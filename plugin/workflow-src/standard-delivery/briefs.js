@@ -33,6 +33,9 @@
  *            plan.js passes listed outside_limits to decide().
  *   buildTailBrief({kind, problem, goOn, other, strength, why})  the
  *            shared shape of a tail brief, also used by review.js.
+ *   buildBriefOption(id, summary, effort, value, reversible) and
+ *   buildUnshownAssumptions(origin)  the option and assumptions of a
+ *            code-built brief, also used by review.js.
  *   buildValidationRemediationBrief, buildFixLimitBrief and
  *   buildGateRerunBrief  the tail briefs gates.js resolves.
  *   buildStepStopBrief(isReplan)  the fix_cause step_stop brief
@@ -96,11 +99,11 @@ function buildPlanAcceptanceBrief(plan) {
     problem: 'Start delivering the plan: create or confirm its working branch and run its steps.',
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'medium', value: 'high', reversible: true, beyond_request: false },
-      { id: 'B', summary: 'Stop before any step runs.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true, beyond_request: false }
+      buildBriefOption('A', 'Accept the plan and run its steps.', 'medium'),
+      buildBriefOption('B', 'Stop before any step runs.', 'trivial', 'low')
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'Every change stays on the working branch, and every decision taken is listed for you before the merge.' },
-    assumptions: [{ statement: unshownBriefText(), origin: 'assumed', evidence: unshownBriefText() }],
+    assumptions: buildUnshownAssumptions('assumed'),
     gate: { irreversible: false, architectural: false, safety: false },
     verbatim: plan.summary
   };
@@ -128,11 +131,11 @@ function buildTrunkStaleBrief(facts) {
     problem: 'The trunk may not be up to date: its freshness is ' + facts.trunk_freshness + ', ' + Number(facts.trunk_ahead) + ' commits ahead of its remote and ' + Number(facts.trunk_behind) + ' behind. Create or confirm the working branch from it anyway?',
     criticality: { level: 'low', likelihood: 'occasional', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Go on from the trunk as it is.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'medium', reversible: true, beyond_request: false },
-      { id: 'B', summary: 'Stop so you can bring the trunk up to date first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true, beyond_request: false }
+      buildBriefOption('A', 'Go on from the trunk as it is.', 'trivial', 'medium'),
+      buildBriefOption('B', 'Stop so you can bring the trunk up to date first.', 'small', 'medium')
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'A stale base costs at most a rebase, and the run goes on.' },
-    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
+    assumptions: buildUnshownAssumptions(),
     gate: { irreversible: false, architectural: false, safety: false }
   };
 }
@@ -144,11 +147,11 @@ function buildExternalEffectBrief(summary) {
     problem: 'A plan step has an effect outside the repo that cannot be undone. May the run go on to it?',
     criticality: { level: 'high', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: false, beyond_request: false },
-      { id: 'B', summary: 'Change or drop the step first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true, beyond_request: false }
+      buildBriefOption('A', 'Go on and let the step make this effect.', 'small', 'high', false),
+      buildBriefOption('B', 'Change or drop the step first.', 'small', 'medium')
     ],
     recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide whether this effect outside the repo may happen.' },
-    assumptions: [{ statement: unshownBriefText(), origin: 'assumed', evidence: unshownBriefText() }],
+    assumptions: buildUnshownAssumptions('assumed'),
     gate: { irreversible: true, architectural: false, safety: false },
     verbatim: summary
   };
@@ -179,8 +182,7 @@ function markOutsideLimits(brief, outsidePaths) {
   /*
    * INVARIANT: the problem names the count only when it fits the brief
    * problem maxLength, so the brief stays valid with every remediation flag
-   * set. The pause lead names the outside paths and their count in every
-   * case.
+   * set.
    */
   return Object.assign(brief, { problem: problem.length <= BRIEF_SCHEMA.properties.problem.maxLength ? problem : brief.problem });
 }
@@ -192,11 +194,11 @@ function buildTailBrief({ kind, problem, goOn, other, strength, why }) {
     problem: problem,
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: goOn, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true, beyond_request: false },
-      { id: 'B', summary: other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true, beyond_request: false }
+      buildBriefOption('A', goOn),
+      buildBriefOption('B', other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, 'trivial', 'low')
     ],
     recommendation: { option_id: strength === 'none' ? 'B' : 'A', strength: strength, why: why },
-    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
+    assumptions: buildUnshownAssumptions(),
     gate: { irreversible: false, architectural: false, safety: false }
   };
 }
@@ -246,17 +248,29 @@ function raiseVersion(version, bumpType) {
   return raised[bumpType].join('.');
 }
 
-function buildVersionOption(id, summary) {
-  return { id: id, summary: summary, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true, beyond_request: false };
+/**
+ * Returns the one assumption of a code-built brief, of origin, with
+ * unshownBriefText() in its statement and evidence.
+ */
+function buildUnshownAssumptions(origin = 'repo') {
+  return [{ statement: unshownBriefText(), origin: origin, evidence: unshownBriefText() }];
+}
+
+/**
+ * Returns a brief option of id and summary with unshownBriefText() in its
+ * unshown fields and beyond_request false.
+ */
+function buildBriefOption(id, summary, effort = 'small', value = 'high', reversible = true) {
+  return { id: id, summary: summary, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: effort, value: value, reversible: reversible, beyond_request: false };
 }
 
 function listVersionOptions(values) {
   if (values.version_check === 'unreadable') {
-    return [buildVersionOption('A', 'Keep the version each file holds on the branch.'), buildVersionOption('B', 'Set the version your reply names in each file.')];
+    return [buildBriefOption('A', 'Keep the version each file holds on the branch.'), buildBriefOption('B', 'Set the version your reply names in each file.')];
   }
   const trunk = values.trunk_version;
-  const bumpOptions = [['A', 'major'], ['B', 'minor'], ['C', 'patch']].map(([id, bumpType]) => buildVersionOption(id, 'Make a ' + bumpType + ' version bump' + (trunk === undefined ? '.' : ', to version ' + raiseVersion(trunk, bumpType) + '.')));
-  return bumpOptions.concat(buildVersionOption('D', 'Make no version bump' + (trunk === undefined ? '.' : ', keeping version ' + trunk + '.')));
+  const bumpOptions = [['A', 'major'], ['B', 'minor'], ['C', 'patch']].map(([id, bumpType]) => buildBriefOption(id, 'Make a ' + bumpType + ' version bump' + (trunk === undefined ? '.' : ', to version ' + raiseVersion(trunk, bumpType) + '.')));
+  return bumpOptions.concat(buildBriefOption('D', 'Make no version bump' + (trunk === undefined ? '.' : ', keeping version ' + trunk + '.')));
 }
 
 function buildVersionQuestionBrief(values) {
@@ -270,7 +284,7 @@ function buildVersionQuestionBrief(values) {
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: listVersionOptions(values),
     recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide the version of this delivery.' },
-    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
+    assumptions: buildUnshownAssumptions(),
     gate: { irreversible: false, architectural: false, safety: false }
   };
 }

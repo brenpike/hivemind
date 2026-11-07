@@ -289,7 +289,7 @@ function buildRejectedFindingsBlock(note, rejectedFindings, undoneFixes = []) {
 function buildReviewOption(option, question) {
   const isRecommended = option.id === question.recommendation.option_id;
   const changes = readOptionChanges(option).map((entry) => ({ category: entry.category, item: encodeUntrustedText(entry.item) }));
-  return { id: option.id, summary: encodeUntrustedText(option.summary), steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: !isRecommended || !question.gate.irreversible, beyond_request: false, destructive: changes };
+  return { ...buildBriefOption(option.id, encodeUntrustedText(option.summary), 'small', 'medium', !isRecommended || !question.gate.irreversible), destructive: changes };
 }
 
 function readOptionChanges(option) {
@@ -313,7 +313,7 @@ function buildReviewQuestionBrief(review) {
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: question.options.map((option) => buildReviewOption(option, question)),
     recommendation: { option_id: question.recommendation.option_id, strength: question.recommendation.strength, why: encodeUntrustedText(question.recommendation.why) },
-    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
+    assumptions: buildUnshownAssumptions(),
     gate: { irreversible: question.gate.irreversible, architectural: question.gate.architectural, safety: false }
   };
 }

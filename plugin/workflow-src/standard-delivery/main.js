@@ -56,8 +56,8 @@
  *   Every chat message has one shape (issue 460), built in record.js. A
  *   pause is a lead of what happened, then the questions renderQuestions
  *   shows, with the reply line last: a planning pause leads with
- *   describePlanLine(plan, outsidePaths) (plan.js), one line, then one line
- *   per shown outside path, a tail ask with its own one-line lead (askTail,
+ *   describePlanLine(plan) (plan.js), one line, a tail ask with its own
+ *   one-line lead (askTail,
  *   tails.js). A run end is its lead, then, when blocked, the Next line, any
  *   later causes and the commit end line, then only the records ADR-0037
  *   decision 3 needs in chat: the branch and its head once a wave ran, the
@@ -78,16 +78,14 @@
  *   results. When the scope sets limits and a plan path, not a version or
  *   changelog file of versioning, lies outside them, the acceptance is
  *   decided with listed outside_limits: taken, journaled and listed for
- *   veto, never asked for that alone (issue 549). A planning pause lead
- *   names up to
- *   maxListedItems() of those paths, one line each, encoded whole with its
- *   step's limits_reason, then the count of the rest (plan.js
- *   listPlanPaths). Only an irreversible effect, an exact ask, shows its
+ *   veto, never asked for that alone (issue 549). No message names those
+ *   paths (plan.js listPlanPaths). Only an irreversible effect, an exact
+ *   ask, shows its
  *   text word for word.
  *   Bounded fields (issue 445): every planner, worker and validation
  *   string a message shows comes from a step-schema field with maxLength,
  *   the brief fields of decision-brief-schema.json, the digest, step id,
- *   effect summary and limits_reason (160) of plan-schema.json, and the
+ *   and effect summary of plan-schema.json, and the
  *   blocker of the plan result, worker, gate edit and validate schemas,
  *   400 code points. The
  *   unbounded agent fields never reach a message: plan.summary reaches
@@ -208,8 +206,8 @@
  *   questionKey and in the acceptResolution comparison. Planner prose
  *   written for the user is not encoded: the brief fields and verbatim
  *   text lib/brief.js renders, which include an irreversible effect's
- *   text, and digest.change and limits_reason in the planning pause
- *   lead, show as written. That is the residual ADR-0037 records (Risks, step text in a blocked
+ *   text, and digest.change in the planning pause lead, show as
+ *   written. That is the residual ADR-0037 records (Risks, step text in a blocked
  *   message, (b)).
  *   A local review question is the reviewer's own: the review returns
  *   finding_id and user_question, with the reviewer's gate. decide() reads

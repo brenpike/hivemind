@@ -63,4 +63,4 @@ When cerebrate finds the work splits into independent strains with minimal file-
 2. monitors via `hivemind:brood-status` on demand
 3. reports aggregate status when all strains complete
 
-Each child is a standard overlord running a full pipeline with no brood awareness, so one plan = one branch = one PR holds per child; it handles its own version bumps, merge conflicts and PR ordering.
+Each child is a standard overlord with no brood awareness, so one plan = one branch = one PR holds per child; it handles its own version bumps, merge conflicts and PR ordering.

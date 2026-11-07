@@ -690,7 +690,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '2899d8da7b3fa961';
+const BUILD_ID = 'ccce9f5bbeb39926';
 
 function supportedSchemaKeywords(){
 return[
@@ -1023,8 +1023,11 @@ removeSchemaAnyOf(schema.items);
 return schema;
 }
 
-function callerAskReasons(){
-return['outside_limits'];
+function askReasons(){
+return['hard_stop','table_surface','gate_irreversible','gate_architectural','gate_safety','no_recommendation'];
+}
+function listReasons(){
+return['beyond_request','outside_limits','repeats_surface'];
 }
 function resolveLevel(value,table){
 if(value===undefined||value===null||value===''){
@@ -1035,17 +1038,18 @@ return value;
 }
 return'low';
 }
-function decide({kind,level,brief,askReason},table,schema){
-if(askReason!==undefined&&callerAskReasons().indexOf(askReason)===-1){
-throw new Error('decide: unknown askReason '+JSON.stringify(askReason));
-}
+function decide({kind,level,brief,listed},table,schema){
+const callerListed=checkCallerListed(listed);
 const briefCheck=validateSchema(schema,brief);
 const resolvedLevel=resolveLevel(level,table);
 if(table.hard_stops.some((stop)=>stop.hard_stop===kind)){
 return askFor('hard_stop');
 }
-if(!briefCheck.ok||!hasInRequestOption(brief)){
+if(!briefCheck.ok||!hasInRequestOption(brief)||isBeyondRequestUnearned(brief)){
 return askFor('malformed_brief');
+}
+if(!isRecommendationAnOption(brief)){
+return askFor('recommendation_not_an_option');
 }
 const row=table.rows.find((candidate)=>candidate.kind===kind);
 if(row===undefined){
@@ -1067,19 +1071,28 @@ return askFor('gate_architectural');
 if(brief.gate.safety||isRecommendedOptionDestructive(brief)){
 return askFor('gate_safety');
 }
-if(isRecommendedOptionBeyondRequest(brief)){
-return askFor('beyond_request');
-}
-if(askReason!==undefined){
-return askFor(askReason);
-}
 if(brief.recommendation.strength==='none'){
 return askFor('no_recommendation');
 }
-if(!isRecommendationAnOption(brief)){
-return askFor('recommendation_not_an_option');
+return{action:'take',reason:'auto',listed:collectListed(brief,callerListed)};
 }
-return{action:'take',reason:'auto'};
+function checkCallerListed(listed){
+if(listed===undefined){
+return[];
+}
+if(!Array.isArray(listed)){
+throw new Error('decide: listed must be an array, got '+JSON.stringify(listed));
+}
+const callerNames=listReasons().filter((name)=>name!=='beyond_request');
+for(const name of listed){
+if(callerNames.indexOf(name)===-1){
+throw new Error('decide: unknown listed name '+JSON.stringify(name));
+}
+}
+return listed;
+}
+function collectListed(brief,callerListed){
+return listReasons().filter((name)=>(name==='beyond_request'?isRecommendedOptionBeyondRequest(brief):callerListed.indexOf(name)!==-1));
 }
 function askFor(reason){
 return{action:'ask',reason:reason};
@@ -1092,6 +1105,10 @@ return brief.options.some((option)=>option.id===brief.recommendation.option_id&&
 }
 function isRecommendedOptionBeyondRequest(brief){
 return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.beyond_request===true);
+}
+function isBeyondRequestUnearned(brief){
+const isStrong=brief.recommendation.strength==='strong';
+return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.beyond_request===true&&!(isStrong&&(option.effort==='trivial'||option.effort==='small')));
 }
 function hasInRequestOption(brief){
 return brief.options.some((option)=>option.beyond_request===false);
@@ -2486,11 +2503,11 @@ kind:PLAN_ACCEPTANCE_KIND,
 problem:'Start delivering the plan: create or confirm its working branch and run its steps.',
 criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:[
-{id:'A',summary:'Accept the plan and run its steps.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'medium',value:'high',reversible:true,beyond_request:false},
-{id:'B',summary:'Stop before any step runs.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'trivial',value:'low',reversible:true,beyond_request:false}
+buildBriefOption('A','Accept the plan and run its steps.','medium'),
+buildBriefOption('B','Stop before any step runs.','trivial','low')
 ],
 recommendation:{option_id:'A',strength:'strong',why:'Every change stays on the working branch, and every decision taken is listed for you before the merge.'},
-assumptions:[{statement:unshownBriefText(),origin:'assumed',evidence:unshownBriefText()}],
+assumptions:buildUnshownAssumptions('assumed'),
 gate:{irreversible:false,architectural:false,safety:false},
 verbatim:plan.summary
 };
@@ -2504,9 +2521,9 @@ const lead='Run the remediation plan for the local review findings on the workin
 const brief=buildPlanAcceptanceBrief(plan);
 return Object.assign(brief,{
 kind:REMEDIATION_PLAN_ACCEPTANCE_KIND,
-problem:flagTexts.length===0?lead:lead+' I am asking because the plan '+joinNames(flagTexts,'and')+'.',
+problem:flagTexts.length===0?lead:lead+' The plan '+joinNames(flagTexts,'and')+'.',
 recommendation:{...brief.recommendation,why:'The plan answers the local review findings, and every gate runs again on its commit before the pull request.'},
-gate:{...remediationGate.promotion_gate,architectural:flags.architectural||flags.grows_surface||flags.repeats_surface}
+gate:{...remediationGate.promotion_gate,architectural:flags.architectural||flags.grows_surface}
 });
 }
 function buildTrunkStaleBrief(facts){
@@ -2516,11 +2533,11 @@ kind:TRUNK_STALE_KIND,
 problem:'The trunk may not be up to date: its freshness is '+facts.trunk_freshness+', '+Number(facts.trunk_ahead)+' commits ahead of its remote and '+Number(facts.trunk_behind)+' behind. Create or confirm the working branch from it anyway?',
 criticality:{level:'low',likelihood:'occasional',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:[
-{id:'A',summary:'Go on from the trunk as it is.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'trivial',value:'medium',reversible:true,beyond_request:false},
-{id:'B',summary:'Stop so you can bring the trunk up to date first.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:true,beyond_request:false}
+buildBriefOption('A','Go on from the trunk as it is.','trivial','medium'),
+buildBriefOption('B','Stop so you can bring the trunk up to date first.','small','medium')
 ],
 recommendation:{option_id:'A',strength:'strong',why:'A stale base costs at most a rebase, and the run goes on.'},
-assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
+assumptions:buildUnshownAssumptions(),
 gate:{irreversible:false,architectural:false,safety:false}
 };
 }
@@ -2531,11 +2548,11 @@ kind:EXTERNAL_EFFECT_KIND,
 problem:'A plan step has an effect outside the repo that cannot be undone. May the run go on to it?',
 criticality:{level:'high',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:[
-{id:'A',summary:'Go on and let the step make this effect.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:false,beyond_request:false},
-{id:'B',summary:'Change or drop the step first.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:true,beyond_request:false}
+buildBriefOption('A','Go on and let the step make this effect.','small','high',false),
+buildBriefOption('B','Change or drop the step first.','small','medium')
 ],
 recommendation:{option_id:'A',strength:'none',why:'Only you can decide whether this effect outside the repo may happen.'},
-assumptions:[{statement:unshownBriefText(),origin:'assumed',evidence:unshownBriefText()}],
+assumptions:buildUnshownAssumptions('assumed'),
 gate:{irreversible:true,architectural:false,safety:false},
 verbatim:summary
 };
@@ -2563,35 +2580,25 @@ kind:kind,
 problem:problem,
 criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:[
-{id:'A',summary:goOn,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:true,beyond_request:false},
-{id:'B',summary:other===undefined?'Plan again: this run gives your reply to the planner before anything goes further.':other,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'trivial',value:'low',reversible:true,beyond_request:false}
+buildBriefOption('A',goOn),
+buildBriefOption('B',other===undefined?'Plan again: this run gives your reply to the planner before anything goes further.':other,'trivial','low')
 ],
 recommendation:{option_id:strength==='none'?'B':'A',strength:strength,why:why},
-assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
+assumptions:buildUnshownAssumptions(),
 gate:{irreversible:false,architectural:false,safety:false}
-};
-}
-function stepStopTexts(){
-return{
-fix_cause:['strong','commit any change and reply','Clearing it lets the step go on.'],
-report:['weak','nothing in your repo needs a fix: the run\'s own step failed; reply to try once more','A stop that comes back is a workflow defect: report it, do not retry.'],
-run_again:['strong','reply','The cause clears itself.']
 };
 }
 function describeStopThen(isReplan){
 return isReplan?'the run plans again from fresh facts':'the run takes the stopped step again';
 }
-function buildStepStopBrief(causes,isReplan){
-const texts=stepStopTexts();
-const leadAction=orderStopCauses(causes)[0].nextAction;
-const[strength,words,why]=Object.hasOwn(texts,leadAction)?texts[leadAction]:texts.fix_cause;
-const action=leadAction==='report'?words:describeStopAction(leadAction,words);
+function buildStepStopBrief(isReplan){
+const action=describeStopAction('fix_cause','commit any change and reply');
 const brief=buildTailBrief({
 kind:STEP_STOP_KIND,
 problem:action.charAt(0).toUpperCase()+action.slice(1)+', and '+describeStopThen(isReplan)+'.',
 goOn:isReplan?'Go on: plan again from fresh facts.':'Go on: take the stopped step again.',
-strength:strength,
-why:why
+strength:'strong',
+why:'Clearing it lets the step go on.'
 });
 return Object.assign(brief,{options:brief.options.slice(0,1)});
 }
@@ -2620,16 +2627,19 @@ const parts=version.split('.').map(Number);
 const raised={major:[parts[0]+1,0,0],minor:[parts[0],parts[1]+1,0],patch:[parts[0],parts[1],parts[2]+1]};
 return raised[bumpType].join('.');
 }
-function buildVersionOption(id,summary){
-return{id:id,summary:summary,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:true,beyond_request:false};
+function buildUnshownAssumptions(origin='repo'){
+return[{statement:unshownBriefText(),origin:origin,evidence:unshownBriefText()}];
+}
+function buildBriefOption(id,summary,effort='small',value='high',reversible=true){
+return{id:id,summary:summary,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:effort,value:value,reversible:reversible,beyond_request:false};
 }
 function listVersionOptions(values){
 if(values.version_check==='unreadable'){
-return[buildVersionOption('A','Keep the version each file holds on the branch.'),buildVersionOption('B','Set the version your reply names in each file.')];
+return[buildBriefOption('A','Keep the version each file holds on the branch.'),buildBriefOption('B','Set the version your reply names in each file.')];
 }
 const trunk=values.trunk_version;
-const bumpOptions=[['A','major'],['B','minor'],['C','patch']].map(([id,bumpType])=>buildVersionOption(id,'Make a '+bumpType+' version bump'+(trunk===undefined?'.':', to version '+raiseVersion(trunk,bumpType)+'.')));
-return bumpOptions.concat(buildVersionOption('D','Make no version bump'+(trunk===undefined?'.':', keeping version '+trunk+'.')));
+const bumpOptions=[['A','major'],['B','minor'],['C','patch']].map(([id,bumpType])=>buildBriefOption(id,'Make a '+bumpType+' version bump'+(trunk===undefined?'.':', to version '+raiseVersion(trunk,bumpType)+'.')));
+return bumpOptions.concat(buildBriefOption('D','Make no version bump'+(trunk===undefined?'.':', keeping version '+trunk+'.')));
 }
 function buildVersionQuestionBrief(values){
 const isUnreadable=values.version_check==='unreadable';
@@ -2642,7 +2652,7 @@ problem:isUnreadable
 criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:listVersionOptions(values),
 recommendation:{option_id:'A',strength:'none',why:'Only you can decide the version of this delivery.'},
-assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
+assumptions:buildUnshownAssumptions(),
 gate:{irreversible:false,architectural:false,safety:false}
 };
 }
@@ -2702,12 +2712,17 @@ return[lines[0],'Fix your result per the check block.',...lines.slice(1),formatD
 function describeCheckLimit(problem){
 return{problem:problem+' It stayed after '+maxCheckRetries()+' retries.',nextAction:'report',terminal:true};
 }
+function describeQuestionProblem(planResult,run){
+const isDefect=(brief)=>!['auto',...askReasons()].includes(decide({kind:PLANNER_QUESTION_KIND,level:run.level,brief:brief},AUTONOMY_TABLE,BRIEF_SCHEMA).reason);
+return planResult.questions.some(isDefect)?'A planner question fails the decision check, so '+RUN_NAME+' stopped.':undefined;
+}
 async function callCheckedPlanner(run,facts,call){
 let prompt=call.prompt;
 for(let retry=0;;retry+=1){
 const label=retry===0?call.label:call.label+'-fix-'+retry;
 const result=normalizePlanTitle(await agent(prompt,plannerCallOptions(label,call.phaseTitle,call.schema)),call.schema);
-const problem=describePlanProblem(result,call.schema,facts,run.trunk,run.references);
+const planProblem=describePlanProblem(result,call.schema,facts,run.trunk,run.references);
+const problem=planProblem===undefined?describeQuestionProblem(result,run):planProblem;
 const isFixable=problem!==undefined&&isFixablePlanResult(result,call.schema);
 if(!isFixable||retry===maxCheckRetries()){
 return{planResult:result,problem:problem,isExhausted:isFixable};
@@ -3245,26 +3260,16 @@ return JSON.stringify([kind,scope,renderQuestions([ask])]);
 function describeCount(count,noun){
 return count+' '+noun+(count===1?'':'s');
 }
-function describeLimitsReason(plan,file){
-const reasonStep=plan.steps.find((step)=>step.files.includes(file)&&renderText(step.limits_reason)!==renderText(undefined));
-return reasonStep===undefined?'the plan gives no reason':renderText(reasonStep.limits_reason);
-}
-function describePlanLine(plan,outsidePaths){
-const fileCount=listPlanPaths(plan).length;
-const lead='The plan for branch '+encodeUntrustedText(plan.branch)+' has '+describeCount(plan.steps.length,'step')+' over '+describeCount(fileCount,'file')+': '+renderText(plan.digest.change);
-if(outsidePaths.length===0){
-return lead;
-}
-const pathLines=outsidePaths.map((file)=>'- '+encodeUntrustedText(file)+': '+describeLimitsReason(plan,file));
-return[lead+' Outside the limits you set:',...capItemLines(pathLines)].join('\n');
+function describePlanLine(plan){
+return'The plan for branch '+encodeUntrustedText(plan.branch)+' has '+describeCount(plan.steps.length,'step')+' over '+describeCount(listPlanPaths(plan).length,'file')+': '+renderText(plan.digest.change);
 }
 function unshownBriefText(){
 return'Not shown.';
 }
-function resolveDecision(kind,brief,scope,run,resolution,askReason){
-const decision=decide({kind:kind,level:run.level,brief:brief,askReason:askReason},AUTONOMY_TABLE,BRIEF_SCHEMA);
+function resolveDecision(kind,brief,scope,run,resolution,listed){
+const decision=decide({kind:kind,level:run.level,brief:brief,listed:listed},AUTONOMY_TABLE,BRIEF_SCHEMA);
 if(decision.action==='take'){
-resolution.taken.push({brief:brief,kind:kind});
+resolution.taken.push({brief:brief,kind:kind,listed:decision.listed});
 return'take';
 }
 const ask={brief:brief,reason:decision.reason,kind:kind};
@@ -3301,15 +3306,14 @@ resolveDecision(EXTERNAL_EFFECT_KIND,buildExternalEffectBrief(effect.summary),['
 }
 function resolvePlanAcceptance(plan,run,resolution,scope){
 const isRemediation=run.taken.some((entry)=>entry.kind===PLANNER_ESCALATION_ROUTING_KIND||entry.kind===ROOT_CLUSTER_ROUTING_KIND);
-resolution.outsidePaths=listOutsidePaths(plan,scope);
-const askReason=resolution.outsidePaths.length===0?undefined:'outside_limits';
-if(isRemediation){
-return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND,markOutsideLimits(buildRemediationPlanBrief(plan),resolution.outsidePaths),[run.pass,plan],run,resolution,askReason);
-}
-return resolveDecision(PLAN_ACCEPTANCE_KIND,markOutsideLimits(buildPlanAcceptanceBrief(plan),resolution.outsidePaths),[run.pass,plan],run,resolution,askReason);
+const outsidePaths=listOutsidePaths(plan,scope);
+const holds={outside_limits:outsidePaths.length>0,repeats_surface:plan.remediation_gate.repeats_surface};
+const listed=Object.keys(holds).filter((name)=>holds[name]);
+const brief=isRemediation?buildRemediationPlanBrief(plan):buildPlanAcceptanceBrief(plan);
+return resolveDecision(isRemediation?REMEDIATION_PLAN_ACCEPTANCE_KIND:PLAN_ACCEPTANCE_KIND,markOutsideLimits(brief,outsidePaths),[run.pass,plan],run,resolution,listed);
 }
 function resolvePlanAsks(planResult,facts,run,scope){
-const resolution={asks:[],taken:[],freshness:undefined,reversibleEffects:[],outsidePaths:[]};
+const resolution={asks:[],taken:[],freshness:undefined,reversibleEffects:[]};
 const plan=planResult.plan;
 planResult.questions.forEach((brief)=>resolveDecision(PLANNER_QUESTION_KIND,brief,run.pass,run,resolution));
 const acceptance=resolvePlanAcceptance(plan,run,resolution,scope);
@@ -3401,8 +3405,7 @@ const resettled=resolution.asks.find((ask)=>settledKinds.has(ask.kind)&&[PLAN_AC
 if(resettled!==undefined){
 return stopDelivery([{problem:'Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.',terminal:true,nextAction:'report'}],run,[],true);
 }
-const isAcceptance=resolution.asks.some((ask)=>[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
-const lead=describePlanLine(planResult.plan,isAcceptance?resolution.outsidePaths:[]);
+const lead=describePlanLine(planResult.plan);
 const round=run.answerLog.length+1;
 const reply=takeNextReply(run,round);
 if(reply===undefined){
@@ -3428,7 +3431,7 @@ return{
 }
 function toPullRequestDecision(entry){
 const problem=reviewDecisionProblems()[entry.kind];
-return problem===undefined?entry:{brief:Object.assign({},entry.brief,{problem:problem}),kind:entry.kind};
+return problem===undefined?entry:{brief:Object.assign({},entry.brief,{problem:problem}),kind:entry.kind,listed:entry.listed};
 }
 function isPullRequestCharacter(codePoint,keepsLines){
 if(keepsLines&&(codePoint===9||codePoint===10)){
@@ -3643,7 +3646,8 @@ function routineDecisionKinds(){
 return[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND,GATE_RERUN_KIND];
 }
 function isShownDecision(entry){
-return!routineDecisionKinds().includes(entry.kind);
+const isListed=entry.listed!==undefined&&entry.listed.length>0;
+return isListed||!routineDecisionKinds().includes(entry.kind);
 }
 function renderApprovals(approvals){
 return['Destructive changes you approved:',...approvals.map((change)=>'- '+renderDestructiveChange(change))].join('\n');
@@ -3731,7 +3735,14 @@ function finishOpenQuestions(resolution,stopReason,run){
 const cause={problem:'The delivery ran no further step, because questions are still open.',nextAction:'answer'};
 return finishDeliveryBlocked([cause],{...run,taken:run.taken.concat(resolution.taken)},[renderOpenQuestions(resolution.asks,stopReason)]);
 }
+function checkPauseAsk(ask){
+const isBadStop=ask.kind===STEP_STOP_KIND&&!stopAskActions().includes(ask.stop);
+if(isBadStop||!askReasons().includes(ask.reason)){
+throw new Error('pauseDelivery: ask '+ask.kind+' '+ask.reason);
+}
+}
 function pauseDelivery(resolution,run,lead){
+resolution.asks.forEach(checkPauseAsk);
 const resumeArgs=buildResumeArgs(run.answerLog.map((entry)=>entry.reply),BUILD_ID);
 if(!canCarry(resumeArgs)){
 return finishOpenQuestions(resolution,'reply_size',run);
@@ -3751,18 +3762,22 @@ function describeStopLead(causes,endLines){
 const causeTexts=buildStopBlocks(causes).filter((block)=>block.whole!==true).map((block)=>block.text);
 return causeTexts.concat(endLines).join('\n');
 }
-function listStopAsks(causes,run,isReplan){
-const leadCause=orderStopCauses(causes)[0];
-if(leadCause.nextAction==='approve'){
-return buildApprovalAsks(leadCause.holds,isReplan,run);
+function stopAskActions(){
+return['approve','fix_cause'];
 }
-return[buildUndecidedAsk(STEP_STOP_KIND,buildStepStopBrief(causes,isReplan),run)];
+function listStopAsks(leadCause,run,isReplan){
+if(leadCause.nextAction==='approve'){
+return buildApprovalAsks(leadCause.holds,isReplan,run).map((ask)=>({...ask,stop:'approve'}));
+}
+return[{...buildUndecidedAsk(STEP_STOP_KIND,buildStepStopBrief(isReplan),run),stop:'fix_cause'}];
 }
 function stopDelivery(causes,run,endLines,isReplan){
-if(causes.some((cause)=>cause.terminal===true||cause.agentFailure===true)){
+const leadCause=orderStopCauses(causes)[0];
+const isAsked=stopAskActions().includes(readStopAction(leadCause.nextAction));
+if(!isAsked||causes.some((cause)=>cause.terminal===true||cause.agentFailure===true)){
 return{result:finishDeliveryBlocked(causes,run,endLines)};
 }
-const asked=askTails(listStopAsks(causes,run,isReplan),run,describeStopLead(causes,endLines));
+const asked=askTails(listStopAsks(leadCause,run,isReplan),run,describeStopLead(causes,endLines));
 if(asked.answer===undefined){
 return asked;
 }
@@ -4390,7 +4405,7 @@ return{text:lines.join('\n')};
 function buildReviewOption(option,question){
 const isRecommended=option.id===question.recommendation.option_id;
 const changes=readOptionChanges(option).map((entry)=>({category:entry.category,item:encodeUntrustedText(entry.item)}));
-return{id:option.id,summary:encodeUntrustedText(option.summary),steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:!isRecommended||!question.gate.irreversible,beyond_request:false,destructive:changes};
+return{...buildBriefOption(option.id,encodeUntrustedText(option.summary),'small','medium',!isRecommended||!question.gate.irreversible),destructive:changes};
 }
 function readOptionChanges(option){
 return option.destructive??[];
@@ -4404,7 +4419,7 @@ problem:encodeUntrustedText(question.ask),
 criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:question.options.map((option)=>buildReviewOption(option,question)),
 recommendation:{option_id:question.recommendation.option_id,strength:question.recommendation.strength,why:encodeUntrustedText(question.recommendation.why)},
-assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
+assumptions:buildUnshownAssumptions(),
 gate:{irreversible:question.gate.irreversible,architectural:question.gate.architectural,safety:false}
 };
 }
