@@ -4209,11 +4209,11 @@ const ROW_TESTS = {
         assert.ok(!workflowTakenConditionExits().includes(exitReason), exitReason);
       }
     });
-    test('the local_review transitions route the same exits: hold to pr_confirm, diminishing to diminishing_returns_decision, and every stop exit, the asked ones included, to a terminal state that never reaches open_pr', () => {
+    test('the local_review transitions route the same exits: hold to gate_check, diminishing to diminishing_returns_decision, and every stop exit, the asked ones included, to a terminal state that never reaches open_pr', () => {
       const transitions = deliveryMachine.states.local_review.transitions;
       assert.deepEqual(Object.keys(transitions).sort(), Object.keys(main.localReviewRoutes()).sort());
       for (const exitReason of localReviewExitsRoutedTo('hold')) {
-        assert.equal(transitions[exitReason], 'pr_confirm', exitReason);
+        assert.equal(transitions[exitReason], 'gate_check', exitReason);
       }
       const decision = deliveryMachine.states.diminishing_returns_decision;
       assert.equal(decision.type, 'decision');
@@ -4230,29 +4230,33 @@ const ROW_TESTS = {
         assert.equal(reachesStateWithout(deliveryMachine, transitions[exitReason], 'open_pr', 'local_review'), false, exitReason);
       }
     });
-    test('the only transitions into pr_confirm are local_review clean, diminishing_returns_decision taken and local_review_decision skipped', () => {
+    test('the only transitions into gate_check are local_review clean, diminishing_returns_decision taken and local_review_decision skipped and held', () => {
       const holdEdges = localReviewExitsRoutedTo('hold').map((exitReason) => 'local_review.' + exitReason);
-      const allowed = [...holdEdges, 'diminishing_returns_decision.taken', 'local_review_decision.skipped'].sort();
-      assert.deepEqual(listTransitionsInto(deliveryMachine, 'pr_confirm'), allowed);
-      assert.deepEqual(allowed, ['diminishing_returns_decision.taken', 'local_review.clean', 'local_review_decision.skipped']);
+      const allowed = [...holdEdges, 'diminishing_returns_decision.taken', 'local_review_decision.held', 'local_review_decision.skipped'].sort();
+      assert.deepEqual(listTransitionsInto(deliveryMachine, 'gate_check'), allowed);
+      assert.deepEqual(allowed, ['diminishing_returns_decision.taken', 'local_review.clean', 'local_review_decision.held', 'local_review_decision.skipped']);
     });
-    test('pr_confirm is a user gate, and pr_confirm approved is the only transition into open_pr', () => {
-      assert.equal(deliveryMachine.states.pr_confirm.type, 'user_gate');
-      assert.deepEqual(listTransitionsInto(deliveryMachine, 'open_pr'), ['pr_confirm.approved']);
+    test('gate_check is an overlord decision whose held is the only transition into open_pr, whose rerun goes back to validate and whose blocked ends at blocked', () => {
+      const gate = deliveryMachine.states.gate_check;
+      assert.equal(gate.type, 'decision');
+      assert.equal(gate.owner, 'overlord');
+      assert.deepEqual(gate.transitions, { held: 'open_pr', rerun: 'validate', blocked: 'blocked' });
+      assert.deepEqual(listTransitionsInto(deliveryMachine, 'open_pr'), ['gate_check.held']);
+      assert.equal(deliveryMachine.states[gate.transitions.blocked].type, 'terminal');
+      assert.equal(reachesStateWithout(deliveryMachine, gate.transitions.blocked, 'open_pr', 'gate_check'), false);
     });
-    test('every pr_confirm outcome but approved ends at a terminal state that never reaches open_pr', () => {
-      const transitions = deliveryMachine.states.pr_confirm.transitions;
-      assert.deepEqual(Object.keys(transitions).filter((outcome) => transitions[outcome] === 'open_pr'), ['approved']);
-      const otherOutcomes = Object.keys(transitions).filter((outcome) => outcome !== 'approved');
-      assert.deepEqual(otherOutcomes.sort(), ['cancelled', 'rejected']);
-      for (const outcome of otherOutcomes) {
-        assert.equal(deliveryMachine.states[transitions[outcome]].type, 'terminal', outcome);
-        assert.equal(reachesStateWithout(deliveryMachine, transitions[outcome], 'open_pr', 'pr_confirm'), false, outcome);
-      }
+    test('no path from plan reaches open_pr without gate_check', () => {
+      assert.equal(reachesStateWithout(deliveryMachine, 'plan', 'open_pr', 'gate_check'), false);
     });
-    test('diminishing_returns_decision reaches pr_confirm only through taken, and its other outcomes end at a terminal state that never reaches open_pr', () => {
+    test('the definition is version 7 with no pr_confirm state, and its only user gates are brood_confirm and question', () => {
+      assert.equal(deliveryMachine.version, 7);
+      assert.ok(!Object.hasOwn(deliveryMachine.states, 'pr_confirm'));
+      const userGates = Object.keys(deliveryMachine.states).filter((name) => deliveryMachine.states[name].type === 'user_gate').sort();
+      assert.deepEqual(userGates, ['brood_confirm', 'question']);
+    });
+    test('diminishing_returns_decision reaches gate_check only through taken, and its other outcomes end at a terminal state that never reaches open_pr', () => {
       const transitions = deliveryMachine.states.diminishing_returns_decision.transitions;
-      assert.deepEqual(Object.keys(transitions).filter((outcome) => transitions[outcome] === 'pr_confirm'), ['taken']);
+      assert.deepEqual(Object.keys(transitions).filter((outcome) => transitions[outcome] === 'gate_check'), ['taken']);
       const otherOutcomes = Object.keys(transitions).filter((outcome) => outcome !== 'taken');
       assert.ok(otherOutcomes.includes('not_taken'));
       for (const outcome of otherOutcomes) {

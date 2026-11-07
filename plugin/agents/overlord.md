@@ -113,7 +113,7 @@ You are the sole ledger writer per RUN-OWNERSHIP-01.
 
 **PR identity.** In `pr-feedback-remediation`, at the `pr_branch_preflight` decision (entered from `intake` on both the `watch` and `fix` routes), resolve the PR's head branch (e.g. via `gh pr view`) and check it out before delegating to any reviewer, so remediation commits land on the PR branch. Carry the intake route forward as the same `watch`/`fix` outcome; take `blocked` if the branch cannot be resolved or checked out. When recording `pr_branch_preflight`, or `open_pr`, with `hivemind:record-state-result`, you must pass `outputs: { pr: <url>, head_ref_oid: <sha> }`, the PR URL and its head SHA (at `open_pr`, the `url` and `head_ref_oid` that `hivemind:open-plan-pr` returned). These are free-form `event.outputs` per `${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md` (Event shape), not ledger fields or `facts.*` mutations. Nothing else persists them, and the deferred decision report in `## Resume On Start` derives the run's PR from them.
 
-**Pass the gated commit to every push.** `hivemind:open-plan-pr` and `hivemind:push-branch` require `expect_commit` and refuse the push when HEAD is another commit. At `open_pr`, pass the full SHA of the branch head the `pr_confirm` gate showed the user; in the Reflex tail, the `commit:` line of the checkpoint `hivemind:molt` that validation ran on; at `push_remediation` in both workflows, the `commit:` line of the last checkpoint `hivemind:molt` before validation passed. Pass it as a literal that must pass the skill's input gate; never re-read it from HEAD after the gate.
+**Pass the gated commit to every push.** `hivemind:open-plan-pr` and `hivemind:push-branch` require `expect_commit` and refuse the push when HEAD is another commit. At `open_pr`, pass the full SHA of the branch head `gate_check` found held; in the Reflex tail, the `commit:` line of the checkpoint `hivemind:molt` that validation ran on; at `push_remediation` in both workflows, the `commit:` line of the last checkpoint `hivemind:molt` before validation passed. Pass it as a literal that must pass the skill's input gate; never re-read it from HEAD after the gate.
 
 ## Resume On Start
 
@@ -154,7 +154,7 @@ When routing or applying review remediation, load and follow `${CLAUDE_PLUGIN_RO
 
 **Surface growth.** A remediation that adds more surface than it removes is handled per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Surface-Growth Escalation).
 
-**Repeat rejections.** At the `pr_confirm` user gate, beside the commits made after each gate, list every finding the local reviewer rejected as a repeat by citing a recorded decision, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). The list informs; it does not ask about those findings again.
+**Repeat rejections.** The PR body lists every finding the local reviewer rejected as a repeat by citing a recorded decision, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings).
 
 **Young-surface `merge_advised`.** When a reviewer reaches `merge_advised` on a young surface (introduced or heavily modified in this PR or initiative), treat it as a zoom-out candidate rather than auto-accepting the merge recommendation, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Bounded-Tail vs Recurring-Class Disambiguation). A mature-surface bounded tail still surfaces as the merge advisory.
 
@@ -166,7 +166,7 @@ When routing or applying review remediation, load and follow `${CLAUDE_PLUGIN_RO
 
 ## Brood Execution
 
-Each spawned child is a normal `hivemind:overlord` in auto mode on the same router and delivery paths, per `## Engine`. On the state machine the child initializes and owns its own run ledger in its own worktree and stops at the `pr_confirm` user gate before the PR.
+Each spawned child is a normal `hivemind:overlord` in auto mode on the same router and delivery paths, per `## Engine`. On the state machine the child initializes and owns its own run ledger in its own worktree.
 
 When a workflow enters brood dispatch (a `user_gate` for strain approval, then a `spawn_brood` skill state), surface the normalized strain task text for the user's explicit approval before invoking `hivemind:spawn-brood`. That approval is the injection gate for the description text, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Brood Spawn Bypass-Mode Mitigation). After spawn, relay the script's `remote:` lines together with its `attach:` lines. A strain that had not started when spawn ended gets remote control only when the user asks for `hivemind:enable-brood-remote`. Then monitor read-only via `hivemind:brood-status`, give on-demand help, and report aggregate status.
 
