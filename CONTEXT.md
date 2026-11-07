@@ -139,7 +139,7 @@ A change to files affecting a published artifact's runtime behavior, public API,
 _Avoid_: version trigger, release trigger
 
 **Trunk Freshness**:
-The pre-branch sub-check within Git Preflight verifying trunk is up-to-date with its remote tracking branch before creating a working branch. Staleness triggers a user decision: fix-and-continue or proceed-at-risk.
+The pre-branch sub-check within Git Preflight verifying trunk is up-to-date with its remote tracking branch before creating a working branch. Staleness is decided by the `trunk_stale` row of the decision autonomy table (taken at high autonomy, surfaced otherwise), not always asked.
 _Avoid_: sync check, remote check
 
 **Git Preflight**:
@@ -223,7 +223,7 @@ _Avoid_: signal detector, classifier, cluster checker
 ### Decision Autonomy
 
 **Decision Tier**:
-The A/B classification of an overlord decision. Tier A = always surfaced to the Overmind (safety rails, merge recommendations, genuine ambiguity-with-risk); Tier B = auto-decided and journaled by default.
+The A/B classification of an overlord decision. Tier A = always surfaced to the Overmind (safety rails, merge recommendations, genuine ambiguity-with-risk); Tier B = auto-decided and journaled by default. On the script engine only the Ask Set asks (an irreversible, architectural or safety call, a surfaced table cell, a hard stop, or a call with no recommendation); other calls are taken and listed in the PR body's "Decided for you" for veto before merge. Rules: `plugin/governance/decision-autonomy.md` (Decision Tiers).
 _Avoid_: priority, severity
 
 **Promotion Gate**:

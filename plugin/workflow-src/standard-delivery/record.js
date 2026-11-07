@@ -43,13 +43,15 @@
  *           or run.undone is not empty, the approvals of run.approvals one
  *           line each through renderDestructiveChange under one label, then
  *           the decisions through renderDecisionsCompact alone. Each taken
- *           entry keeps its kind, so the routine ones drop out.
- *   routineDecisionKinds()  the kinds of taken decision no record shows:
- *           plan_acceptance, remediation_plan_acceptance and gate_rerun.
- *           buildRunRecordParts, buildRecordTailBlocks and so every final
- *           message, finishOpenQuestions included, list only the taken
- *           decisions of other kinds, and a run whose only taken decisions
- *           are routine shows no decisions block or part. run.taken itself
+ *           entry keeps its kind and listed, so the routine ones drop out.
+ *   routineDecisionKinds()  the kinds of taken decision no record shows
+ *           unless listed: plan_acceptance, remediation_plan_acceptance and
+ *           gate_rerun. isShownDecision shows an entry whose listed (the
+ *           listReasons() names decide() gave, lib/decide.js) is not empty,
+ *           or whose kind is not routine. buildRunRecordParts,
+ *           buildRecordTailBlocks and so every final message,
+ *           finishOpenQuestions included, list only shown decisions, and a
+ *           run with none shows no decisions block or part. run.taken itself
  *           keeps every entry: resolvePlanAcceptance (plan.js) reads the
  *           routing kinds from it.
  *
@@ -63,16 +65,22 @@
  *           exact_text_size. The reply line is the last line. No commit, gate line,
  *           taken decision or detail block. A lead longer than
  *           maxBlockedLeadLength() code points has the cutAtBoundary prefix
- *           of at most those code points as its compact form.
+ *           of at most those code points as its compact form. It throws
+ *           first on an ask whose reason is not in askReasons()
+ *           (lib/decide.js), or a step_stop ask whose stop is not in
+ *           stopAskActions(), so no other question reaches the user.
  *   stopDelivery  ends through finishDeliveryBlocked when any cause is
- *           terminal or an agent failure. When its lead cause in
- *           orderStopCauses order is approve, it asks buildApprovalAsks
- *           (briefs.js) of that cause's holds through askTails (tails.js),
- *           one question per held item. Otherwise it asks one undecided
- *           step_stop question (buildStepStopBrief, briefs.js) through
- *           buildUndecidedAsk and askTails: decide() asks it
- *           table_surface at every level, so its recommendation, strong
- *           for fix_cause and run_again, is never taken. The askTail lead is
+ *           terminal or an agent failure, or when the action of its lead
+ *           cause in orderStopCauses order is not in stopAskActions():
+ *           approve and fix_cause, no value read as fix_cause. A report,
+ *           run_again or answer stop never asks. When the lead is approve,
+ *           it asks buildApprovalAsks (briefs.js) of that cause's holds
+ *           through askTails (tails.js), one question per held item, each
+ *           with stop approve. Otherwise it asks one undecided step_stop
+ *           question, stop fix_cause, (buildStepStopBrief(isReplan),
+ *           briefs.js) through buildUndecidedAsk and askTails: decide()
+ *           asks it table_surface at every level, so its strong
+ *           recommendation is never taken. The askTail lead is
  *           the cause problems in buildStopBlocks order, then the end
  *           lines, one per line.
  *   finishOpenQuestions  finishDeliveryBlocked over one cause, the fixed
@@ -85,16 +93,16 @@
  *           line (the open questions, or the commit end runCommitStep
  *           passes), one line naming the encoded branch and its head
  *           only once a wave ran, then the
- *           reversible effects and the taken decisions not of a
- *           routineDecisionKinds() kind, one line each
+ *           reversible effects and the shown taken decisions
+ *           (isShownDecision), one line each
  *           (renderDecisionsCompact), as every final message lists them
  *           (ADR-0037 decision 3).
  *   finishDeliveryComplete  one line naming the pull request opened or
  *           pushed to and its commit, one line naming the gates that held and
  *           any gate not configured, the warning line when there is one, the
  *           rejected findings block when run.rejected or run.undone is not
- *           empty, then the reversible effects and the taken decisions not of a
- *           routine kind, one line each.
+ *           empty, then the reversible effects and the shown taken
+ *           decisions, one line each.
  *   Every Next line starts with 'Next:' and points at no cause the lead
  *   does not name. No message and no pull request text lists the
  *   commits: the branch and the pull request on GitHub hold them
@@ -114,9 +122,10 @@
  *   run.headRound is behind run.answerLog.length, whatever route the reply
  *   took. The run keeps no commit list, so no record of the run can drop
  *   a commit made during a pause.
- *   One stop path (issue 457): a stop ends the run only on a terminal
- *   cause, an agent failure, a size limit (finishOpenQuestions) or the
- *   launch check. Every other stop pauses through stopDelivery, and a reply
+ *   One stop path (issue 457, issue 549): a stop ends the run only on a
+ *   terminal cause, an agent failure, a lead action outside
+ *   stopAskActions(), a size limit (finishOpenQuestions) or the launch
+ *   check. Every other stop pauses through stopDelivery, and a reply
  *   when the cause is still not fixed pauses again, with no cap. So
  *   finishDeliveryBlocked has no caller but stopDelivery,
  *   finishOpenQuestions and the launch end of runDelivery (main.js).
@@ -167,7 +176,8 @@ function routineDecisionKinds() {
 }
 
 function isShownDecision(entry) {
-  return !routineDecisionKinds().includes(entry.kind);
+  const isListed = entry.listed !== undefined && entry.listed.length > 0;
+  return isListed || !routineDecisionKinds().includes(entry.kind);
 }
 
 function renderApprovals(approvals) {
@@ -267,7 +277,15 @@ function finishOpenQuestions(resolution, stopReason, run) {
   return finishDeliveryBlocked([cause], { ...run, taken: run.taken.concat(resolution.taken) }, [renderOpenQuestions(resolution.asks, stopReason)]);
 }
 
+function checkPauseAsk(ask) {
+  const isBadStop = ask.kind === STEP_STOP_KIND && !stopAskActions().includes(ask.stop);
+  if (isBadStop || !askReasons().includes(ask.reason)) {
+    throw new Error('pauseDelivery: ask ' + ask.kind + ' ' + ask.reason);
+  }
+}
+
 function pauseDelivery(resolution, run, lead) {
+  resolution.asks.forEach(checkPauseAsk);
   const resumeArgs = buildResumeArgs(run.answerLog.map((entry) => entry.reply), BUILD_ID);
   if (!canCarry(resumeArgs)) {
     return finishOpenQuestions(resolution, 'reply_size', run);
@@ -289,19 +307,28 @@ function describeStopLead(causes, endLines) {
   return causeTexts.concat(endLines).join('\n');
 }
 
-function listStopAsks(causes, run, isReplan) {
-  const leadCause = orderStopCauses(causes)[0];
+/**
+ * Returns the stop actions a stop asks about: approve and fix_cause. A stop
+ * led by any other action ends the run blocked.
+ */
+function stopAskActions() {
+  return ['approve', 'fix_cause'];
+}
+
+function listStopAsks(leadCause, run, isReplan) {
   if (leadCause.nextAction === 'approve') {
-    return buildApprovalAsks(leadCause.holds, isReplan, run);
+    return buildApprovalAsks(leadCause.holds, isReplan, run).map((ask) => ({ ...ask, stop: 'approve' }));
   }
-  return [buildUndecidedAsk(STEP_STOP_KIND, buildStepStopBrief(causes, isReplan), run)];
+  return [{ ...buildUndecidedAsk(STEP_STOP_KIND, buildStepStopBrief(isReplan), run), stop: 'fix_cause' }];
 }
 
 function stopDelivery(causes, run, endLines, isReplan) {
-  if (causes.some((cause) => cause.terminal === true || cause.agentFailure === true)) {
+  const leadCause = orderStopCauses(causes)[0];
+  const isAsked = stopAskActions().includes(readStopAction(leadCause.nextAction));
+  if (!isAsked || causes.some((cause) => cause.terminal === true || cause.agentFailure === true)) {
     return { result: finishDeliveryBlocked(causes, run, endLines) };
   }
-  const asked = askTails(listStopAsks(causes, run, isReplan), run, describeStopLead(causes, endLines));
+  const asked = askTails(listStopAsks(leadCause, run, isReplan), run, describeStopLead(causes, endLines));
   if (asked.answer === undefined) {
     return asked;
   }

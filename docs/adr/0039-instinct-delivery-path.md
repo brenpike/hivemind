@@ -27,6 +27,8 @@ This ADR records the decisions. It does not restate the rules. Each rule is stat
    - A cut completion notice is a defect and counts as a failed run. The overlord still says so in one line, does not resume the run and reads no file to recover its result, and the request continues on Instinct from git state.
 
    Text: `plugin/agents/overlord.md` (`## Engine`).
+
+   Amended 2026-11-07 (issue 549): the `user_gate` stop in `### Stop Conditions` now stops only for a question in the Ask Set, and the stale or diverged trunk stop is gone. Any other question is taken by its recommendation and journaled. See ADR-0037, Amendment 2026-11-07: the closed Ask Set (issue 549).
 5. **Instinct is intent-driven (D5).** Decided: Instinct states what every run must have and leaves order, failures and questions to judgment, per `### Stop Conditions`. It is not a step sequence. A review finding that asks for a step list, or for per-branch coverage of Instinct, contests this recorded decision. Reviewers reject it as a repeat per `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A finding that shows a run missing something a run must have is new and gets the triage. Text: `plugin/agents/overlord.md` (`## Instinct`, "A run must have:" list).
 
 These stay as they were (D6): the path-choice rule (a `standard-delivery` request that names neither path takes the engine when it carries a `working_branch.base` ref, and otherwise the overlord asks the user, with a recommendation), the "A run must have:" list, the operating rules and the final report line.

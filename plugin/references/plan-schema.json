@@ -65,7 +65,7 @@
         "grows_surface",
         "repeats_surface"
       ],
-      "description": "Whether accepting a plan that remediates review findings goes to the user, per the remediation plan rule of ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Promotion Gate). Each flag, and each flag of promotion_gate, is true only for a plan that remediates review findings, and only while no reply in this run has accepted that condition. Every flag is false for any other plan.",
+      "description": "Whether accepting a remediation plan goes to the user (not by repeats_surface), per ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Promotion Gate). Each flag, and each flag of promotion_gate, is true only for a plan that remediates review findings, and only while no reply in this run has accepted that condition. Every flag is false for any other plan.",
       "properties": {
         "promotion_gate": {
           "type": "object",
@@ -97,7 +97,7 @@
         },
         "repeats_surface": {
           "type": "boolean",
-          "description": "True when the remediation follows a fix on the same surface that did not close its class, per ${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry)."
+          "description": "True when the remediation repeats a surface whose fix left its class open, per ${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry). Taken and listed."
         }
       }
     },

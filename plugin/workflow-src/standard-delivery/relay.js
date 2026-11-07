@@ -100,8 +100,10 @@
  *   stop never hides the step's cause. Only a commit or branch script
  *   refusal, a branch other than the plan branch, a scan injection suspect,
  *   a runner command value outside its class (describeCommandStop) and a
- *   second branch switch (requestBranchReplan) are terminal; an agent
- *   failure ends, and every other stop pauses (issue 457).
+ *   second branch switch (requestBranchReplan) are terminal. stopDelivery
+ *   (record.js) ends the run blocked for a terminal cause, an agent failure
+ *   and a report or run_again lead; only an approve or fix_cause lead asks
+ *   (issue 457).
  *   Transient retry (issue 457): the facts, branch and commit runners call
  *   agent() through runRunnerRelay. Malformed output, a non-transient block
  *   and a null result are never retried, and no step call retries twice.

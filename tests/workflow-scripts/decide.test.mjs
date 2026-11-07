@@ -34,11 +34,14 @@ function decideWith(kind, level, brief, decisionTable = table) {
   return structuredClone(lib.decide({ kind, level, brief }, decisionTable, briefSchema));
 }
 
-function decideAsking(kind, level, brief, decisionTable = table) {
-  return structuredClone(lib.decide({ kind, level, brief, askReason: 'outside_limits' }, decisionTable, briefSchema));
+function decideListing(kind, level, brief, listed, decisionTable = table) {
+  return structuredClone(lib.decide({ kind, level, brief, listed }, decisionTable, briefSchema));
 }
 
-const takeAuto = { action: 'take', reason: 'auto' };
+const takeAuto = { action: 'take', reason: 'auto', listed: [] };
+const askSet = ['hard_stop', 'table_surface', 'gate_irreversible', 'gate_architectural', 'gate_safety', 'no_recommendation'];
+const listSet = ['beyond_request', 'outside_limits', 'repeats_surface'];
+const callerListSet = ['outside_limits', 'repeats_surface'];
 
 function resolvedLevelOf(level) {
   return level === undefined ? table.default_level : level;
@@ -174,36 +177,54 @@ function makeBeyondBrief(beyondIndex, overrides = {}) {
 }
 
 describe('beyond request', () => {
-  test('a recommended option with beyond_request true asks beyond_request at every level and kind', () => {
-    const brief = makeBeyondBrief(0);
-    for (const kind of [...table.rows.map((row) => row.kind), ...hardStopKinds]) {
-      for (const level of [...table.levels, undefined]) {
-        const verdict = decideWith(kind, level, brief);
-        const row = table.rows.find((entry) => entry.kind === kind);
-        const expected = row !== undefined && row[resolvedLevelOf(level)] === 'auto' ? 'beyond_request' : verdict.reason;
-        assert.deepEqual(verdict, { action: 'ask', reason: expected }, `${kind} at ${level}`);
+  const allKinds = [...table.rows.map((row) => row.kind), ...hardStopKinds];
+  const beyondTake = { action: 'take', reason: 'auto', listed: ['beyond_request'] };
+  for (const effort of ['trivial', 'small']) {
+    test(`a strong recommendation of ${effort} effort beyond the request is taken and listed at every auto cell`, () => {
+      const brief = makeBeyondBrief(0);
+      brief.options[0].effort = effort;
+      for (const kind of allKinds) {
+        for (const level of [...table.levels, undefined]) {
+          const row = table.rows.find((entry) => entry.kind === kind);
+          const verdict = decideWith(kind, level, brief);
+          if (row !== undefined && row[resolvedLevelOf(level)] === 'auto') {
+            assert.deepEqual(verdict, beyondTake, `${kind} at ${level}`);
+          } else {
+            assert.deepEqual(verdict, decideWith(kind, level, makeBrief()), `${kind} at ${level}`);
+          }
+        }
       }
+    });
+  }
+  for (const [strength, effort] of [['strong', 'medium'], ['strong', 'large'], ['weak', 'trivial'], ['weak', 'small'], ['weak', 'large'], ['none', 'small']]) {
+    test(`a ${strength} recommendation of ${effort} effort beyond the request asks malformed_brief at every level and kind but a hard stop`, () => {
+      const brief = makeBeyondBrief(0, { recommendation: { option_id: 'A', strength, why: 'Bigger change.' } });
+      brief.options[0].effort = effort;
+      for (const kind of allKinds) {
+        for (const level of [...table.levels, undefined, 'bogus']) {
+          const expected = hardStopKinds.includes(kind) ? 'hard_stop' : 'malformed_brief';
+          assert.deepEqual(decideWith(kind, level, brief), { action: 'ask', reason: expected }, `${kind} at ${level}`);
+        }
+      }
+    });
+  }
+  test('an option with beyond_request true that is not recommended does not make it ask and is not listed', () => {
+    const brief = makeBeyondBrief(1);
+    brief.options[1].effort = 'large';
+    assert.deepEqual(decideWith('plan_acceptance', 'high', brief), takeAuto);
+  });
+  test('malformed_brief for an unearned expansion wins over every later check', () => {
+    const gate = { irreversible: true, architectural: true, safety: true };
+    const brief = makeBeyondBrief(0, { gate, recommendation: { option_id: 'A', strength: 'weak', why: 'Bigger.' } });
+    assert.equal(decideWith('not_a_kind', 'low', brief).reason, 'malformed_brief');
+    assert.equal(decideWith('plan_acceptance', 'high', brief).reason, 'malformed_brief');
+  });
+  test('every later ask wins over listing an earned expansion', () => {
+    const gateWith = (flag) => ({ irreversible: false, architectural: false, safety: false, [flag]: true });
+    for (const flag of ['irreversible', 'architectural', 'safety']) {
+      assert.deepEqual(decideWith('plan_acceptance', 'high', makeBeyondBrief(0, { gate: gateWith(flag) })), { action: 'ask', reason: `gate_${flag}` });
     }
-  });
-  test('it asks beyond_request at every auto cell of the real table', () => {
-    const autoCells = table.rows.flatMap((row) => table.levels.filter((level) => row[level] === 'auto').map((level) => [row.kind, level]));
-    assert.ok(autoCells.length > 0);
-    for (const [kind, level] of autoCells) {
-      assert.deepEqual(decideWith(kind, level, makeBrief()), takeAuto, `${kind} at ${level}`);
-      assert.deepEqual(decideWith(kind, level, makeBeyondBrief(0)), { action: 'ask', reason: 'beyond_request' }, `${kind} at ${level}`);
-    }
-  });
-  test('an option with beyond_request true that is not recommended does not make it ask', () => {
-    assert.deepEqual(decideWith('plan_acceptance', 'high', makeBeyondBrief(1)), takeAuto);
-  });
-  test('gate_safety wins over beyond_request', () => {
-    const gate = { irreversible: false, architectural: false, safety: true };
-    assert.equal(decideWith('plan_acceptance', 'high', makeBeyondBrief(0, { gate })).reason, 'gate_safety');
-  });
-  test('beyond_request wins over askReason and the recommendation checks', () => {
-    const none = { option_id: 'A', strength: 'none', why: 'Both are fine.' };
-    assert.deepEqual(decideAsking('plan_acceptance', 'high', makeBeyondBrief(0)), { action: 'ask', reason: 'beyond_request' });
-    assert.equal(decideWith('plan_acceptance', 'high', makeBeyondBrief(0, { recommendation: none })).reason, 'beyond_request');
+    assert.deepEqual(decideWith('plan_acceptance', 'low', makeBeyondBrief(0)), { action: 'ask', reason: 'table_surface' });
   });
   test('a brief whose every option goes beyond the request is malformed even for an auto cell', () => {
     const brief = makeBrief({ options: makeBrief().options.map((option) => ({ ...option, beyond_request: true })) });
@@ -236,9 +257,23 @@ describe('recommendation', () => {
     const options = [base.options[0], { ...base.options[1], id: 'A' }];
     assert.deepEqual(decideWith('plan_acceptance', 'high', makeBrief({ options })), { action: 'ask', reason: 'recommendation_not_an_option' });
   });
-  test('strength none wins over an option mismatch', () => {
+  test('an option mismatch wins over strength none', () => {
     const recommendation = { option_id: 'Z', strength: 'none', why: 'Unsure.' };
-    assert.equal(decideWith('plan_acceptance', 'high', makeBrief({ recommendation })).reason, 'no_recommendation');
+    assert.equal(decideWith('plan_acceptance', 'high', makeBrief({ recommendation })).reason, 'recommendation_not_an_option');
+  });
+  test('recommendation_not_an_option wins over unknown_kind, table_surface, bad_cell and the gates', () => {
+    const recommendation = { option_id: 'C', strength: 'strong', why: 'Best.' };
+    const gate = { irreversible: true, architectural: true, safety: true };
+    const syntheticTable = { ...table, rows: [{ kind: 'synthetic', high: 'maybe', balanced: 'auto', low: 'surface' }] };
+    assert.equal(decideWith('not_a_kind', 'high', makeBrief({ recommendation })).reason, 'recommendation_not_an_option');
+    assert.equal(decideWith('plan_acceptance', 'low', makeBrief({ recommendation })).reason, 'recommendation_not_an_option');
+    assert.equal(decideWith('synthetic', 'high', makeBrief({ recommendation }), syntheticTable).reason, 'recommendation_not_an_option');
+    assert.equal(decideWith('plan_acceptance', 'high', makeBrief({ recommendation, gate })).reason, 'recommendation_not_an_option');
+  });
+  test('hard_stop and malformed_brief win over recommendation_not_an_option', () => {
+    const recommendation = { option_id: 'C', strength: 'strong', why: 'Best.' };
+    assert.equal(decideWith(hardStopKinds[0], 'high', makeBrief({ recommendation })).reason, 'hard_stop');
+    assert.equal(decideWith('plan_acceptance', 'high', makeBrief({ recommendation, problem: '' })).reason, 'malformed_brief');
   });
 });
 
@@ -385,86 +420,189 @@ describe('the schema is a parameter', () => {
   });
 });
 
-describe('decisionReasons', () => {
-  test('lists every reason in check order, ending with auto', () => {
-    assert.deepEqual(structuredClone(lib.decisionReasons()), [
-      'hard_stop', 'malformed_brief', 'unknown_kind', 'table_surface', 'bad_cell',
-      'gate_irreversible', 'gate_architectural', 'gate_safety', 'beyond_request', 'outside_limits',
-      'no_recommendation', 'recommendation_not_an_option', 'auto'
-    ]);
+describe('askReasons and listReasons', () => {
+  test('askReasons is the closed Ask Set in check order', () => {
+    assert.deepEqual(structuredClone(lib.askReasons()), askSet);
+  });
+  test('listReasons names every list reason in listing order', () => {
+    assert.deepEqual(structuredClone(lib.listReasons()), listSet);
+  });
+  test('the two sets share no name and neither holds auto', () => {
+    for (const name of lib.listReasons()) {
+      assert.equal(lib.askReasons().includes(name), false, name);
+    }
+    assert.equal([...lib.askReasons(), ...lib.listReasons()].includes('auto'), false);
+  });
+  test('each call returns a new array', () => {
+    const asks = lib.askReasons();
+    asks.push('beyond_request');
+    const lists = lib.listReasons();
+    lists.length = 0;
+    assert.deepEqual(structuredClone(lib.askReasons()), askSet);
+    assert.deepEqual(structuredClone(lib.listReasons()), listSet);
+  });
+  test('the removed reasons and caller ask input are gone', () => {
+    assert.equal(typeof lib.decisionReasons, 'undefined');
+    assert.equal(typeof lib.callerAskReasons, 'undefined');
+    for (const reason of ['beyond_request', 'outside_limits', 'repeats_surface']) {
+      assert.equal(lib.askReasons().includes(reason), false, reason);
+    }
   });
 });
 
-describe('caller ask reason', () => {
-  const askOutside = { action: 'ask', reason: 'outside_limits' };
-  test('callerAskReasons is closed and each is a decision reason', () => {
-    const callerReasons = structuredClone(lib.callerAskReasons());
-    assert.deepEqual(callerReasons, ['outside_limits']);
-    for (const reason of callerReasons) {
-      assert.ok(lib.decisionReasons().includes(reason));
-    }
-  });
-  for (const row of table.rows) {
-    for (const level of [...table.levels, undefined]) {
-      const cell = row[resolvedLevelOf(level)];
-      test(`${row.kind} at ${JSON.stringify(level)} with askReason never takes`, () => {
-        const expected = cell === 'auto' ? askOutside : { action: 'ask', reason: 'table_surface' };
-        assert.deepEqual(decideAsking(row.kind, level, makeBrief()), expected);
-      });
+const recommendedVariants = (() => {
+  const variants = [];
+  for (const strength of ['strong', 'weak', 'none']) {
+    for (const reversible of [true, false]) {
+      for (const destructive of [undefined, [], [{ category: 3, item: 'Skip test X.' }]]) {
+        for (const beyondRequest of [false, true]) {
+          for (const effort of ['trivial', 'small', 'medium', 'large']) {
+            variants.push({ strength, reversible, destructive, beyondRequest, effort });
+          }
+        }
+      }
     }
   }
-  test('an otherwise-auto brief asks outside_limits at every auto level', () => {
-    const autoLevels = table.levels.filter((level) => autoRow[level] === 'auto');
-    assert.ok(autoLevels.length > 0);
-    for (const level of autoLevels) {
-      assert.deepEqual(decideWith('plan_acceptance', level, makeBrief()), takeAuto);
-      assert.deepEqual(decideAsking('plan_acceptance', level, makeBrief()), askOutside);
+  return variants;
+})();
+
+const gateVariants = [false, true].flatMap((irreversible) => [false, true].flatMap((architectural) => [false, true].map((safety) => ({ irreversible, architectural, safety }))));
+
+const callerListVariants = [undefined, [], ['outside_limits'], ['repeats_surface'], ['outside_limits', 'repeats_surface'], ['repeats_surface', 'outside_limits']];
+
+function makeVariantBrief(variant, gate) {
+  const base = makeBrief();
+  const recommended = { ...base.options[0], reversible: variant.reversible, beyond_request: variant.beyondRequest, effort: variant.effort };
+  if (variant.destructive !== undefined) {
+    recommended.destructive = variant.destructive;
+  }
+  return makeBrief({ options: [recommended, base.options[1]], recommendation: { option_id: 'A', strength: variant.strength, why: 'Reason.' }, gate });
+}
+
+function expectDecision(kind, level, variant, gate, callerListed) {
+  if (hardStopKinds.includes(kind)) {
+    return { action: 'ask', reason: 'hard_stop' };
+  }
+  const isEarned = variant.strength === 'strong' && (variant.effort === 'trivial' || variant.effort === 'small');
+  if (variant.beyondRequest && !isEarned) {
+    return { action: 'ask', reason: 'malformed_brief' };
+  }
+  const row = table.rows.find((entry) => entry.kind === kind);
+  if (row[lib.resolveLevel(level, table)] === 'surface') {
+    return { action: 'ask', reason: 'table_surface' };
+  }
+  if (gate.irreversible || !variant.reversible) {
+    return { action: 'ask', reason: 'gate_irreversible' };
+  }
+  if (gate.architectural) {
+    return { action: 'ask', reason: 'gate_architectural' };
+  }
+  if (gate.safety || (variant.destructive !== undefined && variant.destructive.length > 0)) {
+    return { action: 'ask', reason: 'gate_safety' };
+  }
+  if (variant.strength === 'none') {
+    return { action: 'ask', reason: 'no_recommendation' };
+  }
+  const named = callerListed === undefined ? [] : callerListed;
+  const listed = listSet.filter((name) => (name === 'beyond_request' ? variant.beyondRequest : named.includes(name)));
+  return { action: 'take', reason: 'auto', listed };
+}
+
+function isSameDecision(verdict, expected) {
+  if (verdict.action !== expected.action || verdict.reason !== expected.reason) {
+    return false;
+  }
+  if (expected.action === 'ask') {
+    return Object.keys(verdict).length === 2;
+  }
+  return Array.isArray(verdict.listed) && verdict.listed.join(',') === expected.listed.join(',');
+}
+
+describe('every kind, level, gate, recommended option and caller list', () => {
+  const kinds = [...table.rows.map((row) => row.kind), ...hardStopKinds];
+  const levels = [...table.levels, undefined, 'bogus'];
+  const defectReasons = ['malformed_brief', 'recommendation_not_an_option'];
+  const emptySchema = {};
+  const cases = gateVariants.flatMap((gate) => recommendedVariants.map((variant) => ({ gate, variant, brief: makeVariantBrief(variant, gate) })));
+  test('every product brief is well formed against the real schema, so an empty schema checks the rest the same way', () => {
+    for (const { brief } of cases) {
+      assert.deepEqual(structuredClone(lib.validateSchema(briefSchema, brief)), { ok: true, errors: [] });
     }
   });
-  test('every earlier check wins over askReason', () => {
-    const gateWith = (flag) => ({ irreversible: false, architectural: false, safety: false, [flag]: true });
-    const syntheticTable = { ...table, rows: [{ kind: 'synthetic', high: 'maybe', balanced: 'auto', low: 'surface' }] };
-    assert.equal(decideAsking(hardStopKinds[0], 'high', makeBrief()).reason, 'hard_stop');
-    assert.equal(decideAsking('plan_acceptance', 'high', {}).reason, 'malformed_brief');
-    assert.equal(decideAsking('not_a_kind', 'high', makeBrief()).reason, 'unknown_kind');
-    assert.equal(decideAsking('plan_acceptance', 'low', makeBrief()).reason, 'table_surface');
-    assert.equal(decideAsking('synthetic', 'high', makeBrief(), syntheticTable).reason, 'bad_cell');
-    for (const flag of ['irreversible', 'architectural', 'safety']) {
-      assert.equal(decideAsking('plan_acceptance', 'high', makeBrief({ gate: gateWith(flag) })).reason, `gate_${flag}`);
-    }
-  });
-  test('askReason wins over the recommendation checks', () => {
-    const none = { option_id: 'A', strength: 'none', why: 'Both are fine.' };
-    const missing = { option_id: 'C', strength: 'strong', why: 'Best.' };
-    assert.deepEqual(decideAsking('plan_acceptance', 'high', makeBrief({ recommendation: none })), askOutside);
-    assert.deepEqual(decideAsking('plan_acceptance', 'high', makeBrief({ recommendation: missing })), askOutside);
-  });
-  for (const invalid of ['auto', 'hard_stop', 'gate_safety', 'OUTSIDE_LIMITS', '', null, 0, false, {}]) {
-    test(`askReason ${JSON.stringify(invalid)} throws, even for a hard stop`, () => {
-      for (const kind of ['plan_acceptance', hardStopKinds[0]]) {
-        const call = () => lib.decide({ kind, level: 'high', brief: makeBrief(), askReason: invalid }, table, briefSchema);
-        assert.throws(call, /decide: unknown askReason/);
+  for (const testCase of cases) {
+    const plannerVerdict = lib.decide({ kind: 'planner_question', level: 'high', brief: testCase.brief }, table, briefSchema);
+    testCase.isRefused = defectReasons.includes(plannerVerdict.reason);
+  }
+  for (const kind of kinds) {
+    test(`${kind}: an ask is in askReasons() unless the planner check refuses its brief, and a take is auto with listed in order`, () => {
+      for (const { gate, variant, brief, isRefused } of cases) {
+        for (const level of levels) {
+          for (const callerListed of callerListVariants) {
+            const verdict = lib.decide({ kind, level, brief, listed: callerListed }, table, emptySchema);
+            const expected = expectDecision(kind, level, variant, gate, callerListed);
+            const isAllowedAsk = verdict.action === 'ask' && (askSet.includes(verdict.reason) || (defectReasons.includes(verdict.reason) && isRefused));
+            const isOrderedTake = verdict.action === 'take' && verdict.reason === 'auto' && verdict.listed.join(',') === listSet.filter((name) => verdict.listed.includes(name)).join(',');
+            if (!isSameDecision(verdict, expected) || !(isAllowedAsk || isOrderedTake)) {
+              assert.fail(JSON.stringify({ kind, level, gate, variant, callerListed, verdict, expected, isRefused }));
+            }
+          }
+        }
       }
     });
   }
-  test('no askReason leaves every result unchanged', () => {
-    const briefs = [makeBrief(), makeBrief({ recommendation: { option_id: 'A', strength: 'none', why: 'x' } }), null];
+});
+
+describe('caller listed names', () => {
+  test('a caller name rides on a take at every auto cell of the real table, in listReasons() order', () => {
+    const autoCells = table.rows.flatMap((row) => table.levels.filter((level) => row[level] === 'auto').map((level) => [row.kind, level]));
+    assert.ok(autoCells.length > 0);
+    for (const [kind, level] of autoCells) {
+      assert.deepEqual(decideListing(kind, level, makeBrief(), ['outside_limits']), { ...takeAuto, listed: ['outside_limits'] });
+      assert.deepEqual(decideListing(kind, level, makeBrief(), ['repeats_surface']), { ...takeAuto, listed: ['repeats_surface'] });
+      const both = { ...takeAuto, listed: ['beyond_request', 'outside_limits', 'repeats_surface'] };
+      assert.deepEqual(decideListing(kind, level, makeBeyondBrief(0), ['repeats_surface', 'outside_limits']), both);
+    }
+  });
+  test('a caller name never makes it ask and never changes an ask', () => {
+    const none = { option_id: 'A', strength: 'none', why: 'Both are fine.' };
+    const briefs = [makeBrief(), makeBrief({ recommendation: none }), makeBrief({ gate: { irreversible: false, architectural: true, safety: false } }), null];
     for (const row of table.rows) {
       for (const level of [...table.levels, undefined, 'bogus']) {
         for (const brief of briefs) {
-          const withKey = structuredClone(lib.decide({ kind: row.kind, level, brief, askReason: undefined }, table, briefSchema));
-          assert.deepEqual(withKey, decideWith(row.kind, level, brief));
+          const unlisted = decideWith(row.kind, level, brief);
+          const withNames = decideListing(row.kind, level, brief, callerListSet);
+          assert.equal(withNames.action, unlisted.action);
+          assert.equal(withNames.reason, unlisted.reason);
+          assert.deepEqual(decideListing(row.kind, level, brief, undefined), unlisted);
         }
       }
     }
   });
-  test('the brief is never mutated', () => {
-    const brief = makeBrief();
+  test('an ask carries no listed field', () => {
+    assert.deepEqual(Object.keys(decideListing('plan_acceptance', 'low', makeBrief(), callerListSet)).sort(), ['action', 'reason']);
+  });
+  test('a repeated caller name is listed once', () => {
+    assert.deepEqual(decideListing('plan_acceptance', 'high', makeBrief(), ['outside_limits', 'outside_limits']).listed, ['outside_limits']);
+  });
+  for (const invalid of ['outside_limits', null, 0, false, {}, ['beyond_request'], ['auto'], ['hard_stop'], ['OUTSIDE_LIMITS'], [''], [undefined], ['outside_limits', 'gate_safety']]) {
+    test(`listed ${JSON.stringify(invalid)} throws, even for a hard stop`, () => {
+      for (const kind of ['plan_acceptance', hardStopKinds[0]]) {
+        const call = () => lib.decide({ kind, level: 'high', brief: makeBrief(), listed: invalid }, table, briefSchema);
+        assert.throws(call, /decide: (listed must be an array|unknown listed name)/);
+      }
+    });
+  }
+  test('neither the brief nor the caller list is mutated, and each take returns a new list', () => {
+    const brief = makeBeyondBrief(0);
     const before = structuredClone(brief);
-    decideAsking('plan_acceptance', 'high', brief);
-    decideAsking('plan_acceptance', 'low', brief);
-    decideWith('plan_acceptance', 'high', brief);
+    const callerListed = ['repeats_surface'];
+    const first = lib.decide({ kind: 'plan_acceptance', level: 'high', brief, listed: callerListed }, table, briefSchema);
+    const second = lib.decide({ kind: 'plan_acceptance', level: 'high', brief, listed: callerListed }, table, briefSchema);
+    decideListing('plan_acceptance', 'low', brief, callerListed);
     assert.deepEqual(brief, before);
+    assert.deepEqual(callerListed, ['repeats_surface']);
+    assert.notEqual(first.listed, second.listed);
+    assert.notEqual(first.listed, callerListed);
   });
 });
 

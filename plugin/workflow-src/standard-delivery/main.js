@@ -61,24 +61,25 @@
  *   tails.js). A run end is its lead, then, when blocked, the Next line, any
  *   later causes and the commit end line, then only the records ADR-0037
  *   decision 3 needs in chat: the branch and its head once a wave ran, the
- *   reversible effects and the taken decisions other than the routine kinds
- *   of routineDecisionKinds() (record.js), one line each. A complete run
+ *   reversible effects and the taken decisions isShownDecision (record.js)
+ *   shows: listed ones and those of no routine kind, one line each. A complete run
  *   names the pull request and its commit, the gates that held and any gate
  *   not configured, the warning when there is one, the run.rejected and
  *   run.undone findings. No message shows a commit list, a criticality or ask
  *   reason line, and no pause shows a taken decision.
  *   The pull request body and comment each carry the one run record
  *   buildRunRecordParts() returns: the reversible effects, the gates, the
- *   run.rejected and run.undone findings, the approvals and the taken
- *   decisions other than the routine kinds, in that order, and no commit list
+ *   run.rejected and run.undone findings, the approvals and the shown taken
+ *   decisions, in that order, and no commit list
  *   (ADR-0037 decisions 2 and 3; review findings 1a75f008 and 6f87ce62), each
  *   decision one compact line with no why (issue 506). Each decision is the
  *   same brief once however many passes took it.
  *   No question shows the plan summary or names this run's per-agent
  *   results. When the scope sets limits and a plan path, not a version or
  *   changelog file of versioning, lies outside them, the acceptance is
- *   asked at every level with askReason outside_limits and its own
- *   recommendation shown, and the planning pause lead names up to
+ *   decided with listed outside_limits: taken, journaled and listed for
+ *   veto, never asked for that alone (issue 549). A planning pause lead
+ *   names up to
  *   maxListedItems() of those paths, one line each, encoded whole with its
  *   step's limits_reason, then the count of the rest (plan.js
  *   listPlanPaths). Only an irreversible effect, an exact ask, shows its
@@ -108,10 +109,13 @@
  *   characters by its schema pattern, so its short id, the first 8, is
  *   whole hex. A break-fix-break stop shows the count of conflicting
  *   findings and no entry, and a rejected finding or undone fix shows its short id alone.
- *   A stop ends the run only on a terminal cause, an agent failure, a size
- *   limit (finishOpenQuestions) or the launch check (issue 457). Every other
- *   stop pauses through stopDelivery (record.js) with one step_stop
- *   question, and the reply takes the stopped step again or plans again.
+ *   A stop ends the run only on a terminal cause, an agent failure, a lead
+ *   action other than approve or fix_cause, so every report, run_again and
+ *   answer stop, a size limit (finishOpenQuestions) or the launch check
+ *   (issues 457, 549). Every other stop pauses through stopDelivery
+ *   (record.js) with step_stop questions, and the reply takes the stopped
+ *   step again or plans again. pauseDelivery throws on an ask whose reason
+ *   is outside askReasons() (lib/decide.js), so only the Ask Set pauses.
  *   A non-null scope, plan or revise result that fails its check, other
  *   than a planner blocked outcome that gives a reason, goes back to its
  *   agent with the check, up to maxCheckRetries() times

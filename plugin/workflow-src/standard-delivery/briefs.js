@@ -30,23 +30,17 @@
  *            outside count added to its problem when a plan path is outside
  *            the limits and the problem still fits. It never changes the
  *            recommendation: its strength and why stay as built, and
- *            plan.js asks the acceptance with askReason outside_limits.
+ *            plan.js passes listed outside_limits to decide().
  *   buildTailBrief({kind, problem, goOn, other, strength, why})  the
  *            shared shape of a tail brief, also used by review.js.
  *   buildValidationRemediationBrief, buildFixLimitBrief and
  *   buildGateRerunBrief  the tail briefs gates.js resolves.
- *   buildStepStopBrief(causes, isReplan)  the step_stop brief stopDelivery
- *            (record.js) asks, one per stop type: the next action of
- *            orderStopCauses(causes)[0], fix_cause when absent. It has one
- *            option, and its problem names the user's move, then whether
- *            the reply takes the stopped step again or plans again from
- *            fresh facts. fix_cause: clear the cause named above and commit
- *            any change, then reply, strength strong. run_again: nothing in
- *            the repo needs a fix, strong. report: nothing in your repo
- *            needs a fix, a step of the run failed, reply to try once more,
- *            weak, and its why says a stop that comes back is a workflow
- *            defect to report, not retry. It is built through
- *            buildTailBrief with its option B left out.
+ *   buildStepStopBrief(isReplan)  the fix_cause step_stop brief
+ *            stopDelivery (record.js) asks. It has one option, strength
+ *            strong, and its problem says to clear the cause named above
+ *            and commit any change, then reply, and whether the reply takes
+ *            the stopped step again or plans again from fresh facts. It is
+ *            built through buildTailBrief with its option B left out.
  *   buildApprovalAsks(holds, isReplan, run)  the asks of an approve stop,
  *            one step_stop ask per held item {stepId, category, item}, in
  *            hold order. Its shown brief names the encoded step in its
@@ -71,9 +65,10 @@
  *   function of this module.
  *   The brief gate of a remediation plan acceptance is
  *   plan.remediation_gate.promotion_gate copied whole, with architectural
- *   also true when grows_surface or repeats_surface is, and its problem
- *   names each flag that holds, so it asks then and is taken otherwise at
- *   the default level (decision-autonomy.md, Promotion Gate).
+ *   also true when grows_surface is, and its problem names each flag that
+ *   holds, so it asks then and is taken otherwise at the default level
+ *   (decision-autonomy.md, Promotion Gate). repeats_surface only lists a
+ *   taken acceptance: plan.js passes it to decide() in listed.
  *   Every brief here puts unshownBriefText() in each field no message
  *   shows and fits BRIEF_SCHEMA with worst-case inputs (main.js, bounded
  *   fields).
@@ -120,9 +115,9 @@ function buildRemediationPlanBrief(plan) {
   const brief = buildPlanAcceptanceBrief(plan);
   return Object.assign(brief, {
     kind: REMEDIATION_PLAN_ACCEPTANCE_KIND,
-    problem: flagTexts.length === 0 ? lead : lead + ' I am asking because the plan ' + joinNames(flagTexts, 'and') + '.',
+    problem: flagTexts.length === 0 ? lead : lead + ' The plan ' + joinNames(flagTexts, 'and') + '.',
     recommendation: { ...brief.recommendation, why: 'The plan answers the local review findings, and every gate runs again on its commit before the pull request.' },
-    gate: { ...remediationGate.promotion_gate, architectural: flags.architectural || flags.grows_surface || flags.repeats_surface }
+    gate: { ...remediationGate.promotion_gate, architectural: flags.architectural || flags.grows_surface }
   });
 }
 
@@ -206,29 +201,18 @@ function buildTailBrief({ kind, problem, goOn, other, strength, why }) {
   };
 }
 
-function stepStopTexts() {
-  return {
-    fix_cause: ['strong', 'commit any change and reply', 'Clearing it lets the step go on.'],
-    report: ['weak', 'nothing in your repo needs a fix: the run\'s own step failed; reply to try once more', 'A stop that comes back is a workflow defect: report it, do not retry.'],
-    run_again: ['strong', 'reply', 'The cause clears itself.']
-  };
-}
-
 function describeStopThen(isReplan) {
   return isReplan ? 'the run plans again from fresh facts' : 'the run takes the stopped step again';
 }
 
-function buildStepStopBrief(causes, isReplan) {
-  const texts = stepStopTexts();
-  const leadAction = orderStopCauses(causes)[0].nextAction;
-  const [strength, words, why] = Object.hasOwn(texts, leadAction) ? texts[leadAction] : texts.fix_cause;
-  const action = leadAction === 'report' ? words : describeStopAction(leadAction, words);
+function buildStepStopBrief(isReplan) {
+  const action = describeStopAction('fix_cause', 'commit any change and reply');
   const brief = buildTailBrief({
     kind: STEP_STOP_KIND,
     problem: action.charAt(0).toUpperCase() + action.slice(1) + ', and ' + describeStopThen(isReplan) + '.',
     goOn: isReplan ? 'Go on: plan again from fresh facts.' : 'Go on: take the stopped step again.',
-    strength: strength,
-    why: why
+    strength: 'strong',
+    why: 'Clearing it lets the step go on.'
   });
   return Object.assign(brief, { options: brief.options.slice(0, 1) });
 }

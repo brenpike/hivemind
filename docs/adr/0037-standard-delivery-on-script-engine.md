@@ -625,6 +625,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/441, https://g
 - **Bounds on the other agent fields.** Planner question briefs gain bounds in `plugin/references/decision-brief-schema.json`: `problem` 300, each option summary 160, the recommendation's `why` 200, and `criticality.blast_radius` and `criticality.if_ignored` 160 each, each described as written for the user. A plan step id gets `maxLength` 64 and an external effect summary 300. The plan, worker, bump, fix gate edit, validation and analysis blocker fields get `maxLength` 400. Every brief built in code passes the brief schema with worst-case inputs, so the diminishing-returns, escalation and root-cluster problems embed no reviewer free text, only a short finding id and counts. Text: the two schema files, `plugin/workflow-src/standard-delivery/main.js`, `plugin/workflow-src/analysis-only/main.js`, row SD-20.
 - **The remediation gate.** The plan gains a required `remediation_gate` that carries the whole Promotion Gate as `promotion_gate`, with the same three booleans as a decision brief's `gate` (`irreversible`, `architectural` and `safety`), plus two booleans of its own, `grows_surface` and `repeats_surface`. A `promotion_gate` key is true only for a plan that remediates review findings and is irreversible, architectural or safety-relevant, as the matching clause of `plugin/governance/decision-autonomy.md` (Promotion Gate) says. `grows_surface` is true only for such a plan that adds more surface than it removes (`plugin/governance/remediation-doctrine.md`, Surface-Growth Escalation), and `repeats_surface` only for one that follows a fix on the same surface that did not close its class. Each is true only while no reply in this run has accepted that condition. Every flag is false for any other plan. The planner sets them by judgment, as Remediation Zoom-Out Mode in `plugin/agents/cerebrate.md` says. Root cause of local review finding be73abc8: the first form of this gate was a narrowed copy of the Promotion Gate. It carried only clause 2 as `architectural`, and the engine hard-coded `irreversible` and `safety` to false in the remediation plan brief, so a remediation plan that could not be undone, or that touched a safety rail, ran without asking. Eliminated class: no Promotion Gate clause can be left out of remediation acceptance, because the plan copies the gate whole, the engine copies `promotion_gate` into the brief's `gate` unchanged, and a parity test ties `promotion_gate` to the `gate` of `plugin/references/decision-brief-schema.json`. Text: `plugin/references/plan-schema.json`; test: `tests/workflow-scripts/plan-schema.test.mjs`.
 - **The remediation acceptance rule (issue 452).** Accepting a remediation plan asks the user only when a `remediation_gate` flag is set, on both engines: any `promotion_gate` key, so an irreversible, architectural or safety-relevant remediation plan asks, or `grows_surface` or `repeats_surface`. Any other remediation plan is decided for the user: journaled on the state machine, and on the script engine resolved by the `remediation_plan_acceptance` row, now auto at the high and balanced levels and surface at low, and listed in the final message and the PR body. When it asks, its brief's `gate` is the plan's `promotion_gate`, copied unchanged, and its problem names each flag that holds. The rule has one home, `plugin/governance/decision-autonomy.md` (Promotion Gate). The Tier B root-cluster bullet and Recurrence Interplay in that file, and `plugin/agents/overlord.md`, refer to it and do not restate it. Text: `plugin/governance/decision-autonomy.md` (Promotion Gate), `plugin/references/decision-autonomy-table.json`, row SD-40.
+Amended 2026-11-07 (issue 549): `repeats_surface` no longer asks. A remediation plan acceptance with `repeats_surface` set is taken and listed for veto before merge. Only `grows_surface` and the `promotion_gate` flags ask (see Amendment 2026-11-07: the closed Ask Set (issue 549)).
 - **The review question fields (issue 441).** The local review result carries short fields the reviewer writes for the user. `user-input-required` carries `question`, the ask in one plain sentence (`maxLength` 300). `high-severity-rejection` carries `rationale_text`, why the reviewer rejects the finding in its own words (`maxLength` 300). Both, and `diminishing-returns`, carry `recommendation_text` (`maxLength` 200, may be empty). Each open finding is `finding_id`, `severity`, `summary` (what is wrong, one plain sentence, `maxLength` 200) and `recommendation` (one plain sentence, `maxLength` 200, may be empty). `title` and `body` are gone, so no Codex body reaches a question. The question brief is short code text that names the finding by the first 8 code points of its `finding_id`, and its recommendation names the reviewer's recommendation when the review gives one. The detail block shows the question or the rejection reason, the reviewer's recommendation, and up to 5 open findings, then one line counting the rest. The rerun review's `user_answer.question` is the text the user saw: the questions block and the detail block. The local reviewer binds a reply by `finding_id` or by the short id the question shows. Text: `REVIEW_SCHEMA` and the review question brief in `plugin/workflow-src/standard-delivery/main.js`, `plugin/agents/local-reviewer.md` (the Output Contract and The Loop step 1), rows SD-33, SD-37 and SD-58. Amended 2026-10-28 (issue 460): `question`, `rationale_text` and `open_findings` are gone, and so is the detail block. Both exits now carry `finding_id` and `user_question`, the reviewer's own question with its own options and recommendation (see Amendment 2026-10-28: one message shape (issue 460)).
 - **The relay rule has one home.** The handoff for this fix found two rules: `plugin/agents/overlord.md` (`## Engine`) said to relay the engine message whole, and the overlord had been rewriting it by hand because the message was a wall of text. Decided: with the message bounded where it is built, the overlord presents `message` as its whole reply, as `## Engine` says, and that section is the rule's one home. The relay contract header of `plugin/workflow-src/lib/result.js` keeps only a pointer to it, with no code change. Rejected: an overlord that rewrites each message in plain words from the run's results. It adds a second author of user text and model work per message, and its labels or reply tokens can drift from what the run reads back. Text: `plugin/agents/overlord.md` (`## Engine`); test: `tests/workflow-scripts/overlord-contract.test.mjs`. Amended 2026-10-28 (issue 460): the rule stays after the logs showed the bounded message was still a wall of text. The fix stays in the engine, the one author of user text, and the bare "A" that clashed with the engine's own option A on #459 is one more reason to reject an overlord rewrite (see Amendment 2026-10-28: one message shape (issue 460)).
 - **The bound lives in the schema.** Each bound is `maxLength` in the step schema, so the agent writes the short field at the source. `tests/workflow-scripts/plan-schema.test.mjs` adds `maxLength` to its keyword subset. Rejected: a bound stated only in each field description, with the script cutting an overrun at a sentence or word boundary. It keeps a cap on pasted text, the pattern the root-cause comment names as the reason the earlier fixes failed.
@@ -1149,6 +1150,8 @@ Amended 2026-11-07: that holds only for a runner relay. A planner result that fa
 - an agent failure: a null `agent()` result, which `describeUnusableResult` alone marks `agentFailure`, and a blocked wave or fix round that holds one;
 - the size limits `reply_size` and `exact_text_size`, through `finishOpenQuestions`;
 - the launch check, a direct end in `runDelivery`.
+
+Amended 2026-11-07 (issue 549): a stop whose lead action is `report`, `run_again` or `answer` ends the run blocked and asks nothing. Only a lead of `approve` or `fix_cause` pauses (see Amendment 2026-11-07: the closed Ask Set (issue 549)).
 
 **One retry of a transient runner block.** `isTransientFailure(text)` in `plugin/workflow-src/lib/result.js` is true only when the text names a root cause that `plugin/governance/definitions.md` (Transient Failure) lists. The facts, branch, commit and pull request runners call `agent()` through `runRunnerRelay`. A relay that fits its schema, is blocked and has transient stderr runs the same prompt once more under the label `<label>-retry`. A step call retries at most once. Row SD-71.
 
@@ -1989,7 +1992,9 @@ This amendment covers https://github.com/brenpike/hivemind/issues/481 and https:
 - **Five next actions.** `fix_cause`, `run_again` and `answer` stay. `approve` and `report` are new, and only code sets them. The Next line comes from the first match in this stop order: `approve`, `fix_cause` (or absent), `answer`, `report`, `run_again`. The agent-facing `next_action` enum stays `[fix_cause, run_again]`. Routing is unchanged: pause or end, rerun or replan, and `agentFailure`.
 - **A schema failure is a report.** A non-null result that is unusable, meaning it fails its schema, is typed `report` on both engines. This reverses the rule "A non-null result that fails its schema or its routing keeps the fix line" in the "Only a null result says to run again" paragraph of Amendment 2026-10-28: one message shape (issue 460). A null result keeps `run_again` plus `agentFailure`. A planner's valid blocked outcome stays `fix_cause`.
 - **One `step_stop` brief per type.** Each has a real recommendation and is resolved through `decide()`. `fix_cause`: option A, strong. `run_again`: option A, strong. `report`: option A, weak. If the same stop returns, it is a workflow defect: report it, do not retry. `approve`: strength none, because only the user can approve what the destructive-fix gate holds back.
+Amended 2026-11-07 (issue 549): only the `fix_cause` brief and the `approve` asks remain. A `report`, `run_again` or `answer` stop ends the run blocked and builds no brief (see Amendment 2026-11-07: the closed Ask Set (issue 549)).
 - **`decide()` takes an ask reason.** The caller passes a reason from the closed list `['outside_limits']`. It replaces the strength rewrite in `markOutsideLimits`. Brief fields never name an ask reason. The undecided asks (`step_stop`, `version_bump_indeterminable`, the fix limit and the gate-rerun limit) resolve through `decide()`. The irreversible external-effect brief (`briefs.js`) keeps strength none: code wrote it, and only the user can authorize an outside effect.
+Amended 2026-11-07 (issue 549): the caller no longer passes an ask reason. It passes `listed`, names from `listReasons()` that ride on a take, and no listed name makes `decide()` ask (see Amendment 2026-11-07: the closed Ask Set (issue 549)).
 - **Worker report `stage`.** The worker report gains an optional `stage`, valid on blocked only. Stage `destructive-fix-gate`, or a blocker starting `proposed fix requires human confirmation`, types the stop `approve`. Approve and refuse options, and labeled stop replies, are deferred to issue 499.
 - **Routine kinds leave the decision record.** The rendered decision record drops `plan_acceptance`, `remediation_plan_acceptance` and `gate_rerun`. `run.taken` keeps them.
 - **Cut quotes.** A cut quote ends with the words `, shortened` in place of ` (cut)`. Terminal punctuation is not doubled.
@@ -2075,10 +2080,12 @@ This amendment covers https://github.com/brenpike/hivemind/issues/504 and https:
 **The change.**
 
 - **Options say when they go beyond the request.** Each decision-brief option requires a boolean `beyond_request`. `decide()` asks with reason `beyond_request`, checked after `gate_safety`, when the recommended option has it. A brief with no option inside the request is `malformed_brief`. The option line shows "This goes beyond what you asked for." Code-built options and review options carry `beyond_request: false`.
+Amended 2026-11-07 (issue 549): `beyond_request` no longer asks. A recommended option that goes beyond the request is taken and listed when its strength is strong and its effort is trivial or small; otherwise the brief is `malformed_brief` and the planner fixes it (see Amendment 2026-11-07: the closed Ask Set (issue 549)).
 - **Plan schema.** `versioning.changelog_files` is required. `steps[].limits_reason` is optional, at most 160 code points.
 - **Changelog entries.** `changelog_files` carries no repository path mark and no length cap: an entry only exempts a step file that is itself path-checked and bounded, so a bad entry matches nothing. Marking it would add built prose and a plan file count for no closed case.
 - **Limits carry their origin.** A scope limit is `{path, origin}`, origin `request` or `answer`. An inferred limit has no value to record, so "the limits you set" holds by construction.
 - **Files outside the limits.** `listOutsidePaths` never counts `artifact_files` or `changelog_files`. The planning pause lists one line per file outside the limits, with its `limits_reason` or "the plan gives no reason".
+Amended 2026-11-07 (issue 549): the planning pause no longer asks for files outside the limits alone. The acceptance is taken and listed for veto before merge, and the lead still names the files (see Amendment 2026-11-07: the closed Ask Set (issue 549)).
 - **Prose.** `plugin/governance/decision-autonomy.md` Tier A gains "an option that goes beyond the request". `plugin/agents/cerebrate.md` Scope Mode keeps only stated limits, each with its origin. `CLAUDE.md` Versioning names `CHANGELOG.md`.
 - JSON state machine: the Tier A bullet and the schema fields reach it; no agent prose change beyond `plugin/agents/cerebrate.md` Scope Mode.
 - Patch, 7.6.1.
@@ -2086,6 +2093,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/504 and https:
 **User decisions.**
 
 - **2026-11-04.** The Tier A bullet: an option that goes beyond the request is always asked.
+  Amended 2026-11-07 (issue 549): reversed by the user. See Amendment 2026-11-07: the closed Ask Set (issue 549).
 - **2026-11-05, "Take recs".** The PR4 scope.
 - **Prose budgets.** No raise. Each step paid for its text with cuts.
 
@@ -2502,6 +2510,8 @@ The rest of ADR-0037 is unchanged.
 
 **Bounded impact.** Each still stops with no change to the repo or user work.
 
+Amended 2026-11-07 (issue 549): the stops that said "retry?" with a `report` or `run_again` lead (issue 548) now end the run blocked and ask nothing (see Amendment 2026-11-07: the closed Ask Set (issue 549)).
+
 **Version.** Patch, 7.6.7. It is a fix: it removes a user stop the planner can close alone.
 
 It updates these places in place, each with a dated note:
@@ -2512,3 +2522,78 @@ It updates these places in place, each with a dated note:
 - The `describePlanProblem` bullet on `closes` (issue 491).
 
 The rest of ADR-0037 is unchanged.
+
+## Amendment 2026-11-07: the closed Ask Set (issue 549)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/549. A run asked the user six times in a row about calls it could take itself. The set of reasons that could ask was open: every new caution signal added a question.
+
+**Root cause.** `decide()` (`plugin/workflow-src/lib/decide.js`) is the one gate, but its set of ask reasons was open-ended. Each caution signal became a user question, and a signal folded into another reason asked under that reason. In run wf_d1cc3369-306 the user was asked six times:
+
+- Asks 1, 3 and 5 were `beyond_request`. An option went beyond the request, and `decide()` asked, however small the step was.
+- Asks 2, 4 and 6 were `repeats_surface`. `buildRemediationPlanBrief` (`briefs.js`) folded it into `gate.architectural`, so it asked under `gate_architectural`.
+- The two kinds alternated in a loop. Each approval covered only the plan file the user was shown, so each replan could fix only that file. The next review found the next file, and the run asked again.
+
+**Decisions.**
+
+- **Two closed lists.** `askReasons()` is `hard_stop`, `table_surface`, `gate_irreversible`, `gate_architectural`, `gate_safety` and `no_recommendation`. `listReasons()` is `beyond_request`, `outside_limits` and `repeats_surface`. A well formed brief of a known kind asks only for a reason in `askReasons()`.
+- **`decide()` takes `listed`.** `decide({kind, level, brief, listed})`, with `listed` an optional array of caller names from `listReasons()`; any other name throws. A take returns `{action: 'take', reason: 'auto', listed}`, the names that hold in `listReasons()` order. `beyond_request` is read from the recommended option, the others from the caller. A listed name never makes `decide()` ask. `callerAskReasons()`, the `askReason` input and `decisionReasons()` are removed.
+- **Check order.** `hard_stop`; `malformed_brief`; `recommendation_not_an_option`; `unknown_kind`; `table_surface`; `bad_cell`; `gate_irreversible`; `gate_architectural`; `gate_safety`; `no_recommendation`. The first that fires asks.
+- **Beyond the request is taken and listed.** A recommended option with `beyond_request` true is well formed only with strength strong and effort trivial or small. Then it is taken and listed. Otherwise the brief is `malformed_brief`, and so is a brief with no option inside the request. The planner recommends the in-request option, and that option's summary names the expansion it leaves out. A review-found fix of the root cause is inside the request. No issue is filed.
+- **A malformed planner question goes back to the planner.** `callCheckedPlanner` (`checks.js`) treats as fixable any planner question that `decide()` (kind `planner_question`) gives a reason in neither `askReasons()` nor `auto`. The planner is asked again with one short fixed sentence, under the retry bound of 2. The user is never asked a defect in a brief.
+- **Surface flags and outside paths are listed.** `repeats_surface` is no longer folded into `gate.architectural`; only `grows_surface` is. `resolvePlanAcceptance` (`plan.js`) passes `outside_limits` when a plan path is outside the limits and `repeats_surface` when `plan.remediation_gate.repeats_surface` holds. The acceptance is taken and listed for veto before merge, and the planning pause lead still names the files.
+- **Only two stops ask.** `stopDelivery` ends the run blocked when a cause is terminal or an agent failure, or when the lead action is neither `approve` nor `fix_cause`. So a `report`, `run_again` or `answer` stop ends blocked, and only `approve` and `fix_cause` ask. `buildStepStopBrief(isReplan)` builds only the `fix_cause` brief. A `step_stop` ask carries `stop`, `approve` or `fix_cause`.
+- **A runtime guard.** `pauseDelivery` throws on an ask whose reason is outside `askReasons()` or a `step_stop` ask whose `stop` is outside those two.
+- **Taken decisions are listed.** A take entry records `{brief, kind, listed}`. `isShownDecision` (`record.js`) shows a routine kind (`plan_acceptance`, `remediation_plan_acceptance`, `gate_rerun`) when `listed` is not empty, and `pr.js` keeps `listed` in the pull request decisions. A listed decision reaches the final message and the PR body.
+- **The same rule on the state machine.** The overlord question gate asks only an Ask Set question, per `plugin/governance/decision-autonomy.md` (Decision Tiers). It takes any other question's recommendation, journals it and runs the asking state again with the answer marked `decided_by: run`. The always-ask bullet for a stale trunk is removed: a stale trunk resolves by the `trunk_stale` row.
+- **The Tier A section is the Ask Set.** `plugin/governance/decision-autonomy.md` says that on the script engine `decide()` asks only for the six reasons. The beyond-request and `repeats_surface` bullets are deleted. Tier B says each taken call is journaled and listed for veto before merge, and that branch work is undone by declining the PR.
+
+**User approvals, 2026-11-07.**
+
+- Reverse the 2026-11-04 decision that an option beyond the request is always asked. A strong recommendation of trivial or small effort is taken and listed; any other is a defect the planner fixes.
+- Files outside the limits are taken and listed, not asked. This reverses the Amendment 2026-11-06 (issues 504 and 497) rule that they ask at every level.
+- The loop-cap draft PR is deferred to PR 2. At the loop cap, today's behavior stands.
+- No automatic issue filing.
+- Not changed: the Engine-or-Instinct question (ADR-0039, D6).
+
+**Options ruled out.**
+
+- **Another narrow patch for each signal.** Each earlier fix removed one signal and left the open set, so the next signal asked.
+- **A draft PR at the loop cap in this PR.** Deferred to PR 2, by the user.
+- **Filing an issue for what a plan leaves out.** Ruled out, by the user.
+
+**Enforcement.**
+
+- **An exhaustive `decide()` test** (`tests/workflow-scripts/decide.test.mjs`). It runs every kind including a hard stop, every level, absent and unknown, every gate flag, every strength, `reversible`, `destructive` and `beyond_request` and effort of the recommended option, against every subset of caller names in `listed`. An ask's reason is in `askReasons()` unless it is a defect reason on a brief the planner check refuses, and a take is `auto` with `listed` in order.
+- **A built-script scan, row SD-82.** It reads the built script and fails on a way to ask the user outside the Ask Set.
+- **The runtime guard** in `pauseDelivery`.
+- **A parity test**, `tests/workflow-scripts/ask-set.test.mjs`. The codes in the one line of `plugin/governance/decision-autonomy.md` Tier A that contains "`decide()` asks only for" equal `askReasons()`, in order.
+- **A policy pin**, `tests/policy/safety-ask-set.json`, on the Tier A line and the overlord question gate.
+- **A replay** of the run shape of wf_d1cc3369-306 in row SD-82: zero pauses, and the decisions in the PR body.
+
+**Budget.** No prose budget raise. Figures: see CHANGELOG 7.6.8.
+
+**Recorded residuals.**
+
+- **analysis-only still asks `malformed_brief`.**
+  - **Not covered.** That skill has no planner retry path, so a malformed brief still reaches the user.
+  - **Bounded impact.** It is a question, not a change; the run writes nothing before it stops.
+  - **Ground.** A retry path there is its own change.
+- **State-machine receivers lack `decided_by`.**
+  - **Not covered.** The receivers that record an answer do not read `decided_by`, so an answer the run took may be recorded as the user's.
+  - **Bounded impact.** The journal and the final report still list the call, and the user can veto it before merge.
+  - **Ground.** The state machine is slated for retirement in slice 5 of https://github.com/brenpike/hivemind/issues/409.
+- **The loop cap still asks.** Until PR 2, the loop cap keeps today's behavior.
+
+**Version.** Patch, 7.6.8. It is a fix: it removes user stops the run can take alone.
+
+It updates these places in place, each with a dated note:
+
+- Amendment 2026-10-25 (issue 452, the remediation acceptance rule) and Amendment 2026-10-29 (issue 457, the stop path and its terminal allowlist).
+- Amendment 2026-11-05: typed stop causes (the `step_stop` brief per type, `decide()` takes an ask reason).
+- Amendment 2026-11-06: issues 504 and 497 (`beyond_request`, files outside the limits, the 2026-11-04 user decision).
+- Amendment 2026-11-07: a planner check slip (its recorded residuals, issue 548).
+- ADR-0039, decision 4.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/549, https://github.com/brenpike/hivemind/issues/548.

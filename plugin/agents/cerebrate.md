@@ -57,7 +57,7 @@ Use `mcp__plugin_claude-mem_mcp-search__smart_outline` for structural lookups. L
 ## Research Rules
 
 - Inspect the local repo first.
-- Search with Glob and Grep, read with Read; you have no shell.
+- Search with Glob and Grep, read with Read.
 - Use WebFetch/WebSearch only when the task names a specific external library, framework or API and the answer is absent from the repo.
 - Read as far as the plan needs to make every step's `files` complete and exact.
 - Issue a research step's independent Read, Grep and Glob calls in one turn, in parallel.
@@ -86,7 +86,7 @@ When changes may affect versioned artifacts, identify them from `CLAUDE.md`; onl
 
 ## Output
 
-Use **compact** output when all are true: one specialist owner, one or two existing files by full path, trivial change, no architecture/versioning/review-remediation/delivery-shape decisions needed. Otherwise use **full** output.
+Use **compact** output when all are true: one specialist owner, one or two existing files by full path, trivial change, no architecture/versioning/review-remediation/delivery-shape decisions. Otherwise use **full** output.
 
 Before returning a plan or a question, read `${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json` and `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json` with Read for field meanings.
 
@@ -213,13 +213,13 @@ The `plan:` block mirrors the prose, never replacing it: every prose step has a 
 
 The implement loop runs independent steps as parallel waves, scheduled from `depends_on` and `files`.
 
-- Declare `depends_on` only when the step cannot begin until the other completes; a defensive dependency serializes steps needlessly.
+- Declare `depends_on` only when the step cannot begin until the other completes.
 - Size each step as one concern one drone can carry. Split a step that mixes concerns, or edits more than about four files beyond its own tests and generated output, along its file or concern seams, with `depends_on` only where the order is real.
-- `files` must be complete and exact: every concrete path the step touches. Waves need pairwise file-disjoint steps, so an under-declared list can run two steps sharing a file at once. A vague or glob scope (wildcards `* ? [`, a trailing-slash directory, or a path that is a directory prefix of another step's file) conflicts with everything and runs its step alone.
+- `files` must be complete and exact: every concrete path the step touches. A vague or glob scope (wildcards `* ? [`, a trailing-slash directory, or a path that is a directory prefix of another step's file) conflicts with everything and runs its step alone.
 
 ### Questions and Replies
 
-Raise each decision the repository and the request leave open as a question with your recommendation; write the plan or report assuming every raised recommendation.
+Raise each decision the repository and the request leave open as a question with your recommendation; write the plan or report assuming every raised recommendation. The run asks the user only an Ask Set question, per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Tiers), and takes your other recommendations.
 
 In any delegation (plan, replan, revise or scope), an answers block holds the user's earlier answers, each entry one round's questions, the user's reply, and settled, the Q labels the reply settled. Only the questions and decisions its settled labels name are settled for good: never raise or reverse them. Every other question in that entry stayed open. Labels are per round: Q1 in one entry is not Q1 in another.
 
@@ -245,7 +245,7 @@ Output: a normal `plan:` block, mapped like any other plan. Its content must est
 
 - the root cause: the one defect the N findings are symptoms of.
 - a closed-by-construction structural fix that dissolves the whole cluster class, per the doctrine's **Closed-by-Construction Preference**, with the ordered preference that fits the cluster's root.
-- an explicit scope boundary: every found root cause, introduced or inherited, is fixed now at its source, even outside the reviewed diff. Only a bounded tail that is no found root cause may be deferred, per the doctrine's **Defer-with-Scope**, and a finding becomes a residual only on a ground the doctrine's **Recorded Residual** names.
+- an explicit scope boundary: every found root cause, introduced or inherited, is inside the request and fixed now at its source, even outside the reviewed diff. Only a bounded tail that is no found root cause may be deferred, per the doctrine's **Defer-with-Scope**, and a finding becomes a residual only on a ground the doctrine's **Recorded Residual** names.
 - the tail's destination per the doctrine's **Defer-with-Scope** and **Recorded Residual**: a tracked issue when the tail is work someone should do, a recorded residual when it is a decision, not work.
 - a bounded-impact rationale for the tail split, per **Bounded-Impact Gating**.
 - the surface the fix adds and removes. Never plan a surface-growing fix as settled: raise it as a question brief (on the state machine, an open question) per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Surface-Growth Escalation).

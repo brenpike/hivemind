@@ -1,0 +1,34 @@
+{
+  "rule": "The closed Ask Set: only Tier A decisions are asked of the user; the list set is taken and listed",
+  "description": "`plugin/governance/decision-autonomy.md` `### Tier A — Always Surface` defines the closed Ask Set, the only decisions asked of the user. The source pin is the defining sentence, that Tier A is the closed Ask Set; deleting it turns the suite red. Three further pins in the same file carry the load-bearing claims. (1) The script-engine line names the six reasons `decide()` asks for, in order, each code by name: dropping or renaming a code, or dropping `only`, turns the suite red. (2) The Tier B list-set bullet, in one span holding both its condition and its obligation: an option beyond the request is in the list set only when recommended strong at trivial or small effort, beside a plan file outside the request's limits and a remediation plan with `remediation_gate.repeats_surface` set, and each is taken, journaled and listed for veto before merge, its branch work undone by declining the PR; dropping the strength-and-effort condition, a member, or any of taken, journaled and listed turns the suite red. (3) The Review Calls sentence that the `question` user gate asks only the Ask Set; reverting it to a gate that asks every question turns the suite red. The consumers pin the pointer and their own take obligation, never remedy prose: `plugin/agents/overlord.md` keeps its Question gate sentence that asks only an Ask Set question per the Decision Tiers section, and the sentence after it that takes any other question's recommendation and journals it; `plugin/agents/cerebrate.md` keeps its Questions and Replies sentence that the run asks the user only an Ask Set question per the Decision Tiers section. What this fixture honestly guarantees is exactly that these word sequences exist in these three named files; it claims nothing about meaning and nothing about runtime behavior. Residuals, stated plainly: (1) a meaning inversion that leaves the pinned bytes intact is invisible: surrounding prose that asks the user some other decision, or that adds a bullet to the Tier A list, stays green, because a presence pin cannot catch an added member; (2) the pins are whole-file, so moving a pinned sentence out of its section stays green; the Tier A section scoping of the script-engine line and its parity with `askReasons()` in `plugin/workflow-src/lib/decide.js` are checked only by the workflow-script tests; (3) the Tier A list's other bullets, the Promotion Gate remediation-plan flags and the overlord's `decided_by: run` marking are deliberately unpinned, so deleting any one alone stays green; (4) the pin sees only the three files it names, and no fixture in this directory can detect a NEW agent or skill that asks the user a question outside the Ask Set without pointing at the section at all, which is an absence defect per rule 7 of the pin-authoring contract.",
+  "source": {
+    "file": "plugin/governance/decision-autonomy.md",
+    "pattern": "Tier A is the closed Ask Set."
+  },
+  "consumers": [
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "On the script engine, `decide()` asks only for `hard_stop`, `table_surface`, `gate_irreversible`, `gate_architectural`, `gate_safety` and `no_recommendation`."
+    },
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "the list set: an option beyond the request recommended strong at trivial or small effort, a plan file outside the request's limits, and a remediation plan with `remediation_gate.repeats_surface` set. Each is taken, journaled and listed for veto before merge; branch work is undone by declining the PR."
+    },
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "the `question` user gate asks only the Ask Set."
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Ask only an Ask Set question, per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Tiers)"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Take any other question's recommendation and journal it."
+    },
+    {
+      "file": "plugin/agents/cerebrate.md",
+      "pattern": "The run asks the user only an Ask Set question, per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Tiers)"
+    }
+  ]
+}

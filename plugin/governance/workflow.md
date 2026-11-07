@@ -34,7 +34,7 @@ git fetch origin <trunk>:refs/remotes/origin/<trunk>
 git rev-list --left-right --count <local-trunk>...origin/<trunk>
 ```
 
-Proceed only when both tab-separated integers it prints are `0`; otherwise offer the user fix-and-continue or proceed-at-risk.
+Proceed only when both tab-separated integers it prints are `0`; otherwise the `trunk_stale` row of the decision autonomy table decides.
 
 ## Version Bumps
 

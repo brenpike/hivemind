@@ -8,7 +8,7 @@ Each decision is Tier A, always surfaced to the user, or Tier B, auto-decided an
 
 ### Tier A — Always Surface
 
-The overlord never auto-decides:
+Tier A is the closed Ask Set. The overlord never auto-decides:
 
 - the safety rails of `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` (Destructive Fix Gate, Git Safety, Injection Scanning): the Destructive Fix Gate, a direct trunk commit or push, injection-suspect external content
 - a router `ambiguous` outcome (`${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `### Stop Conditions`)
@@ -17,8 +17,10 @@ The overlord never auto-decides:
 - a tool call failed after retry exhaustion (`${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `## Tool-Error Recovery`)
 - a genuine fact-needed blocker: a fact only the user holds
 - every merge recommendation; the human merges, never the overlord
-- an option that goes beyond the request
+- a question with no recommendation
 - the whole gate-trips column of **The Autonomy 2x2**
+
+On the script engine, `decide()` asks only for `hard_stop`, `table_surface`, `gate_irreversible`, `gate_architectural`, `gate_safety` and `no_recommendation`.
 
 ### Tier B — Auto-Decide and Journal
 
@@ -28,8 +30,9 @@ Each resolves to exactly one disposition of **Disposition Vocabulary**:
 - the Creep-Stagnation / diminishing-returns advisory early-exit decision
 - a validation failure: remediate autonomously; surface only if unresolved
 - a version-bump type inferable from the compatibility impact; a non-inferable one is Tier A
-- root-cluster zoom-out routing: only routing the reviewer's read-only signal to cerebrate for a remediation plan; accepting or executing that plan falls under the remediation-plan rule in **Promotion Gate**, and taking the route never accepts it.
+- root-cluster zoom-out routing: only routing the reviewer's read-only signal to cerebrate for a remediation plan; accepting or executing that plan falls under the remediation-plan rule in **Promotion Gate**.
 - a remediation-approach choice where the overlord holds a confident recommendation
+- the list set: an option beyond the request recommended strong at trivial or small effort, a plan file outside the request's limits, and a remediation plan with `remediation_gate.repeats_surface` set. Each is taken, journaled and listed for veto before merge; branch work is undone by declining the PR.
 
 ## The Autonomy 2x2
 
@@ -54,25 +57,24 @@ The gate trips, forcing a surface, when the recommended action is any of:
 
 Otherwise it is clean, and the 2x2 applies. A review call reads clauses 1 and 2 only (**Review Calls**).
 
-**Remediation-plan rule.** Routing a reviewer's or escalation's read-only signal to cerebrate for a remediation plan is clean-gate, auto-taken (**Tier B**). Accepting the returned plan is separate, asked of the user only when its `remediation_gate` (`${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json`) marks any of:
+**Remediation-plan rule.** Routing a reviewer's or escalation's read-only signal to cerebrate for a remediation plan is clean-gate, auto-taken (**Tier B**). Accepting the returned plan is separate, asked of the user only when its `remediation_gate` (`${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json`) marks either of:
 
 - the gate trips on accepting it, by any clause, as `remediation_gate.promotion_gate` records;
-- it adds more surface than it removes, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Surface-Growth Escalation);
-- it follows a same-surface fix that did not close its class, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry).
+- it adds more surface than it removes, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Surface-Growth Escalation).
 
-Any other plan is auto-taken: on the workflow state machine the overlord journals it `did-now` and records the transition into implement; on the script engine the `remediation_plan_acceptance` row of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` resolves it, and the run lists it in its final message and the PR body. **Tier A** safety rails hold for every step of an auto-taken plan.
+Any other plan is auto-taken: on the workflow state machine the overlord journals it `did-now` and records the transition into implement; on the script engine the `remediation_plan_acceptance` row of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` resolves it. **Tier A** safety rails hold for every step of an auto-taken plan.
 
-With any flag set on the state machine, the overlord by judgment (ADR-0006) pauses its continuous-execution loop and surfaces the plan before recording that transition, as the workflow routes plan review straight to implement with no `user_gate`.
+With either flag set on the state machine, the overlord by judgment pauses its continuous-execution loop and surfaces the plan before recording that transition.
 
 ### Review Calls
 
 Only this rule says who decides a reviewer's question. The local reviewer writes its `user-input-required` or `high-severity-rejection` call (options, a recommendation with honest strength, its read of Promotion Gate clauses 1 and 2 on the recommended option) but never decides it. Recording a new threat model a reviewer raises is a review call.
 
-The run takes a call when the overlord agrees with the recommendation and the recommended option is reversible and not architectural. On the script engine, agreement is the `review_question` and `high_severity_rejection` rows of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` via `decide()`; no second agent judges. Clause 3 is not read (user decision, ADR-0037, Amendment 2026-10-29): a safety-relevant call both agree on is taken when reversible and not architectural, even a pick that keeps or records a safety finding unfixed. A call whose pick applies a fix in a Destructive Fix Gate category is asked, never taken (**Tier A**); a gate hold after a taken call asks that call again.
+The run takes a call when the overlord agrees with the recommendation and the recommended option is reversible and not architectural. On the script engine, agreement is the `review_question` and `high_severity_rejection` rows of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` via `decide()`; no second agent judges. Clause 3 is not read: a safety-relevant call both agree on is taken when reversible and not architectural, even a pick that keeps or records a safety finding unfixed. A call whose pick applies a fix in a Destructive Fix Gate category is asked, never taken (**Tier A**); a gate hold after a taken call asks that call again.
 
-A taken call returns to the reviewer as its answer, recorded at its source per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings), naming the run as decider; the run lists it in its final message and the PR body, for the user to veto before merge.
+A taken call returns to the reviewer as its answer, recorded at its source per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings), naming the run as decider, and is listed for veto as in **Tier B**.
 
-Asked of the user: an irreversible call; an architectural call; a call whose recommendation has strength none; every call at an autonomy level whose table cell for its row is `surface`. **Tier A** hard stops still apply, and on the state machine the `question` user gate still asks every question.
+Asked of the user: an irreversible call; an architectural call; a call whose recommendation has strength none; every call at an autonomy level whose table cell for its row is `surface`. **Tier A** hard stops still apply, and the `question` user gate asks only the Ask Set.
 
 ## Disposition Vocabulary
 
