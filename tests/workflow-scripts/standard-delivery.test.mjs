@@ -535,9 +535,9 @@ function assertBlockedBeforeWaves(run, message) {
 }
 
 /**
- * Builds the workflow from a scratch copy whose autonomy table rows for
- * the given kinds are surface at every level, with editSource applied to
- * the copy of the workflow module moduleFile.
+ * Builds the workflow from a scratch copy, the prose budget file included,
+ * whose autonomy table rows for the given kinds are surface at every level,
+ * with editSource applied to the copy of the workflow module moduleFile.
  */
 function buildWithSurfaceKinds(kinds, editSource = (source) => source, moduleFile = 'main.js') {
   const scratchRoot = realpathSync(mkdtempSync(join(tmpdir(), 'hivemind-delivery-table-')));
@@ -545,6 +545,8 @@ function buildWithSurfaceKinds(kinds, editSource = (source) => source, moduleFil
   for (const dir of ['plugin/workflow-src', 'plugin/references']) {
     cpSync(join(repoRoot, dir), join(scratchRoot, dir), { recursive: true });
   }
+  mkdirSync(join(scratchRoot, 'tests/policy'), { recursive: true });
+  cpSync(join(repoRoot, 'tests/policy/prose-byte-budget.json'), join(scratchRoot, 'tests/policy/prose-byte-budget.json'));
   const tablePath = join(scratchRoot, 'plugin/references/decision-autonomy-table.json');
   const table = JSON.parse(readFileSync(tablePath, 'utf8'));
   table.rows.filter((row) => kinds.includes(row.kind)).forEach((row) => Object.assign(row, { high: 'surface', balanced: 'surface', low: 'surface' }));

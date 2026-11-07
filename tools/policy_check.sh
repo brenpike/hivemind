@@ -4222,6 +4222,12 @@ mark_time 'CHECK17'
 # CHECK18_BUDGET_MAX.
 # Anything else is one non-allowlistable finding and no budget is checked. A
 # covered path outside CHECK18_PATH_CLASS is a non-allowlistable finding.
+# A key matching CHECK18_WORKFLOW_KEY_CLASS (plugin/workflows/<name>.js, inside
+# CHECK18_PATH_CLASS) is a built workflow's prose budget. Its unit is characters
+# of the built script's string and template literals, not bytes, and
+# tools/build_workflows.mjs measures and enforces it, and the workflow-scripts
+# suite checks the key set, so it yields no size, slack or covered-file finding
+# here, even when no such file exists. Its raise is checked like any key's.
 # A budget raise needs a recorded user approval. The base is the merge-base of
 # HEAD with POLICY_CHECK_BASE when that is set, else with origin/main, else with
 # main. A budget higher than the same path's budget in the budget file at the
@@ -4246,6 +4252,7 @@ echo '=== CHECK 18: Prose files fit their byte budget ==='
 CHECK18_BUDGET_REL='tests/policy/prose-byte-budget.json'
 CHECK18_SLACK_PERCENT=5
 CHECK18_PATH_CLASS='[A-Za-z0-9._/-]+'
+CHECK18_WORKFLOW_KEY_CLASS='plugin/workflows/[A-Za-z0-9._-]+[.]js'
 CHECK18_BUDGET_MAX=1000000000
 CHECK18_RAISES_REL='tests/policy/prose-budget-raises.json'
 # INVARIANT: jq --stream sees every key as written, so a repeated key is caught
@@ -4315,13 +4322,15 @@ check18_read_budget() {
 
 # check18_compare_budget BUDGET_FILE SIZES_TEXT
 # SIZES_TEXT holds one "path<TAB>bytes" line per covered file. Prints one
-# "path<TAB>description" line per violation of BUDGET_FILE. Returns non-zero
-# when BUDGET_FILE is unreadable or does not match the budget schema.
+# "path<TAB>description" line per violation of BUDGET_FILE, skipping each key
+# in CHECK18_WORKFLOW_KEY_CLASS. Returns non-zero when BUDGET_FILE is
+# unreadable or does not match the budget schema.
 check18_compare_budget() {
     local budget_records entry_path entry_budget size_path size_bytes
     local -A budget_by_path=()
     budget_records="$(check18_read_budget "$1")" || return
     while IFS= read -r -d $'\x1f' entry_path && IFS= read -r -d $'\x1f' entry_budget; do
+        [[ "$entry_path" =~ ^${CHECK18_WORKFLOW_KEY_CLASS}$ ]] && continue
         budget_by_path["$entry_path"]="$entry_budget"
     done <<< "$budget_records"
     while IFS=$'\t' read -r size_path size_bytes; do
@@ -4508,15 +4517,22 @@ check18_canary_finding() {
     return 0
 }
 
+# check18_expect_path_flagged LABEL SIZES_TEXT BUDGET_JSON EXPECTED_PATH EXPECTED_TEXT
+# Requires exactly one finding, for EXPECTED_PATH, whose description holds
+# EXPECTED_TEXT.
+check18_expect_path_flagged() {
+    local canary_output canary_rc=0
+    canary_output="$(check18_compare_budget <(printf '%s' "$3") "$2")" || canary_rc=$?
+    if [[ "$canary_rc" -ne 0 || "$canary_output" != "$4"$'\t'*"$5"* || "$canary_output" == *$'\n'* ]]; then
+        check18_canary_finding "$1 produced status ${canary_rc} and [${canary_output//$'\n'/ | }], expected exactly one $4 finding holding '$5'"
+    fi
+    return 0
+}
+
 # check18_expect_flagged LABEL SIZES_TEXT BUDGET_JSON EXPECTED_TEXT
 # Requires exactly one finding, for x.md, whose description holds EXPECTED_TEXT.
 check18_expect_flagged() {
-    local canary_output canary_rc=0
-    canary_output="$(check18_compare_budget <(printf '%s' "$3") "$2")" || canary_rc=$?
-    if [[ "$canary_rc" -ne 0 || "$canary_output" != $'x.md\t'*"$4"* || "$canary_output" == *$'\n'* ]]; then
-        check18_canary_finding "$1 produced status ${canary_rc} and [${canary_output//$'\n'/ | }], expected exactly one x.md finding holding '$4'"
-    fi
-    return 0
+    check18_expect_path_flagged "$1" "$2" "$3" x.md "$4"
 }
 
 # check18_expect_rejected LABEL BUDGET_JSON
@@ -4546,6 +4562,10 @@ check18_expect_clean 'a file at budget' $'x.md\t100' '{"x.md":100}'
 check18_expect_clean 'a file exactly 5% under budget' $'x.md\t95' '{"x.md":100}'
 check18_expect_clean 'a budget of 1000000000' $'x.md\t1000000000' '{"x.md":1000000000}'
 check18_expect_clean 'an empty budget object with no covered file' '' '{}'
+check18_expect_clean 'a workflow budget with no covered file' '' '{"plugin/workflows/x.js":100}'
+check18_expect_clean 'a workflow budget beside a file at budget' $'x.md\t100' '{"x.md":100,"plugin/workflows/x.js":1}'
+check18_expect_path_flagged 'a workflow json budget with no covered file' '' '{"plugin/workflows/x.json":100}' 'plugin/workflows/x.json' 'is not a covered file'
+check18_expect_path_flagged 'a workflow source budget with no covered file' '' '{"plugin/workflow-src/x.js":100}' 'plugin/workflow-src/x.js' 'is not a covered file'
 check18_expect_rejected 'a string budget' '{"x.md":"100"}'
 check18_expect_rejected 'a duplicate key' '{"x.md":100,"x.md":100}'
 check18_expect_rejected 'a key with a tab' '{"x.md":100,"x\t.md":100}'
@@ -4562,15 +4582,22 @@ if check18_compare_budget /dev/null/g-missing-budget.json $'x.md\t100' > /dev/nu
     check18_canary_finding 'a missing budget file was accepted, expected a non-zero status'
 fi
 
+# check18_expect_raise_path_flagged LABEL BASE_JSON HEAD_JSON RAISES_JSON EXPECTED_PATH EXPECTED_TEXT
+# Requires exactly one raise finding, for EXPECTED_PATH, whose description
+# holds EXPECTED_TEXT.
+check18_expect_raise_path_flagged() {
+    local canary_output canary_rc=0
+    canary_output="$(check18_compare_raises <(printf '%s' "$2") <(printf '%s' "$3") <(printf '%s' "$4") base)" || canary_rc=$?
+    if [[ "$canary_rc" -ne 0 || "$canary_output" != "$5"$'\t'*"$6"* || "$canary_output" == *$'\n'* ]]; then
+        check18_canary_finding "$1 produced status ${canary_rc} and [${canary_output//$'\n'/ | }], expected exactly one $5 finding holding '$6'"
+    fi
+    return 0
+}
+
 # check18_expect_raise_flagged LABEL BASE_JSON HEAD_JSON RAISES_JSON EXPECTED_TEXT
 # Requires exactly one raise finding, for x.md, whose description holds EXPECTED_TEXT.
 check18_expect_raise_flagged() {
-    local canary_output canary_rc=0
-    canary_output="$(check18_compare_raises <(printf '%s' "$2") <(printf '%s' "$3") <(printf '%s' "$4") base)" || canary_rc=$?
-    if [[ "$canary_rc" -ne 0 || "$canary_output" != $'x.md\t'*"$5"* || "$canary_output" == *$'\n'* ]]; then
-        check18_canary_finding "$1 produced status ${canary_rc} and [${canary_output//$'\n'/ | }], expected exactly one x.md finding holding '$5'"
-    fi
-    return 0
+    check18_expect_raise_path_flagged "$1" "$2" "$3" "$4" x.md "$5"
 }
 
 # check18_expect_raise_clean LABEL BASE_JSON HEAD_JSON RAISES_JSON
@@ -4607,6 +4634,12 @@ check18_expect_raise_clean 'a raise with an entry above the new budget' '{"x.md"
 check18_expect_raise_clean 'a lowered budget' '{"x.md":100}' '{"x.md":80}' "$check18_canary_no_raises"
 check18_expect_raise_clean 'an unchanged budget' '{"x.md":100}' '{"x.md":100}' "$check18_canary_no_raises"
 check18_expect_raise_clean 'a budget new since the base' '{}' '{"x.md":120}' "$check18_canary_no_raises"
+check18_canary_workflow_key='plugin/workflows/x.js'
+check18_expect_raise_path_flagged 'a workflow budget raise with no entry' "{\"${check18_canary_workflow_key}\":100}" \
+    "{\"${check18_canary_workflow_key}\":120}" "$check18_canary_no_raises" "$check18_canary_workflow_key" 'raised from 100 at the merge-base base'
+check18_expect_raise_clean 'a workflow budget raise with an entry to the new budget' "{\"${check18_canary_workflow_key}\":100}" \
+    "{\"${check18_canary_workflow_key}\":120}" \
+    "{\"description\":\"d\",\"raises\":[{\"path\":\"${check18_canary_workflow_key}\",\"from\":100,\"to\":120,\"approved_by\":\"u\",\"date\":\"2026-11-03\",\"reason\":\"r\"}]}"
 check18_expect_raise_rejected 'a base budget off the schema' 3 '{"x.md":"100"}' "$check18_canary_no_raises"
 check18_expect_raise_rejected 'a raise with a blank approved_by' 5 '{"x.md":100}' "$(check18_canary_raise 100 120 ' ' 2026-11-03 r)"
 check18_expect_raise_rejected 'a raise with a blank reason' 5 '{"x.md":100}' "$(check18_canary_raise 100 120 u 2026-11-03 '')"

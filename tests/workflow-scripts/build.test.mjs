@@ -13,7 +13,7 @@ import {
   MAX_BUILT_LINE_LENGTH,
   MAX_BUILT_LINE_SQUARES,
   MAX_BUILT_SCRIPT_LENGTH,
-  PROSE_BUDGETS,
+  PROSE_BUDGET_FILE,
   BUILD_ID_LENGTH,
   WORKFLOW_APPROVAL_LIMIT,
   WORKFLOW_PREVIEW_COMBINING_RUN_LIMIT,
@@ -40,6 +40,7 @@ import {
   projectAutonomyTable,
   projectSchema,
   readDataConstant,
+  readProseBudgets,
   runCli,
   splitProseSentences,
   stripComments,
@@ -55,7 +56,7 @@ const draftIds = listDraftWorkflowIds(repoRoot);
 const DRAFT_ID = 'draft-check';
 const MAX_SOURCE_LINES = 600;
 const DELIVERY_MODULES = ['approvals.js', 'briefs.js', 'gates.js', 'paths.js', 'plan.js', 'pr.js', 'record.js', 'relay.js', 'review-schema.js', 'review.js', 'scope.js', 'specs.js', 'tails.js', 'waves.js'];
-const PROSE_BUDGETS_PATTERN = /export const PROSE_BUDGETS = Object\.freeze\(\{[^}]*\}\);/;
+const proseBudgets = readProseBudgets(repoRoot);
 const MAX_PROSE_MARGIN = 1000;
 const CEREBRATE_SENTENCE = 'You do not write or edit code.';
 const PLAN_PROMPT_OPENING = '\'Plan the delivery of the user request below in this repository, as one plan on one working branch.';
@@ -115,6 +116,8 @@ function makeScratchCopy() {
     cpSync(join(repoRoot, dir), join(scratchRoot, dir), { recursive: true });
   }
   copySkillFiles(scratchRoot);
+  mkdirSync(join(scratchRoot, 'tests/policy'), { recursive: true });
+  cpSync(join(repoRoot, PROSE_BUDGET_FILE), join(scratchRoot, PROSE_BUDGET_FILE));
   return scratchRoot;
 }
 
@@ -132,21 +135,37 @@ function copySkillFiles(scratchRoot) {
 
 /**
  * Writes a copy of tools/build_workflows.mjs under a new name into
- * scratchRoot whose PROSE_BUDGETS is budgets, and returns the imported copy.
- * The copy imports acorn from the tools/vendor/ that makeScratchCopy copies.
+ * scratchRoot and returns the imported copy. The copy imports acorn from
+ * the tools/vendor/ that makeScratchCopy copies.
  */
-async function loadScratchBuilder(scratchRoot, budgets) {
-  const builderSource = readFileSync(builderPath, 'utf8');
-  assert.ok(PROSE_BUDGETS_PATTERN.test(builderSource), 'PROSE_BUDGETS is not one frozen object literal');
+async function loadScratchBuilder(scratchRoot) {
   scratchBuilderCount += 1;
   const scratchBuilderPath = join(scratchRoot, 'tools/build_workflows.' + scratchBuilderCount + '.mjs');
   mkdirSync(join(scratchRoot, 'tools'), { recursive: true });
-  writeFileSync(scratchBuilderPath, builderSource.replace(PROSE_BUDGETS_PATTERN, 'export const PROSE_BUDGETS = Object.freeze(' + JSON.stringify(budgets) + ');'));
+  cpSync(builderPath, scratchBuilderPath);
   return import(pathToFileURL(scratchBuilderPath).href);
 }
 
-function loadDraftBuilder(scratchRoot) {
-  return loadScratchBuilder(scratchRoot, { ...PROSE_BUDGETS, [DRAFT_ID]: PROSE_BUDGETS['analysis-only'] });
+/**
+ * Returns the parsed prose budget file of the repository.
+ */
+function readBudgetFile() {
+  return JSON.parse(readFileSync(join(repoRoot, PROSE_BUDGET_FILE), 'utf8'));
+}
+
+/**
+ * Writes the prose budget file of a scratch copy: every key of the
+ * repository's file, with each workflow key replaced by one key per entry
+ * of budgets, a workflow id to budget, at builtPathFor(id).
+ */
+function writeScratchBudgets(scratchRoot, budgets) {
+  const otherBudgets = Object.entries(readBudgetFile()).filter(([key]) => !key.startsWith('plugin/workflows/'));
+  const workflowBudgets = Object.entries(budgets).map(([id, budget]) => [builtPathFor(id), budget]);
+  writeFileSync(join(scratchRoot, PROSE_BUDGET_FILE), JSON.stringify(Object.fromEntries([...otherBudgets, ...workflowBudgets]), null, 2) + '\n');
+}
+
+function writeDraftBudget(scratchRoot) {
+  writeScratchBudgets(scratchRoot, { ...proseBudgets, [DRAFT_ID]: proseBudgets['analysis-only'] });
 }
 
 /**
@@ -378,7 +397,7 @@ describe('build_workflows vendored acorn', () => {
   test('a scratch builder imports acorn from the copied tools/vendor/', async () => {
     const scratchRoot = makeScratchCopy();
     assert.ok(existsSync(join(scratchRoot, ACORN_PATH)));
-    const builder = await loadScratchBuilder(scratchRoot, PROSE_BUDGETS);
+    const builder = await loadScratchBuilder(scratchRoot);
     assert.equal(builder.buildWorkflow(scratchRoot, 'analysis-only'), readBuilt('analysis-only'));
   });
 });
@@ -1107,14 +1126,14 @@ describe('build_workflows length budget', () => {
     appendAnalysisMainLines(scratchRoot, ['log(\'a' + '́'.repeat(9) + '\');']);
     assertBuildAndCheckThrow(scratchRoot, /analysis-only: line \d+ of the built script has a run of 9 combining or zero-width characters, over the budget of 8 \(the Workflow approval limit is a run of 8\)/);
   });
-  test('a run of exactly 8 combining characters and a line of exactly 2048 characters build', async () => {
+  test('a run of exactly 8 combining characters and a line of exactly 2048 characters build', () => {
     const scratchRoot = makeScratchCopy();
-    const builder = await loadScratchBuilder(scratchRoot, { ...PROSE_BUDGETS, 'analysis-only': PROSE_BUDGETS['analysis-only'] + MAX_BUILT_LINE_LENGTH + MAX_PROSE_MARGIN });
+    writeScratchBudgets(scratchRoot, { ...proseBudgets, 'analysis-only': proseBudgets['analysis-only'] + MAX_BUILT_LINE_LENGTH + MAX_PROSE_MARGIN });
     appendAnalysisMainLines(scratchRoot, ['log(\'a' + '́'.repeat(8) + '\');', makeLogLine(MAX_BUILT_LINE_LENGTH)]);
-    const source = builder.buildWorkflow(scratchRoot, 'analysis-only');
+    const source = buildWorkflow(scratchRoot, 'analysis-only');
     assert.equal(findLongestLineLength(source), MAX_BUILT_LINE_LENGTH);
     assert.equal(findLongestCombiningRun(source), 8);
-    const check = runCliIn(scratchRoot, ['--check'], builder.runCli);
+    const check = runCliIn(scratchRoot, ['--check']);
     assert.equal(check.code, 1);
     assert.equal(check.stderr, 'plugin/workflows/analysis-only.js is stale. Rebuild with: ' + REBUILD_COMMAND + '\n');
   });
@@ -1149,17 +1168,18 @@ describe('build_workflows drafts', () => {
     assert.ok(!build.stdout.includes('wrote plugin/workflows/' + DRAFT_ID + '.js'), build.stdout);
     assert.equal(existsSync(join(scratchRoot, builtPathFor(DRAFT_ID))), false);
   });
-  test('--check passes on a draft with no built file', async () => {
+  test('--check passes on a draft with no built file', () => {
     const scratchRoot = makeScratchDraftCopy();
-    const run = runCliIn(scratchRoot, ['--check'], (await loadDraftBuilder(scratchRoot)).runCli);
+    writeDraftBudget(scratchRoot);
+    const run = runCliIn(scratchRoot, ['--check']);
     assert.equal(run.code, 0, run.stderr);
     assert.equal(run.stderr, '');
   });
-  test('--check fails when a draft has a built file, naming the file and the marker', async () => {
+  test('--check fails when a draft has a built file, naming the file and the marker', () => {
     const scratchRoot = makeScratchDraftCopy();
-    const builder = await loadDraftBuilder(scratchRoot);
-    writeFileSync(join(scratchRoot, builtPathFor(DRAFT_ID)), builder.buildWorkflow(scratchRoot, DRAFT_ID));
-    const run = runCliIn(scratchRoot, ['--check'], builder.runCli);
+    writeDraftBudget(scratchRoot);
+    writeFileSync(join(scratchRoot, builtPathFor(DRAFT_ID)), buildWorkflow(scratchRoot, DRAFT_ID));
+    const run = runCliIn(scratchRoot, ['--check']);
     assert.equal(run.code, 1);
     assert.ok(run.stderr.includes('plugin/workflows/' + DRAFT_ID + '.js exists but plugin/workflow-src/' + DRAFT_ID + '/DRAFT'), run.stderr);
     assert.ok(!run.stderr.includes('orphan'), run.stderr);
@@ -1176,15 +1196,15 @@ describe('build_workflows drafts', () => {
     appendFileSync(join(scratchRoot, 'plugin/workflow-src', DRAFT_ID, 'main.js'), '\nimport x from \'y\';\n');
     assert.throws(() => runCliIn(scratchRoot, ['--check']), new RegExp('^Error: plugin/workflow-src/' + DRAFT_ID + '/main\\.js: acorn cannot parse it: '));
   });
-  test('removing the marker reports the script missing, and a stale one stale', async () => {
+  test('removing the marker reports the script missing, and a stale one stale', () => {
     const scratchRoot = makeScratchDraftCopy();
-    const builder = await loadDraftBuilder(scratchRoot);
+    writeDraftBudget(scratchRoot);
     rmSync(join(scratchRoot, 'plugin/workflow-src', DRAFT_ID, 'DRAFT'));
-    const missing = runCliIn(scratchRoot, ['--check'], builder.runCli);
+    const missing = runCliIn(scratchRoot, ['--check']);
     assert.equal(missing.code, 1);
     assert.ok(missing.stderr.includes('plugin/workflows/' + DRAFT_ID + '.js is stale'), missing.stderr);
     writeFileSync(join(scratchRoot, builtPathFor(DRAFT_ID)), readBuilt('analysis-only'));
-    const stale = runCliIn(scratchRoot, ['--check'], builder.runCli);
+    const stale = runCliIn(scratchRoot, ['--check']);
     assert.equal(stale.code, 1);
     assert.ok(stale.stderr.includes('plugin/workflows/' + DRAFT_ID + '.js is stale'), stale.stderr);
   });
@@ -1205,7 +1225,8 @@ describe('build_workflows drafts', () => {
   });
   test('the in-memory draft loads and its meta.name equals its id', async () => {
     const scratchRoot = makeScratchDraftCopy();
-    const source = (await loadDraftBuilder(scratchRoot)).buildWorkflow(scratchRoot, DRAFT_ID);
+    writeDraftBudget(scratchRoot);
+    const source = buildWorkflow(scratchRoot, DRAFT_ID);
     const run = await loadWorkflowSource(source, DRAFT_ID + ' (in memory)').run({ args: undefined, results: {} });
     assert.equal(run.meta.name, DRAFT_ID);
   });
@@ -1253,10 +1274,30 @@ describe('build_workflows schema projection', () => {
 });
 
 describe('build_workflows prose guards', () => {
-  test('the prose budgets are pinned, one per workflow id', () => {
-    assert.deepEqual(PROSE_BUDGETS, { 'analysis-only': 16050, 'standard-delivery': 43800 });
-    assert.ok(Object.isFrozen(PROSE_BUDGETS));
-    assert.deepEqual(Object.keys(PROSE_BUDGETS).sort(), workflowIds);
+  test('the prose budget file holds one workflow key per workflow id', () => {
+    assert.equal(PROSE_BUDGET_FILE, 'tests/policy/prose-byte-budget.json');
+    assert.ok(Object.isFrozen(proseBudgets));
+    assert.deepEqual(Object.keys(proseBudgets).sort(), workflowIds);
+    assert.deepEqual(Object.keys(readBudgetFile()).filter((key) => key.startsWith('plugin/workflows/')).sort(), workflowIds.map(builtPathFor).sort());
+  });
+  test('a workflow budget that is not a non-negative safe integer fails the build and --check, naming the file and the key', () => {
+    for (const budget of [16050.5, -1, '16050', null, Number.MAX_SAFE_INTEGER + 1]) {
+      const scratchRoot = makeScratchCopy();
+      writeScratchBudgets(scratchRoot, { ...proseBudgets, 'analysis-only': budget });
+      const pattern = /^Error: tests\/policy\/prose-byte-budget\.json: the prose budget of plugin\/workflows\/analysis-only\.js is .+, not a non-negative safe integer$/;
+      assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), (error) => pattern.test(String(error)), String(budget));
+      for (const argv of [[], ['--check']]) {
+        assert.throws(() => runCliIn(scratchRoot, argv), (error) => pattern.test(String(error)), String(budget));
+      }
+    }
+  });
+  test('a Markdown key of the prose budget file is ignored by the build', () => {
+    const scratchRoot = makeScratchCopy();
+    const budgetPath = join(scratchRoot, PROSE_BUDGET_FILE);
+    const budgetData = { ...readBudgetFile(), 'plugin/agents/drone.md': 'not a budget', 'plugin/workflows/nested/draft.js': 'not a workflow key' };
+    writeFileSync(budgetPath, JSON.stringify(budgetData, null, 2) + '\n');
+    assert.deepEqual(readProseBudgets(scratchRoot), proseBudgets);
+    assert.equal(buildWorkflow(scratchRoot, 'analysis-only'), readBuilt('analysis-only'));
   });
   test('splitProseSentences joins wrapped lines, splits at markers and keeps sentences of five words or more', () => {
     const text = '# A heading of five words\nOne two three four five\n  six. Too short here.\n- a list item of words.\n| a table row of words |\nAfter the table, five words.';
@@ -1265,31 +1306,31 @@ describe('build_workflows prose guards', () => {
   for (const id of liveIds) {
     test(builtPathFor(id) + ' is within its prose budget by a margin of at most ' + MAX_PROSE_MARGIN, () => {
       const count = countProseCharacters(readBuilt(id));
-      assert.ok(count <= PROSE_BUDGETS[id], id + ' holds ' + count);
-      assert.ok(PROSE_BUDGETS[id] - count <= MAX_PROSE_MARGIN, id + ' holds ' + count + '; lower its budget');
+      assert.ok(count <= proseBudgets[id], id + ' holds ' + count);
+      assert.ok(proseBudgets[id] - count <= MAX_PROSE_MARGIN, id + ' holds ' + count + '; lower its budget in ' + PROSE_BUDGET_FILE);
     });
     test(builtPathFor(id) + ' copies no sentence of an agent or skill file', () => {
       assert.deepEqual(findCopiedSentences(repoRoot, readBuilt(id)), []);
     });
-    test('a prose budget one under the count of ' + id + ' fails the build and --check, naming the id, the count and the budget', async () => {
+    test('a prose budget one under the count of ' + id + ' fails the build and --check, naming the id, the count and the budget', () => {
       const scratchRoot = makeScratchCopy();
       const count = countProseCharacters(readBuilt(id));
-      const under = await loadScratchBuilder(scratchRoot, { ...PROSE_BUDGETS, [id]: count - 1 });
-      const pattern = new RegExp('^Error: ' + id + ': the built script holds ' + count + ' characters of string and template literals, over its prose budget of ' + (count - 1) + '\\.');
-      assert.throws(() => under.buildWorkflow(scratchRoot, id), (error) => pattern.test(String(error)));
-      assert.throws(() => runCliIn(scratchRoot, ['--check'], under.runCli), (error) => pattern.test(String(error)));
-      const exact = await loadScratchBuilder(scratchRoot, { ...PROSE_BUDGETS, [id]: count });
-      assert.equal(exact.buildWorkflow(scratchRoot, id), readBuilt(id));
+      writeScratchBudgets(scratchRoot, { ...proseBudgets, [id]: count - 1 });
+      const pattern = new RegExp('^Error: ' + id + ': the built script holds ' + count + ' characters of string and template literals, over its prose budget of ' + (count - 1) + '\\. .*; a raise of plugin/workflows/' + id + '\\.js in tests/policy/prose-byte-budget\\.json needs a user-approved entry in tests/policy/prose-budget-raises\\.json \\(CHECK 18\\)$');
+      assert.throws(() => buildWorkflow(scratchRoot, id), (error) => pattern.test(String(error)));
+      assert.throws(() => runCliIn(scratchRoot, ['--check']), (error) => pattern.test(String(error)));
+      writeScratchBudgets(scratchRoot, { ...proseBudgets, [id]: count });
+      assert.equal(buildWorkflow(scratchRoot, id), readBuilt(id));
     });
   }
-  test('a workflow id with no prose budget fails the build and --check, naming it, live or draft', async () => {
+  test('a workflow id with no prose budget fails the build and --check, naming it, live or draft', () => {
     const scratchRoot = makeScratchCopy();
-    const { 'analysis-only': analysisBudget, ...otherBudgets } = PROSE_BUDGETS;
+    const { 'analysis-only': analysisBudget, ...otherBudgets } = proseBudgets;
     assert.ok(analysisBudget > 0);
-    const unbudgeted = await loadScratchBuilder(scratchRoot, otherBudgets);
-    const pattern = new RegExp('^Error: analysis-only: the workflow has no prose budget\\. Add one to PROSE_BUDGETS in tools/build_workflows\\.mjs: its measured count of ' + countProseCharacters(readBuilt('analysis-only')) + ' ');
+    writeScratchBudgets(scratchRoot, otherBudgets);
+    const pattern = new RegExp('^Error: analysis-only: the workflow has no prose budget\\. Add plugin/workflows/analysis-only\\.js to tests/policy/prose-byte-budget\\.json at its measured count of ' + countProseCharacters(readBuilt('analysis-only')) + ' plus a margin of at most 1000$');
     for (const argv of [[], ['--check']]) {
-      assert.throws(() => runCliIn(scratchRoot, argv, unbudgeted.runCli), (error) => pattern.test(String(error)));
+      assert.throws(() => runCliIn(scratchRoot, argv), (error) => pattern.test(String(error)));
     }
     assert.throws(() => runCliIn(makeScratchDraftCopy(), ['--check']), /^Error: draft-check: the workflow has no prose budget\./);
   });

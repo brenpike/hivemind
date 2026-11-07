@@ -374,6 +374,8 @@ run_suites() {
 #     plugin/skills/_shared/{containment,ledger-engine-io}.sh,
 #     plugin/skills/create-working-branch/scripts/create-working-branch.sh,
 #     plugin/skills/bump-type/scripts/bump-type.sh, tests/workflow-scripts/**,
+#     tests/policy/prose-byte-budget.json (the build reads each workflow's prose budget from it;
+#       it keeps its policy_check route by union),
 #     plugin/**/*.md and plugin/**/*.json (governance-section-refs.test.mjs reads every plugin
 #       Markdown and JSON file and checks each governance section citation it holds; the node
 #       tests also pin the overlord launch contract, the drone read-only and validation fix task
@@ -702,7 +704,8 @@ map_path() {
   fi
 
   # test_workflow_scripts: the workflow-script sources, the generated plugin/workflows/*.js they
-  # build, the two data files the build copies in, the facts and plan contracts the node tests
+  # build, the two data files the build copies in, the tests/policy/prose-byte-budget.json file the
+  # build reads each workflow's prose budget from, the facts and plan contracts the node tests
   # validate, every plugin Markdown and JSON file under plugin/ (governance-section-refs.test.mjs
   # reads every plugin Markdown and JSON file and checks that each governance section citation
   # parses and names exactly one heading of its doc; the node tests also pin the overlord launch
@@ -730,6 +733,7 @@ map_path() {
   # Markdown glob),
   # and the node tests themselves. Every path here except the
   # node tests keeps its other routes by union (for example *.json keeps validate_workflows,
+  # prose-byte-budget.json keeps policy_check,
   # next-wave.sh and its fixtures keep test_next_wave, cerebrate.md and local-reviewer.md keep
   # validate_workflows, synapse-gate.sh keeps test_synapse_gate, molt.sh keeps test_molt,
   # open-plan-pr.sh keeps test_open_plan_pr, push-branch.sh keeps test_push_branch and
@@ -744,6 +748,7 @@ map_path() {
   if [[ "$p" == plugin/workflow-src/* \
      || "$p" == plugin/workflows/*.js \
      || "$p" == plugin/workflows/*.json \
+     || "$p" == tests/policy/prose-byte-budget.json \
      || "$p" == plugin/skills/route-workflow/SKILL.md \
      || "$p" == plugin/references/decision-autonomy-table.json \
      || "$p" == plugin/references/decision-brief-schema.json \
@@ -1470,8 +1475,8 @@ self_test() {
 
   # 9. Each workflow-script input the KNOWN_SUITES probe (#1) does not reach must route to
   #    test_workflow_scripts.sh. #1 probes a plugin/workflow-src/* path, so it would stay green if
-  #    the generated-script, data-file, plugin Markdown glob (agents overlord, drone, synapse,
-  #    cerebrate, local-reviewer, github-reviewer, changeling; governance docs safety-rails,
+  #    the generated-script, data-file, prose budget file, plugin Markdown glob (agents overlord,
+  #    drone, synapse, cerebrate, local-reviewer, github-reviewer, changeling; governance docs safety-rails,
   #    definitions, security-policy, workflow, decision-autonomy, report-format; a skill SKILL.md, a
   #    skill references/*.md, a plugin/references/*.md), plugin JSON glob (plugin.json, outside
   #    references and workflows), route-workflow skill,
@@ -1484,6 +1489,7 @@ self_test() {
     "plugin/references/decision-brief-schema.json" \
     "plugin/references/facts-schema.json" \
     "plugin/references/plan-schema.json" \
+    "tests/policy/prose-byte-budget.json" \
     "plugin/skills/gather-facts/scripts/gather-facts.sh" \
     "plugin/skills/gather-facts/scripts/gather-facts.jq" \
     "plugin/skills/next-wave/scripts/next-wave.sh" \
