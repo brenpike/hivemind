@@ -139,7 +139,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">Gate</h3>
-              <p class="xs">A drone runs the project's validation commands and checks the version read-only with <code>hivemind:bump-type --version-file</code>. A test case that hits its own time limit in a file the branch does not change runs once more alone; if it passes there, validation passes and the PR body lists the case as slow. A failure gets a bounded number of fix rounds, each one committed; after the last round the run asks you.</p>
+              <p class="xs">A drone runs the project's validation commands and checks the version read-only with <code>hivemind:bump-type --version-file</code>. A test case that hits its own time limit in a file the branch does not change runs once more alone; if it passes there, validation passes and the PR lists the case as slow. A failure gets a bounded number of fix rounds, each one committed; after the last round the run asks you.</p>
               <p class="xs">The validation (with its version check) and local review each hold only for the commit they ended on, and the PR step pushes only a commit every configured gate held on. A later commit reruns the gates it invalidates.</p>
             </li>
             <li class="beat panel">
@@ -148,7 +148,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">Ship and watch</h3>
-              <p class="xs">A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (<code>hivemind:open-plan-pr</code>). The PR body is built in code from the plan digest, the steps and the run record. The run lists the decisions it took for you in its final message and the PR body, for veto before merge. <a href="./functionality.html#lifecycle">How it works</a> says which decisions are listed.</p>
+              <p class="xs">A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (<code>hivemind:open-plan-pr</code>). The plan digest, the steps and the run record are built in code. The run lists the decisions it took for you in its final message and on the PR, for veto before merge. <a href="./functionality.html#lifecycle">How it works</a> says which decisions are listed.</p>
               <p class="xs">The overlord then watches the PR by default. It fixes, pushes, replies to and resolves actionable feedback from Codex, Copilot or Claude reviewer bots until reviewer approval, merge, close, or an idle hour.</p>
               <p class="xs">Opt out by saying so in the request or by setting <code>HIVEMIND_SKIP_PR_WATCH</code>. Agents never merge. You do.</p>
             </li>
@@ -163,7 +163,7 @@
             <article class="panel subpanel" aria-labelledby="autonomy-title">
               <p class="kicker xs">Who decides</p>
               <h3 id="autonomy-title" class="xg">Autonomy</h3>
-              <p class="xs">Routine calls are decided for you by the autonomy table. Only the closed Ask Set pauses the run and asks you: an irreversible, architectural or safety-relevant call, a surface cell of the autonomy table, a hard stop, or a call with no recommendation. The run lists the decisions it took for you in its final message and the PR body, for veto before merge (<a href="./functionality.html#lifecycle">which decisions are listed</a>). Every merge comes back to you. A step whose own output failed ends the run instead of asking you to retry. Every open question pauses a delivery run and your reply resumes the same run, with no pause limit, while an analysis-only run completes after 3 pauses and lists the questions still open.</p>
+              <p class="xs">Routine calls are decided for you by the autonomy table. Only the closed Ask Set pauses the run and asks you: an irreversible, architectural or safety-relevant call, a surface cell of the autonomy table, a hard stop, or a call with no recommendation. The run lists the decisions it took for you in its final message and on the PR, for veto before merge (<a href="./functionality.html#lifecycle">which decisions are listed</a>). Every merge comes back to you. A step whose own output failed ends the run instead of asking you to retry. Every open question pauses a delivery run and your reply resumes the same run, with no pause limit, while an analysis-only run completes after 3 pauses and lists the questions still open.</p>
             </article>
             <article class="panel subpanel signals-panel" aria-labelledby="signals-title">
               <p class="kicker xs">What the swarm tells you</p>

@@ -223,7 +223,7 @@ _Avoid_: signal detector, classifier, cluster checker
 ### Decision Autonomy
 
 **Decision Tier**:
-The A/B classification of an overlord decision. Tier A = always surfaced to the Overmind (safety rails, merge recommendations, genuine ambiguity-with-risk); Tier B = auto-decided and journaled by default. On the script engine only the Ask Set asks (an irreversible, architectural or safety call, a surfaced table cell, a hard stop, or a call with no recommendation); other calls are taken and listed in the PR body's "Decided for you" for veto before merge. Rules: `plugin/governance/decision-autonomy.md` (Decision Tiers).
+The A/B classification of an overlord decision. Tier A = always surfaced to the Overmind (safety rails, merge recommendations, genuine ambiguity-with-risk); Tier B = auto-decided and journaled by default. On the script engine only the Ask Set asks (an irreversible, architectural or safety call, a surfaced table cell, a hard stop, or a call with no recommendation); other calls are taken and listed under "Decided for you" on the PR for veto before merge. Rules: `plugin/governance/decision-autonomy.md` (Decision Tiers).
 _Avoid_: priority, severity
 
 **Promotion Gate**:
