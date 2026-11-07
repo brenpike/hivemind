@@ -56,5 +56,7 @@
   "plugin/skills/tdd/references/mocking.md": 1767,
   "plugin/skills/tdd/references/tests.md": 1848,
   "plugin/skills/triage-backlog/SKILL.md": 11952,
-  "plugin/skills/zoom-out/SKILL.md": 388
+  "plugin/skills/zoom-out/SKILL.md": 388,
+  "plugin/workflows/analysis-only.js": 16050,
+  "plugin/workflows/standard-delivery.js": 43800
 }

@@ -109,10 +109,14 @@
  *   modes (docs/engineering-principles.md P24). The prose budget: the
  *   characters of the built script's string and template literals, read
  *   from acorn's tokens (countProseCharacters), are at most that workflow's
- *   entry in
- *   PROSE_BUDGETS, and a workflow id with no entry fails the build, naming
- *   it. Each budget is the measured count plus a margin of at most 1,000,
- *   and raising a budget is a visible, reviewed change to this file. The
+ *   budget: the value of the key plugin/workflows/<id>.js of
+ *   PROSE_BUDGET_FILE (readProseBudgets). A workflow id with no key fails
+ *   the build, naming it, and so does a workflow value that is not a
+ *   non-negative safe integer, naming the file and the key. The other keys
+ *   of that file, the Markdown prose budgets, are not read. Each budget is
+ *   the measured count plus a margin of at most 1,000, and a raise needs a
+ *   user-approved entry in tests/policy/prose-budget-raises.json, which
+ *   tools/policy_check.sh CHECK 18 checks against the merge-base. The
  *   duplication check compares each sentence of at least five words of a
  *   string literal or a template piece, read as acorn decodes it, with
  *   every plugin/agents/*.md and plugin/skills/<name>/SKILL.md,
@@ -124,8 +128,9 @@
  *   its own, so a sentence split across literals joined by +, across a
  *   template substitution or across a join, or reworded, passes it and
  *   rests on review (ADR-0037, local review finding c5199443).
- *   Every file the build reads, a source, a data file, an agent or skill
- *   file or a committed script, goes through readSource, its only file
+ *   Every file the build reads, a source, a data file, the prose budget
+ *   file, an agent or skill file or a committed script, goes through
+ *   readSource, its only file
  *   read, and every input directory it lists goes through readDirectory.
  *   readSource fails the build, naming the path, in both modes, unless the
  *   entry is a regular file that resolves to its own path under the real
@@ -850,16 +855,15 @@ function assertBuiltScript(id, output, parsed) {
 }
 
 /**
- * PROSE_BUDGETS pins, for each workflow id, the most characters of string
- * and template literal tokens its built script may hold (P24). Each budget
- * is the script's measured count plus a margin of at most 1,000. Raising a
- * budget is a visible, reviewed change to this file, never a quiet edit to
+ * PROSE_BUDGET_FILE holds, at the key plugin/workflows/<id>.js of each
+ * workflow id, the most characters of string and template literal tokens
+ * its built script may hold (P24), beside the Markdown prose budgets of
+ * CHECK 18. Each budget is the script's measured count plus a margin of at
+ * most 1,000. A raise needs a user-approved entry in
+ * tests/policy/prose-budget-raises.json (CHECK 18), never a quiet edit to
  * make the build pass.
  */
-export const PROSE_BUDGETS = Object.freeze({
-  'analysis-only': 16050,
-  'standard-delivery': 43800
-});
+export const PROSE_BUDGET_FILE = 'tests/policy/prose-byte-budget.json';
 const PROSE_PIECE_KINDS = Object.freeze(['string', 'template']);
 const MIN_COPIED_SENTENCE_WORDS = 5;
 const AGENT_DIR = 'plugin/agents';
@@ -977,13 +981,59 @@ export function findCopiedSentences(root, source, parsed = parseJavaScript(sourc
     .map((promptFile) => ({ path: promptFile.path, sentence: sentence })));
 }
 
-function assertProseBudget(id, output, parsed) {
-  const count = countProseCharacters(output, parsed);
-  if (!Object.hasOwn(PROSE_BUDGETS, id)) {
-    throw new Error(id + ': the workflow has no prose budget. Add one to PROSE_BUDGETS in tools/build_workflows.mjs: its measured count of ' + count + ' plus a margin of at most 1000');
+/**
+ * Returns the workflow id whose built script path is key, or undefined when
+ * key is not of the form builtPathFor(id), such as a Markdown key.
+ */
+function readBudgetWorkflowId(key) {
+  const prefix = OUTPUT_DIR + '/';
+  if (!key.startsWith(prefix) || !key.endsWith('.js')) {
+    return undefined;
   }
-  if (count > PROSE_BUDGETS[id]) {
-    throw new Error(id + ': the built script holds ' + count + ' characters of string and template literals, over its prose budget of ' + PROSE_BUDGETS[id] + '. Move agent and skill rules into their own files (docs/engineering-principles.md P24); raising a budget is a reviewed change to PROSE_BUDGETS in tools/build_workflows.mjs');
+  const id = key.slice(prefix.length, -'.js'.length);
+  return id !== '' && !id.includes('/') && builtPathFor(id) === key ? id : undefined;
+}
+
+/**
+ * Returns a frozen object of workflow id to prose budget, read from
+ * PROSE_BUDGET_FILE through readSource: one entry for each key of the form
+ * builtPathFor(id). Every other key is left out. Throws, naming the file,
+ * when it is not a JSON object, and naming the file and the key, when a
+ * workflow value is not a non-negative safe integer.
+ */
+export function readProseBudgets(root) {
+  const text = readSource(root, PROSE_BUDGET_FILE);
+  let budgetData;
+  try {
+    budgetData = JSON.parse(text);
+  } catch (error) {
+    throw new Error(PROSE_BUDGET_FILE + ': it is not valid JSON: ' + error.message, { cause: error });
+  }
+  if (budgetData === null || typeof budgetData !== 'object' || Array.isArray(budgetData)) {
+    throw new Error(PROSE_BUDGET_FILE + ': it is not a JSON object of path to budget');
+  }
+  const budgets = {};
+  for (const [key, value] of Object.entries(budgetData)) {
+    const id = readBudgetWorkflowId(key);
+    if (id === undefined) {
+      continue;
+    }
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(PROSE_BUDGET_FILE + ': the prose budget of ' + key + ' is ' + JSON.stringify(value) + ', not a non-negative safe integer');
+    }
+    budgets[id] = value;
+  }
+  return Object.freeze(budgets);
+}
+
+function assertProseBudget(root, id, output, parsed) {
+  const count = countProseCharacters(output, parsed);
+  const budgets = readProseBudgets(root);
+  if (!Object.hasOwn(budgets, id)) {
+    throw new Error(id + ': the workflow has no prose budget. Add ' + builtPathFor(id) + ' to ' + PROSE_BUDGET_FILE + ' at its measured count of ' + count + ' plus a margin of at most 1000');
+  }
+  if (count > budgets[id]) {
+    throw new Error(id + ': the built script holds ' + count + ' characters of string and template literals, over its prose budget of ' + budgets[id] + '. Move agent and skill rules into their own files (docs/engineering-principles.md P24); a raise of ' + builtPathFor(id) + ' in ' + PROSE_BUDGET_FILE + ' needs a user-approved entry in tests/policy/prose-budget-raises.json (CHECK 18)');
   }
 }
 
@@ -1241,7 +1291,7 @@ export function buildWorkflow(root, id) {
   assertBuiltScript(id, output, parsed);
   assertResolvableReads(id, selection.reached);
   assertKeptDeclarationsRead(selection.parts, selection.reached);
-  assertProseBudget(id, output, parsed);
+  assertProseBudget(root, id, output, parsed);
   assertNoCopiedSentences(root, id, output, parsed);
   return output;
 }
