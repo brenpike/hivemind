@@ -1,6 +1,6 @@
 {
   "id": "standard-delivery",
-  "version": 6,
+  "version": 7,
   "start": "plan",
   "terminal": ["complete", "blocked", "cancelled", "hatchery_monitor", "review_exhausted", "merge_advised", "review_window_elapsed"],
   "states": {
@@ -114,7 +114,7 @@
     },
     "validate": {
       "type": "decision",
-      "description": "Overlord runs validation and judges pass/fail.",
+      "description": "Overlord runs validation and judges pass/fail. On passed, it records the branch head it ran on as event.outputs.commit.",
       "owner": "overlord",
       "transitions": {
         "passed": "local_review_decision",
@@ -124,20 +124,21 @@
     },
     "local_review_decision": {
       "type": "decision",
-      "description": "Overlord decides whether local pre-PR review runs (Codex present and opted in) or is skipped.",
+      "description": "Overlord decides whether local pre-PR review runs (Codex present and opted in), is skipped, or already held: held only when this validate ran after a gate_check rerun, so local review held on the branch head.",
       "owner": "overlord",
       "transitions": {
         "required": "local_review",
-        "skipped": "pr_confirm",
+        "skipped": "gate_check",
+        "held": "gate_check",
         "blocked": "blocked"
       }
     },
     "local_review": {
       "type": "agent",
-      "description": "Local reviewer runs the pre-PR adaptation cycle; reviewer-return outcomes are named transitions matching the local-reviewer exit_reason vocabulary. The reviewer's fix_commits_exist flag is surfaced for operator awareness only — it is a scalar field, not an exit_reason, so it is NOT a transition key and does NOT alter the deterministic route: 'clean' always targets pr_confirm, the user stop before open_pr, and 'diminishing-returns' always targets diminishing_returns_decision. The deterministic executor can only advance to the returned state. A post-review version re-evaluation, if the operator wants one when fix commits exist, is a separate user-initiated action outside this workflow's automatic routing.",
+      "description": "Local reviewer runs the pre-PR adaptation cycle; reviewer-return outcomes are named transitions matching the local-reviewer exit_reason vocabulary. The reviewer's fix_commits_exist flag is surfaced for operator awareness only — it is a scalar field, not an exit_reason, so it is NOT a transition key and does NOT alter the deterministic route: 'clean' always targets gate_check, which sends a fix commit back through validate, and 'diminishing-returns' always targets diminishing_returns_decision. The deterministic executor can only advance to the returned state. A post-review version re-evaluation, if the operator wants one when fix commits exist, is a separate user-initiated action outside this workflow's automatic routing.",
       "agent": "hivemind:local-reviewer",
       "transitions": {
-        "clean": "pr_confirm",
+        "clean": "gate_check",
         "planner-escalation": "review_remediation_plan",
         "root-cluster-suspected": "review_remediation_plan",
         "max-iterations-reached": "review_exhausted",
@@ -151,10 +152,10 @@
     },
     "diminishing_returns_decision": {
       "type": "decision",
-      "description": "Overlord decides whether the local reviewer's diminishing-returns advisory exit is taken, as decision kind diminishing_returns_exit of ${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json. Only taken reaches pr_confirm, the user stop before open_pr, per ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md (PR Requirements). An advisory that is not taken, including one the user declines when the decision is surfaced, ends the run at blocked before the pull request.",
+      "description": "Overlord decides whether the local reviewer's diminishing-returns advisory exit is taken, as decision kind diminishing_returns_exit of ${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json. Only taken reaches gate_check, the check before open_pr, per ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md (PR Requirements). An advisory that is not taken, including one the user declines when the decision is surfaced, ends the run at blocked before the pull request.",
       "owner": "overlord",
       "transitions": {
-        "taken": "pr_confirm",
+        "taken": "gate_check",
         "not_taken": "blocked",
         "blocked": "blocked"
       }
@@ -171,13 +172,14 @@
         "blocked": "blocked"
       }
     },
-    "pr_confirm": {
-      "type": "user_gate",
-      "description": "Stop before the pull request and ask the user. The state machine does not rerun earlier gates after a later commit (ADR-0037, Recorded residual: state-machine gates), so the overlord shows the commits made after each gate ended and asks before opening the PR. Only approved reaches open_pr.",
+    "gate_check": {
+      "type": "decision",
+      "description": "Overlord checks, before the pull request, that every gate held on the branch head. held: the head is the event.outputs.commit of the last passed validate, and local review held on the head or was skipped. rerun: a later commit, such as a local review fix, moved the head, so validate runs again on it; local review, which held on that commit, does not run again. blocked: that validate commit cannot be read from the run ledger.",
+      "owner": "overlord",
       "transitions": {
-        "approved": "open_pr",
-        "rejected": "blocked",
-        "cancelled": "cancelled"
+        "held": "open_pr",
+        "rerun": "validate",
+        "blocked": "blocked"
       }
     },
     "open_pr": {

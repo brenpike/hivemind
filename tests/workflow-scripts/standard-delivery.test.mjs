@@ -2878,7 +2878,7 @@ const ROW_TESTS = {
       const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
       state.head = OTHER;
       state.taken.push({ brief: acceptance, kind: 'plan_acceptance' });
-      const texts = main.buildPullRequestTexts(state, makePlan(), { held: { validate: OTHER }, notes: { validate: 'passed' } });
+      const texts = main.buildPullRequestTexts(state, makePlan(), { held: { validate: OTHER }, notes: { validate: 'passed' }, slow: [] });
       for (const text of [run.result.message, prBodyOf(run, 'pr-1'), texts.body, texts.comment]) {
         assert.ok(!text.includes('Decided for you') && !text.includes(acceptance.problem), text);
       }
@@ -3006,8 +3006,10 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, versionResults());
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const call = callOf(run, 'validate-1-1');
-      const lines = withoutDataBlock(withoutDataBlock(call.prompt, 'inputs'), 'version').split('\n');
-      assert.deepEqual(lines, ['Run the project\'s validation on the working branch as it is checked out.', main.validationCommandsSentence(), lib.runnerReadOnlySentence(), main.versionCheckSentence(), '']);
+      const lines = withoutDataBlock(withoutDataBlock(withoutDataBlock(call.prompt, 'inputs'), 'git'), 'version').split('\n');
+      assert.deepEqual(lines, ['Run the project\'s validation on the working branch as it is checked out.', main.validationCommandsSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), main.versionCheckSentence(), '']);
+      assert.ok(call.prompt.indexOf('<inputs>') < call.prompt.indexOf('<git>') && call.prompt.indexOf('<git>') < call.prompt.indexOf('<version>'), call.prompt);
+      assert.deepEqual(readDataBlock(call.prompt, 'git'), { base: 'main' });
       assert.deepEqual(readDataBlock(call.prompt, 'version'), { base: TRUNK_COMMIT, bump_trigger: 'yes', no_bump_match: 'no', version_files: ['VERSION'] });
       assert.deepEqual(call.opts.schema, structuredClone(lib.toAgentSchema(main.buildValidateSchema(true, true))));
       const full = structuredClone(main.buildValidateSchema(false, true));
@@ -3264,10 +3266,12 @@ const ROW_TESTS = {
       assert.ok(!Object.prototype.hasOwnProperty.call(call.opts, 'model'));
       assert.equal(call.opts.phase, 'Validate');
       assert.deepEqual(call.opts.schema.properties.outcome.enum, ['passed', 'failed', 'blocked']);
-      assert.deepEqual(Object.keys(call.opts.schema.properties), ['outcome', 'failures', 'blocker', 'next_action']);
+      assert.deepEqual(Object.keys(call.opts.schema.properties), ['outcome', 'failures', 'slow', 'blocker', 'next_action']);
       assert.equal(call.opts.schema.properties.outcome.description, 'passed when every command passes. failed when any fails. blocked when a command cannot run.');
-      assert.deepEqual(withoutDataBlock(call.prompt, 'inputs').split('\n'), ['Run the project\'s validation on the working branch as it is checked out.', main.validationCommandsSentence(), lib.runnerReadOnlySentence(), '']);
+      assert.deepEqual(withoutDataBlock(withoutDataBlock(call.prompt, 'inputs'), 'git').split('\n'), ['Run the project\'s validation on the working branch as it is checked out.', main.validationCommandsSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), '']);
       assert.deepEqual(readDataBlock(call.prompt, 'inputs'), { commands: commands });
+      assert.ok(call.prompt.indexOf('<inputs>') < call.prompt.indexOf('<git>'), call.prompt);
+      assert.deepEqual(readDataBlock(call.prompt, 'git'), { base: 'main' });
       assert.ok(!labelsOf(run).some((label) => label.startsWith('validate-commit')), JSON.stringify(labelsOf(run)));
       const labels = labelsOf(run);
       assert.equal(labels[labels.indexOf('validate-1-1') + 1], 'review-1-1');
@@ -3282,7 +3286,8 @@ const ROW_TESTS = {
       const call = callOf(run, 'validate-1-1');
       assert.equal(call.opts.agentType, 'hivemind:drone');
       assert.ok(!Object.prototype.hasOwnProperty.call(call.opts, 'model'));
-      assert.deepEqual(call.prompt.split('\n'), ['Run the project\'s validation on the working branch as it is checked out.', main.validationTaskSentence(), lib.runnerReadOnlySentence()]);
+      assert.deepEqual(withoutDataBlock(call.prompt, 'git').split('\n'), ['Run the project\'s validation on the working branch as it is checked out.', main.validationTaskSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), '']);
+      assert.deepEqual(readDataBlock(call.prompt, 'git'), { base: 'main' });
       assert.deepEqual(call.opts.schema.properties.outcome.enum, ['passed', 'failed', 'not_run', 'blocked']);
       assert.equal(call.opts.schema.properties.outcome.description, 'passed when every validation command passes. failed when any fails. not_run when the project documents no validation commands. blocked when a command cannot run.');
     });
@@ -3305,8 +3310,69 @@ const ROW_TESTS = {
         assert.ok(taskSentence.includes(phrase), phrase);
       }
       assert.ok(procedure.includes('If `CLAUDE.md` lists no validation commands, validation is "Not run"'));
+      for (const phrase of ['hits its own time limit in a file the branch does not change runs once more alone', 'the PR body lists the case as slow']) {
+        assert.ok(procedure.includes(phrase), phrase);
+      }
+      for (const phrase of ['hits its own time limit', 'the branch does not change', 'runs once more alone', 'counts as passed']) {
+        assert.ok(main.slowCaseSentence().includes(phrase), phrase);
+      }
       assert.ok(main.buildValidateSchema(false).properties.outcome.description.includes('not_run when the project documents no validation commands'));
       assert.ok(!main.buildValidateSchema(true).properties.outcome.description.includes('not_run'));
+    });
+    test('the validate schemas take slow only under passed, at most 20 cases of at most 200 characters each', () => {
+      for (const schema of [main.buildValidateSchema(true), main.buildValidateSchema(false)]) {
+        assert.ok(lib.validateSchema(schema, { outcome: 'passed', slow: ['cache.test.js reads within the limit'] }).ok);
+        assert.ok(lib.validateSchema(schema, { outcome: 'passed', slow: Array.from({ length: 20 }, () => 'x'.repeat(200)) }).ok);
+        assert.ok(!lib.validateSchema(schema, { outcome: 'failed', failures: FAILURE_TEXT, slow: ['cache.test.js'] }).ok);
+        assert.ok(!lib.validateSchema(schema, { outcome: 'blocked', slow: ['cache.test.js'] }).ok);
+        assert.ok(!lib.validateSchema(schema, { outcome: 'passed', slow: Array.from({ length: 21 }, () => 'cache.test.js') }).ok);
+        assert.ok(!lib.validateSchema(schema, { outcome: 'passed', slow: ['x'.repeat(201)] }).ok);
+      }
+      assert.ok(!lib.validateSchema(main.buildValidateSchema(false), { outcome: 'not_run', slow: ['cache.test.js'] }).ok);
+      assert.equal(main.buildValidateSchema(true).properties.slow.description, 'Each test case that passed only when run once more alone. Only with outcome passed.');
+    });
+    test('a passed validation with slow cases lists them, neutralized, right after the gates in the pull request body and comment', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'passed', slow: ['cache.test.js reads within the limit', '@octocat ping'] } }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const slowText = 'Slow test cases that passed only when run alone:\n- "cache.test.js reads within the limit"\n- "`@octocat` ping"';
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
+      for (const text of [inputs.body, inputs.comment]) {
+        assert.ok(text.includes('\n- local review: clean, held on commit ' + OTHER + '\n\n' + slowText), text);
+      }
+    });
+    test('a slow case name with line breaks stays one encoded list line, so it forges no heading, list, quote or fence', async () => {
+      const name = 'cache.test.js\n\n## Gates passed\n- [x] security review\n> quoted\n```\nfenced';
+      const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'passed', slow: [name] } }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
+      for (const text of [inputs.body, inputs.comment]) {
+        const lines = text.split('\n');
+        const index = lines.indexOf('Slow test cases that passed only when run alone:');
+        assert.ok(index !== -1, text);
+        assert.equal(lines[index + 1], '- "cache.test.js\\\\n\\\\n## Gates passed\\\\n- \\[x\\] security review\\\\n\\> quoted\\\\n\\`\\`\\`\\\\nfenced"', text);
+        assert.ok(!lines.some((line) => line.startsWith('## ') || line.startsWith('> ') || line.startsWith('```')), text);
+      }
+    });
+    test('a passed validation with no slow cases adds no slow part', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'passed', slow: [] } }));
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
+      for (const text of [inputs.body, inputs.comment]) {
+        assert.ok(!text.includes('Slow test cases'), text);
+      }
+    });
+    test('a later validation on a new head with no slow cases clears the slow part', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({
+        'validate-1-1': { outcome: 'passed', slow: ['cache.test.js reads within the limit'] },
+        'review-1-1': { ...REVIEW_CLEAN, findings_resolved: 1, fix_commits_exist: true },
+        'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }),
+        'validate-1-2': VALIDATE_PASSED
+      }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run).slice(-4), ['review-1-1', 'review-commit-1-1', 'validate-1-2', 'pr-1']);
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
+      for (const text of [inputs.body, inputs.comment]) {
+        assert.ok(!text.includes('Slow test cases'), text);
+      }
     });
     test('passed holds the gate and the run names the commit', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
@@ -4209,11 +4275,11 @@ const ROW_TESTS = {
         assert.ok(!workflowTakenConditionExits().includes(exitReason), exitReason);
       }
     });
-    test('the local_review transitions route the same exits: hold to pr_confirm, diminishing to diminishing_returns_decision, and every stop exit, the asked ones included, to a terminal state that never reaches open_pr', () => {
+    test('the local_review transitions route the same exits: hold to gate_check, diminishing to diminishing_returns_decision, and every stop exit, the asked ones included, to a terminal state that never reaches open_pr', () => {
       const transitions = deliveryMachine.states.local_review.transitions;
       assert.deepEqual(Object.keys(transitions).sort(), Object.keys(main.localReviewRoutes()).sort());
       for (const exitReason of localReviewExitsRoutedTo('hold')) {
-        assert.equal(transitions[exitReason], 'pr_confirm', exitReason);
+        assert.equal(transitions[exitReason], 'gate_check', exitReason);
       }
       const decision = deliveryMachine.states.diminishing_returns_decision;
       assert.equal(decision.type, 'decision');
@@ -4230,29 +4296,33 @@ const ROW_TESTS = {
         assert.equal(reachesStateWithout(deliveryMachine, transitions[exitReason], 'open_pr', 'local_review'), false, exitReason);
       }
     });
-    test('the only transitions into pr_confirm are local_review clean, diminishing_returns_decision taken and local_review_decision skipped', () => {
+    test('the only transitions into gate_check are local_review clean, diminishing_returns_decision taken and local_review_decision skipped and held', () => {
       const holdEdges = localReviewExitsRoutedTo('hold').map((exitReason) => 'local_review.' + exitReason);
-      const allowed = [...holdEdges, 'diminishing_returns_decision.taken', 'local_review_decision.skipped'].sort();
-      assert.deepEqual(listTransitionsInto(deliveryMachine, 'pr_confirm'), allowed);
-      assert.deepEqual(allowed, ['diminishing_returns_decision.taken', 'local_review.clean', 'local_review_decision.skipped']);
+      const allowed = [...holdEdges, 'diminishing_returns_decision.taken', 'local_review_decision.held', 'local_review_decision.skipped'].sort();
+      assert.deepEqual(listTransitionsInto(deliveryMachine, 'gate_check'), allowed);
+      assert.deepEqual(allowed, ['diminishing_returns_decision.taken', 'local_review.clean', 'local_review_decision.held', 'local_review_decision.skipped']);
     });
-    test('pr_confirm is a user gate, and pr_confirm approved is the only transition into open_pr', () => {
-      assert.equal(deliveryMachine.states.pr_confirm.type, 'user_gate');
-      assert.deepEqual(listTransitionsInto(deliveryMachine, 'open_pr'), ['pr_confirm.approved']);
+    test('gate_check is an overlord decision whose held is the only transition into open_pr, whose rerun goes back to validate and whose blocked ends at blocked', () => {
+      const gate = deliveryMachine.states.gate_check;
+      assert.equal(gate.type, 'decision');
+      assert.equal(gate.owner, 'overlord');
+      assert.deepEqual(gate.transitions, { held: 'open_pr', rerun: 'validate', blocked: 'blocked' });
+      assert.deepEqual(listTransitionsInto(deliveryMachine, 'open_pr'), ['gate_check.held']);
+      assert.equal(deliveryMachine.states[gate.transitions.blocked].type, 'terminal');
+      assert.equal(reachesStateWithout(deliveryMachine, gate.transitions.blocked, 'open_pr', 'gate_check'), false);
     });
-    test('every pr_confirm outcome but approved ends at a terminal state that never reaches open_pr', () => {
-      const transitions = deliveryMachine.states.pr_confirm.transitions;
-      assert.deepEqual(Object.keys(transitions).filter((outcome) => transitions[outcome] === 'open_pr'), ['approved']);
-      const otherOutcomes = Object.keys(transitions).filter((outcome) => outcome !== 'approved');
-      assert.deepEqual(otherOutcomes.sort(), ['cancelled', 'rejected']);
-      for (const outcome of otherOutcomes) {
-        assert.equal(deliveryMachine.states[transitions[outcome]].type, 'terminal', outcome);
-        assert.equal(reachesStateWithout(deliveryMachine, transitions[outcome], 'open_pr', 'pr_confirm'), false, outcome);
-      }
+    test('no path from plan reaches open_pr without gate_check', () => {
+      assert.equal(reachesStateWithout(deliveryMachine, 'plan', 'open_pr', 'gate_check'), false);
     });
-    test('diminishing_returns_decision reaches pr_confirm only through taken, and its other outcomes end at a terminal state that never reaches open_pr', () => {
+    test('the definition is version 7 with no pr_confirm state, and its only user gates are brood_confirm and question', () => {
+      assert.equal(deliveryMachine.version, 7);
+      assert.ok(!Object.hasOwn(deliveryMachine.states, 'pr_confirm'));
+      const userGates = Object.keys(deliveryMachine.states).filter((name) => deliveryMachine.states[name].type === 'user_gate').sort();
+      assert.deepEqual(userGates, ['brood_confirm', 'question']);
+    });
+    test('diminishing_returns_decision reaches gate_check only through taken, and its other outcomes end at a terminal state that never reaches open_pr', () => {
       const transitions = deliveryMachine.states.diminishing_returns_decision.transitions;
-      assert.deepEqual(Object.keys(transitions).filter((outcome) => transitions[outcome] === 'pr_confirm'), ['taken']);
+      assert.deepEqual(Object.keys(transitions).filter((outcome) => transitions[outcome] === 'gate_check'), ['taken']);
       const otherOutcomes = Object.keys(transitions).filter((outcome) => outcome !== 'taken');
       assert.ok(otherOutcomes.includes('not_taken'));
       for (const outcome of otherOutcomes) {
@@ -5032,7 +5102,7 @@ const ROW_TESTS = {
       }
     });
     test('a blank digest field is left out, and a digest with both fields blank adds no paragraph', () => {
-      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' } };
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, slow: [] };
       const run = { localReview: false, head: OTHER, waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], approvals: [], rejected: [], undone: [], taken: [] };
       const steps = 'Steps:\n- STEP-001 (src/cache.js): Step STEP-001 is done.';
       assert.ok(main.buildPullRequestTexts(run, makePlan({ digest: { problem: ' ', change: 'Add a cache.' } }), gates).body.startsWith('Add a cache.\n\n' + steps + '\n\n'));
@@ -5046,7 +5116,7 @@ const ROW_TESTS = {
       run.reversibleEffects.push({ stepId: 'STEP-001', summary: 'Post a preview link.' });
       run.notRunGates.push(main.notConfiguredReviewLine());
       run.taken.push({ brief: makeBrief({ problem: 'PARITY_PROBLEM' }), kind: 'planner_question' });
-      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' } };
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, slow: [] };
       for (const gateArg of [undefined, gates]) {
         const parts = main.buildRunRecordParts(run, run.taken, gateArg);
         assert.deepEqual([...parts.map((part) => part.id)], ['reversible_effects', 'gates', 'decisions']);
@@ -5088,7 +5158,7 @@ const ROW_TESTS = {
       run.approvals.push({ category: 3, item: 'tests/cache.test.js' }, { category: 1, item: 'Drop @octocat <b>users</b>' });
       run.taken.push({ brief: makeBrief({ problem: 'APPROVAL_PROBLEM' }), kind: 'planner_question' });
       run.rejected.push({ finding_id: 'a1b2c3d4'.repeat(8) });
-      const gates = { held: { validate: OTHER, review: OTHER }, notes: { validate: 'passed', review: 'clean, 1 finding rejected under recorded decisions' } };
+      const gates = { held: { validate: OTHER, review: OTHER }, notes: { validate: 'passed', review: 'clean, 1 finding rejected under recorded decisions' }, slow: [] };
       const parts = main.buildRunRecordParts(run, run.taken, gates);
       assert.deepEqual([...parts.map((part) => part.id)], ['gates', 'rejected_findings', 'approvals', 'decisions']);
       const texts = main.buildPullRequestTexts(run, makePlan(), gates);
@@ -5216,7 +5286,7 @@ const ROW_TESTS = {
       assert.equal(run.result.pr, undefined);
     });
     test('a comment over maxPullRequestTextLength() stops the run naming the comment and its size, and a text at the limit passes', () => {
-      const gates = { held: { validate: OTHER, review: OTHER }, notes: { validate: 'passed', review: 'clean' } };
+      const gates = { held: { validate: OTHER, review: OTHER }, notes: { validate: 'passed', review: 'clean' }, slow: [] };
       const plan = makePlan({ digest: { problem: '', change: '' }, steps: [makeStep('S', ['a'], { outcome: 'x' })] });
       const runWith = (problem) => ({ localReview: true, head: OTHER, waveCount: 1, notRunGates: [], reversibleEffects: [], approvals: [], rejected: [], undone: [], taken: [{ brief: makeBrief({ problem: problem }), kind: 'planner_question' }] });
       const shortTexts = main.buildPullRequestTexts(runWith('P'), plan, gates);
@@ -5230,7 +5300,7 @@ const ROW_TESTS = {
     const attributionProblem = (noun) => 'The pull request ' + noun + ' would hold an attribution string, so the delivery stopped before the pull request and pushed nothing.';
     test('a title, body or comment that holds a forbiddenSubjectTexts() string in any case names that text, neutralized text included', () => {
       assert.deepEqual([...main.forbiddenSubjectTexts()], ['co-authored-by:', 'authored-by:', 'generated with', 'created with claude', '\u{1f916} generated']);
-      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' } };
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, slow: [] };
       const runWith = (taken) => ({ localReview: false, head: OTHER, waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], approvals: [], rejected: [], undone: [], taken: taken });
       assert.equal(main.buildPullRequestTexts(runWith([]), makePlan(), gates).problem, undefined);
       for (const forbidden of main.forbiddenSubjectTexts()) {
@@ -5245,7 +5315,7 @@ const ROW_TESTS = {
       }
     });
     test('the comment is checked when neither the title nor the body holds the string', () => {
-      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' } };
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, slow: [] };
       const run = { localReview: false, head: 'Co-Authored-By: x', waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], approvals: [], rejected: [], undone: [], taken: [] };
       assert.deepEqual({ ...main.buildPullRequestTexts(run, makePlan(), gates) }, { problem: attributionProblem('comment') });
     });
@@ -8851,7 +8921,7 @@ function readGateDecision(scratch, input) {
 function heldGates(run) {
   const held = Object.fromEntries(main.configuredGateIds(run).map((gateId) => [gateId, OTHER]));
   const notes = Object.fromEntries(main.configuredGateIds(run).map((gateId) => [gateId, 'passed']));
-  return { held: held, notes: notes, runs: { validate: 1, review: 1, fix: 0, headCheck: 0, pr: 1 }, failures: {}, fixRounds: 0, reruns: 0, answer: undefined };
+  return { held: held, notes: notes, runs: { validate: 1, review: 1, fix: 0, headCheck: 0, pr: 1 }, failures: {}, fixRounds: 0, reruns: 0, answer: undefined, slow: [] };
 }
 
 /**

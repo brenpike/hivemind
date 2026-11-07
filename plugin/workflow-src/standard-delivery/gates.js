@@ -15,8 +15,10 @@
  *   gates  the gate loop state runGates builds: held, notes, runs
  *          (validate, review, fix, headCheck and pr), failures, fixRounds,
  *          reruns, answer and takenReview, which only review.js sets and
- *          reads (runReviewGate), and fixAnswer, which only runFixRound sets
- *          and reads.
+ *          reads (runReviewGate), fixAnswer, which only runFixRound sets
+ *          and reads, and slow, the slow test cases of the validation that
+ *          last held, [] at the start of each runGates and when it named
+ *          none, which buildRunRecordParts (record.js) reads.
  *          failures maps a head to the kept failed validation on it:
  *          {status, failures, versionOnly, versionLine}.
  *   FIX_SCHEMA, VALIDATE_SCHEMA, VALIDATE_COMMANDS_SCHEMA and the limits of
@@ -38,7 +40,12 @@
  *           and VALIDATE_COMMANDS_SCHEMA offers no not_run. When it is empty,
  *           the drone runs the Validation Procedure of definitions.md, and
  *           VALIDATE_SCHEMA keeps not_run, so an empty list never skips
- *           validation. When plan.versioning.artifact_files is not empty,
+ *           validation. Both prompts carry slowCaseSentence() (relay.js)
+ *           and a git block of only plan.base, and both schemas offer
+ *           slow, at most 20 cases of at most 200 characters, only under
+ *           passed: a case that hit its own time limit in a file the
+ *           branch does not change and passed when run once more alone,
+ *           the Validation Procedure rule. When plan.versioning.artifact_files is not empty,
  *           the same drone also invokes hivemind:bump-type once with the
  *           version block, the pass's facts trunk_commit as base, the plan's
  *           two versioning answers and the version files, and relays it in
@@ -184,12 +191,13 @@ function buildValidateSchema(hasCommands, hasVersion) {
         description: 'passed when every command passes. failed when any fails. blocked when a command cannot run.'
       },
       failures: { type: 'string', description: 'What failed: each failing command with its failure output.' },
+      slow: { type: 'array', maxItems: 20, description: 'Each test case that passed only when run once more alone.', items: { type: 'string', maxLength: 200 } },
       blocker: { type: 'string', maxLength: 400, description: 'The command that cannot run and why, in one or two short sentences written for the user.' },
       next_action: buildNextActionProperty()
     },
     required: ['outcome'],
     variants: {
-      passed: { required: [], optional: [] },
+      passed: { required: [], optional: ['slow'] },
       failed: { required: ['failures'], optional: [] },
       blocked: { required: [], optional: ['blocker', 'next_action'] }
     }
@@ -235,13 +243,14 @@ function versionCheckSentence() {
 
 function buildValidatePrompt(plan, trunkCommit) {
   const commands = plan.validation_commands;
-  const lines = ['Run the project\'s validation on the working branch as it is checked out.', commands.length === 0 ? validationTaskSentence() : validationCommandsSentence(), runnerReadOnlySentence()];
+  const lines = ['Run the project\'s validation on the working branch as it is checked out.', commands.length === 0 ? validationTaskSentence() : validationCommandsSentence(), runnerReadOnlySentence(), slowCaseSentence()];
   const blocks = commands.length === 0 ? [] : [formatDataBlock('inputs', { commands: commands })];
+  blocks.push(formatDataBlock('git', { base: plan.base }));
   if (hasVersionFiles(plan)) {
     lines.push(versionCheckSentence());
     blocks.push(formatDataBlock('version', Object.assign(buildBumpTypeInputs(trunkCommit, plan.versioning), { version_files: plan.versioning.artifact_files })));
   }
-  return (blocks.length === 0 ? lines : lines.concat('', blocks)).join('\n');
+  return lines.concat('', blocks).join('\n');
 }
 
 function selectValidateSchema(plan) {
@@ -259,7 +268,7 @@ function readValidateOutcome(result, schema) {
   if (result.outcome === 'blocked') {
     return { problem: 'The validation step was blocked, so ' + RUN_NAME + ' stopped before the pull request: ' + describeReason(result.blocker), nextAction: readBlockerAction(result.blocker, result.next_action) };
   }
-  const validation = { status: result.outcome, failures: result.failures };
+  const validation = { status: result.outcome, failures: result.failures, slow: result.slow };
   if (Object.hasOwn(result, 'version')) {
     validation.versionRelay = result.version;
   }
@@ -420,6 +429,7 @@ async function runValidateGate(run, plan, facts, gates) {
     listNotRunGate(run, 'validation: the project documents no validation commands.');
   }
   if (validation.status !== 'failed') {
+    gates.slow = validation.slow === undefined ? [] : validation.slow;
     return { held: true, note: describeValidateNote(validation, plan, run) };
   }
   gates.failures[run.head] = validation;
@@ -466,7 +476,7 @@ async function runHeadCheck(run, plan, gates) {
 
 async function runGates(run, plan, facts) {
   const gateList = configuredGateIds(run);
-  const gates = { held: {}, notes: {}, runs: { validate: 0, review: 0, fix: 0, headCheck: 0, pr: 0 }, failures: {}, fixRounds: 0, reruns: 0, answer: undefined, fixAnswer: undefined };
+  const gates = { held: {}, notes: {}, runs: { validate: 0, review: 0, fix: 0, headCheck: 0, pr: 0 }, failures: {}, fixRounds: 0, reruns: 0, answer: undefined, fixAnswer: undefined, slow: [] };
   if (!run.localReview) {
     listNotRunGate(run, notConfiguredReviewLine());
   }

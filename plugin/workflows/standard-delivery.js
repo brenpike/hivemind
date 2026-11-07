@@ -689,7 +689,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '28e4884f9562cb74';
+const BUILD_ID = '1b489e556ff510ae';
 
 function supportedSchemaKeywords(){
 return[
@@ -2722,12 +2722,13 @@ enum:['passed','failed','blocked'],
 description:'passed when every command passes. failed when any fails. blocked when a command cannot run.'
 },
 failures:{type:'string',description:'What failed: each failing command with its failure output.'},
+slow:{type:'array',maxItems:20,description:'Each test case that passed only when run once more alone.',items:{type:'string',maxLength:200}},
 blocker:{type:'string',maxLength:400,description:'The command that cannot run and why, in one or two short sentences written for the user.'},
 next_action:buildNextActionProperty()
 },
 required:['outcome'],
 variants:{
-passed:{required:[],optional:[]},
+passed:{required:[],optional:['slow']},
 failed:{required:['failures'],optional:[]},
 blocked:{required:[],optional:['blocker','next_action']}
 }
@@ -2767,13 +2768,14 @@ return'The hivemind:bump-type run is part of this validation task: invoke the hi
 }
 function buildValidatePrompt(plan,trunkCommit){
 const commands=plan.validation_commands;
-const lines=['Run the project\'s validation on the working branch as it is checked out.',commands.length===0?validationTaskSentence():validationCommandsSentence(),runnerReadOnlySentence()];
+const lines=['Run the project\'s validation on the working branch as it is checked out.',commands.length===0?validationTaskSentence():validationCommandsSentence(),runnerReadOnlySentence(),slowCaseSentence()];
 const blocks=commands.length===0?[]:[formatDataBlock('inputs',{commands:commands})];
+blocks.push(formatDataBlock('git',{base:plan.base}));
 if(hasVersionFiles(plan)){
 lines.push(versionCheckSentence());
 blocks.push(formatDataBlock('version',Object.assign(buildBumpTypeInputs(trunkCommit,plan.versioning),{version_files:plan.versioning.artifact_files})));
 }
-return(blocks.length===0?lines:lines.concat('',blocks)).join('\n');
+return lines.concat('',blocks).join('\n');
 }
 function selectValidateSchema(plan){
 const hasCommands=plan.validation_commands.length>0;
@@ -2789,7 +2791,7 @@ return describeUnusableResult('The validation step returned no usable result, so
 if(result.outcome==='blocked'){
 return{problem:'The validation step was blocked, so '+RUN_NAME+' stopped before the pull request: '+describeReason(result.blocker),nextAction:readBlockerAction(result.blocker,result.next_action)};
 }
-const validation={status:result.outcome,failures:result.failures};
+const validation={status:result.outcome,failures:result.failures,slow:result.slow};
 if(Object.hasOwn(result,'version')){
 validation.versionRelay=result.version;
 }
@@ -2928,6 +2930,7 @@ if(validation.status==='not_run'){
 listNotRunGate(run,'validation: the project documents no validation commands.');
 }
 if(validation.status!=='failed'){
+gates.slow=validation.slow===undefined?[]:validation.slow;
 return{held:true,note:describeValidateNote(validation,plan,run)};
 }
 gates.failures[run.head]=validation;
@@ -2970,7 +2973,7 @@ return runCommitStep(run,plan,{files:[],label:gateLabel('head',run,gates.runs.he
 }
 async function runGates(run,plan,facts){
 const gateList=configuredGateIds(run);
-const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0,headCheck:0,pr:0},failures:{},fixRounds:0,reruns:0,answer:undefined,fixAnswer:undefined};
+const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0,headCheck:0,pr:0},failures:{},fixRounds:0,reruns:0,answer:undefined,fixAnswer:undefined,slow:[]};
 if(!run.localReview){
 listNotRunGate(run,notConfiguredReviewLine());
 }
@@ -3599,6 +3602,9 @@ return!routineDecisionKinds().includes(entry.kind);
 function renderApprovals(approvals){
 return['Destructive changes you approved:',...approvals.map((change)=>'- '+renderDestructiveChange(change))].join('\n');
 }
+function renderSlowTests(cases){
+return['Slow test cases that passed only when run alone:',...cases.map((name)=>'- '+encodeUntrustedText(name))].join('\n');
+}
 function hasListedFindings(run){
 return run.rejected.length>0||run.undone.length>0;
 }
@@ -3612,6 +3618,9 @@ if(gates!==undefined){
 parts.push({id:'gates',text:renderPullRequestGates(run,gates),external:false});
 }else if(run.notRunGates.length>0){
 parts.push({id:'gates',text:renderNotRunGates(run.notRunGates),external:false});
+}
+if(gates!==undefined&&gates.slow.length>0){
+parts.push({id:'slow_tests',text:renderSlowTests(gates.slow),external:true});
 }
 if(gates!==undefined&&hasListedFindings(run)){
 parts.push({id:'rejected_findings',text:buildRejectedFindingsBlock(gates.notes.review,run.rejected,run.undone).text,external:true});
@@ -3746,6 +3755,9 @@ return'This is a validation task: the Validation Procedure of ${CLAUDE_PLUGIN_RO
 }
 function validationCommandsSentence(){
 return'This is a validation task: running each command of the inputs block once, in order and in the foreground, is its whole task, not a Worker Self-Check.';
+}
+function slowCaseSentence(){
+return'A test case that hits its own time limit, in a file the branch does not change from the base in the git block, runs once more alone: if it passes, it counts as passed and goes in slow.';
 }
 function validationFixSentence(){
 return'This is a validation fix task: the task is one fix round for the run\'s failed validation.';

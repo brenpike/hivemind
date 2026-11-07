@@ -437,7 +437,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">State-machine fallback</h3>
-              <p>When the launch is refused, or the Workflow tool is absent, <code>standard-delivery</code> runs on its state machine instead: route, record a run ledger at <code>.hivemind/runs/&lt;run-id&gt;/state.json</code>, plan, git preflight and branch, build in waves with <code>hivemind:next-wave</code>, gate, review, ask you before the PR (<code>pr_confirm</code>), open the PR, and watch it. A <em>Reflex</em>, a trivial task such as a one-file change or a version-only edit, is checked before routing and skips the router, the run ledger, and the cerebrate.</p>
+              <p>When the launch is refused, or the Workflow tool is absent, <code>standard-delivery</code> runs on its state machine instead: route, record a run ledger at <code>.hivemind/runs/&lt;run-id&gt;/state.json</code>, plan, git preflight and branch, build in waves with <code>hivemind:next-wave</code>, gate, review, rerun validation on a later commit (<code>gate_check</code>), open the PR, and watch it. A <em>Reflex</em>, a trivial task such as a one-file change or a version-only edit, is checked before routing and skips the router, the run ledger, and the cerebrate.</p>
             </li>
           </ol>
 
