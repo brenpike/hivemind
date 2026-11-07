@@ -2597,3 +2597,15 @@ It updates these places in place, each with a dated note:
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/549, https://github.com/brenpike/hivemind/issues/548.
+
+### Local review finding fd77890f: a bad listed value throws before any ask check (2026-11-07)
+
+**The finding.** `decide()` checks the caller's `listed` value before the ask checks. So a bad value throws even where a hard stop, a table surface, a gate or a destructive option would ask. The built standard-delivery and analysis-only scripts keep the same order, and `decide.test.mjs` pins the throw for a hard stop too.
+
+**Decision.** Keep the order. A bad caller `listed` value throws on every `decide()` call, before any check. The throw ends the run with an engine error, so it fails closed and never takes. Only engine code builds `listed`, from fixed names (`resolvePlanAcceptance` in `plan.js`), never from model or external text. A check after the ask checks would let a caller defect pass on every ask path and surface only on a take path. The order matches the throw on a missing schema.
+
+**Repeat findings.** A later finding that contests this order is a repeat of this record, per `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A finding where `listed` is built from model or external text is new.
+
+**Decided by.** The run took this call, option A, per `plugin/governance/decision-autonomy.md` (Review Calls): a strong recommendation, reversible and not architectural. It is listed in the pull request body for the user's veto before merge.
+
+**Prose budgets.** No change under `plugin/`.
