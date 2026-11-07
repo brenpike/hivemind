@@ -413,7 +413,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">Plan</h3>
-              <p>The cerebrate plans what is left of the request on this branch, and the plan is checked against <code>plugin/references/plan-schema.json</code>. A scope, plan or revise result that fails its check goes back to the cerebrate with the exact problem, at most 2 retries. Routine planner questions are decided by the autonomy table. Only the closed Ask Set pauses the run with a decision brief: an irreversible, architectural or safety-relevant call, a surface cell of the autonomy table, a hard stop, or a call with no recommendation. Every other call is taken and listed under "Decided for you", so you can veto it before merge.</p>
+              <p>The cerebrate plans what is left of the request on this branch, and the plan is checked against <code>plugin/references/plan-schema.json</code>. A scope, plan or revise result that fails its check goes back to the cerebrate with the exact problem, at most 2 retries. Routine planner questions are decided by the autonomy table. Only the closed Ask Set pauses the run with a decision brief: an irreversible, architectural or safety-relevant call, a surface cell of the autonomy table, a hard stop, or a call with no recommendation. Every other call is taken, and all but the routine ones are listed under "Decided for you", so you can veto them before merge (see the PR step below).</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Branch</h3>
@@ -433,7 +433,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">PR</h3>
-              <p>A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (<code>hivemind:open-plan-pr</code>). The validation (with its version check) and local review gates each hold only for the commit they ended on, so a later commit reruns the gates it invalidates. The PR body is built in code from the plan digest, the steps and the run record: gates, slow cases, rejected and undone findings, approvals, and decisions. Every decision the run took for you is listed in the final message and in the PR body. A step whose own output failed ends the run with its cause instead of asking you to retry. Agents never merge. You do.</p>
+              <p>A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (<code>hivemind:open-plan-pr</code>). The validation (with its version check) and local review gates each hold only for the commit they ended on, so a later commit reruns the gates it invalidates. The PR body is built in code from the plan digest, the steps and the run record: gates, slow cases, rejected and undone findings, approvals, and decisions. The final message and the PR body list each call the run took for you, except the routine calls: accepting the plan or a remediation plan, and rerunning a gate after a later commit. A plan acceptance is listed only when the plan changes a file outside your stated limits or is a repeated remediation plan. A script run keeps no decision journal. A step whose own output failed ends the run with its cause instead of asking you to retry. Agents never merge. You do.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Instinct fallback</h3>
@@ -562,7 +562,7 @@
             <div class="sig-flare"><dt>Flare</dt><dd>Urgent: an agent hit something it cannot resolve alone. The overlord stops, surfaces the problem, and asks you how to proceed.</dd><dd><span class="tag tag--ember">Requires human input</span></dd></div>
             <div class="sig-reflex"><dt>Reflex</dt><dd>Trivial task, such as a one-file change or a version-only edit. The overlord checks for it before routing, skips the router, the run ledger, and the cerebrate, and delegates the change directly.</dd><dd><span class="tag tag--hot">Fast path</span></dd></div>
             <div class="sig-decay"><dt>Mutation Decay</dt><dd>Fixes are fighting each other in a break-fix-break loop. Mandatory stop. You decide which direction to take.</dd><dd><span class="tag tag--violet">Conflict detected</span></dd></div>
-            <div class="sig-stagnation"><dt>Creep Stagnation</dt><dd>Diminishing returns: each review pass yields less. An advisory early exit: the overlord stops the loop and opens the PR on its own, journals the call, and asks you only if the promotion gate trips.</dd><dd><span class="tag tag--cyan">Advisory</span></dd></div>
+            <div class="sig-stagnation"><dt>Creep Stagnation</dt><dd>Diminishing returns: each review pass yields less. An advisory early exit: the overlord stops the loop and opens the PR on its own, and asks you only if the promotion gate trips. The state machine journals the call; a script run lists it.</dd><dd><span class="tag tag--cyan">Advisory</span></dd></div>
             <div class="sig-root"><dt>Root-Cluster</dt><dd>Several findings share one root. Instead of patching each instance, the swarm routes to one structural fix.</dd><dd><span class="tag tag--hot">One structural fix</span></dd></div>
             <div class="sig-merge"><dt>Merge-Advised</dt><dd>Only a bounded tail of findings remains on a hardened surface (the Stop-and-Merge rule). The loop recommends merging. Humans merge.</dd><dd><span class="tag tag--ember">Advisory</span></dd></div>
           </dl>
@@ -680,7 +680,7 @@
                 </tr>
                 <tr>
                   <td><code>HIVEMIND_ENABLE_DECISION_REPORT</code></td>
-                  <td>Covers state-machine runs only: workflow-script runs keep no run ledger, so the report does not see them, and they show their decisions in the final message and the PR body instead. When set to any non-empty value, the overlord shows the post-merge decision report. Unset or empty: the report is off; the decision journal in the run ledger is still written.</td>
+                  <td>Covers state-machine runs only: workflow-script runs keep no run ledger, so the report does not see them, and they list their non-routine decisions in the final message and the PR body instead. When set to any non-empty value, the overlord shows the post-merge decision report. Unset or empty: the report is off; the decision journal in the run ledger is still written.</td>
                 </tr>
               </tbody>
             </table>
