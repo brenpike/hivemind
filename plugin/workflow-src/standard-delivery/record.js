@@ -37,7 +37,8 @@
  *           to branch and run.headRound to the run.answerLog length.
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
  *           request body and its comment carry, with no commit list, in
- *           order: the reversible effects, the gates, the rejected findings
+ *           order: the reversible effects, the gates, the slow test cases
+ *           of gates.slow when it is not empty, the rejected findings
  *           block of buildRejectedFindingsBlock (review.js) when run.rejected
  *           or run.undone is not empty, the approvals of run.approvals one
  *           line each through renderDestructiveChange under one label, then
@@ -173,6 +174,10 @@ function renderApprovals(approvals) {
   return ['Destructive changes you approved:', ...approvals.map((change) => '- ' + renderDestructiveChange(change))].join('\n');
 }
 
+function renderSlowTests(cases) {
+  return ['Slow test cases that passed only when run alone:', ...cases.map((name) => '- ' + name)].join('\n');
+}
+
 function hasListedFindings(run) {
   return run.rejected.length > 0 || run.undone.length > 0;
 }
@@ -187,6 +192,9 @@ function buildRunRecordParts(run, taken, gates) {
     parts.push({ id: 'gates', text: renderPullRequestGates(run, gates), external: false });
   } else if (run.notRunGates.length > 0) {
     parts.push({ id: 'gates', text: renderNotRunGates(run.notRunGates), external: false });
+  }
+  if (gates !== undefined && gates.slow.length > 0) {
+    parts.push({ id: 'slow_tests', text: renderSlowTests(gates.slow), external: true });
   }
   if (gates !== undefined && hasListedFindings(run)) {
     parts.push({ id: 'rejected_findings', text: buildRejectedFindingsBlock(gates.notes.review, run.rejected, run.undone).text, external: true });

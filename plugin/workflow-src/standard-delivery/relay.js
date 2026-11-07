@@ -54,7 +54,9 @@
  *           or fallbackSubject when that line is blank, holds a breaking
  *           change marker or an attribution string molt SKILL.md forbids.
  *   The options, sentences and relay helpers every other runner step
- *   uses. The steps, as meta.js names them:
+ *   uses, slowCaseSentence() among them: the validate prompt's line for
+ *   the slow case rule of the Validation Procedure (gates.js). The
+ *   steps, as meta.js names them:
  *   Facts   a haiku hivemind:synapse runner runs the gather-facts command
  *           and relays its stdout word for word; the workflow parses it with
  *           gatherFactsRoutingSpec(), checks it with isConsistentFactsRelay
@@ -176,6 +178,10 @@ function validationTaskSentence() {
 
 function validationCommandsSentence() {
   return 'This is a validation task: running each command of the inputs block once, in order and in the foreground, is its whole task, not a Worker Self-Check.';
+}
+
+function slowCaseSentence() {
+  return 'A test case that hits its own time limit, in a file the branch does not change from the base in the git block, runs once more alone: if it passes, it counts as passed and goes in slow.';
 }
 
 function validationFixSentence() {
