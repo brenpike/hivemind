@@ -1128,6 +1128,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/457. A deliver
 
 - **Bump design D.** Neither a bump split nor new relay fields. A plan step sets the version beside the change log, and validation checks it read-only. A version question never plans again. This replaces the bump split of the earlier plan (its Q1, option A).
 - **Q1 of this plan, option A, with one retry rule.** Malformed agent output pauses with a `step_stop` question, and the reply takes the step again. A runner relay runs once more in place only when it is blocked and its failure is transient per `plugin/governance/definitions.md` (Transient Failure). Malformed output, a block that is not transient and a null result are never retried.
+Amended 2026-11-07: that holds only for a runner relay. A planner result that fails its check goes back to the planner (see Amendment 2026-11-07: a planner check slip goes back to the planner, not to the user).
 - **Tests.** The test deletions and assertion rewrites the plan listed are approved.
 
 **One stop path.** `stopDelivery(causes, run, endLines, isReplan)` in `plugin/workflow-src/standard-delivery/record.js` takes every stop. It ends the run through `finishDeliveryBlocked` when any cause is marked `terminal` or `agentFailure`. Otherwise it asks one undecided question of the new kind `step_stop` through `askTail`. Its lead is the cause problems, then the end lines. Its brief is built in code by `buildStepStopBrief`: fix what stopped the run, then reply, or reply when ready when nothing in the repo needs a fix. The `step_stop` row of `plugin/references/decision-autonomy-table.json` is `surface` at every level. A reply when the cause is still not fixed pauses again, with no cap, because each reply is a user action. Row SD-70.
@@ -1366,7 +1367,7 @@ Second finding: agent frontmatter cannot scope Write. The hook closes it for syn
 - **Agent types.** The facts, branch, commit and pull request runners are `hivemind:synapse` on haiku (`synapseAgentType()`). The scan, validation and fix rounds stay `hivemind:drone` (`droneAgentType()`, renamed from `runnerAgentType`). The analysis-only facts step runs on synapse too.
 - **The prompt.** (amended 2026-10-30, issue 480: the commit or push grant sentence the commit and pull request runners carried is removed.) A task line; `dataBlocksSentence()`; a `command` block holding the one command line `buildRunnerCommand` builds; and for the commit and pull request runners an `inputs_file` block `{path, content}`. The placeholders `{plugin-root}` and `{token}` are the words of `plugin/agents/synapse.md`. Synapse replaces `{plugin-root}` with the `${CLAUDE_PLUGIN_ROOT}` that Claude Code substitutes in agent content, and `{token}` with a token it makes. The engine cannot make the token: the workflow runtime throws on `Date.now()` and `Math.random()`, and a fixed token breaks the transient retry (SD-71), which sends the same prompt again to a file that already exists. Amended 2026-10-31 (issue 487): the engine now makes the token. It builds each inputs path whole from the pass's facts file stem and the call label, `{token}` is removed from the prompt words, and a retry gets its own prompt and path (see Amendment 2026-10-31: the engine names each inputs file (issue 487)).
 - **The runner word check.** Before each runner call, the step checks every command word against the hook's value classes with `describeRunnerWordProblem` in `plugin/workflow-src/lib/facts.js`. A word outside its class is a terminal cause that names its flag and never its value, and no runner call is made. Without it, a word the hook refuses would reach synapse, be denied, and pause the run on a stop that no reply can fix. The standard-delivery runners and the analysis-only facts step both check.
-- **The branch taxonomy.** SD-08 refuses a plan branch outside `^(feature|bugfix|hotfix|refactor|chore|docs|test|ci)/[a-z0-9]+(-[a-z0-9]+)*$`, the Branch Taxonomy and Branch Naming of `plugin/governance/workflow.md`. Like every plan problem, it pauses and plans again on the reply.
+- **The branch taxonomy.** SD-08 refuses a plan branch outside `^(feature|bugfix|hotfix|refactor|chore|docs|test|ci)/[a-z0-9]+(-[a-z0-9]+)*$`, the Branch Taxonomy and Branch Naming of `plugin/governance/workflow.md`. Like every plan problem, it pauses and plans again on the reply. Amended 2026-11-07: a plan problem is now asked again of the planner first, and a run that started on a branch outside the taxonomy stops before planning with the fix line (see Amendment 2026-11-07: a planner check slip goes back to the planner, not to the user).
 - **Pull request attribution.** Under SD-45, a title, body or comment that holds a `forbiddenSubjectTexts()` string, in any case, is a terminal stop before any push.
 - **Rows.** (amended 2026-10-30, issue 480: SD-43, updated here for the synapse prompts, is removed.) SD-12, SD-15, SD-18 and SD-42 are updated for the synapse prompts. SD-74 is added: the runner agent types, the prompt words, the word check, and that every command the engine builds is an exact form the hook allows for `hivemind:synapse`. A test runs each built command through the real hook, and another pins the prompt words in `plugin/agents/synapse.md`.
 
@@ -1545,7 +1546,7 @@ First finding: the pull request title ignores a title the request sets, and is b
 **Recorded residuals.**
 
 - **Planner adherence.** Root cause: the brood and strain id rule, and matching the classification to the type of a title the request sets, are planner rules. Bounded impact: code has no ground truth for either, since the child session holds no brood ids, so a planner miss shows only in the title text. The type still comes from the classification, so a title never carries two types.
-- **Request title types outside the classifications.** Root cause: the type comes from the eight classifications. Bounded impact: a request title whose type is outside them (`perf:`, `build:`) or that carries a scope (`fix(ui):`) cannot be reproduced exactly; the text after the type is kept and the type is the classification's.
+- **Request title types outside the classifications.** Root cause: the type comes from the eight classifications. Bounded impact: a request title whose type is outside them (`perf:`, `build:`) or that carries a scope (`fix(ui):`) cannot be reproduced exactly; the text after the type is kept and the type is the classification's. Amended 2026-11-07: a title that starts with the plan's own matching type is cleaned in code, not refused (see Amendment 2026-11-07: a planner check slip goes back to the planner, not to the user).
 - **Titles over 256 code points are cut.** Bounded impact: only a request title longer than 256 code points is cut, at a word and never inside an open bracket.
 - **`hivemind:spawn-brood` is unchanged.** A strain description is the child's request, so the plan `title` field covers a title it sets. No brood-specific title path is added (ADR-0007).
 
@@ -1835,7 +1836,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/491. PR 490, t
 **The change.**
 
 - `plugin/references/plan-schema.json` gains an optional field, `closes`: a list of issue numbers. Empty or absent means none. The planner lists only a reference the run fixes, never one the request names for context.
-- `describePlanProblem` (`plan.js`) refuses a plan whose `closes` holds a number that is not the number of one of the launch `references` (`run.references`), with a fixed message naming its index. It goes through `stopDelivery` with isReplan true, as every other plan problem does.
+- `describePlanProblem` (`plan.js`) refuses a plan whose `closes` holds a number that is not the number of one of the launch `references` (`run.references`), with a fixed message naming its index. It goes through `stopDelivery` with isReplan true, as every other plan problem does. Amended 2026-11-07: a plan problem now goes back to the planner first (see Amendment 2026-11-07: a planner check slip goes back to the planner, not to the user).
 - `buildPullRequestBody` opens with one code-built plain line `Closes #<n>` per distinct number, in plan order, outside any fence and ahead of the fenced summary. The fence around planner text is unchanged. The pull request comment gets no closing line. Amended 2026-11-06 (issues 506 and 501): the body holds no fence and no summary, and the closing lines open it ahead of the digest paragraph (see Amendment 2026-11-06: the pull request body is built in code and sent in its own file (issues 506 and 501)).
 - Row SD-76 is added, and SD-08 and SD-45 name the new clause.
 
@@ -2450,5 +2451,63 @@ It updates these places in place, each with a dated note:
 
 - Amendment 2026-10-26: the delivery engine shrinks and splits into modules (issue 459), the bullet "The prose budget".
 - Amendment 2026-11-06: scope questions name only limits the user stated, and an option beyond the request is never taken (issues 504 and 497), the paragraph "Not folded".
+
+The rest of ADR-0037 is unchanged.
+
+## Amendment 2026-11-07: a planner check slip goes back to the planner, not to the user
+
+**Root cause.** Every planner check slip went through `stopDelivery` with next action `report`: the run's own step failed, and the user was told to reply to try once more. Each earlier fix closed one check: the branch taxonomy (issue 467), the title type (issue 469), the `closes` numbers (issue 491). The latest instance: a plan title `docs: ...` tripped the typed-title check, and the user had to reply for a slip the planner could fix alone.
+
+**Decisions.**
+
+- **Strip the matching type.** `normalizePlanTitle` (`checks.js`) cuts the plan's own commit type from `plan.title` on a copy of a complete result that fits its schema. The agent result is never changed. A title with a different type, or with a `!` on a plan that is not breaking, stays a problem.
+- **Bounded retry of 2.** A plan or revise result that fails the plan check is asked again, with its first prompt, one fix line and a `check` data block holding the exact problem and up to `maxListedItems()` schema errors. Labels: `plan-P-fix-N`, `revise-R-fix-N`. `maxCheckRetries()` is 2.
+- **Terminal report on exhaustion.** A result still failing after 2 retries ends the run, terminal with next action `report`, with the cause "... It stayed after 2 retries." (`describeCheckLimit`).
+- **The scope step is the same class.** `runScopeStep` (`scope.js`) retries a non-null result that fails `SCOPE_SCHEMA` the same way, label plus `-fix-N`, and ends the same way.
+- **The start-branch stop comes before the planner.** A run that started on a non-trunk branch outside the Branch Taxonomy cannot deliver on any plan branch, so it stops before planning with the fix line, and no planner call is spent.
+- **A blocked outcome with no reason is retried.** A planner blocked outcome that fits its schema and gives a reason is the planner's own call and pauses with the fix line, unchanged. With no reason it is a slip, so it is retried.
+- **Unchanged.** A null result, an agent failure, still ends with `run_again`. A blocked outcome with a reason is unchanged.
+- **A new module.** `checks.js` holds the retry code, because `plan.js` would pass the 600-line source limit.
+
+**Options ruled out.**
+
+- **Normalizing other checks.** Each check differs, and a cut that guesses another field's meaning can change what the planner decided. Only the title type has exactly one safe repair.
+- **A new pass per retry.** A pass reruns facts and scope, and costs far more than one planner call.
+- **Unbounded retry.** A result that never fits would loop.
+- **A prose budget raise.** The new strings fit by rewording three existing ones (below).
+
+**Surface account.**
+
+- **Added.** The `check` data block, the `-fix-N` labels, `normalizePlanTitle`, `isFixablePlanResult`, `buildCheckFixPrompt`, `describeCheckLimit`, `callCheckedPlanner` and `typedTitlePattern` in `checks.js`, `describeStartBranch` and `describeTaxonomyMiss` in `plan.js`, and `maxCheckRetries()` in `main.js`.
+- **Removed.** The report pause for a planner call: a check slip no longer asks the user.
+
+**Reworded strings, to stay in budget.**
+
+- `plan.js` outcome description: 'blocked only when the delivery cannot be planned at all.' became 'blocked only when no plan is possible.'
+- `plan.js` replan line: 'This is a new plan in a run that already started: the replan block says why.' became 'A replan of a started run: the replan block says why.'
+- `waves.js` worker outcome description: 'needs_replan when the plan must change before the step can be done.' became 'needs_replan when the plan must change first.'
+
+**Figures.** Built prose 43647 of budget 43800 (was 43594). Built length 189797 of 190000. `plan.js` is 592 lines. No budget raise.
+
+**Recorded residuals.** Other stops that say "retry?" stay. They are not the same class:
+
+- **Runner relays for side-effect scripts.** A retry could repeat the side effect, under the issue 457 no-retry decision.
+- **The scan.** The shared `lib/facts.js` and the security step.
+- **Worker and fix-round results.** The edited files and whether the commit ran.
+- **Validation.**
+- **Local review.** The reviewer commits.
+- **A mid-run unschedulable plan.** At `waves.js`.
+- **Runner blockers with no reason.**
+
+**Bounded impact.** Each still stops with no change to the repo or user work.
+
+**Version.** Patch, 7.6.7. It is a fix: it removes a user stop the planner can close alone.
+
+It updates these places in place, each with a dated note:
+
+- Amendment 2026-10-29 (issue 457), the bullet "Q1 of this plan, option A, with one retry rule".
+- The branch taxonomy bullet (issue 467).
+- The bullet "Request title types outside the classifications" (issue 469).
+- The `describePlanProblem` bullet on `closes` (issue 491).
 
 The rest of ADR-0037 is unchanged.

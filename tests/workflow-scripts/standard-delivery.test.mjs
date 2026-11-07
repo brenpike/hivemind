@@ -535,6 +535,38 @@ function assertBlockedBeforeWaves(run, message) {
 }
 
 /**
+ * Returns the check retry labels of a call label, label-fix-1 up to
+ * label-fix-maxCheckRetries().
+ */
+function listFixLabels(label) {
+  return Array.from({ length: main.maxCheckRetries() }, (_, index) => label + '-fix-' + (index + 1));
+}
+
+/**
+ * Returns results that give label and each of its check retry labels the
+ * same result, so a result failing its check fails every retry.
+ */
+function repeatCheckResult(label, result) {
+  return Object.fromEntries([label, ...listFixLabels(label)].map((callLabel) => [callLabel, result]));
+}
+
+function readCheckProblem(run, label) {
+  return readDataBlock(callOf(run, label).prompt, 'check').problem;
+}
+
+/**
+ * Asserts a run that ended blocked before any wave because the result of
+ * label failed its check problem on every retry: the lead is the check
+ * limit cause, the Next line is the report line, each retry prompt carries
+ * problem in its check block, and the last retry label is the last call.
+ */
+function assertCheckLimitEnd(run, problem, label) {
+  assertBlockedBeforeWaves(run, main.describeCheckLimit(problem).problem + '\n\n' + main.nextStepLine('report'));
+  listFixLabels(label).forEach((fixLabel) => assert.equal(readCheckProblem(run, fixLabel), problem, fixLabel));
+  assert.equal(labelsOf(run).at(-1), listFixLabels(label).at(-1));
+}
+
+/**
  * Builds the workflow from a scratch copy, the prose budget file included,
  * whose autonomy table rows for the given kinds are surface at every level,
  * with editSource applied to the copy of the workflow module moduleFile.
@@ -1465,14 +1497,15 @@ const ROW_TESTS = {
       assert.ok(readDataBlock(callOf(run, 'plan-2').prompt, 'replan').startsWith('The branch step switched'));
       assert.equal(readDataBlock(callOf(run, 'plan-3').prompt, 'replan'), 'Step "STEP-001" needs a new plan: it says "The API moved.".');
     });
-    test('a reply to a facts or scope stop starts a pass, past maxReplans() passes, since a stop reply counts against no replan limit', async () => {
+    test('a reply to a facts or plan stop starts a pass, past maxReplans() passes, since a stop reply counts against no replan limit', async () => {
       const blocked = { outcome: 'blocked', stderr: 'blocker: not ready\n' };
-      const stops = { 'facts-1': blocked, 'facts-2': blocked, 'facts-3': factsRelay(), 'scope-3': { documents: [] }, 'facts-4': blocked };
+      const plannerBlock = { outcome: 'blocked', blocker: 'No such module.', questions: [] };
+      const stops = { 'facts-1': blocked, 'facts-2': blocked, 'facts-3': factsRelay(), 'plan-3': plannerBlock, 'facts-4': blocked };
       const pass5 = { 'facts-5': factsRelay(), 'plan-5': planResult(), 'branch-5': branchRelay(), 'work-5-STEP-001': WORKER_DONE, 'commit-5-1': commitRelay(), ...tailResults(5, OTHER) };
       const answers = { 'round-1': 'one', 'round-2': 'two', 'round-3': 'three', 'round-4': 'four' };
       const run = await runWorkflow({ ...LAUNCH, build: BUILD_ID, answers: answers }, happyResults({ ...stops, ...pass5 }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), ['facts-1', 'facts-2', 'facts-3', 'scope-3', 'facts-4', 'facts-5', 'scope-5', 'plan-5', 'branch-5', 'work-5-STEP-001', 'commit-5-1', ...tailLabels(5)]);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'facts-2', 'facts-3', 'scope-3', 'plan-3', 'facts-4', 'facts-5', 'scope-5', 'plan-5', 'branch-5', 'work-5-STEP-001', 'commit-5-1', ...tailLabels(5)]);
       assert.ok(readDataBlock(callOf(run, 'plan-5').prompt, 'replan').startsWith('The user replied to a stop the run paused at'));
       assert.deepEqual(readDataBlock(callOf(run, 'plan-5').prompt, 'answers').map((entry) => entry.reply), ['one', 'two', 'three', 'four']);
     });
@@ -1521,7 +1554,7 @@ const ROW_TESTS = {
       ['a blank validation command', planResult(makePlan({ validation_commands: ['npm test', '  '] })), schemaProblem],
       ['a validation command with a line break', planResult(makePlan({ validation_commands: ['npm test', 'npm test\nrm -rf x'] })), 'The plan names a validation command at validation_commands[1] that holds a line break, so the delivery stopped.'],
       ['a validation command with a control character', planResult(makePlan({ validation_commands: ['npm test\u001b[0m'] })), 'The plan names a validation command at validation_commands[0] that holds a control character, so the delivery stopped.'],
-      ...['fix: Add the cache layer', 'feat(cache)!: Add the cache layer', ' \tchore!: Add the cache layer', 'docs(): Add the cache layer', 'Feat: Add the cache layer', 'FIX(ui)!: Add the cache layer'].map((title) => [
+      ...['fix: Add the cache layer', 'feat(cache)!: Add the cache layer', ' \tchore!: Add the cache layer', 'docs(): Add the cache layer', 'FIX(ui)!: Add the cache layer'].map((title) => [
         'a title typed ' + JSON.stringify(title),
         planResult(makePlan({ title: title })),
         'The plan title starts with a commit type, which the workflow writes before it, so the delivery stopped.'
@@ -1540,21 +1573,28 @@ const ROW_TESTS = {
         'The plan title leaves no text once it is cleaned and cut to fit the pull request title, so the delivery stopped.'
       ])
     ]) {
-      test(`${label} ${result === null ? 'ends' : 'pauses'} before the branch step`, async () => {
-        const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': result });
-        if (result === null) {
-          assertBlockedBeforeWaves(run, message);
-        } else {
-          assertPassStopPause(run, message, 'plan-1', label === 'a blocked planner' ? undefined : 'report');
+      const isKept = result === null || label === 'a blocked planner';
+      test(`${label} ${isKept ? (result === null ? 'ends' : 'pauses') : 'goes back to the planner, then ends the run'} before the branch step`, async () => {
+        if (isKept) {
+          const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': result });
+          if (result === null) {
+            assertBlockedBeforeWaves(run, message);
+          } else {
+            assertPassStopPause(run, message, 'plan-1');
+          }
+          assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
+          return;
         }
-        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
+        const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), ...repeatCheckResult('plan-1', result) });
+        assertCheckLimitEnd(run, message, 'plan-1');
+        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', ...listFixLabels('plan-1')]);
       });
     }
-    test('a null plan result, an agent failure, ends with the run_again Next line, and a result that is not an object pauses with the report brief', async () => {
+    test('a null plan result, an agent failure, ends with the run_again Next line, and a result that is not an object ends with the report Next line once retries run out', async () => {
       const failed = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': null });
       assert.equal(failed.result.message.split('\n\n')[1], main.nextStepLine('run_again'));
-      const unusable = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': 'Planned.' });
-      assertPassStopPause(unusable, 'The planner returned no result, so the delivery stopped.', 'plan-1', 'report');
+      const unusable = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), ...repeatCheckResult('plan-1', 'Planned.') });
+      assertCheckLimitEnd(unusable, 'The planner returned no result, so the delivery stopped.', 'plan-1');
     });
     test('a title that only starts with a commit type word goes on', async () => {
       for (const title of ['fix the cache layer: reads', 'fixes: the cache layer']) {
@@ -1562,9 +1602,9 @@ const ROW_TESTS = {
         assert.equal(run.result.outcome, 'complete', run.result.message);
       }
     });
-    test('a run started on another branch delivers on it: another plan branch pauses', async () => {
-      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay({ branch: 'feature/old' }), 'plan-1': planResult() });
-      assertPassStopPause(run, 'The run started on branch "feature/old" and delivers on it, but the plan names branch "feature/cache", so the delivery stopped.', 'plan-1', 'report');
+    test('a run started on another branch delivers on it: another plan branch goes back to the planner, then ends the run', async () => {
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay({ branch: 'feature/old' }), ...repeatCheckResult('plan-1', planResult()) });
+      assertCheckLimitEnd(run, 'The run started on branch "feature/old" and delivers on it, but the plan names branch "feature/cache", so the delivery stopped.', 'plan-1');
     });
     test('a run started on another branch with a plan naming it goes on', async () => {
       const results = happyResults({ 'facts-1': factsRelay({ branch: 'feature/cache' }), 'branch-1': branchRelay({ created: 'false' }) });
@@ -1592,21 +1632,21 @@ const ROW_TESTS = {
       assert.deepEqual(schema.properties.questions.items, briefWithoutDialect);
     });
     for (const [label, settled] of [['no settled', undefined], ['a label past the shown count', ['Q2']]]) {
-      test(`a revise result with ${label} pauses before the branch step with the schema message`, async () => {
+      test(`a revise result with ${label} goes back to the planner with the schema message, then ends the run before the branch step`, async () => {
         const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
         const revised = settled === undefined ? planResult() : reviseResult(planResult(), settled);
         const args = { ...LAUNCH, build: BUILD_ID, answers: { 'round-1': 'Take option A.' } };
-        const run = await runWorkflow(args, happyResults({ 'plan-1': gated, 'revise-1': revised }));
-        assertPassStopPause(run, schemaProblem, 'revise-1', 'report');
-        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1']);
+        const run = await runWorkflow(args, happyResults({ 'plan-1': gated, ...repeatCheckResult('revise-1', revised) }));
+        assertCheckLimitEnd(run, schemaProblem, 'revise-1');
+        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', ...listFixLabels('revise-1')]);
       });
     }
-    test('a revise that fails the plan check logs its reply with settled [] first, so the stop asks the next round and its reply plans again', async () => {
+    test('a revise that fails the plan check with a blocked outcome logs its reply with settled [] first, so the stop asks the next round and its reply plans again', async () => {
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
       const args = { ...LAUNCH, build: BUILD_ID, answers: { 'round-1': 'Take option A.' } };
-      const results = happyResults({ 'plan-1': gated, 'revise-1': planResult() });
+      const results = happyResults({ 'plan-1': gated, 'revise-1': reviseResult({ outcome: 'blocked', blocker: 'No such module.', questions: [] }, []) });
       const paused = await runWorkflow(args, results);
-      assertPassStopPause(paused, schemaProblem, 'revise-1', 'report');
+      assertPassStopPause(paused, 'The planner could not plan the delivery: it says "No such module.".', 'revise-1');
       const pass2 = { 'facts-2': factsRelay(), 'plan-2': planResult(), 'branch-2': branchRelay(), 'work-2-STEP-001': WORKER_DONE, 'commit-2-1': commitRelay(), ...tailResults(2, OTHER) };
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Go on.'), { ...results, ...pass2 });
       assert.equal(run.result.outcome, 'complete', run.result.message);
@@ -1623,27 +1663,27 @@ const ROW_TESTS = {
     for (const keyPath of pathFields) {
       const location = describeKeyPath(keyPath);
       for (const value of refusedPaths) {
-        test(`a path ${JSON.stringify(value)} at ${location} pauses before the branch step`, async () => {
-          const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(planWithValueAt(keyPath, value)) });
-          assertPassStopPause(run, pathProblem(location), 'plan-1', 'report');
-          assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
+        test(`a path ${JSON.stringify(value)} at ${location} goes back to the planner, then ends the run before the branch step`, async () => {
+          const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), ...repeatCheckResult('plan-1', planResult(planWithValueAt(keyPath, value))) });
+          assertCheckLimitEnd(run, pathProblem(location), 'plan-1');
+          assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', ...listFixLabels('plan-1')]);
         });
       }
       for (const value of ['', '  ']) {
-        test(`a blank path ${JSON.stringify(value)} at ${location} pauses with the schema message`, async () => {
-          const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(planWithValueAt(keyPath, value)) });
-          assertPassStopPause(run, schemaProblem, 'plan-1', 'report');
-          assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
+        test(`a blank path ${JSON.stringify(value)} at ${location} goes back to the planner with the schema message`, async () => {
+          const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), ...repeatCheckResult('plan-1', planResult(planWithValueAt(keyPath, value))) });
+          assertCheckLimitEnd(run, schemaProblem, 'plan-1');
+          assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', ...listFixLabels('plan-1')]);
         });
       }
     }
-    test('a revise result with a bad path pauses at the revise step', async () => {
+    test('a revise result with a bad path goes back to the planner at the revise step, then ends the run', async () => {
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
       const revised = reviseResult(planResult(makePlan({ steps: [makeStep('STEP-001', ['../x'])] })), ['Q1']);
       const args = { ...LAUNCH, build: BUILD_ID, answers: { 'round-1': 'Take option A.' } };
-      const run = await runWorkflow(args, happyResults({ 'plan-1': gated, 'revise-1': revised }));
-      assertPassStopPause(run, pathProblem('steps[0].files[0]'), 'revise-1', 'report');
-      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1']);
+      const run = await runWorkflow(args, happyResults({ 'plan-1': gated, ...repeatCheckResult('revise-1', revised) }));
+      assertCheckLimitEnd(run, pathProblem('steps[0].files[0]'), 'revise-1');
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', ...listFixLabels('revise-1')]);
     });
     test('the path check follows the mark, not the field names', () => {
       const marked = structuredClone(planSchema);
@@ -1674,6 +1714,7 @@ const ROW_TESTS = {
         assert.equal(main.describePlanProblem(planResult(plan), resultSchema, parsedFacts(), 'main'), undefined, value);
       }
     });
+    const startBranchMiss = ', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens.';
     const branchProblem = (branch) => 'The plan names branch ' + lib.encodeUntrustedText(branch) + ', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens, so the delivery stopped.';
     const taxonomyPrefixes = [...workflowRulesText.split('## Branch Taxonomy')[1].split('\n## ')[0].matchAll(/^\| `([a-z]+)\/` \|/gm)].map((match) => match[1]);
     const acceptedBranches = [...taxonomyPrefixes.map((prefix) => prefix + '/cache'), 'bugfix/proj-123-fix-cache', 'feature/467-synapse-runner', 'ci/a1-b2'];
@@ -1710,16 +1751,16 @@ const ROW_TESTS = {
       assert.equal(probe.describePlanProblem(planResult(makePlan({ branch: 'feature/cache' })), resultSchema, parsedFacts(), 'main'), branchProblem('feature/cache'));
     });
     for (const branch of ['feat/cache', 'feature/my_cache']) {
-      test(`a plan branch ${JSON.stringify(branch)} outside the branch taxonomy fails the plan schema and pauses before the branch step`, async () => {
-        const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan({ branch: branch })) });
-        assertPassStopPause(run, schemaProblem, 'plan-1', 'report');
-        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
+      test(`a plan branch ${JSON.stringify(branch)} outside the branch taxonomy fails the plan schema, goes back to the planner, then ends the run before the branch step`, async () => {
+        const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), ...repeatCheckResult('plan-1', planResult(makePlan({ branch: branch }))) });
+        assertCheckLimitEnd(run, schemaProblem, 'plan-1');
+        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', ...listFixLabels('plan-1')]);
       });
     }
-    test('a run started on a branch outside the taxonomy pauses at the plan check even when the plan names that branch', async () => {
+    test('a run started on a branch outside the taxonomy pauses with the fix line before the plan call, even when the plan names that branch', async () => {
       const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay({ branch: 'my-work' }), 'plan-1': planResult(makePlan({ branch: 'my-work' })) });
-      assertPassStopPause(run, schemaProblem, 'plan-1', 'report');
-      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
+      assertPassStopPause(run, 'The run started on branch "my-work"' + startBranchMiss, 'scope-1');
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1']);
     });
   },
   'SD-09': () => {
@@ -2021,15 +2062,15 @@ const ROW_TESTS = {
       assert.ok(paragraphs.indexOf(branchLine(OTHER)) > 2, run.result.message);
       assert.ok(!labelsOf(run).includes('branch-2'));
     });
-    test('a null revise result, an agent failure, ends with the run_again Next line, and a revise result that fails its schema pauses with the report brief', async () => {
+    test('a null revise result, an agent failure, ends with the run_again Next line, and a revise result that fails its schema ends with the report Next line once retries run out', async () => {
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
       const args = { ...LAUNCH, build: BUILD_ID, answers: { 'round-1': 'Take option A.' } };
       const failed = await runWorkflow(args, happyResults({ 'plan-1': gated, 'revise-1': null }));
       assert.deepEqual(failed.result.message.split('\n\n').slice(0, 2), ['The planner returned no result, so the delivery stopped. ' + lib.describeNoResult(null), main.nextStepLine('run_again')]);
       assert.deepEqual(labelsOf(failed), ['facts-1', 'scope-1', 'plan-1', 'revise-1']);
-      const unusable = await runWorkflow(args, happyResults({ 'plan-1': gated, 'revise-1': planResult() }));
-      assertPassStopPause(unusable, 'The planner returned a plan that does not fit the plan schema, so the delivery stopped.', 'revise-1', 'report');
-      assert.deepEqual(labelsOf(unusable), ['facts-1', 'scope-1', 'plan-1', 'revise-1']);
+      const unusable = await runWorkflow(args, happyResults({ 'plan-1': gated, ...repeatCheckResult('revise-1', planResult()) }));
+      assertCheckLimitEnd(unusable, 'The planner returned a plan that does not fit the plan schema, so the delivery stopped.', 'revise-1');
+      assert.deepEqual(labelsOf(unusable), ['facts-1', 'scope-1', 'plan-1', 'revise-1', ...listFixLabels('revise-1')]);
     });
   },
   'SD-10': () => {
@@ -2328,14 +2369,14 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, results);
       assertBlockedBeforeWaves(run, 'The branch step switched branch or commit again after a replan, so the delivery stopped before any wave.');
     });
-    test('a second plan naming a branch other than the facts branch pauses', async () => {
+    test('a second plan naming a branch other than the facts branch goes back to the planner, then ends the run', async () => {
       const results = happyResults({
         'branch-1': branchRelay({ created: 'false' }),
         'facts-2': onPlanBranchFacts(HEAD),
-        'plan-2': planResult(makePlan({ branch: 'feature/other' }))
+        ...repeatCheckResult('plan-2', planResult(makePlan({ branch: 'feature/other' })))
       });
       const run = await runWorkflow(LAUNCH, results);
-      assertPassStopPause(run, 'The run started on branch "feature/cache" and delivers on it, but the plan names branch "feature/other", so the delivery stopped.', 'plan-2', 'report');
+      assertCheckLimitEnd(run, 'The run started on branch "feature/cache" and delivers on it, but the plan names branch "feature/other", so the delivery stopped.', 'plan-2');
     });
     test('real scripts: switching onto an existing branch replans once', async () => {
       const scratch = makeScratchRepo();
@@ -5727,7 +5768,7 @@ const ROW_TESTS = {
       ]),
       ['commit outside line', 'line', (payload) => happyResults({ 'commit-1-1': { outcome: 'blocked', stderr: 'outside: ' + payload + outsideBlocker } })],
       ['commit outside JSON string line', 'joined', (payload) => happyResults({ 'commit-1-1': { outcome: 'blocked', stderr: 'outside: ' + JSON.stringify(payload) + outsideBlocker } })],
-      ['planner', 'reason', (payload) => happyResults({ 'plan-1': { outcome: 'blocked', blocker: payload, questions: [] } })],
+      ['planner', 'reason', (payload) => happyResults(repeatCheckResult('plan-1', { outcome: 'blocked', blocker: payload, questions: [] }))],
       ['blocked worker', 'reason', (payload) => happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: payload } })],
       ['needs_replan worker', 'reason', hostileReplanResults],
       ['fix round', 'reason', (payload) => fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: payload }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) })],
@@ -5756,16 +5797,16 @@ const ROW_TESTS = {
       excerpt: 'The injection scan returned a result it could not use, so the delivery stopped before planning.'
     };
     const pauseSiteLabels = ['facts relay blocker line', 'facts relay stderr', 'pull request relay blocker line', 'pull request relay stderr', 'planner', 'blocked worker', 'needs_replan worker', 'fix round', 'blocked review'];
-    function assertHostileStop(run, isPause) {
+    function assertHostileStop(run, isPause, nextLine = NEXT_STEP_LINE) {
       const message = run.result.message;
-      const nextLineCount = message.split('\n').filter((line) => line === NEXT_STEP_LINE).length;
+      const nextLineCount = message.split('\n').filter((line) => line === nextLine).length;
       if (isPause) {
         assert.equal(run.result.needs_user, true, message.slice(0, 300));
         assert.equal(nextLineCount, 0, message.slice(0, 600));
         return;
       }
       assert.equal(run.result.outcome, 'blocked', message.slice(0, 300));
-      assert.equal(message.split('\n\n')[1], NEXT_STEP_LINE);
+      assert.equal(message.split('\n\n')[1], nextLine);
       assert.equal(nextLineCount, 1);
     }
     for (const [label, kind, buildResults] of hostileSites) {
@@ -5783,7 +5824,11 @@ const ROW_TESTS = {
           const overBound = await runWorkflow(LAUNCH, buildResults(HOSTILE_PAYLOADS[0]));
           assert.ok(/^[\t\n\x20-\x7e]*$/.test(overBound.result.message), overBound.result.message.slice(0, 300));
           assert.ok(!overBound.result.message.includes('Z'.repeat(10)), overBound.result.message.slice(0, 300));
-          assertHostileStop(overBound, isPause);
+          if (label === 'planner') {
+            assertHostileStop(overBound, false, main.nextStepLine('report'));
+          } else {
+            assertHostileStop(overBound, isPause);
+          }
         }
         if (overBoundLeads[kind] !== undefined) {
           const overBound = await runWorkflow(LAUNCH, buildResults(HOSTILE_PAYLOADS[0]));
@@ -5926,8 +5971,7 @@ const ROW_TESTS = {
     for (const [label, results, leadStart] of [
       ['worker', happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: longBlocker } }), 'A worker did not finish its step'],
       ['fix round', fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: longBlocker }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }), 'The validation fix round was blocked'],
-      ['local review', happyResults({ 'review-1-1': { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: longBlocker, stage: 'invoke_review' } }), 'The local review step returned no usable result'],
-      ['planner', { 'facts-1': factsRelay(), 'plan-1': { outcome: 'blocked', blocker: longBlocker, questions: [] } }, 'The planner returned a plan that does not fit the plan schema']
+      ['local review', happyResults({ 'review-1-1': { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: longBlocker, stage: 'invoke_review' } }), 'The local review step returned no usable result']
     ]) {
       test(`a ${label} blocker too long for the notice pauses with no next-step line, without a throw`, async () => {
         const run = await runWorkflow(LAUNCH, results);
@@ -5952,6 +5996,12 @@ const ROW_TESTS = {
         assert.ok(lib.noticeLength(run.result) <= lib.noticeBudget());
       });
     }
+    test('a planner blocker too long for the notice goes back to the planner, then ends the run with the report Next line, without a throw', async () => {
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), ...repeatCheckResult('plan-1', { outcome: 'blocked', blocker: longBlocker, questions: [] }) });
+      assert.equal(run.failures, 0);
+      assertCheckLimitEnd(run, 'The planner returned a plan that does not fit the plan schema, so the delivery stopped.', 'plan-1');
+      assert.ok(lib.noticeLength(run.result) <= lib.noticeBudget());
+    });
     test('a validation blocker too long for the notice pauses as unusable, without a throw', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: longBlocker } }));
       assert.equal(run.failures, 0);
@@ -6607,12 +6657,18 @@ const ROW_TESTS = {
       }
       assert.deepEqual(callOf(replan, 'revise-1').opts.schema, structuredClone(lib.toAgentSchema(main.buildReviseResultSchema([{}], []))));
     });
+    for (const [label, args, results, callLabel] of [
+      ['a complete plan result carrying blocker', LAUNCH, { 'facts-1': factsRelay(), ...repeatCheckResult('plan-1', { ...planResult(), blocker: 'x' }) }, 'plan-1'],
+      ['a blocked plan result carrying a plan', LAUNCH, { 'facts-1': factsRelay(), ...repeatCheckResult('plan-1', { outcome: 'blocked', plan: makePlan(), questions: [], blocker: 'x' }) }, 'plan-1'],
+      ['a complete plan result with no plan', LAUNCH, { 'facts-1': factsRelay(), ...repeatCheckResult('plan-1', { outcome: 'complete', questions: [] }) }, 'plan-1'],
+      ['a complete revise result carrying blocker', reviseArgs, happyResults({ 'plan-1': gated, ...repeatCheckResult('revise-1', reviseResult({ ...planResult(), blocker: 'x' }, ['Q1'])) }), 'revise-1'],
+      ['a complete revise result with no plan', reviseArgs, happyResults({ 'plan-1': gated, ...repeatCheckResult('revise-1', reviseResult({ outcome: 'complete', questions: [] }, ['Q1'])) }), 'revise-1']
+    ]) {
+      test(`${label} fails the plan check, goes back to the planner, then ends the run`, async () => {
+        assertCheckLimitEnd(await runWorkflow(args, results), schemaProblem, callLabel);
+      });
+    }
     for (const [label, args, results, expected, lastLabel] of [
-      ['a complete plan result carrying blocker', LAUNCH, { 'facts-1': factsRelay(), 'plan-1': { ...planResult(), blocker: 'x' } }, schemaProblem, 'plan-1'],
-      ['a blocked plan result carrying a plan', LAUNCH, { 'facts-1': factsRelay(), 'plan-1': { outcome: 'blocked', plan: makePlan(), questions: [], blocker: 'x' } }, schemaProblem, 'plan-1'],
-      ['a complete plan result with no plan', LAUNCH, { 'facts-1': factsRelay(), 'plan-1': { outcome: 'complete', questions: [] } }, schemaProblem, 'plan-1'],
-      ['a complete revise result carrying blocker', reviseArgs, happyResults({ 'plan-1': gated, 'revise-1': reviseResult({ ...planResult(), blocker: 'x' }, ['Q1']) }), schemaProblem, 'revise-1'],
-      ['a complete revise result with no plan', reviseArgs, happyResults({ 'plan-1': gated, 'revise-1': reviseResult({ outcome: 'complete', questions: [] }, ['Q1']) }), schemaProblem, 'revise-1'],
       ['a ran relay carrying stderr', LAUNCH, { 'facts-1': { ...factsRelay(), stderr: 'x' } }, MALFORMED_FACTS, 'facts-1'],
       ['a blocked relay carrying stdout', LAUNCH, { 'facts-1': { outcome: 'blocked', stdout: factsStdout() } }, MALFORMED_FACTS, 'facts-1'],
       ['a ran relay with no stdout', LAUNCH, { 'facts-1': { outcome: 'ran' } }, MALFORMED_FACTS, 'facts-1'],
@@ -6988,15 +7044,15 @@ const ROW_TESTS = {
       }
       assert.deepEqual(run.phases.slice(0, 4), ['Facts', 'Scan', 'Scope', 'Plan']);
     });
-    test('a null scope result, an agent failure, names it once with the run_again Next line, and a malformed one gets the report brief', async () => {
+    test('a null scope result, an agent failure, names it once with the run_again Next line, and a malformed one ends with the report Next line once retries run out', async () => {
       const lead = 'The scope step returned a result it could not use, so the delivery stopped before planning.';
       const failed = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'scope-1': null });
       assert.equal(failed.result.outcome, 'blocked');
       assert.deepEqual(failed.result.message.split('\n\n').slice(0, 2), [lead + ' ' + lib.describeNoResult(null), main.nextStepLine('run_again')]);
       assert.deepEqual(labelsOf(failed), ['facts-1', 'scope-1']);
-      const malformed = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'scope-1': { documents: [] } });
-      assertPassStopPause(malformed, lead, 'scope-1', 'report');
-      assert.deepEqual(labelsOf(malformed), ['facts-1', 'scope-1']);
+      const malformed = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), ...repeatCheckResult('scope-1', { documents: [] }) });
+      assertCheckLimitEnd(malformed, lead, 'scope-1');
+      assert.deepEqual(labelsOf(malformed), ['facts-1', 'scope-1', ...listFixLabels('scope-1')]);
     });
   },
   'SD-60': () => {
@@ -7066,7 +7122,7 @@ const ROW_TESTS = {
     });
   },
   'SD-62': () => {
-    test('a scope result that fails its schema blocks before planning, and an empty scope goes on', async () => {
+    test('a scope result that fails its schema goes back to the scope agent, then ends the run before planning, and an empty scope goes on', async () => {
       const unusable = [
         { documents: [] },
         { documents: [], paths: [] },
@@ -7082,9 +7138,9 @@ const ROW_TESTS = {
         { documents: [], paths: [], limits: Array.from({ length: 31 }, (_, index) => 'src/d' + index) }
       ];
       for (const scope of unusable) {
-        const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'scope-1': scope });
-        assertPassStopPause(run, 'The scope step returned a result it could not use, so the delivery stopped before planning.', 'scope-1', 'report');
-        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1'], JSON.stringify(scope));
+        const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), ...repeatCheckResult('scope-1', scope) });
+        assertCheckLimitEnd(run, 'The scope step returned a result it could not use, so the delivery stopped before planning.', 'scope-1');
+        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', ...listFixLabels('scope-1')], JSON.stringify(scope));
       }
       const usable = await runWorkflow(LAUNCH, happyResults({ 'scope-1': { documents: [], paths: [], limits: [] } }));
       assert.equal(usable.result.outcome, 'complete', usable.result.message);
@@ -7379,7 +7435,7 @@ const ROW_TESTS = {
       assert.deepEqual(readDataBlock(callOf(run, 'revise-2').prompt, 'answers'), [unsettled]);
       assert.deepEqual(readDataBlock(callOf(run, 'scope-1-2').prompt, 'answers'), [unsettled, { question: unsettled.question, settled: ['Q1'], reply: 'Take option B.' }]);
     });
-    test('a pause shows no taken decision, so the settled enum holds the Q labels only and a revise naming D1 fails its schema', async () => {
+    test('a pause shows no taken decision, so the settled enum holds the Q labels only and a revise naming D1 fails its schema on every retry', async () => {
       const results = happyResults({ 'plan-1': gated, 'revise-1': reviseResult(planResult(), ['Q1']) });
       const run = await runWorkflow(answeredArgs({}), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
@@ -7388,9 +7444,9 @@ const ROW_TESTS = {
       assert.ok(!readDataBlock(revise.prompt, 'questions').includes('D1. '), revise.prompt);
       assert.deepEqual(revise.opts.schema.properties.settled.items.enum, ['Q1']);
       assert.deepEqual(readDataBlock(callOf(run, 'scope-1-1').prompt, 'answers'), [{ question: readDataBlock(revise.prompt, 'questions'), settled: ['Q1'], reply: firstReply }]);
-      const refused = await runWorkflow(answeredArgs({}), happyResults({ 'plan-1': gated, 'revise-1': reviseResult(planResult(), ['D1', 'Q1']) }));
-      assertPassStopPause(refused, 'The planner returned a plan that does not fit the plan schema, so the delivery stopped.', 'revise-1', 'report');
-      assert.deepEqual(labelsOf(refused), ['facts-1', 'scope-1', 'plan-1', 'revise-1']);
+      const refused = await runWorkflow(answeredArgs({}), happyResults({ 'plan-1': gated, ...repeatCheckResult('revise-1', reviseResult(planResult(), ['D1', 'Q1'])) }));
+      assertCheckLimitEnd(refused, 'The planner returned a plan that does not fit the plan schema, so the delivery stopped.', 'revise-1');
+      assert.deepEqual(labelsOf(refused), ['facts-1', 'scope-1', 'plan-1', 'revise-1', ...listFixLabels('revise-1')]);
     });
     test('a settled plan acceptance is logged with its plan lead and settled ["Q1"]', async () => {
       const surfaced = buildWithSurfaceKinds(['plan_acceptance']);
@@ -7615,11 +7671,13 @@ const ROW_TESTS = {
         assertOutsideAsk(paused.result.message, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], makePlan());
       }
     });
-    test('a re-scope result that fails SCOPE_SCHEMA pauses before any wave, after the reply of its round is logged', async () => {
-      const { paused } = await pauseOnAnswerLimit([], { 'scope-1-1': { documents: [], paths: [] } });
-      assertPassStopPause(paused, UNUSABLE_SCOPE, 'scope-1-1', 'report');
-      assert.deepEqual(Object.keys(paused.result.resume_args.answers), ['round-1']);
-      assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1']);
+    test('a re-scope result that fails SCOPE_SCHEMA goes back to the scope agent with the reply of its round logged, then ends the run before any wave', async () => {
+      const { paused } = await pauseOnAnswerLimit([], repeatCheckResult('scope-1-1', { documents: [], paths: [] }));
+      assertCheckLimitEnd(paused, UNUSABLE_SCOPE, 'scope-1-1');
+      for (const fixLabel of listFixLabels('scope-1-1')) {
+        assert.deepEqual(readDataBlock(callOf(paused, fixLabel).prompt, 'answers').map((entry) => entry.reply), ['Take option A, and change only docs.'], fixLabel);
+      }
+      assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', ...listFixLabels('scope-1-1')]);
     });
     test('the pause lead names up to maxListedItems() outside paths, one line each, then the count of the rest', () => {
       assert.equal(main.maxListedItems(), 5);
@@ -8241,7 +8299,8 @@ const ROW_TESTS = {
       const scratch = makeScratchRepo();
       mkdirSync(join(scratch.repo, '.hivemind'));
       const fresh = await runWorkflow({ request: REQUEST, references: [5, 12] }, fixFlowResults());
-      const stale = await runWorkflow(LAUNCH, happyResults({ 'facts-1': factsRelay({ trunk_freshness: 'behind', trunk_behind: '1' }) }));
+      const stale = await runWorkflow(LAUNCH, happyResults({ 'facts-1': factsRelay({ trunk_freshness: 'behind', trunk_behind: '1' }), 'plan-1': planResult(makePlan({ trunk_freshness: 'behind' })), 'branch-1': branchRelay({ warning: main.branchWarningTexts().stale }) }));
+      assert.equal(stale.result.outcome, 'complete', stale.result.message);
       const blocked = { outcome: 'blocked', stderr: 'blocker: PR_STOP_ZQ\n' };
       const results = happyResults({ 'pr-1': blocked, 'head-1-1': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
       const paused = await runWorkflow(LAUNCH, results);
@@ -8523,10 +8582,10 @@ const ROW_TESTS = {
       ['any number when the launch names no reference', LAUNCH, [488], 0],
       ['a zero', fixLaunch, [0], 0]
     ]) {
-      test(`${label} pauses before the branch step`, async () => {
-        const run = await runWorkflow(launch, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan({ closes: closes })) });
-        assertPassStopPause(run, closesProblem(index), 'plan-1', 'report');
-        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
+      test(`${label} goes back to the planner, then ends the run before the branch step`, async () => {
+        const run = await runWorkflow(launch, { 'facts-1': factsRelay(), ...repeatCheckResult('plan-1', planResult(makePlan({ closes: closes }))) });
+        assertCheckLimitEnd(run, closesProblem(index), 'plan-1');
+        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', ...listFixLabels('plan-1')]);
       });
     }
     test('the check is membership only: a launch number in another digit form passes, and a non-integer fails the schema', () => {
@@ -8600,8 +8659,9 @@ const ROW_TESTS = {
       const logged = await runPlanningRounds({ 'plan-1': plan, 'revise-1': reviseResult(planResult(), ['Q1']) }, { 'round-1': 'B' });
       assert.ok(logged.end.plan !== undefined, JSON.stringify(logged.end));
       assert.deepEqual(logged.approvals, [TEST_X]);
-      const failed = await runPlanningRounds({ 'plan-1': plan, 'revise-1': { outcome: 'complete' } }, { 'round-1': 'B' });
-      assert.equal(failed.end.result.needs_user, true, JSON.stringify(failed.end));
+      const failed = await runPlanningRounds({ 'plan-1': plan, ...repeatCheckResult('revise-1', { outcome: 'complete' }) }, { 'round-1': 'B' });
+      assert.equal(failed.end.result.needs_user, false, JSON.stringify(failed.end));
+      assert.equal(failed.end.result.outcome, 'blocked', JSON.stringify(failed.end));
       assert.deepEqual(failed.answerLog.map((entry) => entry.settled), [[]]);
       assert.deepEqual(failed.approvals, [TEST_X]);
     });
@@ -8872,6 +8932,188 @@ const ROW_TESTS = {
         assert.deepEqual([decided.result, decided.calls], [plain.result, plain.calls]);
       }
       assert.doesNotMatch(analysisSource, /\.decisions\b/);
+    });
+  },
+  'SD-81': () => {
+    const schemaProblem = 'The planner returned a plan that does not fit the plan schema, so the delivery stopped.';
+    const unusableScope = 'The scope step returned a result it could not use, so the delivery stopped before planning.';
+    const trunkProblem = 'The plan copies a trunk freshness other than the facts, so the delivery stopped.';
+    const fixLine = 'Fix your result per the check block.';
+    const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
+    const reviseArgs = { ...LAUNCH, build: BUILD_ID, answers: { 'round-1': 'Take option A.' } };
+    const versioning = (artifactFiles) => ({ bump_trigger: 'yes', no_bump_match: 'no', artifact_files: artifactFiles, changelog_files: [] });
+    const checkCases = [
+      ['no result', 'not an object', 'Planned.', 'The planner returned no result, so the delivery stopped.'],
+      ['schema', 'a plan with no steps', planResult(makePlan({ steps: [] })), schemaProblem],
+      ['blocked', 'a blocked planner with no reason', { outcome: 'blocked', questions: [] }, 'The planner could not plan the delivery: it gave no reason.'],
+      ['path', 'a step path outside the repository', planResult(makePlan({ steps: [makeStep('STEP-001', ['../x'])] })), pathProblem('steps[0].files[0]')],
+      ['wave', 'unschedulable steps', planResult(makePlan({ steps: [makeStep('A', ['a.js'], { depends_on: ['B'] }), makeStep('B', ['b.js'], { depends_on: ['A'] })] })), 'The plan steps cannot be scheduled, so the delivery stopped: dependency cycle detected among plan steps'],
+      ['trunk', 'another trunk_freshness', planResult(makePlan({ trunk_freshness: 'behind' })), trunkProblem],
+      ['git name', 'an unsafe base', planResult(makePlan({ base: '-main' })), 'The plan names a branch or base that is not a safe git name, so the delivery stopped.'],
+      ['version path', 'an unsafe version path', planResult(makePlan({ versioning: versioning(['VERSION;touch x']) })), 'The plan names a version file path that is not a safe git path, so the delivery stopped.'],
+      ['command', 'a validation command with a line break', planResult(makePlan({ validation_commands: ['npm test\nrm -rf x'] })), 'The plan names a validation command at validation_commands[0] that holds a line break, so the delivery stopped.'],
+      ['command', 'a validation command with a control character', planResult(makePlan({ validation_commands: ['npm test\u001b[0m'] })), 'The plan names a validation command at validation_commands[0] that holds a control character, so the delivery stopped.'],
+      ['typed title', 'a title typed with another commit type', planResult(makePlan({ title: 'fix: Add the cache layer' })), 'The plan title starts with a commit type, which the workflow writes before it, so the delivery stopped.'],
+      ['typed title', 'a title typed breaking on a plan that is not', planResult(makePlan({ title: 'feat!: Add the cache layer' })), 'The plan title starts with a commit type, which the workflow writes before it, so the delivery stopped.'],
+      ['empty title', 'a title with no text', planResult(makePlan({ title: '('.repeat(300) })), 'The plan title leaves no text once it is cleaned and cut to fit the pull request title, so the delivery stopped.'],
+      ['other branch', 'another branch than the start branch', planResult(makePlan({ branch: 'feature/other' })), 'The run started on branch "feature/cache" and delivers on it, but the plan names branch "feature/other", so the delivery stopped.'],
+      ['closes', 'a closes number that is not a launch reference', planResult(makePlan({ closes: [488] })), 'The plan names an issue at closes[0] that is not one of the references the run started with, so the delivery stopped.']
+    ];
+    const probedChecks = ['taxonomy'];
+    function startResultsOf(check) {
+      return check === 'other branch' ? { 'facts-1': factsRelay({ branch: 'feature/cache' }), 'branch-1': branchRelay({ created: 'false' }) } : {};
+    }
+    /**
+     * Asserts the prompt of fixLabel is the prompt of label with the fix
+     * line after its first line and, at its end, a check block whose
+     * problem is problem and whose schema_errors has at most
+     * maxListedItems() entries, none when the result fits its schema.
+     */
+    function assertFixPrompt(run, label, fixLabel, problem, fitsSchema) {
+      const firstLines = callOf(run, label).prompt.split('\n');
+      const fixLines = callOf(run, fixLabel).prompt.split('\n');
+      assert.deepEqual([fixLines[0], fixLines[1]], [firstLines[0], fixLine], fixLabel);
+      assert.deepEqual(fixLines.slice(2, -3), firstLines.slice(1), fixLabel);
+      assert.equal(fixLines.at(-3), '<check>', fixLabel);
+      const check = readDataBlock(callOf(run, fixLabel).prompt, 'check');
+      assert.deepEqual(Object.keys(check), ['problem', 'schema_errors'], fixLabel);
+      assert.equal(check.problem, problem, fixLabel);
+      assert.ok(check.schema_errors.length <= main.maxListedItems(), fixLabel);
+      assert.equal(check.schema_errors.length === 0, fitsSchema, fixLabel);
+      assert.deepEqual(callOf(run, fixLabel).opts.schema, callOf(run, label).opts.schema, fixLabel);
+      assert.deepEqual([callOf(run, fixLabel).opts.agentType, callOf(run, fixLabel).opts.phase], [callOf(run, label).opts.agentType, callOf(run, label).opts.phase], fixLabel);
+    }
+    for (const [check, label, bad, problem] of checkCases) {
+      test(`a plan with ${label} goes back to the planner with the check block, and its fixed retry completes the run with no question`, async () => {
+        const run = await runWorkflow(LAUNCH, happyResults({ ...startResultsOf(check), 'plan-1': bad, 'plan-1-fix-1': planResult() }));
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        assert.notEqual(run.result.needs_user, true);
+        const labels = labelsOf(run);
+        assert.deepEqual(labels.slice(labels.indexOf('plan-1'), labels.indexOf('plan-1') + 3), ['plan-1', 'plan-1-fix-1', 'branch-1']);
+        assert.ok(!labels.includes('plan-1-fix-2'), JSON.stringify(labels));
+        assertFixPrompt(run, 'plan-1', 'plan-1-fix-1', problem, check !== 'no result' && check !== 'schema');
+        assert.equal(main.isFixablePlanResult(bad, callOf(run, 'plan-1').opts.schema), true, label);
+      });
+    }
+    test('a branch outside the taxonomy, a check the schema pattern shadows, is fixable behind a schema with no branch pattern', () => {
+      const unpatternedSchema = structuredClone(planSchema);
+      delete unpatternedSchema.properties.branch.pattern;
+      const resultSchema = main.buildPlanResultSchema(unpatternedSchema, briefSchema);
+      const result = planResult(makePlan({ branch: 'feat/cache' }));
+      const problem = 'The plan names branch "feat/cache", which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens, so the delivery stopped.';
+      assert.equal(main.describePlanProblem(result, resultSchema, parsedFacts(), 'main', []), problem);
+      assert.equal(main.isFixablePlanResult(result, resultSchema), true);
+      assert.equal(main.describePlanProblem(result, main.buildPlanResultSchema(planSchema, briefSchema), parsedFacts(), 'main', []), schemaProblem);
+    });
+    test('isFixablePlanResult refuses only a null result and a blocked outcome that fits its schema and gives a reason', () => {
+      const resultSchema = main.buildPlanResultSchema(planSchema, briefSchema);
+      assert.equal(main.isFixablePlanResult(null, resultSchema), false);
+      assert.equal(main.isFixablePlanResult({ outcome: 'blocked', blocker: 'No such module.', questions: [] }, resultSchema), false);
+      for (const result of [{ outcome: 'blocked', blocker: ' ', questions: [] }, { outcome: 'blocked', blocker: 'No such module.' }, { outcome: 'blocked', blocker: 'B'.repeat(500), questions: [] }, 'Planned.', planResult(makePlan({ trunk_freshness: 'behind' }))]) {
+        assert.equal(main.isFixablePlanResult(result, resultSchema), true, JSON.stringify(result).slice(0, 80));
+      }
+    });
+    test('the cases name every return of describePlanProblem, describeClosesProblem the last', () => {
+      const code = stripCommentsAndStrings(main.describePlanProblem.toString());
+      const checks = new Set([...checkCases.map(([check]) => check), ...probedChecks]);
+      assert.equal((code.match(/\breturn\b/g) || []).length, checks.size);
+      assert.ok(/return describeClosesProblem\(plan, ?references\);\s*\}$/.test(code), code.slice(-80));
+      assert.equal((stripCommentsAndStrings(main.describeClosesProblem.toString()).match(/\breturn\b/g) || []).length, 1);
+    });
+    test('a plan still failing its check after maxCheckRetries() retries ends the run blocked with the report Next line, and no further retry is called', async () => {
+      assert.equal(main.maxCheckRetries(), 2);
+      assert.deepEqual(structuredClone(main.describeCheckLimit(trunkProblem)), { problem: trunkProblem + ' It stayed after 2 retries.', nextAction: 'report', terminal: true });
+      const bad = planResult(makePlan({ trunk_freshness: 'behind' }));
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), ...repeatCheckResult('plan-1', bad), 'plan-1-fix-3': planResult() });
+      assert.equal(run.result.needs_user, false);
+      assert.equal(run.result.outcome, 'blocked');
+      const paragraphs = run.result.message.split('\n\n');
+      assert.deepEqual(paragraphs.slice(0, 2), [trunkProblem + ' It stayed after 2 retries.', main.nextStepLine('report')]);
+      assertCheckLimitEnd(run, trunkProblem, 'plan-1');
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'plan-1-fix-1', 'plan-1-fix-2']);
+      assertFixPrompt(run, 'plan-1', 'plan-1-fix-2', trunkProblem, true);
+    });
+    test('a retry that fails another check gets that check, and a later fitting retry completes', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan({ trunk_freshness: 'behind' })), 'plan-1-fix-1': planResult(makePlan({ steps: [] })), 'plan-1-fix-2': planResult() }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual([readCheckProblem(run, 'plan-1-fix-1'), readCheckProblem(run, 'plan-1-fix-2')], [trunkProblem, schemaProblem]);
+      assertFixPrompt(run, 'plan-1', 'plan-1-fix-2', schemaProblem, false);
+    });
+    test('a null retry ends the run with the run_again Next line, and a retry blocked with a reason pauses with the fix line', async () => {
+      const bad = planResult(makePlan({ trunk_freshness: 'behind' }));
+      const failed = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': bad, 'plan-1-fix-1': null });
+      assertBlockedBeforeWaves(failed, 'The planner returned no result, so the delivery stopped. ' + lib.describeNoResult(null) + '\n\n' + main.nextStepLine('run_again'));
+      assert.equal(labelsOf(failed).at(-1), 'plan-1-fix-1');
+      const blocked = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': bad, 'plan-1-fix-1': { outcome: 'blocked', blocker: 'No such module.', questions: [] } });
+      assertPassStopPause(blocked, 'The planner could not plan the delivery: it says "No such module.".', 'plan-1-fix-1');
+    });
+    for (const [title, breaking, prTitle] of [
+      ['feat: Add the cache layer', false, 'feat: Add the cache layer'],
+      ['Feat(cache): Add the cache layer', false, 'feat: Add the cache layer'],
+      [' FEAT:  Add the cache layer ', false, 'feat: Add the cache layer'],
+      ['feat!: Add the cache layer', true, 'feat!: Add the cache layer'],
+      ['feat(cache)!: Add the cache layer', true, 'feat!: Add the cache layer'],
+      ['feat: Add the cache layer', true, 'feat!: Add the cache layer']
+    ]) {
+      test(`a title ${JSON.stringify(title)} of the plan's own type${breaking ? ' on a breaking plan' : ''} completes with no retry, the PR title carrying one type`, async () => {
+        const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan({ title: title, breaking: breaking })) }));
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        assert.ok(labelsOf(run).every((label) => !label.includes('-fix-')), JSON.stringify(labelsOf(run)));
+        assert.equal(readRunnerInputs(callOf(run, 'pr-1').prompt).title, prTitle);
+      });
+    }
+    test('normalizePlanTitle cuts the type on a copy, and leaves any other result as it is', () => {
+      const resultSchema = main.buildPlanResultSchema(planSchema, briefSchema);
+      const typed = planResult(makePlan({ title: 'feat(cache): Add the cache layer' }));
+      const normalized = main.normalizePlanTitle(typed, resultSchema);
+      assert.equal(normalized.plan.title, 'Add the cache layer');
+      assert.equal(typed.plan.title, 'feat(cache): Add the cache layer');
+      for (const result of [planResult(makePlan({ title: 'feat: ' })), planResult(makePlan({ title: 'fix: Add the cache layer' })), planResult(makePlan({ title: 'feat!: Add the cache layer' })), planResult(makePlan({ title: 'feat: X', steps: [] })), 'Planned.', null]) {
+        assert.equal(main.normalizePlanTitle(result, resultSchema), result, JSON.stringify(result).slice(0, 80));
+      }
+    });
+    test('a revise that a retry fixed logs the settled labels of the fixed result, and one still failing logs settled [] and ends the run', async () => {
+      const bad = reviseResult(planResult(makePlan({ trunk_freshness: 'behind' })), []);
+      const fixed = await runPlanningRounds({ 'plan-1': gated, 'revise-1': bad, 'revise-1-fix-1': reviseResult(planResult(), ['Q1']) }, { 'round-1': 'Take option A.' });
+      assert.ok(fixed.end.plan !== undefined, JSON.stringify(fixed.end));
+      assert.deepEqual(fixed.answerLog.map((entry) => [entry.settled, entry.reply]), [[['Q1'], 'Take option A.']]);
+      const failed = await runPlanningRounds({ 'plan-1': gated, ...repeatCheckResult('revise-1', bad) }, { 'round-1': 'Take option A.' });
+      assert.equal(failed.end.result.needs_user, false, JSON.stringify(failed.end));
+      assert.ok(failed.end.result.message.startsWith(trunkProblem + ' It stayed after 2 retries.\n\n' + main.nextStepLine('report')), failed.end.result.message);
+      assert.deepEqual(failed.answerLog.map((entry) => [entry.settled, entry.reply]), [[[], 'Take option A.']]);
+      const run = await runWorkflow(reviseArgs, happyResults({ 'plan-1': gated, 'revise-1': bad, 'revise-1-fix-1': reviseResult(planResult(), ['Q1']) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assertFixPrompt(run, 'revise-1', 'revise-1-fix-1', trunkProblem, true);
+    });
+    test('a scope result that fails SCOPE_SCHEMA goes back to the scope agent with the check block, and a fitting retry goes on', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'scope-1': { documents: [] }, 'scope-1-fix-1': EMPTY_SCOPE }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run).slice(0, 4), ['facts-1', 'scope-1', 'scope-1-fix-1', 'plan-1']);
+      assertFixPrompt(run, 'scope-1', 'scope-1-fix-1', unusableScope, false);
+      assert.deepEqual(callOf(run, 'scope-1-fix-1').opts.model, 'sonnet');
+    });
+    test('a re-scope result that fails SCOPE_SCHEMA goes back to the scope agent, and a fitting retry goes on', async () => {
+      const run = await runWorkflow(reviseArgs, happyResults({ 'plan-1': gated, 'revise-1': reviseResult(planResult(), ['Q1']), 'scope-1-1': { documents: [], paths: [] }, 'scope-1-1-fix-1': EMPTY_SCOPE }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const labels = labelsOf(run);
+      assert.deepEqual(labels.slice(labels.indexOf('revise-1'), labels.indexOf('revise-1') + 3), ['revise-1', 'scope-1-1', 'scope-1-1-fix-1']);
+      assertFixPrompt(run, 'scope-1-1', 'scope-1-1-fix-1', unusableScope, false);
+    });
+    test('a scope result still failing SCOPE_SCHEMA after maxCheckRetries() retries ends the run blocked before planning, and a null retry ends it with the run_again Next line', async () => {
+      const exhausted = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), ...repeatCheckResult('scope-1', { documents: [] }), 'scope-1-fix-3': EMPTY_SCOPE });
+      assertCheckLimitEnd(exhausted, unusableScope, 'scope-1');
+      assert.deepEqual(labelsOf(exhausted), ['facts-1', 'scope-1', 'scope-1-fix-1', 'scope-1-fix-2']);
+      const failed = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'scope-1': { documents: [] }, 'scope-1-fix-1': null });
+      assertBlockedBeforeWaves(failed, unusableScope + ' ' + lib.describeNoResult(null) + '\n\n' + main.nextStepLine('run_again'));
+      assert.deepEqual(labelsOf(failed), ['facts-1', 'scope-1', 'scope-1-fix-1']);
+    });
+    test('a run started on a branch outside the taxonomy pauses before plan-1 with the fix line brief, and a trunk or detached start is not stopped', async () => {
+      const lead = 'The run started on branch "my-work", which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens.';
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay({ branch: 'my-work' }) });
+      assertPassStopPause(run, lead, 'scope-1');
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1']);
+      const detached = await runWorkflow(LAUNCH, happyResults({ 'facts-1': factsRelay({ head_state: 'detached', branch: undefined }) }));
+      assert.equal(detached.result.outcome, 'complete', detached.result.message);
     });
   }
 };
