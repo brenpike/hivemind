@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - On the state machine, `standard-delivery` no longer stops before the pull request: the `pr_confirm` user gate is gone. Every route into `open_pr` passes the new decision state `gate_check`, which sends the run back through `validate` when a commit, such as a local review fix, moved the branch head after validation passed. The definition moves to version 7, so a run resumed from version 6 meets the version-skew doors (#541).
 - `overlord.md`: repeat rejections go in the PR body, and the gated-commit and brood-child lines drop `pr_confirm` (#541).
+- `remediation-doctrine.md` (Recorded Decisions and Repeat Findings): a reviewer lists a repeat for the user before the merge, not before the PR; the CONTEXT.md entry matches (#541).
 - `definitions.md` (Validation Procedure) drops the ADR pointer and the version-check detail the script holds; no rule changes.
 - Docs: ADR-0037 amendment, ADR-0038 notes, README, the website and the brood ledger model (#541).
 

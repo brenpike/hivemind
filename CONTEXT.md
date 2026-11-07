@@ -200,7 +200,7 @@ The four questions answered at the first non-trivial review finding, before any 
 _Avoid_: cluster triage, triage at N findings, inherited-finding deferral
 
 **Repeat Finding**:
-A later review finding that contests a decision recorded in the repo — a user's rejection of a finding, or a threat model — on the branch or on trunk. The reviewer rejects it by citing the record, lists it for the user before the PR, does not fix it, and never asks again. Keyed on the recorded decision, never on a finding id (new every run) or a question (lives one run). A finding that shows a failure the record does not cover is new, not a repeat, and gets **First-Finding Triage**. Defined in the **Remediation Doctrine**.
+A later review finding that contests a decision recorded in the repo — a user's rejection of a finding, or a threat model — on the branch or on trunk. The reviewer rejects it by citing the record, lists it for the user before the merge, does not fix it, and never asks again. Keyed on the recorded decision, never on a finding id (new every run) or a question (lives one run). A finding that shows a failure the record does not cover is new, not a repeat, and gets **First-Finding Triage**. Defined in the **Remediation Doctrine**.
 _Avoid_: duplicate finding, same-finding-repeat (the GitHub Review Loop terminal), re-raised finding
 
 **Root-Cluster**:

@@ -2413,7 +2413,9 @@ This amendment covers https://github.com/brenpike/hivemind/issues/541. A session
 
 **Recorded residual: post-PR validation edits no PR body.** Post-PR validation (`github-reviewer`, `validate_postpr`) applies the rerun, but edits no pull request body.
 
-**Other ADRs.** ADR-0038 gains two dated notes: its `plugin/agents/overlord.md` consumer line, where the repeat rejections go in the PR body, and the residual "Matching a repeat is judgment".
+**Local review finding a729e35c.** `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings), its pin `tests/policy/safety-recorded-decision-repeat.json` and the `CONTEXT.md` entry Repeat Finding said a reviewer lists a repeat for the user before the PR. That never held for the GitHub reviewer, and after decision 1 it no longer holds for the local reviewer. All three now say before the merge, the point both reviewers meet: the local reviewer's repeats go in the PR body, the GitHub reviewer's in its thread reply. Rejected: the finding's "in the PR body, before the merge", which is wrong for the GitHub reviewer. A later finding that asks for that wording repeats this decision. The doctrine went from 19906 to 19905 bytes, under its budget of 19906: "merge" adds 3 bytes, and "naming the run as decider", the wording of `plugin/governance/decision-autonomy.md` (Review Calls), cuts 4.
+
+**Other ADRs.** ADR-0038 gains three dated notes: its `plugin/agents/overlord.md` consumer line, where the repeat rejections go in the PR body, the residual "Matching a repeat is judgment", and decision 4, where a reviewer lists a repeat before the merge.
 
 It updates these places in place, each with a dated note:
 

@@ -84,9 +84,9 @@ A residual whose reasoning later fails (unbounded impact, an attacker or failure
 
 A user's rejection of a finding and a threat model are decisions, each recorded at its source in the project's durable design records, named by role, on the branch or on trunk. The key is the recorded decision, never a finding id or a question.
 
-A later finding that contests a recorded decision is a repeat: the reviewer rejects it by citing the record, lists it for the user before the PR, does not fix it, and never asks again. A finding that shows a failure the record does not cover is new and gets **First-Finding Triage**.
+A later finding that contests a recorded decision is a repeat: the reviewer rejects it by citing the record, lists it for the user before the merge, does not fix it, and never asks again. A finding that shows a failure the record does not cover is new and gets **First-Finding Triage**.
 
-A user's rejection is recorded before the next review reads it: by the reviewer that asked, when the answer reaches it in the same run (the local reviewer in a delivery run, the GitHub reviewer in a PR watch), otherwise by the next plan as a plan step. A call the run took under `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls) is recorded the same way by the reviewer that asked, naming the run as the decider.
+A user's rejection is recorded before the next review reads it: by the reviewer that asked, when the answer reaches it in the same run (the local reviewer in a delivery run, the GitHub reviewer in a PR watch), otherwise by the next plan as a plan step. A call the run took under `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls) is recorded the same way by the reviewer that asked, naming the run as decider.
 
 ## Stop-and-Merge
 
