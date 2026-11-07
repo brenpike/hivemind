@@ -690,7 +690,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '0aeb5857a4658504';
+const BUILD_ID = '2899d8da7b3fa961';
 
 function supportedSchemaKeywords(){
 return[
@@ -893,7 +893,7 @@ errors.push(path+': additionalProperties: unexpected '+describeUnexpectedSchemaK
 }
 }
 function describeUnexpectedSchemaKey(name){
-return/^[A-Za-z0-9_-]+$/.test(name)?name:JSON.stringify(name);
+return/^[A-Za-z0-9_-]{1,64}$/.test(name)?name:JSON.stringify(name.slice(0,64));
 }
 function collectArrayErrors(schema,list,path,errors){
 if(schema.minItems!==undefined&&list.length<schema.minItems){

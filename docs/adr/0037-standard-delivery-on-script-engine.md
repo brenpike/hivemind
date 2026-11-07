@@ -2468,6 +2468,7 @@ The rest of ADR-0037 is unchanged.
 - **A blocked outcome with no reason is retried.** A planner blocked outcome that fits its schema and gives a reason is the planner's own call and pauses with the fix line, unchanged. With no reason it is a slip, so it is retried.
 - **Unchanged.** A null result, an agent failure, still ends with `run_again`. A blocked outcome with a reason is unchanged.
 - **A new module.** `checks.js` holds the retry code, because `plan.js` would pass the 600-line source limit.
+- **A bounded check block.** A schema error names only schema text, except an unexpected key, the one value an agent writes into it. `describeUnexpectedSchemaKey` (`lib/schema.js`) now names that key as is only when it is 1 to 64 letters, digits, `_` and `-`, else its first 64 code units JSON-encoded. So every error in the check block, and every retry prompt, has a bound the schema sets, whatever key the agent writes.
 
 **Options ruled out.**
 
@@ -2487,7 +2488,7 @@ The rest of ADR-0037 is unchanged.
 - `plan.js` replan line: 'This is a new plan in a run that already started: the replan block says why.' became 'A replan of a started run: the replan block says why.'
 - `waves.js` worker outcome description: 'needs_replan when the plan must change before the step can be done.' became 'needs_replan when the plan must change first.'
 
-**Figures.** Built prose 43647 of budget 43800 (was 43594). Built length 189797 of 190000. `plan.js` is 592 lines. No budget raise.
+**Figures.** Built prose 43647 of budget 43800 (was 43594). Built length 189814 of 190000. `plan.js` is 592 lines. No budget raise.
 
 **Recorded residuals.** Other stops that say "retry?" stay. They are not the same class:
 

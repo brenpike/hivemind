@@ -28,9 +28,9 @@
  *                   each naming the path from '$' and the failed keyword.
  *                   ok is true only when errors is empty. Each error is one
  *                   line. Every name in it comes from the schema, except an
- *                   unexpected key, which comes from the value: it is named
- *                   as is when it holds only letters, digits, _ and -, and
- *                   JSON-encoded otherwise.
+ *                   unexpected key, which comes from the value: named as
+ *                   is when it is 1 to 64 letters, digits, _ and -, else
+ *                   its first 64 code units JSON-encoded.
  *   supportedSchemaKeywords  every keyword validateSchema accepts.
  *   buildTaggedSchema  {type: 'object', additionalProperties: false,
  *                   required, properties, anyOf}. anyOf holds one branch
@@ -340,7 +340,7 @@ function collectObjectErrors(schema, record, path, errors) {
 }
 
 function describeUnexpectedSchemaKey(name) {
-  return /^[A-Za-z0-9_-]+$/.test(name) ? name : JSON.stringify(name);
+  return /^[A-Za-z0-9_-]{1,64}$/.test(name) ? name : JSON.stringify(name.slice(0, 64));
 }
 
 function collectArrayErrors(schema, list, path, errors) {
