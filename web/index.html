@@ -118,7 +118,7 @@
               <h3 class="xg">Route</h3>
               <p class="xs"><code>hivemind:route-workflow</code> picks standard-delivery, analysis-only, pr-feedback-remediation, hatchery-dispatch or exploratory-intent-session. Analysis-only and standard-delivery launch as the <code>hivemind:analysis-only</code> and <code>hivemind:standard-delivery</code> workflow scripts when Claude Code's Workflow tool is available; every other workflow runs on its state machine.</p>
               <p class="xs">Analysis-only has been a script since 6.0.0, standard-delivery since 7.0.0. In manual mode the Workflow tool shows an approval prompt; in auto mode the launch goes ahead with no prompt. A No at the prompt interrupts the turn, with no fallback. To keep delivery on the state machine, add <code>Workflow(hivemind:standard-delivery)</code> to <code>permissions.deny</code>: the launch is refused with no prompt and the request falls back to the state machine. The definitions live in <code>plugin/workflows/</code>: <code>.json</code> state machines plus the generated <code>.js</code> scripts.</p>
-              <p class="xs">A trivial one-file change takes the Reflex fast path, which skips the router, the run ledger and the cerebrate.</p>
+              <p class="xs">A trivial task, such as a one-file change or a version-only edit, is checked before routing and takes the Reflex fast path, which skips the router, the run ledger and the cerebrate.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Facts</h3>

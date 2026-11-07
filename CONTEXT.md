@@ -85,7 +85,7 @@ _Alias_: plan artifact, psionic directive
 _Avoid_: map, blueprint, spec, design doc
 
 **Reflex**:
-An instinctive response that bypasses the cerebrate when all reflex conditions are met: one owner, one known file, trivial change, clear branch classification, no version impact, no review remediation.
+An instinctive response that bypasses the cerebrate and the router when every Reflex condition in `plugin/agents/overlord.md` (`## Reflex (Ledger-Skip)`) holds; the overlord checks it before routing.
 _Alias_: trivial fast path (TFP)
 _Avoid_: quick path, shortcut
 
@@ -442,7 +442,7 @@ _Avoid_: degraded mode, manual mode, safe mode
 ## Example dialogue
 
 > **Dev:** "This is a one-line typo fix in a governance doc — do I still need the **Cerebrate** (planner)?"
-> **Domain expert:** "Check the **Reflex** (trivial fast path) conditions. If they all pass — one owner, one known file, trivial change, clear **Branch Classification**, no version impact, not **Remediation** — the **Overlord** skips the **Cerebrate** and spawns a **Drone** directly."
+> **Domain expert:** "Check the **Reflex** (trivial fast path) conditions in `plugin/agents/overlord.md` first. If they all pass, the **Overlord** skips the **Cerebrate** and spawns a **Drone** directly."
 
 > **Dev:** "The **Adaptation Cycle** (review loop) keeps flipping between two states — what happens?"
 > **Domain expert:** "That's **Mutation Decay** (break-fix-break). When 2-of-3 signals fire (line-range overlap, git revert, N-2 oscillation), the cycle stops and the **Overlord** flares to the user. No more automatic **Remediation** until a human decides."
