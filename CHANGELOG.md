@@ -19,12 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `overlord.md` `## Engine` opens with the Reflex check. The routing sentence moves there from `## Reflex (Ledger-Skip)`, and step 1 of `## Workflow State Execution` routes only a non-Reflex request, without the words "the sole classifier".
 - `overlord.md` drops the Implement Loop pointer to `## Parallel Delegation Safety`, whose rules already hold for every wave, and the framing clause that opened `## Brood Execution`; no rule changes.
-- `README.md`, `CONTEXT.md` and the site's functionality page point to the Reflex conditions instead of copying them.
+- `README.md`, `CONTEXT.md` and the site's functionality and home pages point to the Reflex conditions instead of copying them.
 
 ### Fixed
 
 - The overlord takes the Reflex path again: it checks the Reflex conditions before `hivemind:route-workflow`, and a request that meets them all takes the Reflex tail and launches no workflow (#451).
-- A version-only edit, which changes only the files the project names for a version bump, meets the Reflex file and version conditions (#451).
+- A version-only edit, which is the project's whole version bump and changes no other file, meets the Reflex file and version conditions; part of a bump, such as a version file without its changelog section, does not (#451).
 
 No prose budget changed.
 

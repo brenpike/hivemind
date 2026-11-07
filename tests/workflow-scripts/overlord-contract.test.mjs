@@ -461,9 +461,9 @@ describe('overlord Reflex check before routing', () => {
   test('Workflow State Execution routes only a non-Reflex request', () => {
     assert.ok(stateExecutionSection.includes("1. Select a non-Reflex request's workflow with `hivemind:route-workflow`."), '## Workflow State Execution step 1 routes a Reflex');
   });
-  test('the Reflex conditions admit a version-only edit', () => {
+  test('the Reflex conditions admit a version-only edit only as the whole bump', () => {
     assertSectionHasPhrases('## Reflex (Ledger-Skip)', [
-      'one known file or a version-only edit (only the files the project names for a version bump)',
+      "a version-only edit (the project's whole version bump, no other file)",
       'no version impact beyond that edit',
     ]);
   });
