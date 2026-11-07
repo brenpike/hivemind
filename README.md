@@ -273,7 +273,7 @@ You --> Overlord --> route-workflow --> standard-delivery
     question (asks you; your answer goes back to the state that asked)
 ```
 
-1. **Route.** `hivemind:route-workflow` picks the workflow: `standard-delivery`, `analysis-only`, `pr-feedback-remediation`, `hatchery-dispatch`, or `exploratory-intent-session`. A **Reflex** (one owner, one known file, trivial change) takes the fast path and skips the router, the run ledger, and the cerebrate.
+1. **Route.** `hivemind:route-workflow` picks the workflow: `standard-delivery`, `analysis-only`, `pr-feedback-remediation`, `hatchery-dispatch`, or `exploratory-intent-session`. The overlord checks for a **Reflex** first, a trivial task that meets every condition in `plugin/agents/overlord.md` (`## Reflex (Ledger-Skip)`); a Reflex takes the fast path and skips the router, the run ledger, and the cerebrate.
 2. **Record.** The overlord writes a run ledger to `.hivemind/runs/<run-id>/state.json`. Each state result is normally validated against the workflow definition before the run advances (a resumed run on a changed workflow version can fall back to judgment instead).
 3. **Plan.** At `plan`, the cerebrate returns the directive. Before every cerebrate delegation, in every planning state and on every replan, the state machine runs `hivemind:gather-facts` and passes the facts file to the cerebrate. It stops before planning on a failed facts run, a cut field, or injection-suspect text.
 4. **Branch.** `git_preflight` checks git state, then `branch` creates or confirms a compliant working branch (`feature/`, `bugfix/`, `hotfix/`, `refactor/`, `chore/`, `docs/`, `test/`, `ci/`). Nothing is ever committed to trunk.
@@ -329,7 +329,7 @@ You --> Overlord --> Cerebrate (decompose)
 | Signal | Meaning |
 |---|---|
 | :fire: **Flare** | Urgent: an agent hit something it can't resolve alone. The overlord stops and asks you. |
-| :zap: **Reflex** | Trivial task: one owner, one known file, no version impact. The overlord skips the router, the run ledger, and the cerebrate, and delegates the change directly. |
+| :zap: **Reflex** | Trivial task that meets every condition in `plugin/agents/overlord.md` (`## Reflex (Ledger-Skip)`), such as a one-file change or a version-only edit. The overlord checks for it before routing, skips the router, the run ledger, and the cerebrate, and delegates the change directly. |
 | :dna: **Mutation Decay** | Two fixes are fighting each other (break-fix-break). The swarm stops. You decide. |
 | :hourglass: **Creep Stagnation** | The local review loop keeps finding less and less. Advisory exit (`diminishing-returns`). The overlord decides to stop and open the PR on its own, journals the call, and asks you only if the promotion gate trips. |
 | :link: **Root-Cluster** | Several findings share one root cause. The reviewer stops patching them one by one and the overlord sends the cerebrate to plan one structural fix. |

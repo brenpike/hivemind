@@ -446,3 +446,32 @@ describe('overlord section-scoped state-machine pins', () => {
     ]);
   });
 });
+
+// These check the Reflex check comes before routing and the Reflex conditions sit only in their own section, never their meaning, per tests/policy/README.md (1. Honest capability statement); ADR-0018 amendment 2026-11-06 (issue 451).
+describe('overlord Reflex check before routing', () => {
+  const reflexSection = readSection(body, '## Reflex (Ledger-Skip)');
+  const engineOpening = engineSection.trim().split('\n\n')[0];
+  test('Engine checks the Reflex before hivemind:route-workflow selects a workflow', () => {
+    const reflexCheck = engineOpening.indexOf('Check `## Reflex (Ledger-Skip)` first; a Reflex launches no workflow.');
+    const routing = engineOpening.indexOf('`hivemind:route-workflow` selects the workflow before any launch.');
+    assert.notEqual(reflexCheck, -1, 'the opening ## Engine paragraph lacks the Reflex check');
+    assert.notEqual(routing, -1, 'the opening ## Engine paragraph lacks the routing sentence');
+    assert.ok(reflexCheck < routing, 'the opening ## Engine paragraph routes before it checks the Reflex');
+  });
+  test('Workflow State Execution routes only a non-Reflex request', () => {
+    assert.ok(stateExecutionSection.includes("1. Select a non-Reflex request's workflow with `hivemind:route-workflow`."), '## Workflow State Execution step 1 routes a Reflex');
+  });
+  test('the Reflex conditions admit a version-only edit', () => {
+    assertSectionHasPhrases('## Reflex (Ledger-Skip)', [
+      'one known file or a version-only edit (only the files the project names for a version bump)',
+      'no version impact beyond that edit',
+    ]);
+  });
+  test('the Reflex conditions are stated only in ## Reflex (Ledger-Skip)', () => {
+    for (const phrase of ['one known file', 'version-only edit', 'no version impact']) {
+      const inSection = reflexSection.split(phrase).length - 1;
+      assert.ok(inSection > 0, `## Reflex (Ledger-Skip) lacks ${phrase}`);
+      assert.equal(body.split(phrase).length - 1, inSection, `${phrase} is stated outside ## Reflex (Ledger-Skip)`);
+    }
+  });
+});
