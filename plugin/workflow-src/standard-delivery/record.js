@@ -175,7 +175,7 @@ function renderApprovals(approvals) {
 }
 
 function renderSlowTests(cases) {
-  return ['Slow test cases that passed only when run alone:', ...cases.map((name) => '- ' + name)].join('\n');
+  return ['Slow test cases that passed only when run alone:', ...cases.map((name) => '- ' + encodeUntrustedText(name))].join('\n');
 }
 
 function hasListedFindings(run) {

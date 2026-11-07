@@ -689,7 +689,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'f2a9265c6b5772c4';
+const BUILD_ID = '1b489e556ff510ae';
 
 function supportedSchemaKeywords(){
 return[
@@ -3603,7 +3603,7 @@ function renderApprovals(approvals){
 return['Destructive changes you approved:',...approvals.map((change)=>'- '+renderDestructiveChange(change))].join('\n');
 }
 function renderSlowTests(cases){
-return['Slow test cases that passed only when run alone:',...cases.map((name)=>'- '+name)].join('\n');
+return['Slow test cases that passed only when run alone:',...cases.map((name)=>'- '+encodeUntrustedText(name))].join('\n');
 }
 function hasListedFindings(run){
 return run.rejected.length>0||run.undone.length>0;
