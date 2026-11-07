@@ -2621,14 +2621,23 @@ Links: https://github.com/brenpike/hivemind/issues/549, https://github.com/brenp
 
 - **Who the run asks has one home.** It is `plugin/governance/decision-autonomy.md` (Decision Tiers, Review Calls). `README.md`, `CONTEXT.md` and the site pages name the closed Ask Set and point there. They never copy its members. An example uses "such as" and draws only on members with no exception: an irreversible call, an architectural call, a hard stop, a call with no recommendation.
 - **What a script run lists has one docs home per published surface.** They are "Decisions on the PR" in `README.md` and the PR step of `web/functionality.html`. Each states the three kinds that are not listed and when an acceptance is listed anyway. Every other mention points there and never says every taken call is listed.
-- **A new copy is a new finding.** A docs sentence outside those homes that states who is asked or what is listed is a defect of this class.
+- **Only a copy of the rule is a defect.** A docs sentence outside those homes is a defect of this class only when it restates the rule itself, in one of three ways:
+  - it copies Ask Set members beyond a "such as" example drawn from members with no exception;
+  - it makes an every, all, any or no claim about which questions or calls ask or are taken, without naming the Ask Set;
+  - it states which taken calls are listed outside the two listing homes.
+- **A step fact is not a copy.** A step fact is a sentence whose subject is one named step, stop kind, decision kind, prompt or signal, and which says what it does: asks you, ends the run, or goes on without asking. It may stay without an Ask Set pointer. It is checked only against its own source: the workflow code, the agent or skill text, or the autonomy table row at the script engine's fixed default level. There are two reasons:
+  - On the script engine every ask goes through `pauseDelivery`, whose guard refuses a reason outside `askReasons()`. So a script step fact cannot contradict the Ask Set.
+  - Some asks the docs name are not Ask Set members, such as the engine-or-Instinct question in `plugin/agents/overlord.md` (### Stop Conditions). A pointer would mis-state them.
 
 **Options ruled out.**
 
 - **Another sentence-by-sentence correction.** Each earlier pass fixed one copy and left the others free to drift, so the next review found the next copy.
 - **A test that scans the docs for copies.** It grows the surface, the same call ADR-0018 amendment 2026-11-06 item 3 made for the Reflex conditions.
+- **An Ask Set pointer on every step fact.** It completes a known set of sites, mis-points asks outside the Ask Set, and leaves the next site for the next review.
 
-**Repeat findings.** A later finding that asks a doc to copy the Ask Set members or the listing rule again is a repeat of this record, per `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A finding that one of the two listing homes disagrees with governance is new.
+**Repeat findings.** A later finding that asks a doc to copy the Ask Set members or the listing rule again is a repeat of this record, per `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). So is a finding that asks a step fact to point to the Ask Set, or to be removed. A finding that a step fact disagrees with its step's source, or that one of the two listing homes disagrees with governance, is new.
+
+**Narrowed 2026-11-07.** Local review finding 6f875034 is the reason for the narrowing. It flagged accurate step facts as defects under this record's earlier bullet "A new copy is a new finding", which made any sentence outside the homes that states who is asked or what is listed a defect. That key was too broad, so the two bullets "Only a copy of the rule is a defect" and "A step fact is not a copy" replace it. The run took this call, and the call is listed in the pull request body for veto before merge.
 
 **Version.** None. The change is docs only, outside `plugin/`.
 
