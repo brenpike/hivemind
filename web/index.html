@@ -148,7 +148,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">Ship and watch</h3>
-              <p class="xs">A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (<code>hivemind:open-plan-pr</code>). The PR body is built in code from the plan digest, the steps and the run record. The final message and the PR body list the decisions the run took for you, except routine calls such as accepting the plan or rerunning a gate.</p>
+              <p class="xs">A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (<code>hivemind:open-plan-pr</code>). The PR body is built in code from the plan digest, the steps and the run record. The run lists the decisions it took for you in its final message and the PR body, for veto before merge. <a href="./functionality.html#lifecycle">How it works</a> says which decisions are listed.</p>
               <p class="xs">The overlord then watches the PR by default. It fixes, pushes, replies to and resolves actionable feedback from Codex, Copilot or Claude reviewer bots until reviewer approval, merge, close, or an idle hour.</p>
               <p class="xs">Opt out by saying so in the request or by setting <code>HIVEMIND_SKIP_PR_WATCH</code>. Agents never merge. You do.</p>
             </li>
@@ -163,7 +163,7 @@
             <article class="panel subpanel" aria-labelledby="autonomy-title">
               <p class="kicker xs">Who decides</p>
               <h3 id="autonomy-title" class="xg">Autonomy</h3>
-              <p class="xs">Routine calls are decided for you by the autonomy table. Only the closed Ask Set pauses the run and asks you: an irreversible, architectural or safety-relevant call, a surface cell of the autonomy table, a hard stop, or a call with no recommendation. Other calls are taken and listed for veto before merge, except routine calls such as accepting the plan or rerunning a gate, which are not listed. Every merge comes back to you. A step whose own output failed ends the run instead of asking you to retry. Every open question pauses a delivery run and your reply resumes the same run, with no pause limit, while an analysis-only run completes after 3 pauses and lists the questions still open.</p>
+              <p class="xs">Routine calls are decided for you by the autonomy table. Only the closed Ask Set pauses the run and asks you: an irreversible, architectural or safety-relevant call, a surface cell of the autonomy table, a hard stop, or a call with no recommendation. The run lists the decisions it took for you in its final message and the PR body, for veto before merge (<a href="./functionality.html#lifecycle">which decisions are listed</a>). Every merge comes back to you. A step whose own output failed ends the run instead of asking you to retry. Every open question pauses a delivery run and your reply resumes the same run, with no pause limit, while an analysis-only run completes after 3 pauses and lists the questions still open.</p>
             </article>
             <article class="panel subpanel signals-panel" aria-labelledby="signals-title">
               <p class="kicker xs">What the swarm tells you</p>
