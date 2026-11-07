@@ -5,10 +5,11 @@
  *
  * Inputs
  *   run     the run state of main.js createRunState. callCheckedPlanner
- *           reads trunk and references.
+ *           reads trunk, references and level.
  *   facts   the checked facts of the pass, from runFactsStep (relay.js).
  *   call    {prompt, label, phaseTitle, schema} of one plan or revise call.
- *   maxCheckRetries() of main.js.
+ *   maxCheckRetries(), AUTONOMY_TABLE, BRIEF_SCHEMA and
+ *   PLANNER_QUESTION_KIND of main.js.
  *
  * Outputs
  *   callCheckedPlanner(run, facts, call)  {planResult, problem,
@@ -33,6 +34,10 @@
  *   with next action report, through describeCheckLimit. A null result, an
  *   agent failure, and a planner blocked outcome that fits its schema and
  *   gives a reason are never asked again.
+ *   A plan result that passes the plan check still fails it when decide()
+ *   (kind planner_question, the run level) gives one of its questions a
+ *   reason in neither askReasons() nor auto: a defect in the brief, which
+ *   the planner fixes, so the user is never asked a defect.
  *   Title type: normalizePlanTitle returns a copy of a complete result
  *   that fits its schema whose cleaned plan.title starts with the plan's
  *   own commitTypeMap() value in any letter case, an optional
@@ -105,12 +110,22 @@ function describeCheckLimit(problem) {
  * {planResult, problem, isExhausted}: isExhausted when the last result
  * still has a fixable problem.
  */
+/**
+ * Returns a fixed problem when decide() gives a question of the complete
+ * planResult a reason in neither askReasons() nor auto, else undefined.
+ */
+function describeQuestionProblem(planResult, run) {
+  const isDefect = (brief) => !['auto', ...askReasons()].includes(decide({ kind: PLANNER_QUESTION_KIND, level: run.level, brief: brief }, AUTONOMY_TABLE, BRIEF_SCHEMA).reason);
+  return planResult.questions.some(isDefect) ? 'A planner question fails the decision check, so ' + RUN_NAME + ' stopped.' : undefined;
+}
+
 async function callCheckedPlanner(run, facts, call) {
   let prompt = call.prompt;
   for (let retry = 0; ; retry += 1) {
     const label = retry === 0 ? call.label : call.label + '-fix-' + retry;
     const result = normalizePlanTitle(await agent(prompt, plannerCallOptions(label, call.phaseTitle, call.schema)), call.schema);
-    const problem = describePlanProblem(result, call.schema, facts, run.trunk, run.references);
+    const planProblem = describePlanProblem(result, call.schema, facts, run.trunk, run.references);
+    const problem = planProblem === undefined ? describeQuestionProblem(result, run) : planProblem;
     const isFixable = problem !== undefined && isFixablePlanResult(result, call.schema);
     if (!isFixable || retry === maxCheckRetries()) {
       return { planResult: result, problem: problem, isExhausted: isFixable };

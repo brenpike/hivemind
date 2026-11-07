@@ -34,7 +34,7 @@ git fetch origin <trunk>:refs/remotes/origin/<trunk>
 git rev-list --left-right --count <local-trunk>...origin/<trunk>
 ```
 
-Proceed only when both tab-separated integers it prints are `0`; otherwise offer the user fix-and-continue or proceed-at-risk.
+Proceed only when both tab-separated integers it prints are `0`; otherwise the `trunk_stale` row of the decision autonomy table decides.
 
 ## Version Bumps
 
@@ -63,4 +63,4 @@ When cerebrate finds the work splits into independent strains with minimal file-
 2. monitors via `hivemind:brood-status` on demand
 3. reports aggregate status when all strains complete
 
-Each child is a standard overlord running a full pipeline with no brood awareness, so one plan = one branch = one PR holds per child; it handles its own version bumps, merge conflicts and PR ordering.
+Each child is a standard overlord with no brood awareness, so one plan = one branch = one PR holds per child; it handles its own version bumps, merge conflicts and PR ordering.

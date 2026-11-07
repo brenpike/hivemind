@@ -86,8 +86,9 @@
  *   stopDelivery (record.js) with isReplan true, so the reply starts a new
  *   pass outside maxReplans(). Each plan and revise call goes through
  *   callCheckedPlanner (checks.js), which asks a result that fails the
- *   plan check again, and one still failing ends the run, terminal with
- *   next action report. A null result, an agent failure, adds the
+ *   plan check again, a planner question decide() refuses as a defect
+ *   among them, and one still failing ends the run, terminal with next
+ *   action report. A null result, an agent failure, adds the
  *   agent-failure sentence through describeUnusableResult (lib/stop.js)
  *   and ends the run with next action run_again. A planner's blocked
  *   outcome that fits its schema and gives a reason pauses with the fix
@@ -120,13 +121,10 @@
  *   does not pause, and a terminal stop ends it naming the question kind. An
  *   irreversible effect whose text changed, and a planner question that
  *   renders other text, are new questions and pause again.
- *   A planning pause leads with describePlanLine(plan, outsidePaths): one
- *   line of the encoded branch, the step count, the distinct file count and
- *   digest.change through renderText, then, when outsidePaths is not empty,
- *   up to maxListedItems() lines (capItemLines, relay.js), one per outside
- *   path encoded whole with the limits_reason of the first step in plan
- *   order that lists it and gives a non-blank one, through renderText, else
- *   a fixed text saying the plan gives none, then the count of the rest.
+ *   A planning pause leads with describePlanLine(plan): one line of the
+ *   encoded branch, the step count, the distinct file count and
+ *   digest.change through renderText. It names no outside path; the
+ *   acceptance problem gives their count when it fits.
  *   The answer log question and the revise prompt's questions block hold
  *   that lead and the questions, the text the user saw.
  *   An irreversible effect is asked as an exact entry, so the pause keeps
@@ -155,23 +153,23 @@
  *   settled entry per launch decision ahead of it (issue 500). With no
  *   decision and an empty log, the plan and first revise prompts are the
  *   prompts of a run with no answers, so a resume replays them from cache.
- *   Outside-limit ask: the limit check and the pause lead read every plan
+ *   Outside-limit list: the limit check and the pause lead read every plan
  *   path through the mark walk (listPlanPaths): the version files and the
  *   step files the wave commits take. When scope.limits is not empty, a
  *   plan path in neither versioning.artifact_files nor
  *   versioning.changelog_files that neither equals a limit path nor sits
- *   under it plus '/' makes resolvePlanAcceptance pass askReason
- *   outside_limits to decide(), so the plan or remediation plan acceptance
- *   asks at every level, with its own recommendation shown:
- *   markOutsideLimits never changes the strength or why. A surface cell or
- *   a gate flag asks first, with its own reason. The acceptance problem
- *   names their count when it fits, and the pause lead of a round that
- *   shows the acceptance names up to maxListedItems() of them, one line
- *   each with its limits_reason, then the count of the rest. Empty limits
- *   leave the brief as it was. The limits come only from the scope step,
- *   so a later pass asks a file outside them again. Validation fix round
- *   and local review edits are not plan paths and are outside the limits
- *   (ADR-0037, finding 2ecc5af1).
+ *   under it plus '/' makes resolvePlanAcceptance pass outside_limits in
+ *   listed to decide(), as plan.remediation_gate.repeats_surface passes
+ *   repeats_surface, so an acceptance decide() takes is taken and listed
+ *   for veto before merge: markOutsideLimits never changes the strength or
+ *   why. A surface cell or a gate flag still asks, with its own reason.
+ *   The acceptance problem names their count when it fits. Empty limits
+ *   leave the brief as it was. The limits come only
+ *   from the scope step, so a later pass lists a file outside them again.
+ *   Validation fix round and local review edits are not plan paths and are
+ *   outside the limits (ADR-0037, finding 2ecc5af1).
+ *   A taken decision goes in taken as {brief, kind, listed}, listed the
+ *   listReasons() names decide() returns with it.
  *   The plan and revise prompts restate no rule of
  *   ${CLAUDE_PLUGIN_ROOT}/agents/cerebrate.md (docs/engineering-principles.md
  *   P24): how to read the facts, what is left to plan, the review block and
@@ -365,30 +363,12 @@ function describeCount(count, noun) {
 }
 
 /**
- * Returns the limits_reason through renderText of the first step in plan
- * order that lists file and gives a non-blank one, else a fixed text saying
- * the plan gives none.
- */
-function describeLimitsReason(plan, file) {
-  const reasonStep = plan.steps.find((step) => step.files.includes(file) && renderText(step.limits_reason) !== renderText(undefined));
-  return reasonStep === undefined ? 'the plan gives no reason' : renderText(reasonStep.limits_reason);
-}
-
-/**
  * Returns the lead of a planning pause: one line of the encoded branch, the
  * step count, the distinct plan path count and digest.change through
- * renderText. When outsidePaths is not empty, that line ends with a colon
- * and capItemLines (relay.js) adds one line per outside path, encoded
- * whole, with its describeLimitsReason.
+ * renderText.
  */
-function describePlanLine(plan, outsidePaths) {
-  const fileCount = listPlanPaths(plan).length;
-  const lead = 'The plan for branch ' + encodeUntrustedText(plan.branch) + ' has ' + describeCount(plan.steps.length, 'step') + ' over ' + describeCount(fileCount, 'file') + ': ' + renderText(plan.digest.change);
-  if (outsidePaths.length === 0) {
-    return lead;
-  }
-  const pathLines = outsidePaths.map((file) => '- ' + encodeUntrustedText(file) + ': ' + describeLimitsReason(plan, file));
-  return [lead + ' Outside the limits you set:', ...capItemLines(pathLines)].join('\n');
+function describePlanLine(plan) {
+  return 'The plan for branch ' + encodeUntrustedText(plan.branch) + ' has ' + describeCount(plan.steps.length, 'step') + ' over ' + describeCount(listPlanPaths(plan).length, 'file') + ': ' + renderText(plan.digest.change);
 }
 
 /**
@@ -400,10 +380,10 @@ function unshownBriefText() {
   return 'Not shown.';
 }
 
-function resolveDecision(kind, brief, scope, run, resolution, askReason) {
-  const decision = decide({ kind: kind, level: run.level, brief: brief, askReason: askReason }, AUTONOMY_TABLE, BRIEF_SCHEMA);
+function resolveDecision(kind, brief, scope, run, resolution, listed) {
+  const decision = decide({ kind: kind, level: run.level, brief: brief, listed: listed }, AUTONOMY_TABLE, BRIEF_SCHEMA);
   if (decision.action === 'take') {
-    resolution.taken.push({ brief: brief, kind: kind });
+    resolution.taken.push({ brief: brief, kind: kind, listed: decision.listed });
     return 'take';
   }
   const ask = { brief: brief, reason: decision.reason, kind: kind };
@@ -451,16 +431,15 @@ function resolveExternalEffects(plan, run, resolution) {
 
 function resolvePlanAcceptance(plan, run, resolution, scope) {
   const isRemediation = run.taken.some((entry) => entry.kind === PLANNER_ESCALATION_ROUTING_KIND || entry.kind === ROOT_CLUSTER_ROUTING_KIND);
-  resolution.outsidePaths = listOutsidePaths(plan, scope);
-  const askReason = resolution.outsidePaths.length === 0 ? undefined : 'outside_limits';
-  if (isRemediation) {
-    return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND, markOutsideLimits(buildRemediationPlanBrief(plan), resolution.outsidePaths), [run.pass, plan], run, resolution, askReason);
-  }
-  return resolveDecision(PLAN_ACCEPTANCE_KIND, markOutsideLimits(buildPlanAcceptanceBrief(plan), resolution.outsidePaths), [run.pass, plan], run, resolution, askReason);
+  const outsidePaths = listOutsidePaths(plan, scope);
+  const holds = { outside_limits: outsidePaths.length > 0, repeats_surface: plan.remediation_gate.repeats_surface };
+  const listed = Object.keys(holds).filter((name) => holds[name]);
+  const brief = isRemediation ? buildRemediationPlanBrief(plan) : buildPlanAcceptanceBrief(plan);
+  return resolveDecision(isRemediation ? REMEDIATION_PLAN_ACCEPTANCE_KIND : PLAN_ACCEPTANCE_KIND, markOutsideLimits(brief, outsidePaths), [run.pass, plan], run, resolution, listed);
 }
 
 function resolvePlanAsks(planResult, facts, run, scope) {
-  const resolution = { asks: [], taken: [], freshness: undefined, reversibleEffects: [], outsidePaths: [] };
+  const resolution = { asks: [], taken: [], freshness: undefined, reversibleEffects: [] };
   const plan = planResult.plan;
   /*
    * INVARIANT: a planner question key holds the pass and the question as
@@ -573,8 +552,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
     if (resettled !== undefined) {
       return stopDelivery([{ problem: 'Workflow defect: the ' + resettled.kind + ' question came back after a reply settled it, so ' + RUN_NAME + ' stopped.', terminal: true, nextAction: 'report' }], run, [], true);
     }
-    const isAcceptance = resolution.asks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
-    const lead = describePlanLine(planResult.plan, isAcceptance ? resolution.outsidePaths : []);
+    const lead = describePlanLine(planResult.plan);
     const round = run.answerLog.length + 1;
     const reply = takeNextReply(run, round);
     if (reply === undefined) {

@@ -90,7 +90,7 @@
           },
           "beyond_request": {
             "type": "boolean",
-            "description": "True when this option does more than the request asks: work, files or changes the request does not name. Such an option is never the strong recommendation by default. A brief offering one also offers the in-request option, with the expansion filed as a follow-up issue, as a first-class option."
+            "description": "True when this option does more than the request asks: work, files or changes the request does not name. A review-found root-cause fix is inside the request. Only a strong trivial or small one is taken, listed. Otherwise recommend the in-request option, its summary naming what it leaves out."
           },
           "destructive": {
             "type": "array",

@@ -105,10 +105,12 @@
  *   cause, if any, to runCommitStep (relay.js), which stops with every
  *   cause through stopDelivery with isReplan false, so a commit stop never
  *   hides a step cause; a stop it returns is returned as is. A null fix
- *   result ends the run, and any other fix round stop pauses. A blocked,
+ *   result ends the run, and any other fix round stop goes through
+ *   stopDelivery as below. A blocked,
  *   malformed or unusable validation or version relay goes through
- *   stopDelivery (record.js) with isReplan false: an agent failure ends the
- *   run, and any other cause pauses. A user_answer fix prompt carries the
+ *   stopDelivery (record.js) with isReplan false: a terminal cause, an agent
+ *   failure and a report or run_again lead end the run blocked, and only an
+ *   approve or fix_cause lead asks. A user_answer fix prompt carries the
  *   reply in a data block and not the resume note.
  *   The head read keys on the reply round (issue 457): the head is unread
  *   exactly when run.headRound is behind run.answerLog.length, whatever

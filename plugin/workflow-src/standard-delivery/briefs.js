@@ -30,23 +30,20 @@
  *            outside count added to its problem when a plan path is outside
  *            the limits and the problem still fits. It never changes the
  *            recommendation: its strength and why stay as built, and
- *            plan.js asks the acceptance with askReason outside_limits.
+ *            plan.js passes listed outside_limits to decide().
  *   buildTailBrief({kind, problem, goOn, other, strength, why})  the
  *            shared shape of a tail brief, also used by review.js.
+ *   buildBriefOption(id, summary, effort, value, reversible) and
+ *   buildUnshownAssumptions(origin)  the option and assumptions of a
+ *            code-built brief, also used by review.js.
  *   buildValidationRemediationBrief, buildFixLimitBrief and
  *   buildGateRerunBrief  the tail briefs gates.js resolves.
- *   buildStepStopBrief(causes, isReplan)  the step_stop brief stopDelivery
- *            (record.js) asks, one per stop type: the next action of
- *            orderStopCauses(causes)[0], fix_cause when absent. It has one
- *            option, and its problem names the user's move, then whether
- *            the reply takes the stopped step again or plans again from
- *            fresh facts. fix_cause: clear the cause named above and commit
- *            any change, then reply, strength strong. run_again: nothing in
- *            the repo needs a fix, strong. report: nothing in your repo
- *            needs a fix, a step of the run failed, reply to try once more,
- *            weak, and its why says a stop that comes back is a workflow
- *            defect to report, not retry. It is built through
- *            buildTailBrief with its option B left out.
+ *   buildStepStopBrief(isReplan)  the fix_cause step_stop brief
+ *            stopDelivery (record.js) asks. It has one option, strength
+ *            strong, and its problem says to clear the cause named above
+ *            and commit any change, then reply, and whether the reply takes
+ *            the stopped step again or plans again from fresh facts. It is
+ *            built through buildTailBrief with its option B left out.
  *   buildApprovalAsks(holds, isReplan, run)  the asks of an approve stop,
  *            one step_stop ask per held item {stepId, category, item}, in
  *            hold order. Its shown brief names the encoded step in its
@@ -71,9 +68,10 @@
  *   function of this module.
  *   The brief gate of a remediation plan acceptance is
  *   plan.remediation_gate.promotion_gate copied whole, with architectural
- *   also true when grows_surface or repeats_surface is, and its problem
- *   names each flag that holds, so it asks then and is taken otherwise at
- *   the default level (decision-autonomy.md, Promotion Gate).
+ *   also true when grows_surface is, and its problem names each flag that
+ *   holds, so it asks then and is taken otherwise at the default level
+ *   (decision-autonomy.md, Promotion Gate). repeats_surface only lists a
+ *   taken acceptance: plan.js passes it to decide() in listed.
  *   Every brief here puts unshownBriefText() in each field no message
  *   shows and fits BRIEF_SCHEMA with worst-case inputs (main.js, bounded
  *   fields).
@@ -101,11 +99,11 @@ function buildPlanAcceptanceBrief(plan) {
     problem: 'Start delivering the plan: create or confirm its working branch and run its steps.',
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'medium', value: 'high', reversible: true, beyond_request: false },
-      { id: 'B', summary: 'Stop before any step runs.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true, beyond_request: false }
+      buildBriefOption('A', 'Accept the plan and run its steps.', 'medium'),
+      buildBriefOption('B', 'Stop before any step runs.', 'trivial', 'low')
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'Every change stays on the working branch, and every decision taken is listed for you before the merge.' },
-    assumptions: [{ statement: unshownBriefText(), origin: 'assumed', evidence: unshownBriefText() }],
+    assumptions: buildUnshownAssumptions('assumed'),
     gate: { irreversible: false, architectural: false, safety: false },
     verbatim: plan.summary
   };
@@ -120,9 +118,9 @@ function buildRemediationPlanBrief(plan) {
   const brief = buildPlanAcceptanceBrief(plan);
   return Object.assign(brief, {
     kind: REMEDIATION_PLAN_ACCEPTANCE_KIND,
-    problem: flagTexts.length === 0 ? lead : lead + ' I am asking because the plan ' + joinNames(flagTexts, 'and') + '.',
+    problem: flagTexts.length === 0 ? lead : lead + ' The plan ' + joinNames(flagTexts, 'and') + '.',
     recommendation: { ...brief.recommendation, why: 'The plan answers the local review findings, and every gate runs again on its commit before the pull request.' },
-    gate: { ...remediationGate.promotion_gate, architectural: flags.architectural || flags.grows_surface || flags.repeats_surface }
+    gate: { ...remediationGate.promotion_gate, architectural: flags.architectural || flags.grows_surface }
   });
 }
 
@@ -133,11 +131,11 @@ function buildTrunkStaleBrief(facts) {
     problem: 'The trunk may not be up to date: its freshness is ' + facts.trunk_freshness + ', ' + Number(facts.trunk_ahead) + ' commits ahead of its remote and ' + Number(facts.trunk_behind) + ' behind. Create or confirm the working branch from it anyway?',
     criticality: { level: 'low', likelihood: 'occasional', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Go on from the trunk as it is.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'medium', reversible: true, beyond_request: false },
-      { id: 'B', summary: 'Stop so you can bring the trunk up to date first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true, beyond_request: false }
+      buildBriefOption('A', 'Go on from the trunk as it is.', 'trivial', 'medium'),
+      buildBriefOption('B', 'Stop so you can bring the trunk up to date first.', 'small', 'medium')
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'A stale base costs at most a rebase, and the run goes on.' },
-    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
+    assumptions: buildUnshownAssumptions(),
     gate: { irreversible: false, architectural: false, safety: false }
   };
 }
@@ -149,11 +147,11 @@ function buildExternalEffectBrief(summary) {
     problem: 'A plan step has an effect outside the repo that cannot be undone. May the run go on to it?',
     criticality: { level: 'high', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: false, beyond_request: false },
-      { id: 'B', summary: 'Change or drop the step first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true, beyond_request: false }
+      buildBriefOption('A', 'Go on and let the step make this effect.', 'small', 'high', false),
+      buildBriefOption('B', 'Change or drop the step first.', 'small', 'medium')
     ],
     recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide whether this effect outside the repo may happen.' },
-    assumptions: [{ statement: unshownBriefText(), origin: 'assumed', evidence: unshownBriefText() }],
+    assumptions: buildUnshownAssumptions('assumed'),
     gate: { irreversible: true, architectural: false, safety: false },
     verbatim: summary
   };
@@ -184,8 +182,7 @@ function markOutsideLimits(brief, outsidePaths) {
   /*
    * INVARIANT: the problem names the count only when it fits the brief
    * problem maxLength, so the brief stays valid with every remediation flag
-   * set. The pause lead names the outside paths and their count in every
-   * case.
+   * set.
    */
   return Object.assign(brief, { problem: problem.length <= BRIEF_SCHEMA.properties.problem.maxLength ? problem : brief.problem });
 }
@@ -197,20 +194,12 @@ function buildTailBrief({ kind, problem, goOn, other, strength, why }) {
     problem: problem,
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: goOn, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true, beyond_request: false },
-      { id: 'B', summary: other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true, beyond_request: false }
+      buildBriefOption('A', goOn),
+      buildBriefOption('B', other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, 'trivial', 'low')
     ],
     recommendation: { option_id: strength === 'none' ? 'B' : 'A', strength: strength, why: why },
-    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
+    assumptions: buildUnshownAssumptions(),
     gate: { irreversible: false, architectural: false, safety: false }
-  };
-}
-
-function stepStopTexts() {
-  return {
-    fix_cause: ['strong', 'commit any change and reply', 'Clearing it lets the step go on.'],
-    report: ['weak', 'nothing in your repo needs a fix: the run\'s own step failed; reply to try once more', 'A stop that comes back is a workflow defect: report it, do not retry.'],
-    run_again: ['strong', 'reply', 'The cause clears itself.']
   };
 }
 
@@ -218,17 +207,14 @@ function describeStopThen(isReplan) {
   return isReplan ? 'the run plans again from fresh facts' : 'the run takes the stopped step again';
 }
 
-function buildStepStopBrief(causes, isReplan) {
-  const texts = stepStopTexts();
-  const leadAction = orderStopCauses(causes)[0].nextAction;
-  const [strength, words, why] = Object.hasOwn(texts, leadAction) ? texts[leadAction] : texts.fix_cause;
-  const action = leadAction === 'report' ? words : describeStopAction(leadAction, words);
+function buildStepStopBrief(isReplan) {
+  const action = describeStopAction('fix_cause', 'commit any change and reply');
   const brief = buildTailBrief({
     kind: STEP_STOP_KIND,
     problem: action.charAt(0).toUpperCase() + action.slice(1) + ', and ' + describeStopThen(isReplan) + '.',
     goOn: isReplan ? 'Go on: plan again from fresh facts.' : 'Go on: take the stopped step again.',
-    strength: strength,
-    why: why
+    strength: 'strong',
+    why: 'Clearing it lets the step go on.'
   });
   return Object.assign(brief, { options: brief.options.slice(0, 1) });
 }
@@ -262,17 +248,29 @@ function raiseVersion(version, bumpType) {
   return raised[bumpType].join('.');
 }
 
-function buildVersionOption(id, summary) {
-  return { id: id, summary: summary, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true, beyond_request: false };
+/**
+ * Returns the one assumption of a code-built brief, of origin, with
+ * unshownBriefText() in its statement and evidence.
+ */
+function buildUnshownAssumptions(origin = 'repo') {
+  return [{ statement: unshownBriefText(), origin: origin, evidence: unshownBriefText() }];
+}
+
+/**
+ * Returns a brief option of id and summary with unshownBriefText() in its
+ * unshown fields and beyond_request false.
+ */
+function buildBriefOption(id, summary, effort = 'small', value = 'high', reversible = true) {
+  return { id: id, summary: summary, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: effort, value: value, reversible: reversible, beyond_request: false };
 }
 
 function listVersionOptions(values) {
   if (values.version_check === 'unreadable') {
-    return [buildVersionOption('A', 'Keep the version each file holds on the branch.'), buildVersionOption('B', 'Set the version your reply names in each file.')];
+    return [buildBriefOption('A', 'Keep the version each file holds on the branch.'), buildBriefOption('B', 'Set the version your reply names in each file.')];
   }
   const trunk = values.trunk_version;
-  const bumpOptions = [['A', 'major'], ['B', 'minor'], ['C', 'patch']].map(([id, bumpType]) => buildVersionOption(id, 'Make a ' + bumpType + ' version bump' + (trunk === undefined ? '.' : ', to version ' + raiseVersion(trunk, bumpType) + '.')));
-  return bumpOptions.concat(buildVersionOption('D', 'Make no version bump' + (trunk === undefined ? '.' : ', keeping version ' + trunk + '.')));
+  const bumpOptions = [['A', 'major'], ['B', 'minor'], ['C', 'patch']].map(([id, bumpType]) => buildBriefOption(id, 'Make a ' + bumpType + ' version bump' + (trunk === undefined ? '.' : ', to version ' + raiseVersion(trunk, bumpType) + '.')));
+  return bumpOptions.concat(buildBriefOption('D', 'Make no version bump' + (trunk === undefined ? '.' : ', keeping version ' + trunk + '.')));
 }
 
 function buildVersionQuestionBrief(values) {
@@ -286,7 +284,7 @@ function buildVersionQuestionBrief(values) {
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: listVersionOptions(values),
     recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide the version of this delivery.' },
-    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
+    assumptions: buildUnshownAssumptions(),
     gate: { irreversible: false, architectural: false, safety: false }
   };
 }

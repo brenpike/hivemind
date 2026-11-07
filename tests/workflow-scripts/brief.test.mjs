@@ -107,7 +107,7 @@ describe('renderQuestions layout', () => {
     }
   });
   test('the ask reason does not change the text', () => {
-    const reasons = [...lib.decisionReasons(), 'nonsense', undefined];
+    const reasons = [...lib.askReasons(), 'malformed_brief', 'recommendation_not_an_option', 'unknown_kind', 'bad_cell', 'auto', 'nonsense', undefined];
     for (const reason of reasons) {
       assert.equal(lib.renderQuestions([{ brief: makeBrief(), reason }]), text, String(reason));
     }

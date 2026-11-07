@@ -411,7 +411,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'e3299f63da20988f';
+const BUILD_ID = 'c4e8d0d5cc296f9a';
 
 function supportedSchemaKeywords(){
 return[
@@ -744,8 +744,8 @@ removeSchemaAnyOf(schema.items);
 return schema;
 }
 
-function callerAskReasons(){
-return['outside_limits'];
+function listReasons(){
+return['beyond_request','outside_limits','repeats_surface'];
 }
 function resolveLevel(value,table){
 if(value===undefined||value===null||value===''){
@@ -756,17 +756,18 @@ return value;
 }
 return'low';
 }
-function decide({kind,level,brief,askReason},table,schema){
-if(askReason!==undefined&&callerAskReasons().indexOf(askReason)===-1){
-throw new Error('decide: unknown askReason '+JSON.stringify(askReason));
-}
+function decide({kind,level,brief,listed},table,schema){
+const callerListed=checkCallerListed(listed);
 const briefCheck=validateSchema(schema,brief);
 const resolvedLevel=resolveLevel(level,table);
 if(table.hard_stops.some((stop)=>stop.hard_stop===kind)){
 return askFor('hard_stop');
 }
-if(!briefCheck.ok||!hasInRequestOption(brief)){
+if(!briefCheck.ok||!hasInRequestOption(brief)||isBeyondRequestUnearned(brief)){
 return askFor('malformed_brief');
+}
+if(!isRecommendationAnOption(brief)){
+return askFor('recommendation_not_an_option');
 }
 const row=table.rows.find((candidate)=>candidate.kind===kind);
 if(row===undefined){
@@ -788,19 +789,28 @@ return askFor('gate_architectural');
 if(brief.gate.safety||isRecommendedOptionDestructive(brief)){
 return askFor('gate_safety');
 }
-if(isRecommendedOptionBeyondRequest(brief)){
-return askFor('beyond_request');
-}
-if(askReason!==undefined){
-return askFor(askReason);
-}
 if(brief.recommendation.strength==='none'){
 return askFor('no_recommendation');
 }
-if(!isRecommendationAnOption(brief)){
-return askFor('recommendation_not_an_option');
+return{action:'take',reason:'auto',listed:collectListed(brief,callerListed)};
 }
-return{action:'take',reason:'auto'};
+function checkCallerListed(listed){
+if(listed===undefined){
+return[];
+}
+if(!Array.isArray(listed)){
+throw new Error('decide: listed must be an array, got '+JSON.stringify(listed));
+}
+const callerNames=listReasons().filter((name)=>name!=='beyond_request');
+for(const name of listed){
+if(callerNames.indexOf(name)===-1){
+throw new Error('decide: unknown listed name '+JSON.stringify(name));
+}
+}
+return listed;
+}
+function collectListed(brief,callerListed){
+return listReasons().filter((name)=>(name==='beyond_request'?isRecommendedOptionBeyondRequest(brief):callerListed.indexOf(name)!==-1));
 }
 function askFor(reason){
 return{action:'ask',reason:reason};
@@ -813,6 +823,10 @@ return brief.options.some((option)=>option.id===brief.recommendation.option_id&&
 }
 function isRecommendedOptionBeyondRequest(brief){
 return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.beyond_request===true);
+}
+function isBeyondRequestUnearned(brief){
+const isStrong=brief.recommendation.strength==='strong';
+return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.beyond_request===true&&!(isStrong&&(option.effort==='trivial'||option.effort==='small')));
 }
 function hasInRequestOption(brief){
 return brief.options.some((option)=>option.beyond_request===false);

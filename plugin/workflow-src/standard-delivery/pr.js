@@ -46,7 +46,7 @@
  *           body paths of that label, and the step checks the words of both labels
  *           before the call. A pull request text over its size limit and a head_ref_oid
  *           other than H are terminal stops. A blocked, malformed or other unusable
- *           relay pauses through stopDelivery (record.js). The step makes one runner
+ *           relay stops through stopDelivery (record.js). The step makes one runner
  *           call: the gate loop runs the head check after a reply, then this step again
  *           under pr-P-N, N from 2, or the gates first when the head moved, so
  *           expect_commit is always a head the run read. The title is the commit type
@@ -96,7 +96,8 @@
  *   null result, an agent failure, adds the agent-failure sentence and
  *   next action run_again, and stopDelivery ends the run on it; any other
  *   unusable result, malformed routing lines among them, gets report and
- *   pauses. The text size and attribution stops are report too.
+ *   ends the run blocked. The text size and attribution stops are report
+ *   too.
  *   A stop names what the run saw of the push: a blocked relay whose
  *   stderr holds a synapse-gate denial (isGateDenial, relay.js) or an
  *   inputs refusal of the open-plan-pr script (isInputsRefusal), each made
@@ -127,7 +128,7 @@ function reviewDecisionProblems() {
 
 function toPullRequestDecision(entry) {
   const problem = reviewDecisionProblems()[entry.kind];
-  return problem === undefined ? entry : { brief: Object.assign({}, entry.brief, { problem: problem }), kind: entry.kind };
+  return problem === undefined ? entry : { brief: Object.assign({}, entry.brief, { problem: problem }), kind: entry.kind, listed: entry.listed };
 }
 
 function isPullRequestCharacter(codePoint, keepsLines) {

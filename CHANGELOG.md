@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.6.8] - 2026-11-07
+
+### Changed
+
+- `standard-delivery` asks the user only within a closed Ask Set: an irreversible, architectural or safety call, a surfaced table cell, a hard stop, or a call with no recommendation (#549).
+- Other calls, such as a strong small extra fix, plan files outside the request's limits and a repeated remediation plan, are taken, journaled and listed in the PR body's "Decided for you" for veto before merge.
+- A step whose own output failed (report or run again) ends the run instead of asking the user to retry.
+- A planner question with a weak extra-fix recommendation, or a malformed brief, goes back to the planner.
+- The overlord question gate asks only the Ask Set.
+- A stale trunk follows the `trunk_stale` table row instead of always asking.
+- Enforcement: an exhaustive `decide()` test, an Ask Set parity test, a policy pin and a run-time guard.
+- ADR-0037 amendment 2026-11-07 (closed Ask Set).
+
+The built `standard-delivery` prose is 43647 of its 43800 budget and its length 189358 of 190000. The analysis-only prose is 15473 of 16050. No prose budget raise. The loop-cap draft PR follows in a later release.
+
 ## [7.6.7] - 2026-11-07
 
 ### Changed

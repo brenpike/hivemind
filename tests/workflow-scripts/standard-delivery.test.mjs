@@ -847,14 +847,14 @@ function assertTailPause(run, asks, lastLabel) {
  * Asserts the run paused on one step_stop question: needs_user true, the
  * lead starting with `leadStart`, no Next line, the step_stop question last,
  * and, when given, `lastLabel` as the label of the last agent call.
- * nextAction is the next action of the stop's lead cause, the fix line
- * when absent, so the brief must be that type's, and isReplan whether the
- * reply plans again rather than taking the stopped step again.
+ * nextAction is the next action of the stop's lead cause, fix_cause or
+ * absent, the only stop type that asks the fix_cause brief, and isReplan
+ * whether the reply plans again rather than taking the stopped step again.
  */
 function assertStepStopPause(run, leadStart, lastLabel, nextAction = undefined, isReplan = false) {
+  assert.ok(nextAction === undefined || nextAction === 'fix_cause', 'a ' + nextAction + ' stop never asks');
   assert.equal(run.result.needs_user, true, run.result.message);
-  const cause = { problem: leadStart, nextAction: nextAction };
-  const question = lib.renderQuestions([limitAsk(main.buildStepStopBrief([cause], isReplan))]);
+  const question = lib.renderQuestions([limitAsk(main.buildStepStopBrief(isReplan))]);
   assert.ok(run.result.message.startsWith(leadStart), run.result.message);
   assert.ok(run.result.message.endsWith('\n\n' + question), run.result.message);
   assert.ok(!run.result.message.includes('Next: '), run.result.message);
@@ -865,11 +865,41 @@ function assertStepStopPause(run, leadStart, lastLabel, nextAction = undefined, 
 
 /**
  * Asserts a pause of a stop with isReplan true whose whole lead is lead,
- * with the brief of nextAction, the fix line brief when absent, before any
- * wave and with lastLabel the last agent call.
+ * with the fix_cause brief, before any wave and with lastLabel the last
+ * agent call.
  */
 function assertPassStopPause(run, lead, lastLabel, nextAction = undefined) {
   assertStepStopPause(run, lead + '\n\n', lastLabel, nextAction, true);
+  assert.ok(labelsOf(run).every((label) => !label.startsWith('work-') && !label.startsWith('commit-')), JSON.stringify(labelsOf(run)));
+}
+
+/**
+ * Asserts the run ended blocked, with no question, on a stop whose lead
+ * cause has next action nextAction, report or run_again, which no stop
+ * asks: the message starting with leadStart, then the Next line of
+ * nextAction as its own block, and, when given, `lastLabel` as the label
+ * of the last agent call.
+ */
+function assertStepStopEnd(run, leadStart, lastLabel, nextAction) {
+  assert.ok(nextAction === 'report' || nextAction === 'run_again', 'a ' + nextAction + ' stop asks');
+  assert.equal(run.result.needs_user, false, run.result.message);
+  assert.equal(run.result.outcome, 'blocked', run.result.message);
+  assert.ok(run.result.message.startsWith(leadStart), run.result.message);
+  assert.ok(run.result.message.includes('\n\n' + main.nextStepLine(nextAction)), run.result.message);
+  assert.ok(!run.result.message.includes('**Q1. '), run.result.message);
+  assert.equal(run.result.resume_args, undefined);
+  if (lastLabel !== undefined) {
+    assert.equal(labelsOf(run).at(-1), lastLabel);
+  }
+}
+
+/**
+ * Asserts the end of a stop before any wave whose whole lead is lead and
+ * whose Next line, right after it, is that of nextAction, report or
+ * run_again, with lastLabel the last agent call.
+ */
+function assertPassStopEnd(run, lead, lastLabel, nextAction) {
+  assertStepStopEnd(run, lead + '\n\n' + main.nextStepLine(nextAction), lastLabel, nextAction);
   assert.ok(labelsOf(run).every((label) => !label.startsWith('work-') && !label.startsWith('commit-')), JSON.stringify(labelsOf(run)));
 }
 
@@ -1223,7 +1253,7 @@ const ROW_TESTS = {
     test('trunk and references reach the facts inputs normalized', async () => {
       const run = await runWorkflow({ request: REQUEST, trunk: 'develop', references: [12, '7', 12] }, { 'facts-1': factsRelay() });
       assert.deepEqual(readRunnerInputs(callOf(run, 'facts-1').prompt), { trunk: 'develop', ref: ['12', '7'] });
-      assertPassStopPause(run, MALFORMED_FACTS, 'facts-1', 'report');
+      assertPassStopEnd(run, MALFORMED_FACTS, 'facts-1', 'report');
     });
   },
   'SD-02': () => {
@@ -1269,9 +1299,9 @@ const ROW_TESTS = {
       ['CR line ends', { outcome: 'ran', stdout: goodStdout.replace(/\n/g, '\r\n') }],
       ['an extra field', { outcome: 'ran', stdout: goodStdout, note: 'x' }]
     ]) {
-      test(`a relay with ${label} pauses as malformed facts before planning, with the report brief`, async () => {
+      test(`a relay with ${label} ends blocked as malformed facts before planning, with the report Next line`, async () => {
         const run = await runWorkflow(LAUNCH, { 'facts-1': relay });
-        assertPassStopPause(run, MALFORMED_FACTS, 'facts-1', 'report');
+        assertPassStopEnd(run, MALFORMED_FACTS, 'facts-1', 'report');
         assert.deepEqual(labelsOf(run), ['facts-1']);
       });
     }
@@ -1305,9 +1335,9 @@ const ROW_TESTS = {
       ['an unsafe external_texts count', { external_texts: '9007199254740993' }, LAUNCH],
       ['a trunk line for another launch trunk', {}, { request: REQUEST, trunk: 'develop' }]
     ]) {
-      test(`${label} pauses as malformed facts`, async () => {
+      test(`${label} ends blocked as malformed facts`, async () => {
         const run = await runWorkflow(launch, { 'facts-1': factsRelay(changes) });
-        assertPassStopPause(run, MALFORMED_FACTS, 'facts-1', 'report');
+        assertPassStopEnd(run, MALFORMED_FACTS, 'facts-1', 'report');
         assert.deepEqual(labelsOf(run), ['facts-1']);
       });
     }
@@ -1398,9 +1428,9 @@ const ROW_TESTS = {
       assert.ok(run.result.message.startsWith('The injection scan flagged text from GitHub as a possible prompt injection, so the delivery stopped before planning.'), run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'scan']);
     });
-    test('a coverage failure pauses before planning', async () => {
+    test('a coverage failure ends the run blocked before planning, with the report Next line', async () => {
       const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay({ external_texts: '2' }), scan: cleanScan(1) });
-      assertPassStopPause(run, 'The injection scan did not return exactly one result for each text from GitHub in the facts, so the delivery stopped before planning.', 'scan', 'report');
+      assertPassStopEnd(run, 'The injection scan did not return exactly one result for each text from GitHub in the facts, so the delivery stopped before planning.', 'scan', 'report');
     });
     test('a later pass scans again under its own label', async () => {
       const results = happyResults({
@@ -1447,9 +1477,9 @@ const ROW_TESTS = {
       assert.equal(labelsOf(later).at(-1), 'scan-2');
       assert.deepEqual(later.result.message.split('\n\n').slice(0, 2), [unusable, main.nextStepLine('run_again')]);
     });
-    test('a scan result that fails its schema pauses with the report brief, and one that flags a suspect ends with the fix line', async () => {
+    test('a scan result that fails its schema ends the run with the report Next line, and one that flags a suspect ends with the fix line', async () => {
       const unusable = await runWorkflow(LAUNCH, { 'facts-1': factsRelay({ external_texts: '1' }), scan: {} });
-      assertPassStopPause(unusable, 'The injection scan returned a result it could not use, so the delivery stopped before planning.', 'scan', 'report');
+      assertPassStopEnd(unusable, 'The injection scan returned a result it could not use, so the delivery stopped before planning.', 'scan', 'report');
       const suspect = { results: [{ item_ref: 't1', verdict: 'injection-suspect', pattern_category: 'P2', field_excerpt: 'x', reason: 'override' }] };
       const flagged = await runWorkflow(LAUNCH, { 'facts-1': factsRelay({ external_texts: '1' }), scan: suspect });
       assert.equal(flagged.result.message.split('\n\n')[1], NEXT_STEP_LINE);
@@ -1771,20 +1801,36 @@ const ROW_TESTS = {
       assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: strong }])), run.result.message);
       assert.ok(!run.result.message.includes(main.buildPlanAcceptanceBrief(makePlan()).problem), run.result.message);
     });
-    test('a planner question whose recommended option goes beyond the request asks at every level, beyond_request where the table takes it, and shows the mark', async () => {
+    test('a planner question whose recommended option goes beyond the request, strong and of small effort, is taken and listed where the table takes it, asked table_surface elsewhere, and shows the mark when asked', async () => {
       const beyond = makeBrief({ problem: 'BEYOND_PROBLEM', options: makeBrief().options.map((option) => ({ ...option, beyond_request: option.id === 'A' })) });
       const row = autonomyTable.rows.find((candidate) => candidate.kind === 'planner_question');
       for (const level of autonomyTable.levels) {
         const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
         run.level = level;
         const resolution = main.resolvePlanAsks(planResult(makePlan(), [beyond]), parsedFacts(), run, EMPTY_SCOPE);
-        assert.ok(!resolution.taken.some((entry) => entry.kind === 'planner_question'), level);
-        assert.deepEqual(structuredClone(resolution.asks.map((ask) => [ask.kind, ask.reason])), [['planner_question', row[level] === 'auto' ? 'beyond_request' : 'table_surface']], level);
+        const takenListed = resolution.taken.filter((entry) => entry.kind === 'planner_question').map((entry) => entry.listed);
+        const askedReasons = resolution.asks.filter((ask) => ask.kind === 'planner_question').map((ask) => ask.reason);
+        assert.deepEqual(structuredClone([takenListed, askedReasons]), row[level] === 'auto' ? [[['beyond_request']], []] : [[], ['table_surface']], level);
       }
-      const paused = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan(), [beyond]) });
+      const taken = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan(), [beyond]) }));
+      assert.equal(taken.result.outcome, 'complete', taken.result.message);
+      assert.ok(taken.result.message.endsWith(lib.renderDecisionsCompact([{ brief: beyond }])), taken.result.message);
+      const gated = { ...beyond, problem: 'GATED_BEYOND_PROBLEM', gate: { irreversible: false, architectural: true, safety: false } };
+      const paused = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan(), [gated]) });
       assert.equal(paused.result.needs_user, true);
       assert.ok(paused.result.message.includes('- A: Hash the path. (recommended) This goes beyond what you asked for.\n- B: Use the raw path.\n'), paused.result.message);
     });
+    for (const [label, changes] of [['weak', { strength: 'weak' }], ['of medium effort', { effort: 'medium' }]]) {
+      test(`a planner question whose recommended option goes beyond the request and is ${label} is a defect that goes back to the planner, never asked`, async () => {
+        const options = makeBrief().options.map((option) => (option.id === 'A' ? { ...option, beyond_request: true, effort: changes.effort ?? option.effort } : option));
+        const defect = makeBrief({ problem: 'DEFECT_PROBLEM', options: options, recommendation: { ...makeBrief().recommendation, strength: changes.strength ?? 'strong' } });
+        const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan(), [defect]), 'plan-1-fix-1': planResult() }));
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        assert.deepEqual(labelsOf(run).slice(0, 4), ['facts-1', 'scope-1', 'plan-1', 'plan-1-fix-1']);
+        assert.ok(readCheckProblem(run, 'plan-1-fix-1').startsWith('A planner question fails the decision check'), readCheckProblem(run, 'plan-1-fix-1'));
+        assert.ok(!run.result.message.includes('DEFECT_PROBLEM'), run.result.message);
+      });
+    }
     test('every code-built brief offers only options within the request and fits BRIEF_SCHEMA with worst-case inputs', () => {
       const briefs = [
         main.buildPlanAcceptanceBrief(makePlan()),
@@ -1794,7 +1840,7 @@ const ROW_TESTS = {
         main.buildValidationRemediationBrief(OTHER, 1),
         main.buildFixLimitBrief(OTHER),
         main.buildGateRerunBrief(['validate', 'review'], THIRD, true),
-        main.buildStepStopBrief([{ problem: 'P.', nextAction: 'report' }], true),
+        main.buildStepStopBrief(true),
         main.buildVersionQuestionBrief(parsedVersion(ASK_UNDETERMINED)),
         main.buildVersionQuestionBrief(parsedVersion(MINOR_UNREADABLE)),
         main.removeReviewerText(main.buildReviewQuestionBrief({ ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'f4f4f4f4', user_question: USER_QUESTION }))
@@ -1822,7 +1868,7 @@ const ROW_TESTS = {
       const plan = effectPlan('Publish to the registry.', false);
       const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(plan, [makeGatedBrief('GATED_PROBLEM')]) });
       assert.equal(run.result.needs_user, true);
-      assert.ok(run.result.message.startsWith(main.describePlanLine(plan, []) + '\n\n**Q1. '), run.result.message);
+      assert.ok(run.result.message.startsWith(main.describePlanLine(plan) + '\n\n**Q1. '), run.result.message);
       assert.ok(run.result.message.endsWith('Reply with a label and an option for each, like Q1 A, or in your own words.'), run.result.message);
       assert.ok(run.result.message.includes('Q1. GATED_PROBLEM'));
       assert.ok(run.result.message.includes('Q2. A plan step has an effect outside the repo'));
@@ -2012,7 +2058,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'revise-2', 'scope-1-2', 'revise-3', 'scope-1-3']);
     });
     for (const [kind, call, driftingCall, freshness, revisedLabels] of [
-      ['plan_acceptance', 'markOutsideLimits(buildPlanAcceptanceBrief(plan), resolution.outsidePaths), [run.pass, plan]', 'markOutsideLimits(buildPlanAcceptanceBrief(plan), resolution.outsidePaths), [run.answerLog.length, plan]', 'fresh', ['revise-1']],
+      ['plan_acceptance', 'markOutsideLimits(brief, outsidePaths), [run.pass, plan]', 'markOutsideLimits(brief, outsidePaths), [run.answerLog.length, plan]', 'fresh', ['revise-1']],
       ['trunk_stale', "buildTrunkStaleBrief(facts), 'run'", 'buildTrunkStaleBrief(facts), run.answerLog.length', 'behind', ['revise-1', 'scope-1-1']]
     ]) {
       test(`a settled ${kind} question asked again in its pass ends blocked as a workflow defect, with no pause counted`, async () => {
@@ -2265,7 +2311,7 @@ const ROW_TESTS = {
       ['a blocked script', { outcome: 'blocked', stderr: 'blocker: working_branch equals trunk\n' }, 'fresh', true],
       ['no result', null, 'fresh', true]
     ]) {
-      test(`${label} ${isTerminal ? 'ends the run' : 'pauses'} before any wave`, async () => {
+      test(`${label} ends the run before any wave, ${isTerminal ? 'a terminal cause' : 'with the report Next line'}`, async () => {
         const results = {
           'facts-1': factsRelay({ trunk_freshness: freshness }),
           'plan-1': planResult(makePlan({ trunk_freshness: freshness })),
@@ -2275,26 +2321,24 @@ const ROW_TESTS = {
         if (isTerminal) {
           assertBlockedBeforeWaves(run);
         } else {
-          assertPassStopPause(run, 'The branch step returned malformed routing lines, so the delivery stopped before any wave.', 'branch-1', 'report');
+          assertPassStopEnd(run, 'The branch step returned malformed routing lines, so the delivery stopped before any wave.', 'branch-1', 'report');
         }
         assert.ok(/^The branch step (was blocked|returned|reported)/.test(run.result.message), run.result.message);
         assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'branch-1']);
       });
     }
-    test('a null branch relay, an agent failure, names the failure and says to run again; a malformed one pauses with the report brief', async () => {
+    test('a null branch relay, an agent failure, names the failure and says to run again; a malformed one ends with the report Next line', async () => {
       const stopped = 'The branch step returned a result it could not use, so the delivery stopped before any wave.';
       const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(), 'branch-1': null });
       assert.deepEqual(run.result.message.split('\n\n').slice(0, 2), [stopped + ' ' + lib.describeNoResult(null), main.nextStepLine('run_again')]);
       const malformed = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(), 'branch-1': {} });
-      assertPassStopPause(malformed, stopped, 'branch-1', 'report');
+      assertPassStopEnd(malformed, stopped, 'branch-1', 'report');
     });
-    test('a reply to a malformed branch relay starts a new pass from the facts step, outside maxReplans()', async () => {
+    test('a malformed branch relay ends the run with no question, so no reply starts a new pass', async () => {
       const malformed = branchRelay({ commit: undefined });
-      const paused = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(), 'branch-1': malformed });
-      const results = happyResults({ 'branch-1': malformed, 'facts-2': factsRelay(), 'plan-2': planResult(), 'branch-2': branchRelay(), 'work-2-STEP-001': WORKER_DONE, 'commit-2-1': commitRelay(), ...tailResults(2, OTHER) });
-      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Try again.'), results);
-      assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'facts-2', 'scope-2', 'plan-2', 'branch-2', 'work-2-STEP-001', 'commit-2-1', ...tailLabels(2)]);
+      const run = await runWorkflow(LAUNCH, happyResults({ 'branch-1': malformed, 'facts-2': factsRelay(), 'plan-2': planResult(), 'branch-2': branchRelay() }));
+      assertPassStopEnd(run, 'The branch step returned malformed routing lines, so the delivery stopped before any wave.', 'branch-1', 'report');
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'branch-1']);
     });
     test('a blocked branch step names its blocker line', async () => {
       const results = { 'facts-1': factsRelay(), 'plan-1': planResult(), 'branch-1': { outcome: 'blocked', stderr: 'blocker: the working tree is dirty\n' } };
@@ -2469,12 +2513,12 @@ const ROW_TESTS = {
       assert.ok(!lib.validateSchema(schema, { outcome: 'complete', summary: 'x', stage: 'implementation' }).ok);
       assert.ok(!lib.validateSchema(schema, { outcome: 'needs_replan', summary: 'x', blocker: 'y', stage: 'implementation' }).ok);
     });
-    test('a plan that cannot be scheduled mid-run pauses with a report step_stop question, and its reply plans again', async () => {
+    test('a plan that cannot be scheduled mid-run ends the run blocked with the report Next line and no question', async () => {
       const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
       const cyclic = makePlan({ steps: [makeStep('A', ['a.js'], { depends_on: ['B'] }), makeStep('B', ['b.js'], { depends_on: ['A'] })] });
       const stopped = structuredClone(await main.runPlanWaves(run, cyclic, {}));
       const lead = 'The plan steps cannot be scheduled, so the delivery stopped: dependency cycle detected among plan steps';
-      assert.equal(stopped.result.message, lead + '\n\n' + lib.renderQuestions([limitAsk(main.buildStepStopBrief([{ problem: lead, nextAction: 'report' }], true))]));
+      assert.deepEqual(stopped.result, { needs_user: false, outcome: 'blocked', message: lead + '\n\n' + main.nextStepLine('report') });
       assert.ok(!stopped.result.message.includes('named above'), stopped.result.message);
     });
     test('steps sharing a file run in separate waves', async () => {
@@ -2494,14 +2538,14 @@ const ROW_TESTS = {
       assert.equal(blocks[1], main.nextStepLine('run_again'));
       assert.deepEqual(labelsOf(run).slice(4), ['work-1-S1', 'work-1-S2', 'commit-1-1']);
     });
-    test('a null worker beside a worker blocked with no next_action ends the run with the fix line, and a malformed worker result pauses', async () => {
+    test('a null worker beside a worker blocked with no next_action ends the run with the fix line, and a malformed worker result ends it with the report Next line', async () => {
       const results = { ...waveResults, 'work-1-S1': { outcome: 'blocked', summary: 'Stopped.', blocker: 'Tests fail.' } };
       delete results['work-1-S2'];
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'blocked');
       assert.equal(run.result.message.split('\n\n')[1], NEXT_STEP_LINE);
       const malformed = await runWorkflow(LAUNCH, { ...waveResults, 'work-1-S2': {} });
-      assertStepStopPause(malformed, 'A worker did not finish its step, so the delivery stopped after its wave:\n- Step "S2" was blocked: it returned no usable result.\n', 'commit-1-1', 'report', true);
+      assertStepStopEnd(malformed, 'A worker did not finish its step, so the delivery stopped after its wave:\n- Step "S2" was blocked: it returned no usable result.\n\n' + main.nextStepLine('report'), 'commit-1-1', 'report');
     });
   },
   'SD-15': () => {
@@ -2552,9 +2596,9 @@ const ROW_TESTS = {
       ['committed not a boolean', commitRelay({ committed: 'yes' })],
       ['no commit line', commitRelay({ commit: undefined })]
     ]) {
-      test(`${label} pauses after the wave, and the reply plans again`, async () => {
+      test(`${label} ends the run after the wave with the report Next line and no question`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'commit-1-1': relay }));
-        assertStepStopPause(run, 'The commit step returned malformed routing lines, so the delivery stopped. Check the branch for a commit of the wave.', 'commit-1-1', 'report', true);
+        assertStepStopEnd(run, 'The commit step returned malformed routing lines, so the delivery stopped. Check the branch for a commit of the wave.\n\n' + main.nextStepLine('report'), 'commit-1-1', 'report');
       });
     }
     test('a null result at the wave and fix commit labels names the agent failure and gives the run_again Next line as block 2', async () => {
@@ -2629,9 +2673,13 @@ const ROW_TESTS = {
         assert.deepEqual(run.result.message.split('\n\n').slice(0, 3), [site.fixCause, main.nextStepLine(site.stepAction), describeNullCommit(site.noun)]);
         assert.equal(countFailureSentences(run.result.message), 1, run.result.message);
       });
-      test(`a step cause then a commit with nothing to commit at ${site.label} pauses with no commit end line`, async () => {
+      test(`a step cause then a commit with nothing to commit at ${site.label} ${site.stepAction === 'report' ? 'ends the run' : 'pauses'} with no commit end line`, async () => {
         const run = await runWorkflow(LAUNCH, site.buildResults(site.fixStep, commitRelay({ commit: site.head, committed: 'false' })));
-        assertStepStopPause(run, site.fixCause + '\n\n', site.label, site.stepAction, site.label === 'commit-1-1');
+        if (site.stepAction === 'report') {
+          assertStepStopEnd(run, site.fixCause + '\n\n' + main.nextStepLine('report'), site.label, 'report');
+        } else {
+          assertStepStopPause(run, site.fixCause + '\n\n', site.label, site.stepAction, site.label === 'commit-1-1');
+        }
         assert.ok(!run.result.message.includes(' was committed as '), run.result.message);
       });
     }
@@ -2701,9 +2749,9 @@ const ROW_TESTS = {
       assertStepStopPause(run, blockedLead + '\n\n', 'commit-1-1', undefined, true);
       assert.ok(!run.result.message.includes(' was committed as '), run.result.message);
     });
-    test('a wave whose only causes are workers asking run_again pauses, and a null worker result ends the run', async () => {
+    test('a wave whose only causes are workers asking run_again ends the run with the run_again Next line, and so does a null worker result', async () => {
       const runAgain = await runWorkflow(LAUNCH, happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: 'The registry timed out.', next_action: 'run_again' } }));
-      assertStepStopPause(runAgain, 'A worker did not finish its step, so the delivery stopped after its wave:\n- Step "STEP-001" was blocked: it says "The registry timed out.".\n', 'commit-1-1', 'run_again', true);
+      assertStepStopEnd(runAgain, 'A worker did not finish its step, so the delivery stopped after its wave:\n- Step "STEP-001" was blocked: it says "The registry timed out.".\n\n' + main.nextStepLine('run_again'), 'commit-1-1', 'run_again');
       const results = happyResults();
       delete results['work-1-STEP-001'];
       const failed = await runWorkflow(LAUNCH, results);
@@ -2730,7 +2778,7 @@ const ROW_TESTS = {
       assert.ok(run.result.message.includes('Step "S1" was blocked: it gave no reason.'));
     });
     const waveLead = 'A worker did not finish its step, so the delivery stopped after its wave:';
-    const stopQuestionOf = (nextAction) => lib.renderQuestions([limitAsk(main.buildStepStopBrief([{ problem: 'P.', nextAction: nextAction }], true))]);
+    const stopQuestion = lib.renderQuestions([limitAsk(main.buildStepStopBrief(true))]);
     const approvalQuestionsOf = (holds) => lib.renderQuestions(main.buildApprovalAsks(holds, true, main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] })));
     const reportHoldLine = (stepId, quoted) => '- Step "' + stepId + '" stopped at the destructive-fix gate without a change the run can approve: it says "' + quoted + '".';
     const runBlockedWave = (workers) => {
@@ -2739,11 +2787,10 @@ const ROW_TESTS = {
       const results = Object.fromEntries(ids.map((id) => ['work-1-' + id, { outcome: 'blocked', summary: 'Stopped.', ...workers[id] }]));
       return runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan), ...results }));
     };
-    test('a blocked worker with no blocker gives a report stop that names nothing to clear', async () => {
+    test('a blocked worker with no blocker gives a report stop that names nothing to clear and ends the run', async () => {
       for (const worker of [{}, { next_action: 'fix_cause' }, { stage: 'destructive-fix-gate' }]) {
         const run = await runBlockedWave({ S1: worker });
-        assert.ok(run.result.message.startsWith(waveLead + '\n- Step "S1" was blocked: it gave no reason.\n'), run.result.message);
-        assert.ok(run.result.message.endsWith('\n\n' + stopQuestionOf('report')), run.result.message);
+        assertStepStopEnd(run, waveLead + '\n- Step "S1" was blocked: it gave no reason.\n\n' + main.nextStepLine('report'), 'commit-1-1', 'report');
         assert.ok(!run.result.message.includes('named above'), run.result.message);
       }
       assert.deepEqual(structuredClone(main.readGateHold({ outcome: 'blocked', summary: 'x', blocker: ' \n ', next_action: 'fix_cause', stage: 'destructive-fix-gate', destructive: [DROP_USERS] }, [])), { nextAction: 'report' });
@@ -2764,7 +2811,7 @@ const ROW_TESTS = {
         assert.deepEqual(structuredClone(main.readGateHold({ outcome: 'blocked', summary: 'x', destructive: [DROP_USERS], ...worker }, [])), { nextAction: undefined }, JSON.stringify(worker));
       }
     });
-    test('a hold that lists no item, or only approved items, is a report stop whose step line names no change to approve', async () => {
+    test('a hold that lists no item, or only approved items, is a report stop whose step line names no change to approve, and ends the run', async () => {
       const hold = { outcome: 'blocked', summary: 'x', blocker: 'Dropping the table needs approval.', stage: 'destructive-fix-gate' };
       const other = { category: 4, item: 'db/orders table' };
       assert.deepEqual(structuredClone(main.readGateHold(hold, [])), { nextAction: 'report', holds: [] });
@@ -2772,8 +2819,7 @@ const ROW_TESTS = {
       assert.deepEqual(structuredClone(main.readGateHold({ ...hold, destructive: [DROP_USERS, other] }, [DROP_USERS])), { nextAction: 'approve', holds: [other] });
       assert.deepEqual(structuredClone(main.readGateHold({ ...hold, destructive: [DROP_USERS] }, [{ ...DROP_USERS, category: 5 }])), { nextAction: 'approve', holds: [DROP_USERS] });
       const run = await runBlockedWave({ S1: { blocker: 'Dropping the table needs approval.', stage: 'destructive-fix-gate' } });
-      assert.ok(run.result.message.startsWith(waveLead + '\n' + reportHoldLine('S1', 'Dropping the table needs approval.') + '\n'), run.result.message);
-      assert.ok(run.result.message.endsWith('\n\n' + stopQuestionOf('report')), run.result.message);
+      assertStepStopEnd(run, waveLead + '\n' + reportHoldLine('S1', 'Dropping the table needs approval.') + '\n\n' + main.nextStepLine('report'), 'commit-1-1', 'report');
     });
     test('an approve wave cause holds the {stepId, category, item} of each approve step in stop order, and no other step', () => {
       const outcomes = [
@@ -2786,13 +2832,19 @@ const ROW_TESTS = {
       assert.deepEqual(cause.holds, [{ stepId: 'S3', ...DROP_USERS }, { stepId: 'S3', ...TEST_X }]);
       assert.equal(structuredClone(main.describeBlockedWave(outcomes.slice(0, 2))).holds, undefined);
     });
-    test('the wave cause takes the type first in stop order among its blocked workers', async () => {
+    test('the wave cause takes the type first in stop order among its blocked workers: approve and fix_cause ask, report and run_again end the run', async () => {
       const approve = { blocker: 'Dropping the table needs approval.', stage: 'destructive-fix-gate', destructive: [DROP_USERS] };
       const fix = { blocker: 'Tests fail.' };
       const slow = { blocker: 'The registry timed out.', next_action: 'run_again' };
-      for (const [workers, question] of [[{ S1: fix, S2: approve }, approvalQuestionsOf([{ stepId: 'S2', ...DROP_USERS }])], [{ S1: {}, S2: fix }, stopQuestionOf(undefined)], [{ S1: slow, S2: {} }, stopQuestionOf('report')], [{ S1: slow, S2: slow }, stopQuestionOf('run_again')]]) {
+      for (const [workers, question] of [[{ S1: fix, S2: approve }, approvalQuestionsOf([{ stepId: 'S2', ...DROP_USERS }])], [{ S1: {}, S2: fix }, stopQuestion]]) {
         const run = await runBlockedWave(workers);
+        assert.equal(run.result.needs_user, true, run.result.message);
         assert.ok(run.result.message.endsWith('\n\n' + question), JSON.stringify(workers) + run.result.message);
+      }
+      for (const [workers, nextAction] of [[{ S1: slow, S2: {} }, 'report'], [{ S1: slow, S2: slow }, 'run_again']]) {
+        const run = await runBlockedWave(workers);
+        assertStepStopEnd(run, waveLead + '\n', 'commit-1-1', nextAction);
+        assert.equal(run.result.message.split('\n\n')[1], main.nextStepLine(nextAction), JSON.stringify(workers) + run.result.message);
       }
     });
     test('a capped blocked wave lists its steps in stop order, so the step that sets the next action stays shown', async () => {
@@ -2949,6 +3001,24 @@ const ROW_TESTS = {
       assert.equal(main.buildRunRecordParts(state, reordered, undefined).find((part) => part.id === 'decisions').text, lib.renderDecisionsCompact(reorderedShown));
       assert.equal(main.buildRunRecordParts(state, reordered.map(main.toPullRequestDecision), undefined).find((part) => part.id === 'decisions').text, lib.renderDecisionsCompact(reordered.filter((entry) => listedKinds.includes(entry.kind)).map(main.toPullRequestDecision)));
     });
+    test('a routine taken decision with a non-empty listed is shown in every record, and one with listed empty or absent is not', () => {
+      for (const kind of main.routineDecisionKinds()) {
+        const brief = makeBrief({ problem: 'LISTED_' + kind });
+        assert.equal(main.isShownDecision({ brief: brief, kind: kind, listed: ['outside_limits'] }), true, kind);
+        assert.equal(main.isShownDecision({ brief: brief, kind: kind, listed: [] }), false, kind);
+        assert.equal(main.isShownDecision({ brief: brief, kind: kind }), false, kind);
+      }
+      assert.equal(main.isShownDecision({ brief: makeBrief(), kind: 'planner_question', listed: [] }), true);
+      const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      state.head = OTHER;
+      const listedAcceptance = { brief: main.buildPlanAcceptanceBrief(makePlan()), kind: 'plan_acceptance', listed: ['outside_limits', 'repeats_surface'] };
+      state.taken.push(listedAcceptance, { brief: main.buildGateRerunBrief(['validate'], OTHER, false), kind: 'gate_rerun', listed: [] });
+      const shown = lib.renderDecisionsCompact([{ brief: listedAcceptance.brief }]);
+      assert.deepEqual([...main.buildRecordTailBlocks(state, state.taken).map((block) => block.text)], [shown]);
+      assert.equal(main.buildRunRecordParts(state, state.taken.map(main.toPullRequestDecision), undefined).find((part) => part.id === 'decisions').text, shown);
+      const texts = main.buildPullRequestTexts(state, makePlan(), { held: { validate: OTHER }, notes: { validate: 'passed' }, slow: [] });
+      assert.ok(texts.body.includes('Decided for you') && texts.body.includes(listedAcceptance.brief.problem), texts.body);
+    });
     test('a pause after waves lists no commit, and a resume replays every earlier prompt byte for byte', async () => {
       const results = happyResults({
         'work-1-STEP-001': { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved.' },
@@ -2996,7 +3066,7 @@ const ROW_TESTS = {
       assert.equal(run.result.needs_user, true);
       assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
       const message = run.result.message;
-      assert.ok(message.startsWith(main.describePlanLine(plan, []) + '\n\n**Q1. LONG_PROBLEM_0'), message.slice(0, 300));
+      assert.ok(message.startsWith(main.describePlanLine(plan) + '\n\n**Q1. LONG_PROBLEM_0'), message.slice(0, 300));
       assert.ok(!message.includes('S'.repeat(100)), 'no criticality line shows');
       assert.ok(!message.includes(lib.noticeMarker('cut')), message.slice(-300));
       summaries.forEach((summary) => assert.ok(message.includes('Word for word:\n' + lib.encodeUntrustedText(summary) + '\n'), message));
@@ -3018,6 +3088,33 @@ const ROW_TESTS = {
       const openQuestions = lib.renderOpenQuestions(summaries.map((summary) => ({ brief: main.buildExternalEffectBrief(summary) })), 'exact_text_size');
       assert.equal(run.result.message, [OPEN_LEAD, RUN_AGAIN, openQuestions].join('\n\n'));
       assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
+    });
+    test('pauseDelivery throws on an ask whose reason is outside askReasons(), or a step_stop ask whose stop is not approve or fix_cause, so only the Ask Set pauses', () => {
+      const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      const brief = makeGatedBrief('GUARD_PROBLEM');
+      const pauseOne = (ask) => main.pauseDelivery({ asks: [ask], taken: [] }, run, 'GUARD_LEAD.');
+      for (const reason of ['malformed_brief', 'recommendation_not_an_option', 'unknown_kind', 'bad_cell', ...lib.listReasons(), 'auto']) {
+        assert.throws(() => pauseOne({ brief: brief, reason: reason, kind: 'planner_question' }), new RegExp('^Error: pauseDelivery: ask planner_question ' + reason + '$'), reason);
+      }
+      const stopBrief = main.buildStepStopBrief(false);
+      for (const stop of [undefined, 'report', 'run_again', 'answer']) {
+        assert.throws(() => pauseOne({ brief: stopBrief, reason: 'table_surface', kind: 'step_stop', stop: stop }), /^Error: pauseDelivery: ask step_stop table_surface$/, String(stop));
+      }
+      for (const reason of lib.askReasons()) {
+        assert.equal(pauseOne({ brief: brief, reason: reason, kind: 'planner_question' }).needs_user, true, reason);
+      }
+      for (const stop of ['approve', 'fix_cause']) {
+        assert.equal(pauseOne({ brief: stopBrief, reason: 'table_surface', kind: 'step_stop', stop: stop }).needs_user, true, stop);
+      }
+    });
+    test('a planning pause lead is the plan line alone, naming no path outside the limits', async () => {
+      const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js', 'docs/OUTSIDE_ZQ.md'], { limits_reason: 'LIMITS_REASON_ZQ.' })] });
+      const scope = { documents: [], paths: [], limits: [{ path: 'src', origin: 'request' }] };
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'scope-1': scope, 'plan-1': planResult(plan, [makeGatedBrief('GATED_PROBLEM')]) });
+      assert.equal(run.result.needs_user, true, run.result.message);
+      assert.equal(run.result.message.split('\n\n')[0], main.describePlanLine(plan));
+      assert.ok(!main.describePlanLine(plan).includes('\n'));
+      assert.ok(!run.result.message.includes('OUTSIDE_ZQ') && !run.result.message.includes('LIMITS_REASON_ZQ'), run.result.message);
     });
     test('reply_size and exact_text_size are the only open question stops', () => {
       const stops = [...moduleSource.matchAll(/finishOpenQuestions\([^,]+, '([a-z_]+)'/g)].map((match) => match[1]);
@@ -3126,13 +3223,13 @@ const ROW_TESTS = {
       ['a version part of 16 digits', { expected_version: '1.' + '1'.repeat(16) + '.0' }],
       ['counts that do not add up to mapped_commits', { mapped_commits: '2' }]
     ]) {
-      test(`a version relay with ${label} pauses as malformed`, async () => {
-        assertStepStopPause(await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': validateWithVersion(changes) })), malformedLead, 'validate-1-1', 'report');
+      test(`a version relay with ${label} ends the run as malformed, with the report Next line`, async () => {
+        assertStepStopEnd(await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': validateWithVersion(changes) })), malformedLead, 'validate-1-1', 'report');
       });
     }
-    test('a validation result with no version relay, or a ran relay with no stdout, pauses as unusable, and a null result still ends the run', async () => {
+    test('a validation result with no version relay, or a ran relay with no stdout, ends the run as unusable with the report Next line, and a null result with the run_again one', async () => {
       for (const result of [VALIDATE_PASSED, { ...VALIDATE_PASSED, version: { outcome: 'ran' } }]) {
-        assertStepStopPause(await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': result })), unusableLead, 'validate-1-1', 'report');
+        assertStepStopEnd(await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': result })), unusableLead, 'validate-1-1', 'report');
       }
       const failed = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': null }));
       assert.equal(failed.result.outcome, 'blocked');
@@ -3319,9 +3416,9 @@ const ROW_TESTS = {
       const labels = labelsOf(run);
       assert.equal(labels[labels.indexOf('validate-1-1') + 1], 'review-1-1');
     });
-    test('with validation commands a not_run result pauses as unusable', async () => {
+    test('with validation commands a not_run result ends the run as unusable, with the report Next line', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'not_run' } }));
-      assertStepStopPause(run, 'The validation step returned no usable result, so the delivery stopped before the pull request.', 'validate-1-1', 'report');
+      assertStepStopEnd(run, 'The validation step returned no usable result, so the delivery stopped before the pull request.\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
     });
     test('an empty validation_commands list still runs validation: the fallback prompt names the Validation Procedure and offers not_run', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan({ validation_commands: [] })) }));
@@ -3438,9 +3535,9 @@ const ROW_TESTS = {
       assert.ok(!labelsOf(resumed).includes('facts-2'));
     });
     for (const [label, result] of [['failed with no failures', { outcome: 'failed' }], ['an extra field', { outcome: 'passed', note: 'x' }]]) {
-      test(`a validation result with ${label} pauses as unusable`, async () => {
+      test(`a validation result with ${label} ends the run as unusable, with the report Next line`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': result }));
-        assertStepStopPause(run, 'The validation step returned no usable result, so the delivery stopped before the pull request.', 'validate-1-1', 'report');
+        assertStepStopEnd(run, 'The validation step returned no usable result, so the delivery stopped before the pull request.\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
       });
     }
     test('a null validation result, an agent failure, names the failure and says to run again', async () => {
@@ -3568,7 +3665,7 @@ const ROW_TESTS = {
       assert.ok(!hasDataBlock(callOf(kept, 'fix-1-2').prompt, 'approvals'));
       const heldAgain = { ...results, 'fix-1-2': holdResult([DROP_USERS], { files: [] }), 'fix-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) };
       const again = await runWorkflow(resumeWith(LAUNCH, paused.result, 'A'), heldAgain);
-      assertStepStopPause(again, lead + '\n\n', 'fix-commit-1-2', 'report');
+      assertStepStopEnd(again, lead + '\n\n' + main.nextStepLine('report'), 'fix-commit-1-2', 'report');
     });
     test('the reply B to a fix round hold reaches the next fix round alone as user_answer, in place of the resume sentence, so the kept change stays refused', async () => {
       const failed = { outcome: 'failed', failures: FAILURE_TEXT };
@@ -3603,12 +3700,12 @@ const ROW_TESTS = {
       assert.ok(!hasDataBlock(later, 'user_answer'), later);
       assert.equal(later.split('\n')[1], main.resumedReplySentence());
     });
-    test('a fix round hold that lists no item, or only approved ones, pauses as a report stop', async () => {
+    test('a fix round hold that lists no item, or only approved ones, ends the run as a report stop', async () => {
       const unlisted = holdResult([], { files: [] });
       delete unlisted.destructive;
       for (const fix of [holdResult([], { files: [] }), unlisted]) {
         const run = await runWorkflow(LAUNCH, fixFlowResults({ 'fix-1-1': fix, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }));
-        assertStepStopPause(run, 'The validation fix round was blocked, so the delivery stopped: it says "' + HOLD_BLOCKER + '".\n\n', 'fix-commit-1-1', 'report');
+        assertStepStopEnd(run, 'The validation fix round was blocked, so the delivery stopped: it says "' + HOLD_BLOCKER + '".\n\n' + main.nextStepLine('report'), 'fix-commit-1-1', 'report');
       }
       const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
       state.approvals = [DROP_USERS];
@@ -3735,7 +3832,7 @@ const ROW_TESTS = {
       assert.deepEqual([...main.gateIds()], ['validate', 'review']);
       const brief = main.buildGateRerunBrief(['validate', 'review'], THIRD, false);
       assert.ok(lib.validateSchema(briefSchema, brief).ok);
-      assert.deepEqual({ ...lib.decide({ kind: 'gate_rerun', level: undefined, brief: brief }, autonomyTable, briefSchema) }, { action: 'take', reason: 'auto' });
+      assert.deepEqual(structuredClone(lib.decide({ kind: 'gate_rerun', level: undefined, brief: brief }, autonomyTable, briefSchema)), { action: 'take', reason: 'auto', listed: [] });
       assert.ok(lib.validateSchema(briefSchema, main.buildGateRerunBrief(['validate'], THIRD, true)).ok);
       assert.ok(lib.validateSchema(briefSchema, main.buildValidationRemediationBrief(OTHER, 1)).ok);
       assert.ok(lib.validateSchema(briefSchema, main.buildFixLimitBrief(OTHER)).ok);
@@ -3770,8 +3867,9 @@ const ROW_TESTS = {
         const row = autonomyTable.rows.find((candidate) => candidate.kind === kind);
         assert.ok(isHardStop || (row !== undefined && row.resolved_at.some((site) => site.startsWith('standard-delivery.'))), kind);
       }
-      assert.equal((moduleSource.match(/\bdecide\(\{/g) || []).length, 1);
-      assert.ok(moduleSource.includes('decide({ kind: kind, level: run.level, brief: brief, askReason: askReason }, AUTONOMY_TABLE, BRIEF_SCHEMA)'));
+      assert.equal((moduleSource.match(/\bdecide\(\{/g) || []).length, 2);
+      assert.ok(moduleSource.includes('decide({ kind: kind, level: run.level, brief: brief, listed: listed }, AUTONOMY_TABLE, BRIEF_SCHEMA)'));
+      assert.ok(moduleSource.includes('decide({ kind: PLANNER_QUESTION_KIND, level: run.level, brief: brief }, AUTONOMY_TABLE, BRIEF_SCHEMA)'));
       const kindArgs = [...moduleSource.matchAll(/\bresolve(?:Tail)?Decision\(([A-Za-z_]+),/g)].map((match) => match[1]);
       assert.ok(kindArgs.length > 0);
       kindArgs.filter((name) => name !== 'kind').forEach((name) => assert.ok(/^[A-Z_]+_KIND$/.test(name), name));
@@ -3780,18 +3878,19 @@ const ROW_TESTS = {
       const row = autonomyTable.rows.find((candidate) => candidate.kind === 'step_stop');
       assert.deepEqual([row.high, row.balanced, row.low], ['surface', 'surface', 'surface']);
       assert.deepEqual(row.resolved_at, ['standard-delivery.stop']);
-      assert.equal(main.buildStepStopBrief([{ problem: 'P.' }], false).kind, 'step_stop');
-      for (const nextAction of ['fix_cause', 'run_again', 'report']) {
-        const brief = main.buildStepStopBrief([{ problem: 'P.', nextAction: nextAction }], false);
+      for (const isReplan of [false, true]) {
+        const brief = main.buildStepStopBrief(isReplan);
+        assert.equal(brief.kind, 'step_stop');
+        assert.equal(brief.recommendation.strength, 'strong');
         for (const level of autonomyTable.levels) {
           const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
           run.level = level;
           const ask = main.buildUndecidedAsk('step_stop', brief, run);
-          assert.deepEqual([ask.brief, ask.kind, ask.reason], [brief, 'step_stop', 'table_surface'], nextAction + ' ' + level);
-          assert.equal(run.taken.length, 0, nextAction + ' ' + level);
+          assert.deepEqual([ask.brief, ask.kind, ask.reason], [brief, 'step_stop', 'table_surface'], isReplan + ' ' + level);
+          assert.ok(lib.askReasons().includes(ask.reason));
+          assert.equal(run.taken.length, 0, isReplan + ' ' + level);
         }
       }
-      assert.equal(main.buildStepStopBrief([{ problem: 'P.', nextAction: 'fix_cause' }], false).recommendation.strength, 'strong');
     });
     test('every undecided question resolves through decide() with the kind its call site passes, and a take throws', () => {
       const sites = [...moduleSource.matchAll(/buildUndecidedAsk\(([A-Za-z_]+), (build[A-Za-z]+)\(/g)].map((match) => match[1] + ' ' + match[2]).sort();
@@ -4175,9 +4274,9 @@ const ROW_TESTS = {
       ['a hypothesized_root over 300 characters', { ...CLUSTER, hypothesized_root: 'h'.repeat(301) }],
       ['a title over 300 characters', { ...ESCALATION, title: 't'.repeat(301) }]
     ]) {
-      test(`a review result with ${label} pauses after the review commit`, async () => {
+      test(`a review result with ${label} ends the run after the review commit, with the report Next line`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
-        assertStepStopPause(run, malformed + '\n\n', 'review-commit-1-1', 'report');
+        assertStepStopEnd(run, malformed + '\n\n' + main.nextStepLine('report'), 'review-commit-1-1', 'report');
       });
     }
     test('the usable reviews the bound cases change pass REVIEW_SCHEMA at each bound, so each case fails for its one change', () => {
@@ -4222,13 +4321,11 @@ const ROW_TESTS = {
       assert.deepEqual(readRunnerInputs(callOf(run, 'review-commit-1-1').prompt).files, []);
       assert.equal(run.failures, 0);
     });
-    test('an unusable review pauses after its commit, and the reply runs local review again with the next count, with no head check', async () => {
+    test('an unusable review ends the run after its commit with the report Next line, and runs no local review again', async () => {
       const results = happyResults({ 'review-1-1': { ...REVIEW_CLEAN, finding_id: 'f1f1f1f1' }, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
       const run = await runWorkflow(LAUNCH, results);
-      assertStepStopPause(run, 'The local review step returned no usable result, so the delivery stopped before the pull request.\n\n', 'review-commit-1-1', 'report');
-      const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'Codex is back.'), results);
-      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
-      assert.deepEqual(labelsOf(resumed).slice(labelsOf(run).length), ['review-1-2', 'review-commit-1-2', 'pr-1']);
+      assertStepStopEnd(run, 'The local review step returned no usable result, so the delivery stopped before the pull request.\n\n' + main.nextStepLine('report'), 'review-commit-1-1', 'report');
+      assert.ok(!labelsOf(run).includes('review-1-2'), JSON.stringify(labelsOf(run)));
     });
     test('a null review commit result names the agent failure and gives the run_again Next line', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'review-commit-1-1': null }));
@@ -4572,18 +4669,18 @@ const ROW_TESTS = {
         assert.equal(run.result.message, main.describeReviewQuestionLead(review, OTHER) + '\n\n' + lib.renderQuestions([surfacedAsk(main.buildReviewQuestionBrief(review))]));
       }
     });
-    test('a review result whose user_question has no gate is unusable and pauses with the step_stop question', async () => {
+    test('a review result whose user_question has no gate is unusable and ends the run with the report Next line', async () => {
       const { gate, ...noGate } = agreedQuestion;
       assert.deepEqual(gate, AGREED_GATE);
       const review = { ...agreed, user_question: noGate };
       assert.notEqual(main.describeReviewProblem(review), undefined);
       const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
-      assertStepStopPause(run, 'The local review step returned no usable result', 'review-commit-1-1', 'report');
+      assertStepStopEnd(run, 'The local review step returned no usable result', 'review-commit-1-1', 'report');
     });
     for (const exitReason of Object.keys(main.reviewQuestionKinds())) {
       test(`an agreed reversible ${exitReason} call that is not architectural is taken: no pause, and the review gate reruns with decided_by run`, async () => {
         const review = { ...agreed, exit_reason: exitReason };
-        assert.deepEqual(decideReview(review), { action: 'take', reason: 'auto' });
+        assert.deepEqual(decideReview(review), { action: 'take', reason: 'auto', listed: [] });
         const run = await runWorkflow(LAUNCH, takenResults(review));
         assert.equal(run.result.outcome, 'complete', run.result.message);
         assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'review-1-2', 'review-commit-1-2', 'pr-1']);
@@ -4704,7 +4801,7 @@ const ROW_TESTS = {
       assert.ok(!brief.problem.includes('"low"'), brief.problem);
       assert.ok(run.result.message.includes('\n\n' + HELD_ALL + OTHER + '.'), run.result.message);
       assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: brief }])), run.result.message);
-      assert.deepEqual({ ...lib.decide({ kind: 'diminishing_returns_exit', level: undefined, brief: brief }, autonomyTable, briefSchema) }, { action: 'take', reason: 'auto' });
+      assert.deepEqual(structuredClone(lib.decide({ kind: 'diminishing_returns_exit', level: undefined, brief: brief }, autonomyTable, briefSchema)), { action: 'take', reason: 'auto', listed: [] });
     });
     test('a surfaced diminishing_returns_exit pauses asking, and the reply starts a new pass', async () => {
       const surfaced = buildWithSurfaceKinds(['diminishing_returns_exit']);
@@ -4774,7 +4871,7 @@ const ROW_TESTS = {
         const brief = main.buildReviewEscalationBrief(review);
         assert.equal(brief.kind, kind);
         assert.ok(lib.validateSchema(briefSchema, brief).ok);
-        assert.deepEqual({ ...lib.decide({ kind: kind, level: undefined, brief: brief }, autonomyTable, briefSchema) }, { action: 'take', reason: 'auto' });
+        assert.deepEqual(structuredClone(lib.decide({ kind: kind, level: undefined, brief: brief }, autonomyTable, briefSchema)), { action: 'take', reason: 'auto', listed: [] });
       }
       assert.equal(main.buildReviewEscalationBrief(ESCALATION).problem, 'Local review escalated finding "f5f5f5f5" to the planner. Go back to planning, from fresh facts, for its remediation?');
       assert.equal(main.buildReviewEscalationBrief(CLUSTER).problem, 'Local review found 2 findings in 1 file that share one suspected root. Go back to planning, from fresh facts, for a remediation that closes the class?');
@@ -4815,7 +4912,8 @@ const ROW_TESTS = {
     });
   },
   'SD-40': () => {
-    const GATE_FLAGS = { irreversible: 'gate_irreversible', architectural: 'gate_architectural', safety: 'gate_safety', grows_surface: 'gate_architectural', repeats_surface: 'gate_architectural' };
+    const GATE_FLAGS = { irreversible: 'gate_irreversible', architectural: 'gate_architectural', safety: 'gate_safety', grows_surface: 'gate_architectural' };
+    const FLAG_NAMES = [...Object.keys(GATE_FLAGS), 'repeats_surface'];
     const CLEAN_GATE = makePlan().remediation_gate;
     function gateWith(flag) {
       if (Object.prototype.hasOwnProperty.call(CLEAN_GATE.promotion_gate, flag)) {
@@ -4840,8 +4938,8 @@ const ROW_TESTS = {
         assert.equal(paused.result.needs_user, true);
         assert.deepEqual(paused.result.resume_args, { answers: {}, build: BUILD_ID });
         const message = paused.result.message;
-        assert.ok(message.includes('Q1. Run the remediation plan for the local review findings on the working branch, then every gate again. I am asking because the plan ' + main.remediationGateTexts()[flag] + '.**'), message);
-        assert.ok(message.startsWith(main.describePlanLine(plan, []) + '\n\n**Q1. '), message);
+        assert.ok(message.includes('Q1. Run the remediation plan for the local review findings on the working branch, then every gate again. The plan ' + main.remediationGateTexts()[flag] + '.**'), message);
+        assert.ok(message.startsWith(main.describePlanLine(plan) + '\n\n**Q1. '), message);
         assert.ok(!message.includes(plan.summary) && !message.includes('per-agent results'), message);
         const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, run it.'), results);
         assert.equal(run.result.outcome, 'complete', run.result.message);
@@ -4851,12 +4949,23 @@ const ROW_TESTS = {
         assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: main.buildReviewEscalationBrief(ESCALATION) }])), run.result.message);
       });
     }
+    test('a remediation plan whose gate sets repeats_surface alone is taken at the default level with no pause, and listed by its problem in chat and the pull request body', async () => {
+      const plan = { ...REMEDIATION_PLAN, remediation_gate: gateWith('repeats_surface') };
+      const brief = main.buildRemediationPlanBrief(plan);
+      assert.equal(brief.problem, 'Run the remediation plan for the local review findings on the working branch, then every gate again. The plan ' + main.remediationGateTexts().repeats_surface + '.');
+      assert.deepEqual({ ...brief.gate }, { irreversible: false, architectural: false, safety: false });
+      const run = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(plan) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
+      assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: main.buildReviewEscalationBrief(ESCALATION) }, { brief: brief }])), run.result.message);
+      assert.ok(prBodyOf(run, 'pr-2').includes(brief.problem), prBodyOf(run, 'pr-2'));
+    });
     test('a remediation plan whose gate sets every flag names each in its problem, within the problem bound', () => {
       const plan = { ...REMEDIATION_PLAN, remediation_gate: FULL_GATE };
       const texts = main.remediationGateTexts();
-      assert.deepEqual(Object.keys(texts), Object.keys(GATE_FLAGS));
+      assert.deepEqual(Object.keys(texts), FLAG_NAMES);
       const brief = main.buildRemediationPlanBrief(plan);
-      assert.ok(brief.problem.endsWith(' I am asking because the plan ' + texts.irreversible + ', ' + texts.architectural + ', ' + texts.safety + ', ' + texts.grows_surface + ' and ' + texts.repeats_surface + '.'), brief.problem);
+      assert.ok(brief.problem.endsWith(' The plan ' + texts.irreversible + ', ' + texts.architectural + ', ' + texts.safety + ', ' + texts.grows_surface + ' and ' + texts.repeats_surface + '.'), brief.problem);
       assert.ok(Array.from(brief.problem).length <= 300, String(Array.from(brief.problem).length));
       assert.deepEqual({ ...brief.gate }, { irreversible: true, architectural: true, safety: true });
       assert.ok(!/working branch/.test(brief.recommendation.why), brief.recommendation.why);
@@ -4875,7 +4984,7 @@ const ROW_TESTS = {
       assert.ok(!run.result.message.includes('effect outside the repo'), run.result.message);
       assert.ok(prBodyOf(run, 'pr-2').startsWith(bodyStart(REMEDIATION_PLAN) + '\n\n'), prBodyOf(run, 'pr-2'));
     });
-    test('remediation_plan_acceptance takes a clean gate at high and balanced, asks a set flag there, asks at low, asks outside_limits with its own recommendation, and every later pass of the run uses it', () => {
+    test('remediation_plan_acceptance takes a clean gate at high and balanced, asks a set flag there, asks at low, takes and lists outside_limits and repeats_surface with its own recommendation, and every later pass of the run uses it', () => {
       const clean = main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN);
       assert.equal(clean.kind, 'remediation_plan_acceptance');
       assert.deepEqual({ ...clean.gate }, { irreversible: false, architectural: false, safety: false });
@@ -4889,8 +4998,8 @@ const ROW_TESTS = {
         }
       }
       for (const level of autonomyTable.levels) {
-        const expected = level === 'low' ? { action: 'ask', reason: 'table_surface' } : { action: 'take', reason: 'auto' };
-        assert.deepEqual({ ...lib.decide({ kind: 'remediation_plan_acceptance', level: level, brief: clean }, autonomyTable, briefSchema) }, expected, level);
+        const expected = level === 'low' ? { action: 'ask', reason: 'table_surface' } : { action: 'take', reason: 'auto', listed: [] };
+        assert.deepEqual(structuredClone(lib.decide({ kind: 'remediation_plan_acceptance', level: level, brief: clean }, autonomyTable, briefSchema)), expected, level);
       }
       const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
       const first = { asks: [], taken: [] };
@@ -4901,11 +5010,15 @@ const ROW_TESTS = {
       assert.equal(later.asks[0].brief.kind, 'remediation_plan_acceptance');
       const cleanLater = { asks: [], taken: [] };
       assert.equal(main.resolvePlanAcceptance(CLEAN_REMEDIATION_PLAN, run, cleanLater, EMPTY_SCOPE), 'take');
-      assert.equal(cleanLater.taken[0].kind, 'remediation_plan_acceptance');
+      assert.deepEqual(structuredClone([cleanLater.taken[0].kind, cleanLater.taken[0].listed]), ['remediation_plan_acceptance', []]);
+      const docsLimits = { documents: [], paths: [], limits: [{ path: 'docs', origin: 'request' }] };
       const outside = { asks: [], taken: [] };
-      assert.equal(main.resolvePlanAcceptance(CLEAN_REMEDIATION_PLAN, run, outside, { documents: [], paths: [], limits: [{ path: 'docs', origin: 'request' }] }), 'ask');
-      assert.deepEqual([outside.asks[0].kind, outside.asks[0].reason], ['remediation_plan_acceptance', 'outside_limits']);
-      assert.deepEqual({ ...outside.asks[0].brief.recommendation }, { ...clean.recommendation });
+      assert.equal(main.resolvePlanAcceptance(CLEAN_REMEDIATION_PLAN, run, outside, docsLimits), 'take');
+      assert.deepEqual(structuredClone([outside.asks, outside.taken[0].kind, outside.taken[0].listed]), [[], 'remediation_plan_acceptance', ['outside_limits']]);
+      assert.deepEqual({ ...outside.taken[0].brief.recommendation }, { ...clean.recommendation });
+      const repeated = { asks: [], taken: [] };
+      assert.equal(main.resolvePlanAcceptance({ ...REMEDIATION_PLAN, remediation_gate: gateWith('repeats_surface') }, run, repeated, docsLimits), 'take');
+      assert.deepEqual(structuredClone(repeated.taken[0].listed), ['outside_limits', 'repeats_surface']);
     });
     test('a needs_replan pass after a remediation pass resolves its plan as a remediation plan again', async () => {
       const results = remediationResults(ESCALATION, {
@@ -5427,21 +5540,25 @@ const ROW_TESTS = {
       ['a pushed: yes line and an inputs refusal', { outcome: 'blocked', stderr: 'pushed: yes\nblocker: title must be one line of text\n' }, unpushed + 'Its blocker line says "title must be one line of text".', 'report']
     ]) {
       const isTerminal = message.includes('a head commit other than');
-      test(`a relay with ${label} ${isTerminal ? 'ends the run blocked' : 'pauses with one step_stop question'} naming the pull request step, with the ${nextAction || 'fix_cause'} type`, async () => {
+      const isPause = !isTerminal && nextAction === undefined;
+      test(`a relay with ${label} ${isPause ? 'pauses with one step_stop question' : 'ends the run blocked'} naming the pull request step, with the ${nextAction || 'fix_cause'} ${isPause ? 'type' : 'Next line'}`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': relay }));
         assert.equal(run.result.pr, undefined);
         if (isTerminal) {
           assert.equal(run.result.outcome, 'blocked');
           assert.ok(run.result.message.startsWith(withNextStep(message) + '\n\n' + branchLine(OTHER)), run.result.message);
-        } else {
+        } else if (isPause) {
           assertStepStopPause(run, message + '\n\n', 'pr-1', nextAction);
+        } else {
+          assertStepStopEnd(run, message + '\n\n' + main.nextStepLine(nextAction) + '\n\n' + branchLine(OTHER), 'pr-1', nextAction);
         }
         assert.equal(labelsOf(run).at(-1), 'pr-1');
       });
     }
     test('a reply to a paused pull request step runs it again, and a good relay then completes the run', async () => {
-      const results = happyResults({ 'pr-1': prRelay({ head_ref_oid: OTHER, commented: undefined }), 'head-1-1': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
+      const results = happyResults({ 'pr-1': { outcome: 'blocked', stderr: 'blocker: working tree has uncommitted changes\n' }, 'head-1-1': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
       const paused = await runWorkflow(LAUNCH, results);
+      assert.equal(paused.result.needs_user, true, paused.result.message);
       const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Fixed.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
       assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'pr-1-2']);
@@ -5675,7 +5792,7 @@ const ROW_TESTS = {
       assert.equal(main.readRelayAction('fatal: not a git repository\n'), undefined);
       assert.equal(main.readRelayAction('blocker: not a work tree\n', true), 'report');
       const facts = await runWorkflow(LAUNCH, { 'facts-1': { outcome: 'blocked' } });
-      assertPassStopPause(facts, 'The facts step was blocked, so the delivery stopped before planning: it gave no reason.', 'facts-1', 'report');
+      assertPassStopEnd(facts, 'The facts step was blocked, so the delivery stopped before planning: it gave no reason.', 'facts-1', 'report');
       for (const [label, results] of [['branch-1', happyResults({ 'branch-1': { outcome: 'blocked' } })], ['commit-1-1', happyResults({ 'commit-1-1': { outcome: 'blocked' } })]]) {
         const run = await runWorkflow(LAUNCH, results);
         assert.equal(run.result.outcome, 'blocked');
@@ -5684,7 +5801,7 @@ const ROW_TESTS = {
         assert.ok(!run.result.message.includes('named above'), run.result.message);
       }
       const version = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': { ...VALIDATE_PASSED, version: { outcome: 'blocked' } } }));
-      assertStepStopPause(version, 'The version check of the validation step was blocked, so the delivery stopped before the pull request. It gave no reason.', 'validate-1-1', 'report');
+      assertStepStopEnd(version, 'The version check of the validation step was blocked, so the delivery stopped before the pull request. It gave no reason.\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
       const reasoned = await runWorkflow(LAUNCH, happyResults({ 'branch-1': { outcome: 'blocked', stderr: 'blocker: working_branch equals trunk\n' } }));
       assert.equal(reasoned.result.message.split('\n\n')[1], NEXT_STEP_LINE);
     });
@@ -5824,21 +5941,17 @@ const ROW_TESTS = {
           const overBound = await runWorkflow(LAUNCH, buildResults(HOSTILE_PAYLOADS[0]));
           assert.ok(/^[\t\n\x20-\x7e]*$/.test(overBound.result.message), overBound.result.message.slice(0, 300));
           assert.ok(!overBound.result.message.includes('Z'.repeat(10)), overBound.result.message.slice(0, 300));
-          if (label === 'planner') {
-            assertHostileStop(overBound, false, main.nextStepLine('report'));
-          } else {
-            assertHostileStop(overBound, isPause);
-          }
+          assertHostileStop(overBound, false, main.nextStepLine('report'));
         }
         if (overBoundLeads[kind] !== undefined) {
           const overBound = await runWorkflow(LAUNCH, buildResults(HOSTILE_PAYLOADS[0]));
           assert.equal(overBound.result.message.split('\n\n')[0], overBoundLeads[kind]);
           assert.ok(!overBound.result.message.includes('Z'.repeat(10)), overBound.result.message.slice(0, 300));
-          assertHostileStop(overBound, kind === 'whole' || kind === 'excerpt');
+          assertHostileStop(overBound, false, main.nextStepLine('report'));
         }
       });
     }
-    test('a hostile validation blocker reaches the pause lead as one quote of printable ASCII, cut or refused past its bound, with no Next line', async () => {
+    test('a hostile validation blocker reaches the pause lead as one quote of printable ASCII, cut with no Next line, or refused past its bound with the report Next line', async () => {
       for (const payload of BOUNDED_HOSTILE_PAYLOADS) {
         const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: payload } }));
         const message = run.result.message;
@@ -5848,7 +5961,7 @@ const ROW_TESTS = {
         assert.ok(!message.includes(NEXT_STEP_LINE + '\n'), message.slice(0, 600));
       }
       const overBound = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: HOSTILE_PAYLOADS[0] } }));
-      assertStepStopPause(overBound, 'The validation step returned no usable result, so the delivery stopped before the pull request.', 'validate-1-1', 'report');
+      assertStepStopEnd(overBound, 'The validation step returned no usable result, so the delivery stopped before the pull request.\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
       assert.ok(!overBound.result.message.includes('Z'.repeat(10)), overBound.result.message.slice(0, 300));
     });
     const moduleCode = stripCommentsAndStrings(moduleSource);
@@ -5973,11 +6086,10 @@ const ROW_TESTS = {
       ['fix round', fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: longBlocker }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }), 'The validation fix round was blocked'],
       ['local review', happyResults({ 'review-1-1': { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: longBlocker, stage: 'invoke_review' } }), 'The local review step returned no usable result']
     ]) {
-      test(`a ${label} blocker too long for the notice pauses with no next-step line, without a throw`, async () => {
+      test(`a ${label} blocker too long for the notice is unusable and ends the run with the report Next line, without a throw`, async () => {
         const run = await runWorkflow(LAUNCH, results);
         assert.equal(run.failures, 0);
-        assert.equal(run.result.needs_user, true, run.result.message.slice(0, 300));
-        assert.ok(run.result.message.startsWith(leadStart), run.result.message.slice(0, 300));
+        assertStepStopEnd(run, leadStart, undefined, 'report');
         assert.ok(!run.result.message.includes(NEXT_STEP_LINE), run.result.message.slice(-600));
         assert.ok(lib.noticeLength(run.result) <= lib.noticeBudget());
       });
@@ -6002,10 +6114,10 @@ const ROW_TESTS = {
       assertCheckLimitEnd(run, 'The planner returned a plan that does not fit the plan schema, so the delivery stopped.', 'plan-1');
       assert.ok(lib.noticeLength(run.result) <= lib.noticeBudget());
     });
-    test('a validation blocker too long for the notice pauses as unusable, without a throw', async () => {
+    test('a validation blocker too long for the notice is unusable and ends the run with the report Next line, without a throw', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: longBlocker } }));
       assert.equal(run.failures, 0);
-      assertStepStopPause(run, 'The validation step returned no usable result', 'validate-1-1', 'report');
+      assertStepStopEnd(run, 'The validation step returned no usable result', 'validate-1-1', 'report');
       assert.ok(lib.noticeLength(run.result) <= lib.noticeBudget());
     });
     test('an open question stop keeps the answer Next line right after its first block, without a throw', () => {
@@ -6142,8 +6254,8 @@ const ROW_TESTS = {
         assert.equal(decided, undefined, message);
         assert.ok(/Reply with (an option|a label and an option for each), like (A|Q1 A), or in your own words\.$/.test(message), message.slice(-200));
         assert.ok(paragraphs[1].startsWith('**Q1. '), message);
-        const [planLine, ...pathLines] = paragraphs[0].split('\n');
-        assert.ok(pathLines.length === 0 || (planLine.endsWith(' Outside the limits you set:') && pathLines.every((line) => line.startsWith('- '))), paragraphs[0]);
+        assert.ok(!paragraphs[0].includes('\n'), paragraphs[0]);
+        assert.ok(!paragraphs[0].includes('Outside the limits'), paragraphs[0]);
       }
       if (kind === 'blocked') {
         assert.ok(paragraphs[1].startsWith('Next: '), message);
@@ -6173,40 +6285,43 @@ const ROW_TESTS = {
       assert.equal(message, 'The plan for branch "feature/cache" has 1 step over 1 file: Add a cache layer in front of the reads.\n\n' + lib.renderQuestions([{ brief: main.buildPlanAcceptanceBrief(longPlan), reason: 'table_surface' }]));
       assert.equal(main.buildPlanAcceptanceBrief(longPlan).verbatim, LONG_SUMMARY);
     });
-    test('a plan acceptance pause with outside paths leads with the plan line, then one line per outside path with its reason', async () => {
+    test('a plan with outside paths is taken with no pause, its acceptance one line of the decisions block, naming no outside path or reason', async () => {
       const reasonPlan = makePlan({ summary: LONG_SUMMARY, steps: [makeStep('STEP-001', ['src/cache.js'], { limits_reason: 'The cache sits next to the reads.' })] });
       const docsScope = { documents: [], paths: [], limits: [{ path: 'docs', origin: 'request' }] };
       const run = await runWorkflow(LAUNCH, happyResults({ 'scope-1': docsScope, 'plan-1': planResult(reasonPlan) }));
-      assert.equal(run.result.needs_user, true);
-      const message = assertMessageShape(run.result.message, [LONG_SUMMARY], [], 'pause');
-      assert.equal(message.split('\n\n')[0], main.describePlanLine(reasonPlan, []) + ' Outside the limits you set:\n- "src/cache.js": The cache sits next to the reads.');
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const message = assertMessageShape(run.result.message, [LONG_SUMMARY], [], 'complete');
+      const accepted = main.markOutsideLimits(main.buildPlanAcceptanceBrief(reasonPlan), ['src/cache.js']);
+      assert.equal(message.split('\n\n').at(-1), lib.renderDecisionsCompact([{ brief: accepted }]));
+      assert.ok(!message.includes('src/cache.js') && !message.includes('The cache sits next to the reads.'), message);
     });
     test('a remediation acceptance pause leads with the plan line, then a code-built question, never the plan summary', async () => {
       const run = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(longRemediation) }));
       assert.equal(run.result.needs_user, true);
       const message = assertMessageShape(run.result.message, [longRemediation.summary], [], 'pause');
-      assert.ok(message.startsWith(main.describePlanLine(longRemediation, []) + '\n\n**Q1. '), message);
+      assert.ok(message.startsWith(main.describePlanLine(longRemediation) + '\n\n**Q1. '), message);
       assert.equal(main.buildRemediationPlanBrief(longRemediation).verbatim, longRemediation.summary);
     });
     test('describePlanLine is one line of the encoded branch, the step count, the distinct file count and digest.change made one line', () => {
       const files = ['a.js', 'b.js', 'c\u001b.js', 'd.js', 'e.js', 'f.js', 'g.js'];
       const plan = makePlan({ digest: { problem: 'Line one.', change: 'Change it\n  and more.' }, steps: [makeStep('S1', files.slice(0, 4)), makeStep('S2', files.slice(2))] });
-      assert.equal(main.describePlanLine(plan, []), 'The plan for branch "feature/cache" has 2 steps over 7 files: Change it and more.');
+      assert.equal(main.describePlanLine(plan), 'The plan for branch "feature/cache" has 2 steps over 7 files: Change it and more.');
       assert.equal(planSchema.properties.branch.maxLength, 200);
       const boundBranch = 'b\u001b'.repeat(100);
-      const longBranch = main.describePlanLine({ ...plan, branch: boundBranch, digest: { problem: 'P.', change: 'C'.repeat(200) } }, []);
+      const longBranch = main.describePlanLine({ ...plan, branch: boundBranch, digest: { problem: 'P.', change: 'C'.repeat(200) } });
       assert.ok(!longBranch.includes('\n'));
       assert.ok(longBranch.startsWith('The plan for branch ' + lib.encodeUntrustedText(boundBranch) + ' has 2 steps'), longBranch);
       assert.ok(longBranch.length <= 1500, String(longBranch.length));
       assert.equal(main.buildPlanDetailBlock, undefined);
     });
-    test('a blocked fix round quotes its blocker whole within its bound, and pauses saying nothing in the repo needs a fix', async () => {
+    test('a blocked fix round quotes its blocker whole within its bound, and a run_again one ends the run saying nothing in the repo needs a fix', async () => {
       const results = fixFlowResults({ 'plan-1': planResult(longPlan), 'fix-1-1': { outcome: 'blocked', files: [], blocker: causeBlocker, next_action: 'run_again' }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) });
       const run = await runWorkflow(LAUNCH, results);
-      const message = assertMessageShape(run.result.message, [LONG_SUMMARY], [causeBlocker], 'pause');
+      const message = assertMessageShape(run.result.message, [LONG_SUMMARY], [causeBlocker], 'blocked');
       assert.ok(Array.from(causeBlocker).length <= 400);
       assert.ok(message.includes(JSON.stringify(causeBlocker) + '.'), message);
-      assertStepStopPause(run, 'The validation fix round was blocked, so the delivery stopped: ', 'fix-commit-1-1', 'run_again');
+      assertStepStopEnd(run, 'The validation fix round was blocked, so the delivery stopped: ', 'fix-commit-1-1', 'run_again');
+      assert.equal(message.split('\n\n')[1], main.nextStepLine('run_again'));
     });
     test('a cut relay quote ends at a boundary followed by the words , shortened, and then one full stop', async () => {
       const stderr = 'The fetch failed. ' + 'The remote did not answer in time. '.repeat(8).trim();
@@ -6318,31 +6433,43 @@ const ROW_TESTS = {
         assertAgentFailureEnd(await runWorkflow(args, results), label);
       });
     }
+    /**
+     * Asserts the stop a next action gives: a pause with the fix_cause
+     * step_stop question for fix_cause or no value, else the run end with
+     * the Next line of nextAction.
+     */
+    const assertStopOf = (run, lead, lastLabel, nextAction, isReplan) => {
+      if (nextAction === undefined) {
+        assertStepStopPause(run, lead, lastLabel, nextAction, isReplan);
+        return;
+      }
+      assertStepStopEnd(run, lead, lastLabel, nextAction);
+    };
     for (const [label, lead, lastLabel, isReplan, buildResults] of [
       ['worker', 'A worker did not finish its step, so the delivery stopped after its wave:', 'commit-1-1', true, (next) => happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: timedOut, ...next } })],
       ['fix round', 'The validation fix round was blocked, so the delivery stopped: ', 'fix-commit-1-1', false, (next) => fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: timedOut, ...next }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) })]
     ]) {
-      test(`a blocked ${label} passes its next action through to the step_stop question it pauses with`, async () => {
+      test(`a blocked ${label} passes its next action through to its stop: run_again ends the run, and fix_cause or none pauses with the step_stop question`, async () => {
         for (const [next, nextAction] of [[{ next_action: 'run_again' }, 'run_again'], [{ next_action: 'fix_cause' }, undefined], [{}, undefined]]) {
-          assertStepStopPause(await runWorkflow(LAUNCH, buildResults(next)), lead, lastLabel, nextAction, isReplan);
+          assertStopOf(await runWorkflow(LAUNCH, buildResults(next)), lead, lastLabel, nextAction, isReplan);
         }
       });
     }
     test('a blocked validation or fix round whose blocker gives no reason is report whatever its next_action, never the fix line', async () => {
       for (const next of [{ next_action: 'fix_cause' }, { next_action: 'run_again' }, {}]) {
         const validate = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', ...next } }));
-        assertStepStopPause(validate, 'The validation step was blocked, so the delivery stopped before the pull request: it gave no reason.', 'validate-1-1', 'report');
+        assertStepStopEnd(validate, 'The validation step was blocked, so the delivery stopped before the pull request: it gave no reason.\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
         assert.ok(!validate.result.message.includes('named above'), validate.result.message);
         const fix = await runWorkflow(LAUNCH, fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], ...next }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }));
-        assertStepStopPause(fix, 'The validation fix round was blocked, so the delivery stopped: it gave no reason.', 'fix-commit-1-1', 'report');
+        assertStepStopEnd(fix, 'The validation fix round was blocked, so the delivery stopped: it gave no reason.\n\n' + main.nextStepLine('report'), 'fix-commit-1-1', 'report');
         assert.ok(!fix.result.message.includes('named above'), fix.result.message);
       }
     });
-    test('a blocked validation passes its next action through to the step_stop question it pauses with', async () => {
+    test('a blocked validation passes its next action through to its stop: run_again ends the run, and fix_cause or none pauses with the step_stop question', async () => {
       const lead = 'The validation step was blocked, so the delivery stopped before the pull request: ' + lib.describeReason(timedOut);
       for (const [next, nextAction] of [[{ next_action: 'run_again' }, 'run_again'], [{ next_action: 'fix_cause' }, undefined], [{}, undefined]]) {
         const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: timedOut, ...next } }));
-        assertStepStopPause(run, lead, 'validate-1-1', nextAction);
+        assertStopOf(run, lead, 'validate-1-1', nextAction, false);
       }
     });
     test('a blocked wave says run_again only when every blocked worker says run_again', async () => {
@@ -6350,7 +6477,7 @@ const ROW_TESTS = {
       const blocked = (nextAction) => ({ outcome: 'blocked', summary: 'Stopped.', blocker: timedOut, next_action: nextAction });
       for (const [secondResult, nextAction] of [[blocked('run_again'), 'run_again'], [blocked('fix_cause'), undefined], [blocked(undefined), undefined], [WORKER_DONE, 'run_again']]) {
         const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan), 'work-1-S1': blocked('run_again'), 'work-1-S2': secondResult }));
-        assertStepStopPause(run, 'A worker did not finish its step, so the delivery stopped after its wave:', 'commit-1-1', nextAction, true);
+        assertStopOf(run, 'A worker did not finish its step, so the delivery stopped after its wave:', 'commit-1-1', nextAction, true);
       }
     });
   },
@@ -6548,13 +6675,28 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['review-1-2', 'review-commit-1-2', 'pr-1']);
       assertKeptRun(resumed, 'pr-1', OTHER);
     });
-    test('an unusable review keeps no list', async () => {
-      const results = happyResults({ 'review-1-1': { ...withKept(REVIEW_CLEAN), finding_id: 'f1f1f1f1' }, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
-      const paused = await runWorkflow(LAUNCH, results);
-      const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Codex is back.'), results);
-      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
-      assert.equal(resumed.result.message, openedLine(OTHER) + '\n\n' + HELD_ALL + OTHER + '.');
-      assert.ok(prBodyOf(resumed, 'pr-1').endsWith('\n- local review: clean, held on commit ' + OTHER), prBodyOf(resumed, 'pr-1'));
+    test('an unusable review keeps no list: run.rejected and run.undone stay empty, and the run ends with the report Next line', async () => {
+      const unusable = { ...withKept(REVIEW_CLEAN), finding_id: 'f1f1f1f1' };
+      assert.notEqual(main.describeReviewProblem(unusable), undefined);
+      const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': unusable }));
+      assertStepStopEnd(run, 'The local review step returned no usable result', 'review-commit-1-1', 'report');
+      keptShortIds.concat(keptTexts).forEach((kept) => assert.ok(!run.result.message.includes(kept), kept));
+      const keptLists = [];
+      for (const review of [unusable, withKept(REVIEW_CLEAN)]) {
+        main.phase = () => undefined;
+        main.agent = async () => structuredClone(review);
+        try {
+          const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
+          state.pass = 1;
+          state.head = OTHER;
+          await main.runReviewGate(state, makePlan(), heldGates(state));
+          keptLists.push(structuredClone([state.rejected, state.undone]));
+        } finally {
+          delete main.phase;
+          delete main.agent;
+        }
+      }
+      assert.deepEqual(keptLists, [[[], []], [[keptOne], [keptUndone]]]);
     });
     test('two reviews of one pass list both, a shared finding_id once, in first-seen order', async () => {
       const moved = 'd'.repeat(40);
@@ -6682,11 +6824,10 @@ const ROW_TESTS = {
       ['a diminishing-returns review carrying cluster_ids', LAUNCH, happyResults({ 'review-1-1': { ...DIMINISHING, cluster_ids: ['F1'] } }), reviewUnusable, 'review-commit-1-1'],
       ['a planner-escalation review with no file', LAUNCH, happyResults({ 'review-1-1': escalationWithoutFile }), reviewUnusable, 'review-commit-1-1']
     ]) {
-      test(`${label} blocks the step that reads it, which pauses`, async () => {
+      test(`${label} blocks the step that reads it, which ends the run with the report Next line`, async () => {
         const run = await runWorkflow(args, results);
-        assert.equal(run.result.needs_user, true, run.result.message);
+        assertStepStopEnd(run, '', lastLabel, 'report');
         assert.ok(run.result.message.includes(expected), run.result.message);
-        assert.equal(labelsOf(run).at(-1), lastLabel);
       });
     }
     for (const [label, result] of [
@@ -6695,8 +6836,8 @@ const ROW_TESTS = {
       ['a failed validation carrying next_action', { outcome: 'failed', failures: FAILURE_TEXT, next_action: 'run_again' }],
       ['a failed validation with no failures', { outcome: 'failed' }]
     ]) {
-      test(`${label} pauses at the validation step that reads it`, async () => {
-        assertStepStopPause(await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': result })), validateUnusable, 'validate-1-1', 'report');
+      test(`${label} ends the run at the validation step that reads it, with the report Next line`, async () => {
+        assertStepStopEnd(await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': result })), validateUnusable + '\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
       });
     }
   },
@@ -6858,31 +6999,31 @@ const ROW_TESTS = {
       const paused = await runWorkflow(LAUNCH, maxResults(), buildWithSurfaceKinds(['plan_acceptance']));
       assert.equal(paused.result.needs_user, true);
       assertBounded(paused);
-      assert.equal(paused.result.message.split('\n\n')[0], main.describePlanLine(maxPlan, []));
-      assert.ok(!main.describePlanLine(maxPlan, []).includes('\n'));
+      assert.equal(paused.result.message.split('\n\n')[0], main.describePlanLine(maxPlan));
+      assert.ok(!main.describePlanLine(maxPlan).includes('\n'));
       const flagged = { ...maxPlan, remediation_gate: FULL_GATE };
       const remediation = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-1': planResult(maxPlan), 'work-1-STEP-001': undefined, [workLabel]: workerDone, 'plan-2': planResult(flagged) }));
       assert.equal(remediation.result.needs_user, true);
       assertBounded(remediation);
     });
-    test('a plan acceptance pause with an outside path and a 160 code point limits_reason stays within the bound', async () => {
+    test('a plan with an outside path and a 160 code point limits_reason is taken, and its complete message stays within the bound and shows neither', async () => {
       assert.equal(planSchema.properties.steps.items.properties.limits_reason.maxLength, 160);
-      const reasonPlan = { ...maxPlan, steps: [{ ...maxPlan.steps[0], limits_reason: 'r'.repeat(160) }] };
+      const reasonPlan = { ...maxPlan, steps: [{ ...maxPlan.steps[0], limits_reason: 'L'.repeat(160) }] };
       const docsScope = { documents: [], paths: [], limits: [{ path: 'docs', origin: 'request' }] };
-      const paused = await runWorkflow(LAUNCH, maxResults({ 'scope-1': docsScope, 'plan-1': planResult(reasonPlan) }));
-      assert.equal(paused.result.needs_user, true);
-      const message = assertBounded(paused);
-      assert.equal(message.split('\n\n')[0].split('\n')[1], '- "src/cache.js": ' + 'r'.repeat(160));
+      const run = await runWorkflow(LAUNCH, maxResults({ 'scope-1': docsScope, 'plan-1': planResult(reasonPlan) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message.slice(0, 300));
+      const message = assertBounded(run);
+      assert.ok(!message.includes('L'.repeat(10)) && !message.includes('src/cache.js'), message);
     });
-    test('a planning lead with every field at its bound and more outside paths than it shows stays within its fixed bound', () => {
-      const OUTSIDE_LEAD_BOUND = 27000;
+    test('a planning lead with every field at its bound and more outside paths than the cap is one line within its fixed bound, naming no path', () => {
+      const PLAN_LINE_BOUND = 1500;
       const boundPaths = Array.from({ length: 7 }, (_, index) => index + '\u{1F600}'.repeat(399));
-      const boundStep = makeStep(maxStepId, boundPaths, { limits_reason: '\u{1F600}'.repeat(160) });
+      const boundStep = makeStep(maxStepId, boundPaths, { limits_reason: 'L'.repeat(160) });
       const boundPlan = { ...maxPlan, branch: 'b\u001b'.repeat(100), digest: { problem: 'p', change: '\u{1F600}'.repeat(200) }, steps: [boundStep] };
-      const lead = main.describePlanLine(boundPlan, boundPaths);
-      assert.equal(lead.split('\n').length, 7, lead.slice(0, 300));
-      assert.ok(lead.endsWith('\n- and 2 more.'), lead.slice(-300));
-      assert.ok(lead.length <= OUTSIDE_LEAD_BOUND, String(lead.length));
+      const lead = main.describePlanLine(boundPlan);
+      assert.ok(!lead.includes('\n'), lead.slice(0, 300));
+      assert.ok(!lead.includes('\u{1F600}'.repeat(201)) && !lead.includes('L'.repeat(10)), lead.slice(-300));
+      assert.ok(lead.length <= PLAN_LINE_BOUND, String(lead.length));
     });
     test('a blocked worker with a 5000 character summary and a 400 code point blocker stays within the bound', async () => {
       const run = await runWorkflow(LAUNCH, maxResults({ [workLabel]: { outcome: 'blocked', summary: UNBOUNDED, blocker: 'b'.repeat(400) } }));
@@ -7010,7 +7151,7 @@ const ROW_TESTS = {
         const brief = main.buildReviewQuestionBrief({ ...REVIEW_CLEAN, exit_reason: exitReason, finding_id: 'f1f1f1f1', user_question: worstQuestion });
         assert.equal(lib.validateSchema(briefSchema, brief).ok, false);
         assert.ok(lib.validateSchema(briefSchema, main.removeReviewerText(brief)).ok);
-        assert.deepEqual(structuredClone(lib.decide({ kind: brief.kind, level: undefined, brief: main.removeReviewerText(brief) }, autonomyTable, briefSchema)), { action: 'take', reason: 'auto' });
+        assert.deepEqual(structuredClone(lib.decide({ kind: brief.kind, level: undefined, brief: main.removeReviewerText(brief) }, autonomyTable, briefSchema)), { action: 'take', reason: 'auto', listed: [] });
         const architectural = main.buildReviewQuestionBrief({ ...REVIEW_CLEAN, exit_reason: exitReason, finding_id: 'f1f1f1f1', user_question: { ...worstQuestion, gate: { irreversible: false, architectural: true } } });
         assert.deepEqual(structuredClone(lib.decide({ kind: brief.kind, level: undefined, brief: main.removeReviewerText(architectural) }, autonomyTable, briefSchema)), { action: 'ask', reason: 'gate_architectural' });
         assert.ok(lib.renderQuestions([{ brief: architectural, reason: 'gate_architectural' }]).includes('- C: "' + '\\u0007'.repeat(160) + '" (recommended)'));
@@ -7192,7 +7333,7 @@ const ROW_TESTS = {
     test('a facts relay with no root line or a root with a control character blocks as malformed facts', async () => {
       for (const changes of [{ root: undefined }, { root: '/work/check\tout' }]) {
         const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(changes) });
-        assertPassStopPause(run, MALFORMED_FACTS, 'facts-1', 'report');
+        assertPassStopEnd(run, MALFORMED_FACTS, 'facts-1', 'report');
       }
     });
     test('the scope path field says the path is relative to the repository root', () => {
@@ -7507,7 +7648,6 @@ const ROW_TESTS = {
   },
   'SD-69': () => {
     const UNUSABLE_SCOPE = 'The scope step returned a result it could not use, so the delivery stopped before planning.';
-    const NO_REASON = 'the plan gives no reason';
     const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
     function limitsScope(limits) {
       return { documents: [], paths: [], limits: limits.map((path) => ({ path: path, origin: 'request' })) };
@@ -7516,36 +7656,41 @@ const ROW_TESTS = {
       return brief.problem + ' It changes ' + count + ' outside the limits you set.';
     }
     /**
-     * Asserts the acceptance ask of `brief` shows its problem with the
-     * outside count and its own recommendation, never strength none.
+     * Asserts the run completed with no pause and its decisions block, the
+     * last block of its message, is shownBriefs one line each, the last
+     * the acceptance of `brief` marked with the outside count; no message
+     * names an outside path, and the pull request body of prLabel carries
+     * the marked problem.
      */
-    function assertOutsideAsk(message, brief, outsidePaths, plan) {
-      assert.ok(message.includes('Q1. ' + outsideProblem(brief, outsidePaths.length + ' file')), message);
-      assert.ok(message.includes(lib.renderRecommendation(brief.recommendation, brief.options)), message);
-      assert.ok(!message.includes('Recommendation: none.'), message);
-      const lead = main.describePlanLine(plan, outsidePaths);
-      assert.equal(message.split('\n\n')[0], lead, message);
-      assert.deepEqual(lead.split('\n').slice(1), outsidePaths.map((path) => '- ' + lib.encodeUntrustedText(path) + ': ' + NO_REASON), lead);
-      assert.ok(lead.split('\n')[0].endsWith(' Outside the limits you set:'), lead);
+    function assertOutsideTake(run, brief, outsidePaths, prLabel, earlierBriefs = []) {
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const marked = main.markOutsideLimits(structuredClone(brief), outsidePaths);
+      assert.equal(marked.problem, outsideProblem(brief, outsidePaths.length + (outsidePaths.length === 1 ? ' file' : ' files')));
+      assert.deepEqual({ ...marked.recommendation }, { ...brief.recommendation });
+      const message = run.result.message;
+      assert.ok(message.endsWith('\n\n' + lib.renderDecisionsCompact([...earlierBriefs, marked].map((shown) => ({ brief: shown })))), message);
+      outsidePaths.forEach((path) => assert.ok(!message.includes(path), path + ': ' + message));
+      assert.ok(prBodyOf(run, prLabel).includes(marked.problem), prBodyOf(run, prLabel));
     }
     /**
-     * Pauses a run whose reply to a planner question gets a re-scope that
-     * returns `limits`, so its plan acceptance asks in the same pass.
+     * Runs a pass 1 whose planner question the user answers, its revise
+     * answering it with the revise result `revised`, so scope-1-1 returns
+     * `limits` in the same pass; returns {results, first, second}.
      */
-    async function pauseOnAnswerLimit(limits, changes = {}) {
-      const results = happyResults({ 'plan-1': gated, 'revise-1': reviseResult(planResult(), ['Q1']), 'scope-1-1': limitsScope(limits), ...changes });
+    async function runOnAnswerLimit(limits, changes = {}, revised = reviseResult(planResult(), ['Q1'])) {
+      const results = happyResults({ 'plan-1': gated, 'revise-1': revised, 'scope-1-1': limitsScope(limits), ...changes });
       const first = await runWorkflow(LAUNCH, results);
       assert.equal(first.result.needs_user, true);
       const second = await runWorkflow(resumeWith(LAUNCH, first.result, 'Take option A, and change only docs.'), results);
-      return { results: results, paused: second };
+      return { results: results, first: first, second: second };
     }
-    test('empty limits leave the brief unchanged and the plan taken', async () => {
+    test('empty limits leave the brief unchanged and the plan taken unlisted', async () => {
       assert.deepEqual([...main.listOutsidePaths(makePlan(), limitsScope([]))], []);
       assert.deepEqual(structuredClone(main.markOutsideLimits(main.buildPlanAcceptanceBrief(makePlan()), [])), structuredClone(main.buildPlanAcceptanceBrief(makePlan())));
-      assert.equal(main.describePlanLine(makePlan(), []), 'The plan for branch "feature/cache" has 1 step over 1 file: Add a cache layer in front of the reads.');
+      assert.equal(main.describePlanLine(makePlan()), 'The plan for branch "feature/cache" has 1 step over 1 file: Add a cache layer in front of the reads.');
       const taken = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope([]) }));
       assert.equal(taken.result.outcome, 'complete', taken.result.message);
-      assert.ok(!taken.result.message.includes('outside the limits'), taken.result.message);
+      assert.ok(!taken.result.message.includes('outside the limits') && !taken.result.message.includes('Decided for you'), taken.result.message);
     });
     test('a file equal to a limit or under it, with or without a trailing slash, is inside', async () => {
       const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js', 'src/deep/a.js', 'srcx/b.js', 'docs/x.md', 'docs/x.mdx'])] });
@@ -7555,85 +7700,93 @@ const ROW_TESTS = {
       for (const limit of ['src', 'src/', CHECKOUT_ROOT + '/src/', 'src/cache.js']) {
         const inside = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope([limit]) }));
         assert.equal(inside.result.outcome, 'complete', limit + ' ' + inside.result.message);
+        assert.ok(!inside.result.message.includes('Decided for you'), limit + ' ' + inside.result.message);
       }
     });
     /**
-     * Asserts resolvePlanAsks asks the acceptance of `plan` under `limits`
-     * with reason outside_limits at the default level and every other level
-     * asks it, its brief keeping the built recommendation.
+     * Asserts resolvePlanAsks of `plan` under `limits` takes the acceptance
+     * listed outside_limits where the table cell of its kind is auto, and
+     * asks it table_surface where the cell is surface, its brief keeping
+     * the built recommendation either way.
      */
-    function assertOutsideLimitsReason(plan, limits, built, prepareRun) {
+    function assertOutsideLimitsListed(plan, limits, built, prepareRun) {
+      const row = autonomyTable.rows.find((candidate) => candidate.kind === built.kind);
       for (const level of autonomyTable.levels) {
         const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
         run.level = level;
         prepareRun(run);
-        const resolution = main.resolvePlanAsks(planResult(plan), parsedFacts(), run, limitsScope(limits));
-        assert.equal(resolution.taken.length, 0, level);
-        assert.equal(resolution.asks.length, 1, level);
-        assert.equal(resolution.asks[0].kind, built.kind, level);
-        assert.deepEqual({ ...resolution.asks[0].brief.recommendation }, { ...built.recommendation }, level);
-        assert.equal(resolution.asks[0].reason, level === 'low' ? 'table_surface' : 'outside_limits', level);
+        const resolution = structuredClone(main.resolvePlanAsks(planResult(plan), parsedFacts(), run, limitsScope(limits)));
+        const decided = row[level] === 'auto' ? resolution.taken : resolution.asks;
+        assert.equal(resolution.taken.length + resolution.asks.length, 1, level);
+        assert.equal(decided.length, 1, level);
+        assert.equal(decided[0].kind, built.kind, level);
+        assert.deepEqual(decided[0].brief.recommendation, { ...built.recommendation }, level);
+        assert.deepEqual(row[level] === 'auto' ? decided[0].listed : decided[0].reason, row[level] === 'auto' ? ['outside_limits'] : 'table_surface', level);
       }
       const marked = main.markOutsideLimits(built, ['x.js']);
-      assert.deepEqual({ ...lib.decide({ kind: built.kind, level: autonomyTable.default_level, brief: marked }, autonomyTable, briefSchema) }, { action: 'take', reason: 'auto' });
+      assert.deepEqual(structuredClone(lib.decide({ kind: built.kind, level: autonomyTable.default_level, brief: marked, listed: ['outside_limits'] }, autonomyTable, briefSchema)), { action: 'take', reason: 'auto', listed: ['outside_limits'] });
     }
-    test('a request limit with a file outside asks plan_acceptance outside_limits at every level, its own recommendation shown, with the outside paths in the lead', async () => {
-      const paused = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope(['docs']) }));
-      assert.equal(paused.result.needs_user, true);
-      assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1']);
-      assertOutsideAsk(paused.result.message, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], makePlan());
-      assertOutsideLimitsReason(makePlan(), ['docs'], main.buildPlanAcceptanceBrief(makePlan()), () => {});
+    test('a request limit with a file outside takes plan_acceptance listed outside_limits with no pause, its own recommendation kept, asked table_surface only where the table surfaces it', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope(['docs']) }));
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
+      assertOutsideTake(run, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], 'pr-1');
+      assertOutsideLimitsListed(makePlan(), ['docs'], main.buildPlanAcceptanceBrief(makePlan()), () => {});
     });
-    test('a request limit with a file outside asks remediation_plan_acceptance outside_limits at every level, its own recommendation shown, with the outside paths in the lead', async () => {
-      const paused = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(CLEAN_REMEDIATION_PLAN), 'scope-2': limitsScope(['docs']) }));
-      assert.equal(paused.result.needs_user, true);
-      assert.deepEqual(labelsOf(paused), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2']);
-      assertOutsideAsk(paused.result.message, main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN), ['src/auth.js'], CLEAN_REMEDIATION_PLAN);
-      const escalate = (run) => run.taken.push({ brief: makeBrief(), kind: 'planner_escalation_routing' });
-      assertOutsideLimitsReason(CLEAN_REMEDIATION_PLAN, ['docs'], main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN), escalate);
+    test('a request limit with a file outside takes remediation_plan_acceptance listed outside_limits with no pause, its own recommendation kept, asked table_surface only where the table surfaces it', async () => {
+      const run = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(CLEAN_REMEDIATION_PLAN), 'scope-2': limitsScope(['docs']) }));
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
+      assertOutsideTake(run, main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN), ['src/auth.js'], 'pr-2', [main.buildReviewEscalationBrief(ESCALATION)]);
+      const escalate = (state) => state.taken.push({ brief: makeBrief(), kind: 'planner_escalation_routing' });
+      assertOutsideLimitsListed(CLEAN_REMEDIATION_PLAN, ['docs'], main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN), escalate);
     });
-    test('an answer-only limit asks in the same pass after scope-1-1, whose prompt carries the answers block', async () => {
-      const { paused } = await pauseOnAnswerLimit(['docs']);
-      assert.equal(paused.result.needs_user, true);
-      assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1']);
-      assert.equal(readDataBlock(callOf(paused, 'scope-1-1').prompt, 'answers').length, 1);
-      assert.ok(!callOf(paused, 'scope-1').prompt.includes('<answers>'));
-      assertOutsideAsk(paused.result.message, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], makePlan());
+    test('an answer-only limit applies in the same pass after scope-1-1, whose prompt carries the answers block, and the acceptance is taken and listed', async () => {
+      const { second } = await runOnAnswerLimit(['docs']);
+      assert.deepEqual(labelsOf(second), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
+      assert.equal(readDataBlock(callOf(second, 'scope-1-1').prompt, 'answers').length, 1);
+      assert.ok(!callOf(second, 'scope-1').prompt.includes('<answers>'));
+      assertOutsideTake(second, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], 'pr-1');
     });
-    test('an answer-only limit asks in a later pass whose scope-2 prompt carries the answers block', async () => {
+    test('an answer-only limit applies in a later pass whose scope-2 prompt carries the answers block, and that acceptance is taken and listed', async () => {
       const results = happyResults({
         'plan-1': gated,
         'revise-1': reviseResult(planResult(), ['Q1']),
         'work-1-STEP-001': { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved.' },
         'facts-2': onPlanBranchFacts(OTHER),
         'scope-2': limitsScope(['docs']),
-        'plan-2': planResult()
+        'plan-2': planResult(),
+        'branch-2': branchRelay({ created: 'false', commit: OTHER }),
+        'work-2-STEP-001': WORKER_DONE,
+        'commit-2-1': commitRelay({ commit: THIRD }),
+        ...tailResults(2, THIRD)
       });
       const first = await runWorkflow(LAUNCH, results);
       const run = await runWorkflow(resumeWith(LAUNCH, first.result, 'Take option A, and change only docs.'), results);
-      assert.equal(run.result.needs_user, true);
       assert.ok(labelsOf(run).includes('scope-1-1'), JSON.stringify(labelsOf(run)));
-      assert.deepEqual(labelsOf(run).slice(-3), ['facts-2', 'scope-2', 'plan-2']);
+      assert.deepEqual(labelsOf(run).slice(-9), ['facts-2', 'scope-2', 'plan-2', 'branch-2', 'work-2-STEP-001', 'commit-2-1', ...tailLabels(2).slice(0, -1), 'pr-2'].slice(-9));
       assert.deepEqual(readDataBlock(callOf(run, 'scope-2').prompt, 'answers'), readDataBlock(callOf(run, 'plan-2').prompt, 'answers'));
-      assertOutsideAsk(run.result.message, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], makePlan());
+      assertOutsideTake(run, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], 'pr-2');
     });
-    test('a later answer that widens the limit is taken, and a same-build resume replays scope-1-1 from cache', async () => {
-      const { results, paused } = await pauseOnAnswerLimit(['docs'], { 'revise-2': reviseResult(planResult(), []), 'scope-1-2': limitsScope(['docs', 'src']) });
-      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'src may change too.'), results);
+    test('a later reply whose re-scope widens the limit takes the plan unlisted, and a same-build resume replays scope-1-1 from cache', async () => {
+      const stillOpen = reviseResult(planResult(makePlan(), [makeGatedBrief('SECOND_GATED_PROBLEM')]), ['Q1']);
+      const { results, second } = await runOnAnswerLimit(['docs'], { 'revise-2': reviseResult(planResult(), ['Q1']), 'scope-1-2': limitsScope(['docs', 'src']) }, stillOpen);
+      assert.equal(second.result.needs_user, true, second.result.message);
+      assert.ok(second.result.message.includes('SECOND_GATED_PROBLEM'), second.result.message);
+      assert.ok(!second.result.message.includes('outside the limits'), second.result.message);
+      const run = await runWorkflow(resumeWith(resumeWith(LAUNCH, second.result, 'Take option A, and change only docs.'), second.result, 'src may change too.'), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'revise-2', 'scope-1-2', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
-      assert.deepEqual(paused.calls.map((call) => call.prompt), run.calls.slice(0, paused.calls.length).map((call) => call.prompt));
-      assert.equal(callOf(run, 'scope-1-1').prompt, callOf(paused, 'scope-1-1').prompt);
+      assert.deepEqual(second.calls.map((call) => call.prompt), run.calls.slice(0, second.calls.length).map((call) => call.prompt));
+      assert.equal(callOf(run, 'scope-1-1').prompt, callOf(second, 'scope-1-1').prompt);
       assert.equal(readDataBlock(callOf(run, 'scope-1-2').prompt, 'answers').length, 2);
+      assert.ok(!run.result.message.includes('outside the limits') && !run.result.message.includes('Decided for you'), run.result.message);
     });
     /**
-     * Runs a pass 1 whose outside-limit acceptance the user settles, then a
-     * pass 2 that replans the same plan under `limits`.
+     * Runs a pass 1 under docs limits, whose acceptance is taken with no
+     * pause, then a pass 2 that replans the same plan under `limits`.
      */
-    async function runSettledThenReplan(limits) {
+    async function runTakenThenReplan(limits) {
       const results = happyResults({
         'scope-1': limitsScope(['docs']),
-        'revise-1': reviseResult(planResult(), ['Q1']),
         'work-1-STEP-001': { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved.' },
         'facts-2': onPlanBranchFacts(OTHER),
         'scope-2': limitsScope(limits),
@@ -7643,78 +7796,84 @@ const ROW_TESTS = {
         'commit-2-1': commitRelay({ commit: THIRD }),
         ...tailResults(2, THIRD)
       });
-      const paused = await runWorkflow(LAUNCH, results);
-      assert.equal(paused.result.needs_user, true);
-      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, src may change.'), results);
-      assert.ok(!labelsOf(run).includes('scope-1-1') && !labelsOf(run).includes('revise-2'), JSON.stringify(labelsOf(run)));
-      assert.ok(labelsOf(run).includes('work-1-STEP-001') && labelsOf(run).includes('scope-2'), JSON.stringify(labelsOf(run)));
+      const run = await runWorkflow(LAUNCH, results);
+      assert.ok(!labelsOf(run).includes('scope-1-1') && !labelsOf(run).includes('revise-1'), JSON.stringify(labelsOf(run)));
+      assert.ok(labelsOf(run).includes('work-1-STEP-001') && labelsOf(run).includes('work-2-STEP-001'), JSON.stringify(labelsOf(run)));
       return run;
     }
-    test('a settled outside-limit acceptance runs no re-scope, and a later pass with the same limits asks the outside file again', async () => {
-      const run = await runSettledThenReplan(['docs']);
-      assert.equal(run.result.needs_user, true);
-      assert.deepEqual(labelsOf(run).slice(-3), ['facts-2', 'scope-2', 'plan-2']);
-      assertOutsideAsk(run.result.message, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], makePlan());
+    /**
+     * Returns the listed of the acceptance resolvePlanAsks takes in pass 2
+     * under `limits`, after pass 1 took it under docs limits.
+     */
+    function readPassTwoListed(limits) {
+      const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      state.pass = 1;
+      main.acceptResolution(main.resolvePlanAsks(planResult(), parsedFacts(), state, limitsScope(['docs'])), state);
+      state.pass = 2;
+      const resolution = main.resolvePlanAsks(planResult(), parsedFacts(), state, limitsScope(limits));
+      return structuredClone([resolution.asks.length, resolution.taken.map((entry) => entry.listed)]);
+    }
+    test('an outside-limit acceptance taken in one pass runs no re-scope, and a later pass with the same limits takes and lists it again, shown once', async () => {
+      const run = await runTakenThenReplan(['docs']);
+      assertOutsideTake(run, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], 'pr-2');
+      assert.deepEqual(readPassTwoListed(['docs']), [0, [['outside_limits']]]);
     });
-    test('a later pass whose re-scoped limits include the outside file takes the plan', async () => {
-      const run = await runSettledThenReplan(['docs', 'src']);
-      assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.ok(labelsOf(run).includes('work-2-STEP-001'), JSON.stringify(labelsOf(run)));
+    test('a later pass whose re-scoped limits include the outside file takes the plan unlisted', async () => {
+      const run = await runTakenThenReplan(['docs', 'src']);
+      assertOutsideTake(run, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], 'pr-2');
+      assert.deepEqual(readPassTwoListed(['docs', 'src']), [0, [[]]]);
     });
-    test('an absolute or .. limit is kept, matches nothing and asks', async () => {
+    test('an absolute or .. limit is kept, matches nothing, and the acceptance is taken and listed', async () => {
       const limits = ['/other/src', '../src', 'src/..'];
       assert.deepEqual(structuredClone(main.keepRepositoryPathEntries(limitsScope(limits), CHECKOUT_ROOT).limits), limitsScope(limits).limits);
       for (const limit of limits) {
         assert.deepEqual([...main.listOutsidePaths(makePlan(), limitsScope([limit]))], ['src/cache.js'], limit);
-        const paused = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope([limit]) }));
-        assert.equal(paused.result.needs_user, true, limit);
-        assertOutsideAsk(paused.result.message, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], makePlan());
+        const run = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope([limit]) }));
+        assertOutsideTake(run, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], 'pr-1');
       }
     });
     test('a re-scope result that fails SCOPE_SCHEMA goes back to the scope agent with the reply of its round logged, then ends the run before any wave', async () => {
-      const { paused } = await pauseOnAnswerLimit([], repeatCheckResult('scope-1-1', { documents: [], paths: [] }));
+      const { second: paused } = await runOnAnswerLimit([], repeatCheckResult('scope-1-1', { documents: [], paths: [] }));
       assertCheckLimitEnd(paused, UNUSABLE_SCOPE, 'scope-1-1');
       for (const fixLabel of listFixLabels('scope-1-1')) {
         assert.deepEqual(readDataBlock(callOf(paused, fixLabel).prompt, 'answers').map((entry) => entry.reply), ['Take option A, and change only docs.'], fixLabel);
       }
       assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', ...listFixLabels('scope-1-1')]);
     });
-    test('the pause lead names up to maxListedItems() outside paths, one line each, then the count of the rest', () => {
-      assert.equal(main.maxListedItems(), 5);
+    test('a planning pause where the table surfaces the acceptance leads with the plan line alone, naming no outside path whatever their count', async () => {
       const outsidePaths = ['a.js', 'b.js', 'c.js', 'd.js', 'e.js', 'f.js', 'g.js'];
-      const plan = makePlan({ steps: [makeStep('STEP-001', outsidePaths)] });
-      const lead = main.describePlanLine(plan, outsidePaths);
-      const shownLines = ['a.js', 'b.js', 'c.js', 'd.js', 'e.js'].map((path) => '- "' + path + '": ' + NO_REASON);
-      assert.equal(lead, [main.describePlanLine(plan, []) + ' Outside the limits you set:', ...shownLines, '- and 2 more.'].join('\n'));
-      const fivePaths = outsidePaths.slice(0, 5);
-      assert.deepEqual(main.describePlanLine(plan, fivePaths).split('\n').slice(1), shownLines);
-      assert.equal(main.describePlanLine(plan, []), 'The plan for branch "feature/cache" has 1 step over 7 files: Add a cache layer in front of the reads.');
+      const plan = makePlan({ steps: [makeStep('STEP-001', outsidePaths, { limits_reason: 'LIMITS_REASON_ZQ.' })] });
+      assert.equal(main.describePlanLine(plan), 'The plan for branch "feature/cache" has 1 step over 7 files: Add a cache layer in front of the reads.');
+      const paused = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope(['src']), 'plan-1': planResult(plan) }), buildWithSurfaceKinds(['plan_acceptance']));
+      assert.equal(paused.result.needs_user, true, paused.result.message);
+      assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1']);
+      const marked = main.markOutsideLimits(main.buildPlanAcceptanceBrief(plan), outsidePaths);
+      assert.equal(paused.result.message, main.describePlanLine(plan) + '\n\n' + lib.renderQuestions([{ brief: marked, reason: 'table_surface' }]));
+      outsidePaths.forEach((path) => assert.ok(!paused.result.message.includes('"' + path + '"'), path));
+      assert.ok(!paused.result.message.includes('LIMITS_REASON_ZQ'), paused.result.message);
     });
-    test('each outside path line gives the limits_reason of the first step in plan order that lists the file and gives a non-blank one', () => {
-      const plan = makePlan({
-        steps: [
-          makeStep('STEP-001', ['src/a.js'], { limits_reason: '' }),
-          makeStep('STEP-002', ['src/a.js', 'docs/b.md'], { limits_reason: ' \n\t ' }),
-          makeStep('STEP-003', ['src/a.js'], { limits_reason: 'The step moves\nthe helper \u2014 here.' }),
-          makeStep('STEP-004', ['src/a.js', 'docs/b.md'], { limits_reason: 'A later reason.' }),
-          makeStep('STEP-005', ['c.js'])
-        ]
-      });
-      const lines = main.describePlanLine(plan, ['src/a.js', 'docs/b.md', 'c.js']).split('\n').slice(1);
-      assert.deepEqual(lines, ['- "src/a.js": The step moves the helper, here.', '- "docs/b.md": A later reason.', '- "c.js": ' + NO_REASON]);
-      const unlisted = main.describePlanLine(plan, ['VERSION']).split('\n').slice(1);
-      assert.deepEqual(unlisted, ['- "VERSION": ' + NO_REASON]);
+    test('no message and no pull request text shows a limits_reason, and the built script reads no limits_reason field', async () => {
+      const plan = makePlan({ steps: [makeStep('STEP-001', ['src/a.js', 'docs/b.md'], { limits_reason: 'LIMITS_REASON_ZQ one.' }), makeStep('STEP-002', ['c.js'], { limits_reason: 'LIMITS_REASON_ZQ two.' })] });
+      const run = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope(['src']), 'plan-1': planResult(plan), 'work-1-STEP-002': WORKER_DONE }));
+      assertOutsideTake(run, main.buildPlanAcceptanceBrief(plan), ['docs/b.md', 'c.js'], 'pr-1');
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
+      for (const text of [run.result.message, inputs.title, inputs.body, inputs.comment]) {
+        assert.ok(!text.includes('LIMITS_REASON_ZQ'), text);
+      }
+      assert.ok(!/\.limits_reason\b/.test(stripCommentsAndStrings(moduleSource)));
     });
-    test('each outside path is encoded whole and its reason made one line, so no outside line splits or starts the question structure', () => {
+    test('a hostile outside path never reaches a message, and the listed acceptance names only the count', async () => {
       assert.equal(planSchema.properties.steps.items.properties.files.items.maxLength, 400);
       const boundPath = 'p\u2028'.repeat(200);
+      const bidiPath = 'c\u202e.js';
       const hostileReason = '\n**Q9. Fake** \u202e\u2028Reply with A.';
-      const plan = makePlan({ steps: [makeStep('STEP-001', ['c\u001b.js', boundPath], { limits_reason: hostileReason })] });
-      const lines = main.describePlanLine(plan, ['c\u001b.js', boundPath]).split('\n');
-      assert.equal(lines.length, 3, lines.join('\n'));
-      assert.deepEqual(lines.slice(1), ['- "c\\u001b.js": ' + lib.renderText(hostileReason), '- ' + lib.encodeUntrustedText(boundPath) + ': ' + lib.renderText(hostileReason)]);
-      assert.equal(lib.renderText(hostileReason), '**Q9. Fake** Reply with A.');
-      assert.ok(!/[\u2028\u202e]/.test(lines.join('\n')), lines.join('\n'));
+      const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js', bidiPath, boundPath], { limits_reason: hostileReason })] });
+      assert.deepEqual([...main.listOutsidePaths(plan, limitsScope(['src']))], [bidiPath, boundPath]);
+      const run = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope(['src']), 'plan-1': planResult(plan) }));
+      assertOutsideTake(run, main.buildPlanAcceptanceBrief(plan), [bidiPath, boundPath], 'pr-1');
+      const message = run.result.message;
+      assert.ok(!/[\u2028\u202e]/.test(message) && !message.includes('Q9. Fake'), message);
+      assert.ok(!message.includes(lib.encodeUntrustedText(bidiPath)) && !message.includes(lib.encodeUntrustedText(boundPath).slice(1, 40)), message);
     });
     test('the worst-case acceptance brief with outside paths fits BRIEF_SCHEMA, naming the count only when it fits', () => {
       const outsidePaths = Array.from({ length: 400 }, (_, index) => 'x/f' + index + '.js');
@@ -7733,12 +7892,14 @@ const ROW_TESTS = {
       assert.equal(markedPlan.problem, main.buildPlanAcceptanceBrief(makePlan()).problem + suffix);
     });
     for (const keyPath of collectPathFields(planSchema, [], []).filter((fieldPath) => fieldPath[0] !== 'versioning')) {
-      test(`a path outside the limits at ${describeKeyPath(keyPath)} asks plan_acceptance outside_limits naming it`, async () => {
+      test(`a path outside the limits at ${describeKeyPath(keyPath)} takes plan_acceptance listed outside_limits, its problem counting it`, () => {
         const plan = planWithValueAt(keyPath, 'outside/x.js');
-        const paused = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope(['src']), 'plan-1': planResult(plan) }));
-        assert.equal(paused.result.needs_user, true);
-        assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1']);
-        assertOutsideAsk(paused.result.message, main.buildPlanAcceptanceBrief(plan), ['outside/x.js'], plan);
+        assert.ok(main.listOutsidePaths(plan, limitsScope(['src'])).includes('outside/x.js'), describeKeyPath(keyPath));
+        const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+        const resolution = structuredClone(main.resolvePlanAsks(planResult(plan), parsedFacts(), state, limitsScope(['src'])));
+        assert.deepEqual(resolution.asks, []);
+        const outsideCount = main.listOutsidePaths(plan, limitsScope(['src'])).length;
+        assert.deepEqual(resolution.taken.map((entry) => [entry.kind, entry.listed, entry.brief.problem]), [['plan_acceptance', ['outside_limits'], outsideProblem(main.buildPlanAcceptanceBrief(plan), outsideCount + (outsideCount === 1 ? ' file' : ' files'))]]);
       });
     }
     const VERSIONED_PLAN = { ...versionedPlan(), trunk_freshness: 'fresh' };
@@ -7752,19 +7913,18 @@ const ROW_TESTS = {
         'validate-1-1': validateWithVersion()
       }));
     }
-    test('a version file and a declared changelog file outside the limits never ask, and another step file outside them still asks', async () => {
+    test('a version file and a declared changelog file outside the limits are never listed, and another step file outside them is', async () => {
       const versioning = { ...VERSIONED_PLAN.versioning, changelog_files: ['CHANGELOG.md'] };
       const plan = { ...VERSIONED_PLAN, versioning: versioning, steps: [makeStep('STEP-001', ['src/cache.js', 'VERSION', 'CHANGELOG.md'])] };
       assert.deepEqual([...main.listOutsidePaths(plan, limitsScope(['src']))], []);
       const run = await runVersionedUnder(['src'], plan);
       assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(!run.result.message.includes('outside the limits'), run.result.message);
       const labels = labelsOf(run);
       assert.equal(labels[labels.indexOf('commit-1-1') + 1], 'validate-1-1');
       const widened = { ...plan, steps: [makeStep('STEP-001', ['src/cache.js', 'VERSION', 'CHANGELOG.md', 'docs/x.md'])] };
-      const paused = await runVersionedUnder(['src'], widened);
-      assert.equal(paused.result.needs_user, true);
-      assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1']);
-      assertOutsideAsk(paused.result.message, main.buildPlanAcceptanceBrief(widened), ['docs/x.md'], widened);
+      assert.deepEqual([...main.listOutsidePaths(widened, limitsScope(['src']))], ['docs/x.md']);
+      assertOutsideTake(await runVersionedUnder(['src'], widened), main.buildPlanAcceptanceBrief(widened), ['docs/x.md'], 'pr-1');
     });
     test('every wave commit takes only plan paths, and a plan step that sets the version file makes them take every plan path', async () => {
       const plan = { ...VERSIONED_PLAN, steps: [makeStep('STEP-001', ['src/cache.js', 'VERSION'])] };
@@ -7792,8 +7952,8 @@ const ROW_TESTS = {
     function stopState(argsObject = {}) {
       return main.createRunState({ argsObject: argsObject, request: REQUEST, trunk: 'main', references: [], localReview: true });
     }
-    function stopAskOf(causes, isReplan) {
-      return limitAsk(main.buildStepStopBrief(causes, isReplan));
+    function stopAskOf(isReplan) {
+      return limitAsk(main.buildStepStopBrief(isReplan));
     }
     test('a terminal cause ends the run blocked through finishDeliveryBlocked and asks nothing', () => {
       const state = stopState();
@@ -7812,63 +7972,65 @@ const ROW_TESTS = {
       const mixed = structuredClone(main.stopDelivery([failure, { problem: 'FIX_ZQ.' }], stopState(), [], false));
       assert.ok(mixed.result.message.startsWith('FIX_ZQ.\n\n' + NEXT_STEP_LINE + '\n\n'), mixed.result.message);
     });
-    test('a stop whose only causes are workers\' own run_again pauses with one step_stop question that says nothing needs a fix', () => {
-      const causes = [{ problem: 'SLOW_ONE_ZQ.', nextAction: 'run_again' }, { problem: 'SLOW_TWO_ZQ.', nextAction: 'run_again' }];
-      const stopped = structuredClone(main.stopDelivery(causes, stopState(), [], false));
-      assert.deepEqual(stopped, { result: { needs_user: true, resume_args: { answers: {}, build: BUILD_ID }, message: 'SLOW_ONE_ZQ.\nSLOW_TWO_ZQ.\n\n' + lib.renderQuestions([stopAskOf(causes, false)]) } });
-      assert.ok(main.buildStepStopBrief(causes, false).problem.startsWith('Nothing in the repo needs a fix, so reply later'));
+    test('a stop whose lead cause is run_again, report or answer ends the run blocked with that Next line and asks nothing', () => {
+      assert.deepEqual([...main.stopAskActions()], ['approve', 'fix_cause']);
+      for (const nextAction of ['run_again', 'report', 'answer']) {
+        const state = stopState();
+        const causes = [{ problem: 'SLOW_ZQ.', nextAction: 'run_again' }, { problem: 'LEAD_ZQ.', nextAction: nextAction }];
+        const stopped = structuredClone(main.stopDelivery(causes, state, ['END_ZQ'], false));
+        const blocks = nextAction === 'run_again' ? ['SLOW_ZQ.', main.nextStepLine(nextAction), 'LEAD_ZQ.'] : ['LEAD_ZQ.', main.nextStepLine(nextAction), 'SLOW_ZQ.'];
+        assert.deepEqual(stopped, { result: { needs_user: false, outcome: 'blocked', message: [...blocks, 'END_ZQ'].join('\n\n') } }, nextAction);
+        assert.deepEqual(structuredClone(state.answerLog), [], nextAction);
+      }
     });
     test('a stop with a strong recommendation pauses at every level: stopDelivery asks step_stop through buildUndecidedAsk and decide() never takes it', () => {
-      assert.ok(moduleSource.includes('askTails(listStopAsks(causes, run, isReplan), run, describeStopLead(causes, endLines))'));
-      assert.ok(moduleSource.includes('return [buildUndecidedAsk(STEP_STOP_KIND, buildStepStopBrief(causes, isReplan), run)];'));
-      for (const nextAction of ['fix_cause', 'run_again']) {
+      assert.ok(moduleSource.includes('askTails(listStopAsks(leadCause, run, isReplan), run, describeStopLead(causes, endLines))'));
+      assert.ok(moduleSource.includes("return [{ ...buildUndecidedAsk(STEP_STOP_KIND, buildStepStopBrief(isReplan), run), stop: 'fix_cause' }];"));
+      for (const nextAction of ['fix_cause', undefined, 'run_again', 'report']) {
+        const isAsked = nextAction === 'fix_cause' || nextAction === undefined;
         for (const level of autonomyTable.levels) {
           const state = stopState();
           state.level = level;
           const stopped = structuredClone(main.stopDelivery([{ problem: 'P.', nextAction: nextAction }], state, [], false));
-          assert.equal(stopped.result.needs_user, true, nextAction + ' ' + level);
+          assert.equal(stopped.result.needs_user, isAsked, nextAction + ' ' + level);
           assert.equal(state.taken.length, 0, nextAction + ' ' + level);
         }
+      }
+      const holds = [{ stepId: 'S1', ...DROP_USERS }];
+      assert.deepEqual(structuredClone(main.listStopAsks({ problem: 'P.', nextAction: 'approve', holds: holds }, stopState(), true).map((ask) => [ask.kind, ask.stop])), [['step_stop', 'approve']]);
+      for (const nextAction of ['fix_cause', undefined]) {
+        assert.deepEqual(structuredClone(main.listStopAsks({ problem: 'P.', nextAction: nextAction }, stopState(), true).map((ask) => [ask.kind, ask.reason, ask.stop])), [['step_stop', 'table_surface', 'fix_cause']], String(nextAction));
       }
     });
     test('the pause lead is the cause problems in buildStopBlocks order, then the end lines, one per line', () => {
       const causes = [{ problem: 'LATER_ZQ.', nextAction: 'run_again' }, { problem: 'FIRST_ZQ.\nSTEP_LINE_ZQ' }, { problem: 'SECOND_ZQ.', nextAction: 'fix_cause' }];
       const stopped = structuredClone(main.stopDelivery(causes, stopState(), ['END_ONE_ZQ', 'END_TWO_ZQ'], true));
       const lead = ['FIRST_ZQ.\nSTEP_LINE_ZQ', 'SECOND_ZQ.', 'LATER_ZQ.', 'END_ONE_ZQ', 'END_TWO_ZQ'].join('\n');
-      assert.equal(stopped.result.message, lead + '\n\n' + lib.renderQuestions([stopAskOf(causes, true)]));
+      assert.equal(stopped.result.message, lead + '\n\n' + lib.renderQuestions([stopAskOf(true)]));
     });
     test('a lead longer than maxBlockedLeadLength() keeps its cutAtBoundary compact form, so a long cause list still fits a pause', () => {
       const causes = Array.from({ length: 12 }, (unused, index) => ({ problem: 'Cause ' + index + ' says ' + '<&>\u0001 word'.repeat(120) + '.' }));
       const stopped = structuredClone(main.stopDelivery(causes, stopState(), [], false));
       assert.equal(stopped.result.needs_user, true);
-      assert.ok(stopped.result.message.endsWith(lib.renderQuestions([stopAskOf(causes, false)])), stopped.result.message.slice(-400));
+      assert.ok(stopped.result.message.endsWith(lib.renderQuestions([stopAskOf(false)])), stopped.result.message.slice(-400));
       const lead = causes.map((cause) => cause.problem).join('\n');
       assert.ok(stopped.result.message.includes(lib.cutAtBoundary(lead, lib.maxBlockedLeadLength())), 'the compact lead shows');
       assert.ok(lib.noticeLength(stopped.result) <= lib.noticeBudget());
     });
-    test('the brief of each stop type fits BRIEF_SCHEMA with one option and its own recommendation, and names what the reply does', () => {
-      const expected = {
-        fix_cause: ['strong', 'Clear the cause named above, then commit any change and reply, and ', 'Clearing it lets the step go on.'],
-        run_again: ['strong', 'Nothing in the repo needs a fix, so reply later, for example once the machine is idle, and ', 'The cause clears itself.'],
-        report: ['weak', "Nothing in your repo needs a fix: the run's own step failed; reply to try once more, and ", 'A stop that comes back is a workflow defect: report it, do not retry.']
-      };
+    test('the one step_stop brief, fix_cause, fits BRIEF_SCHEMA with one option and a strong recommendation, and names what the reply does', () => {
       for (const isReplan of [false, true]) {
         const then = isReplan ? 'the run plans again from fresh facts.' : 'the run takes the stopped step again.';
-        for (const [nextAction, [strength, start, why]] of Object.entries(expected)) {
-          const brief = structuredClone(main.buildStepStopBrief([{ problem: 'P.', nextAction: nextAction }], isReplan));
-          assert.ok(lib.validateSchema(briefSchema, brief).ok, JSON.stringify(brief));
-          assert.equal(brief.kind, 'step_stop');
-          assert.equal(brief.options.length, 1);
-          assert.equal(brief.options[0].summary, isReplan ? 'Go on: plan again from fresh facts.' : 'Go on: take the stopped step again.');
-          assert.deepEqual(brief.recommendation, { option_id: 'A', strength: strength, why: why });
-          assert.equal(brief.problem, start + then);
-          assert.ok(!JSON.stringify(brief).includes('Only you can tell when what stopped the run is out of the way.') && !brief.problem.includes('Fix what stopped the run'), brief.problem);
-        }
-        assert.deepEqual(structuredClone(main.buildStepStopBrief([{ problem: 'P.' }], isReplan)), structuredClone(main.buildStepStopBrief([{ problem: 'P.', nextAction: 'fix_cause' }], isReplan)));
+        const brief = structuredClone(main.buildStepStopBrief(isReplan));
+        assert.ok(lib.validateSchema(briefSchema, brief).ok, JSON.stringify(brief));
+        assert.equal(brief.kind, 'step_stop');
+        assert.equal(brief.options.length, 1);
+        assert.equal(brief.options[0].summary, isReplan ? 'Go on: plan again from fresh facts.' : 'Go on: take the stopped step again.');
+        assert.deepEqual(brief.recommendation, { option_id: 'A', strength: 'strong', why: 'Clearing it lets the step go on.' });
+        assert.equal(brief.problem, 'Clear the cause named above, then commit any change and reply, and ' + then);
+        assert.ok(!JSON.stringify(brief).includes('Only you can tell when what stopped the run is out of the way.') && !brief.problem.includes('Fix what stopped the run'), brief.problem);
       }
-      for (const [actions, leadAction] of [[['run_again', 'report'], 'report'], [['report', undefined], 'fix_cause'], [['run_again', 'report', 'fix_cause'], 'fix_cause']]) {
-        const causes = actions.map((nextAction) => ({ problem: 'P.', nextAction: nextAction }));
-        assert.deepEqual(structuredClone(main.buildStepStopBrief(causes, false)), structuredClone(main.buildStepStopBrief([{ problem: 'P.', nextAction: leadAction }], false)), JSON.stringify(actions));
+      for (const text of ["the run's own step failed; reply to try once more", 'The cause clears itself.', 'A stop that comes back is a workflow defect: report it, do not retry.', 'so reply later, for example once the machine is idle']) {
+        assert.ok(!builtSource.includes(text), text);
       }
     });
     test('a reply with isReplan true gives a new pass that does not count against maxReplans(), logged with settled []', () => {
@@ -7878,7 +8040,7 @@ const ROW_TESTS = {
       assert.deepEqual(Object.keys(stopped), ['replan']);
       assert.deepEqual(Object.keys(stopped.replan), ['reason']);
       assert.equal(state.replans, 0);
-      assert.deepEqual(structuredClone(state.answerLog), [{ question: 'FIX_ZQ.\n\n' + lib.renderQuestions([stopAskOf(causes, true)]), settled: [], reply: STOP_REPLY }]);
+      assert.deepEqual(structuredClone(state.answerLog), [{ question: 'FIX_ZQ.\n\n' + lib.renderQuestions([stopAskOf(true)]), settled: [], reply: STOP_REPLY }]);
     });
     test('a reply with isReplan false gives {rerun: true, stopAnswer}, so the gate loop runs the head check, then the stopped step again', () => {
       const state = stopState({ answers: {}, reply: STOP_REPLY });
@@ -7949,14 +8111,12 @@ const ROW_TESTS = {
       assert.ok(prompt.split('\n').includes(lib.dataBlocksSentence('The approvals block')), prompt);
       assert.deepEqual(readDataBlock(callOf(run, 'plan-2').prompt, 'answers').map((entry) => entry.settled), [['Q1']]);
     });
-    test('a next pass worker that holds only the approved item again stops as a report, its step line naming no change to approve', async () => {
+    test('a next pass worker that holds only the approved item again stops as a report that ends the run, its step line naming no change to approve', async () => {
       const results = { ...heldWaveResults([DROP_USERS]), 'work-2-STEP-001': holdResult([DROP_USERS], { summary: 'Stopped.' }), 'commit-2-1': commitRelay({ commit: OTHER, committed: 'false' }) };
       const paused = await runWorkflow(LAUNCH, results);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'A'), results);
       const line = '- Step "STEP-001" stopped at the destructive-fix gate without a change the run can approve: it says "' + HOLD_BLOCKER + '".';
-      assert.ok(run.result.message.startsWith('A worker did not finish its step, so the delivery stopped after its wave:\n' + line + '\n\n'), run.result.message);
-      assert.ok(run.result.message.endsWith('\n\n' + lib.renderQuestions([limitAsk(main.buildStepStopBrief([{ problem: 'P.', nextAction: 'report' }], true))])), run.result.message);
-      assert.equal(labelsOf(run).at(-1), 'commit-2-1');
+      assertStepStopEnd(run, 'A worker did not finish its step, so the delivery stopped after its wave:\n' + line + '\n\n' + main.nextStepLine('report'), 'commit-2-1', 'report');
     });
     test('two held items answered Q1 A Q2 B approve the first and keep the second, and Q1 B Q2 A the reverse', async () => {
       const results = heldWaveResults([DROP_USERS, DROP_ORDERS]);
@@ -8058,9 +8218,13 @@ const ROW_TESTS = {
       writes.forEach((write) => assert.equal(findEnclosingFunction(code, write.index), 'observeHead', code.slice(write.index - 40, write.index + 20)));
       assert.ok(!/\.commits\b/.test(code));
     });
-    test('a malformed wave commit relay whose runner committed pauses, and the next pass reads the head from its branch step', async () => {
+    test('a malformed wave commit relay alone ends the run with the report Next line, and beside a blocked worker pauses, and the next pass reads the head from its branch step', async () => {
+      const malformed = { outcome: 'ran', stdout: 'nonsense\n' };
+      const ended = await runWorkflow(LAUNCH, happyResults({ 'commit-1-1': malformed }));
+      assertStepStopEnd(ended, 'The commit step returned malformed routing lines, so the delivery stopped. Check the branch for a commit of the wave.\n\n' + main.nextStepLine('report'), 'commit-1-1', 'report');
       const results = happyResults({
-        'commit-1-1': { outcome: 'ran', stdout: 'nonsense\n' },
+        'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: 'Tests fail.' },
+        'commit-1-1': malformed,
         'facts-2': onPlanBranchFacts(OTHER),
         'plan-2': planResult(),
         'branch-2': branchRelay({ created: 'false', commit: OTHER }),
@@ -8069,8 +8233,8 @@ const ROW_TESTS = {
         ...tailResults(2, THIRD)
       });
       const paused = await runWorkflow(LAUNCH, results);
-      assert.equal(paused.result.needs_user, true, paused.result.message);
-      assert.equal(labelsOf(paused).at(-1), 'commit-1-1');
+      assertStepStopPause(paused, 'A worker did not finish its step, so the delivery stopped after its wave:', 'commit-1-1', undefined, true);
+      assert.ok(paused.result.message.includes('The commit step returned malformed routing lines'), paused.result.message);
       const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Fixed, go on.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
       const labels = labelsOf(resumed);
@@ -8088,7 +8252,7 @@ const ROW_TESTS = {
     const headCheckedTail = ['head-1-1', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1'];
     const replyRoutes = [
       ['validation blocked', happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: 'npm is not installed.' }, 'head-1-1': headRelay(THIRD), 'validate-1-2': VALIDATE_PASSED, 'review-commit-1-1': headRelay(THIRD) }), THIRD, headCheckedTail],
-      ['fix commit malformed', happyResults({ 'validate-1-1': { outcome: 'failed', failures: FAILURE_TEXT }, 'fix-1-1': { outcome: 'complete', files: ['src/cache.js'] }, 'fix-commit-1-1': { outcome: 'ran', stdout: 'nonsense\n' }, 'head-1-1': headRelay(THIRD), 'validate-1-2': VALIDATE_PASSED, 'review-commit-1-1': headRelay(THIRD) }), THIRD, headCheckedTail],
+      ['fix round blocked beside a malformed fix commit', happyResults({ 'validate-1-1': { outcome: 'failed', failures: FAILURE_TEXT }, 'fix-1-1': { outcome: 'blocked', files: [], blocker: 'Tests need a database.' }, 'fix-commit-1-1': { outcome: 'ran', stdout: 'nonsense\n' }, 'head-1-1': headRelay(THIRD), 'validate-1-2': VALIDATE_PASSED, 'review-commit-1-1': headRelay(THIRD) }), THIRD, headCheckedTail],
       ['version-only fix limit', versionResults(versionLimitResults), THIRD, headCheckedTail],
       ['version question', versionResults({ 'validate-1-1': validateWithVersion(ASK_UNDETERMINED), 'fix-1-1': { outcome: 'complete', files: ['VERSION'] }, 'fix-commit-1-1': commitRelay({ commit: FOURTH }), 'validate-1-2': validateWithVersion(MINOR_MISMATCH), 'review-commit-1-1': headRelay(FOURTH) }), FOURTH, ['fix-1-1', 'fix-commit-1-1', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']],
       ['local review blocked', happyResults({ 'review-1-1': { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: 'Codex is unavailable.', stage: 'invoke_review' }, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': headRelay(THIRD), 'validate-1-2': VALIDATE_PASSED }), THIRD, ['review-1-2', 'review-commit-1-2', 'validate-1-2', 'pr-1']],
@@ -8096,7 +8260,7 @@ const ROW_TESTS = {
       ['local review question after review fix commits moved the head', happyResults({ 'review-1-1': { ...userInput, fix_commits_exist: true }, 'review-commit-1-1': headRelay(FOURTH), 'head-1-1': headRelay(THIRD), 'validate-1-2': VALIDATE_PASSED, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': headRelay(THIRD) }), THIRD, ['head-1-1', 'validate-1-2', 'review-1-2', 'review-commit-1-2', 'pr-1']],
       ['pull request blocked', happyResults({ 'pr-1': prBlocked, 'head-1-1': headRelay(THIRD), 'validate-1-2': VALIDATE_PASSED, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': headRelay(THIRD), 'pr-1-2': cannedPrRunner() }), THIRD, ['head-1-1', 'validate-1-2', 'review-1-2', 'review-commit-1-2', 'pr-1-2']]
     ];
-    const headCheckedRoutes = ['validation blocked', 'fix commit malformed', 'version-only fix limit', 'local review question after review fix commits moved the head', 'pull request blocked'];
+    const headCheckedRoutes = ['validation blocked', 'fix round blocked beside a malformed fix commit', 'version-only fix limit', 'local review question after review fix commits moved the head', 'pull request blocked'];
     for (const [route, results, head, resumedLabels] of replyRoutes) {
       test(`a reply to ${route} reads the head before any gate holds on it or the pull request pushes it`, async () => {
         const paused = await runWorkflow(LAUNCH, results);
@@ -8124,17 +8288,20 @@ const ROW_TESTS = {
       const guard = code.slice(0, holds[0].index).match(/if\s*\(([^{]*)\)\s*\{\s*$/);
       assert.ok(guard !== null && guard[1].replace(/\s+/g, '').includes('run.headRound===run.answerLog.length'), code.slice(holds[0].index - 120, holds[0].index));
     });
-    test('a malformed fix commit relay whose runner committed pauses, and the reply reads the head, holds validation on it and pushes it', async () => {
+    test('a malformed fix commit relay alone ends the run with the report Next line, and beside a blocked fix round pauses, and the reply reads the head, holds validation on it and pushes it', async () => {
       const launch = { ...LAUNCH, local_review: false };
+      const failedFix = { 'validate-1-1': { outcome: 'failed', failures: FAILURE_TEXT }, 'fix-commit-1-1': { outcome: 'ran', stdout: 'nonsense\n' } };
+      const ended = await runWorkflow(launch, happyResults({ ...failedFix, 'fix-1-1': { outcome: 'complete', files: ['src/cache.js'] } }));
+      assertStepStopEnd(ended, malformedLead + 'the fix round.\n\n' + main.nextStepLine('report'), 'fix-commit-1-1', 'report');
       const results = happyResults({
-        'validate-1-1': { outcome: 'failed', failures: FAILURE_TEXT },
-        'fix-1-1': { outcome: 'complete', files: ['src/cache.js'] },
-        'fix-commit-1-1': { outcome: 'ran', stdout: 'nonsense\n' },
+        ...failedFix,
+        'fix-1-1': { outcome: 'blocked', files: [], blocker: 'Tests need a database.' },
         'head-1-1': headRelay(THIRD),
         'validate-1-2': VALIDATE_PASSED
       });
       const paused = await runWorkflow(launch, results);
-      assertStepStopPause(paused, malformedLead + 'the fix round.', 'fix-commit-1-1', 'report');
+      assertStepStopPause(paused, 'The validation fix round was blocked, so the delivery stopped: ', 'fix-commit-1-1');
+      assert.ok(paused.result.message.includes(malformedLead + 'the fix round.'), paused.result.message);
       const resumed = await runWorkflow(resumeWith(launch, paused.result, 'Fixed, go on.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
       assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'validate-1-2', 'pr-1']);
@@ -8172,14 +8339,13 @@ const ROW_TESTS = {
       assert.ok(resumed.result.message.endsWith('\n\n' + HELD_ALL + THIRD + '.'), resumed.result.message);
       assert.ok(!resumed.result.message.includes('landed after'), resumed.result.message);
     });
-    test('a malformed head check pauses, and its reply runs head-P-N with the next count', async () => {
+    test('a malformed head check ends the run with the report Next line, and runs no further head check', async () => {
       const results = happyResults({ 'pr-1': prBlocked, 'head-1-1': { outcome: 'ran', stdout: 'nonsense\n' }, 'head-1-2': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
       const first = await runWorkflow(LAUNCH, results);
+      assert.equal(first.result.needs_user, true, first.result.message);
       const second = await runWorkflow(resumeWith(LAUNCH, first.result, 'Fixed.'), results);
-      assertStepStopPause(second, malformedLead + 'the head check.', 'head-1-1', 'report');
-      const third = await runWorkflow(resumeWith(LAUNCH, second.result, 'Fixed again.'), results);
-      assert.equal(third.result.outcome, 'complete', third.result.message);
-      assert.deepEqual(labelsOf(third).slice(labelsOf(first).length), ['head-1-1', 'head-1-2', 'pr-1-2']);
+      assertStepStopEnd(second, malformedLead + 'the head check.\n\n' + main.nextStepLine('report'), 'head-1-1', 'report');
+      assert.deepEqual(labelsOf(second).slice(labelsOf(first).length), ['head-1-1']);
     });
     test('a transient block of the head check runs it once more under head-P-N-retry', async () => {
       const transientBlock = { outcome: 'blocked', stderr: 'fatal: unable to access the remote: Could not resolve host: github.com\nblocker: the commit failed\n' };
@@ -8292,7 +8458,7 @@ const ROW_TESTS = {
     test('a facts relay with no plugin_root line, or a relative, quote-bearing or space-ended one, blocks as malformed facts', async () => {
       for (const changes of [{ plugin_root: undefined }, { plugin_root: 'plugin' }, { plugin_root: '/a"b' }, { plugin_root: '/a$b' }, { plugin_root: '/a\\b' }, { plugin_root: '/a ' }]) {
         const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(changes) });
-        assertPassStopPause(run, MALFORMED_FACTS, 'facts-1', 'report');
+        assertPassStopEnd(run, MALFORMED_FACTS, 'facts-1', 'report');
       }
     });
     test('every command the engine builds gets an allow from the real synapse gate hook for hivemind:synapse only, and its inputs and body file Writes an allow', async () => {
@@ -8452,21 +8618,17 @@ const ROW_TESTS = {
       }
     });
     const denial = 'PreToolUse:Bash hook error: synapse-gate: hivemind:synapse may run only the exact form of a runner script command';
-    for (const [label, results, isPause] of [
-      ['facts', { 'facts-1': { outcome: 'blocked', stderr: denial } }, true],
-      ['branch', happyResults({ 'branch-1': { outcome: 'blocked', stderr: denial } }), false],
-      ['commit', happyResults({ 'commit-1-1': { outcome: 'blocked', stderr: denial } }), false],
-      ['version', versionResults({ 'validate-1-1': { ...VALIDATE_PASSED, version: { outcome: 'blocked', stderr: denial } } }), true],
-      ['pull request', happyResults({ 'pr-1': { outcome: 'blocked', stderr: denial } }), true]
+    for (const [label, results, lastLabel] of [
+      ['facts', { 'facts-1': { outcome: 'blocked', stderr: denial } }, 'facts-1'],
+      ['branch', happyResults({ 'branch-1': { outcome: 'blocked', stderr: denial } }), 'branch-1'],
+      ['commit', happyResults({ 'commit-1-1': { outcome: 'blocked', stderr: denial } }), 'commit-1-1'],
+      ['version', versionResults({ 'validate-1-1': { ...VALIDATE_PASSED, version: { outcome: 'blocked', stderr: denial } } }), 'validate-1-1'],
+      ['pull request', happyResults({ 'pr-1': { outcome: 'blocked', stderr: denial } }), 'pr-1']
     ]) {
-      test(`a blocked ${label} relay whose stderr holds a synapse-gate denial is report, never the fix line`, async () => {
+      test(`a blocked ${label} relay whose stderr holds a synapse-gate denial is report and ends the run with the report Next line, never the fix line`, async () => {
         const run = await runWorkflow(LAUNCH, results);
-        assert.equal(run.result.needs_user, isPause, run.result.message);
-        if (isPause) {
-          assert.ok(run.result.message.endsWith('\n\n' + lib.renderQuestions([limitAsk(main.buildStepStopBrief([{ problem: 'x', nextAction: 'report' }], label === 'facts'))])), run.result.message);
-        } else {
-          assert.equal(run.result.message.split('\n\n')[1], main.nextStepLine('report'));
-        }
+        assertStepStopEnd(run, '', lastLabel, 'report');
+        assert.equal(run.result.message.split('\n\n')[1], main.nextStepLine('report'));
         assert.ok(!run.result.message.includes('named above'), run.result.message);
       });
     }
@@ -8521,23 +8683,23 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.ok(prBodyOf(run, 'pr-1').includes('- validation: passed, version 1.3.0, held on commit ' + OTHER), prBodyOf(run, 'pr-1'));
     });
-    test('a version relay with one counts line removed still pauses as malformed routing lines', async () => {
+    test('a version relay with one counts line removed still ends the run as malformed routing lines', async () => {
       const stdout = bumpStdout().replace('  patch: 0\n', '');
       assert.ok(!stdout.includes('patch:'));
       const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': { ...VALIDATE_PASSED, version: { outcome: 'ran', stdout: stdout } } }));
-      assertStepStopPause(run, 'The version check of the validation step returned malformed routing lines, so the delivery stopped before the pull request.', 'validate-1-1', 'report');
+      assertStepStopEnd(run, 'The version check of the validation step returned malformed routing lines, so the delivery stopped before the pull request.\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
     });
-    test('a facts relay holding only prose, or with CR line ends, still pauses as malformed facts', async () => {
+    test('a facts relay holding only prose, or with CR line ends, still ends the run as malformed facts', async () => {
       for (const stdout of ['The script ran and printed its facts.\n', factsStdout().replace(/\n/g, '\r\n')]) {
         const run = await runWorkflow(LAUNCH, { 'facts-1': { outcome: 'ran', stdout: stdout } });
-        assertPassStopPause(run, MALFORMED_FACTS, 'facts-1', 'report');
+        assertPassStopEnd(run, MALFORMED_FACTS, 'facts-1', 'report');
       }
     });
-    test('a pull request relay holding only prose, or with CR line ends, still pauses as malformed routing lines', async () => {
+    test('a pull request relay holding only prose, or with CR line ends, still ends the run as malformed routing lines', async () => {
       for (const stdout of ['Opened the pull request.\n', prRelay({ head_ref_oid: OTHER }).stdout.replace(/\n/g, '\r\n')]) {
         const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': { outcome: 'ran', stdout: stdout } }));
         assert.equal(run.result.pr, undefined);
-        assertStepStopPause(run, malformedPr + '\n\n', 'pr-1', 'report');
+        assertStepStopEnd(run, malformedPr + '\n\n' + main.nextStepLine('report'), 'pr-1', 'report');
       }
     });
   },
@@ -9115,8 +9277,100 @@ const ROW_TESTS = {
       const detached = await runWorkflow(LAUNCH, happyResults({ 'facts-1': factsRelay({ head_state: 'detached', branch: undefined }) }));
       assert.equal(detached.result.outcome, 'complete', detached.result.message);
     });
+    test('a planner question decide() gives a reason in neither askReasons() nor auto goes back to the planner, and one still failing ends the run with the report Next line, never asked', async () => {
+      const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      const weakBeyond = makeBrief({ problem: 'DEFECT_PROBLEM', options: makeBrief().options.map((option) => ({ ...option, beyond_request: option.id === 'A' })), recommendation: { ...makeBrief().recommendation, strength: 'weak' } });
+      const decided = structuredClone(lib.decide({ kind: 'planner_question', level: state.level, brief: weakBeyond }, autonomyTable, briefSchema));
+      assert.equal(decided.action, 'ask');
+      assert.ok(!lib.askReasons().includes(decided.reason), decided.reason);
+      const problem = main.describeQuestionProblem(planResult(makePlan(), [makeBrief(), weakBeyond]), state);
+      assert.equal(problem, 'A planner question fails the decision check, so the delivery stopped.');
+      for (const brief of [makeBrief(), makeGatedBrief('GATED_PROBLEM'), makeBrief({ recommendation: { ...makeBrief().recommendation, strength: 'none' } })]) {
+        assert.equal(main.describeQuestionProblem(planResult(makePlan(), [brief]), state), undefined, brief.problem);
+      }
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), ...repeatCheckResult('plan-1', planResult(makePlan(), [weakBeyond])) });
+      assertCheckLimitEnd(run, problem, 'plan-1');
+      assert.ok(!run.result.message.includes('DEFECT_PROBLEM') && !run.result.message.includes('**Q1. '), run.result.message);
+      const revised = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]) }));
+      assert.equal(revised.result.needs_user, true, revised.result.message);
+      const resumedResults = happyResults({ 'plan-1': planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]), 'revise-1': reviseResult(planResult(makePlan(), [weakBeyond]), ['Q1']), 'revise-1-fix-1': reviseResult(planResult(), ['Q1']) });
+      const resumed = await runWorkflow(resumeWith(LAUNCH, revised.result, 'A'), resumedResults);
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      assert.equal(readCheckProblem(resumed, 'revise-1-fix-1'), problem);
+    });
+  },
+  'SD-82': () => {
+    const builtCode = stripCommentsAndStrings(builtSource.replace(/^export const meta\b/, 'const meta'));
+    /**
+     * Returns the enclosing function of each match of pattern in the built
+     * code, function declarations left out.
+     */
+    function listCallSites(pattern) {
+      return [...builtCode.matchAll(pattern)].filter((match) => !/function\s+$/.test(builtCode.slice(Math.max(0, match.index - 16), match.index))).map((match) => findEnclosingFunction(builtCode, match.index));
+    }
+    test('the built script pauses only through pauseDelivery, which only askTails and runPlanningPass call, an ask is pushed only in resolveDecision, and needs_user true is set only in lib/result.js', () => {
+      assert.deepEqual(listCallSites(/\bpauseForUser\(/g), ['pauseDelivery']);
+      assert.deepEqual(listCallSites(/\bpauseDelivery\(/g).sort(), ['askTails', 'runPlanningPass']);
+      assert.deepEqual(listCallSites(/\basks\.push\(/g), ['resolveDecision']);
+      const resultSource = readText(join(sourceDir, '../lib/result.js'));
+      const resultFunctions = [...resultSource.matchAll(/^function (\w+)\(/gm)].map((match) => match[1]);
+      const setters = listCallSites(/\bneeds_user\s*:\s*true\b/g);
+      assert.equal(setters.length, (stripCommentsAndStrings(resultSource).match(/\bneeds_user\s*:\s*true\b/g) || []).length);
+      assert.ok(setters.length > 0);
+      setters.forEach((name) => assert.ok(resultFunctions.includes(name), name));
+      assert.ok(!/\bneeds_user\s*:\s*true\b/.test(stripCommentsAndStrings(moduleSource)));
+    });
+    test('askReasons() is the closed Ask Set, disjoint from listReasons(), and pauseDelivery throws on every other decide() reason and on a step_stop ask that is not approve or fix_cause', () => {
+      assert.deepEqual([...lib.askReasons()], ['hard_stop', 'table_surface', 'gate_irreversible', 'gate_architectural', 'gate_safety', 'no_recommendation']);
+      assert.deepEqual([...lib.listReasons()], ['beyond_request', 'outside_limits', 'repeats_surface']);
+      assert.ok(lib.listReasons().every((name) => !lib.askReasons().includes(name)));
+      const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      const brief = makeGatedBrief('GUARD_PROBLEM');
+      const pauseAsks = (asks) => main.pauseDelivery({ asks: asks, taken: [] }, run, 'GUARD_LEAD.');
+      const goodAsk = { brief: brief, reason: 'gate_architectural', kind: 'planner_question' };
+      for (const reason of ['auto', 'malformed_brief', 'recommendation_not_an_option', 'unknown_kind', 'bad_cell', ...lib.listReasons(), undefined]) {
+        const badAsk = { brief: makeGatedBrief('BAD_PROBLEM'), reason: reason, kind: 'planner_question' };
+        assert.throws(() => pauseAsks([goodAsk, badAsk]), /^Error: pauseDelivery: ask planner_question /, String(reason));
+      }
+      const stopBrief = main.buildStepStopBrief(true);
+      for (const stop of [undefined, 'report', 'run_again', 'answer']) {
+        assert.throws(() => pauseAsks([{ brief: stopBrief, reason: 'table_surface', kind: 'step_stop', stop: stop }]), /^Error: pauseDelivery: ask step_stop table_surface$/, String(stop));
+      }
+      assert.equal(pauseAsks([goodAsk, { brief: stopBrief, reason: 'table_surface', kind: 'step_stop', stop: 'fix_cause' }]).needs_user, true);
+      assert.deepEqual(structuredClone(run.answerLog), []);
+    });
+    test('a replay of run wf_d1cc3369-306: a beyond-request planner question, a plan outside the limits and a root-cluster remediation that repeats a surface reach the pull request with zero pauses, each listed under Decided for you', async () => {
+      const limits = { documents: [], paths: [], limits: [{ path: 'README.md', origin: 'request' }, { path: 'web', origin: 'request' }] };
+      const beyond = makeBrief({ problem: 'BEYOND_REQUEST_ZQ: Also trim the web bundle?', options: makeBrief().options.map((option) => (option.id === 'A' ? { ...option, beyond_request: true, effort: 'trivial' } : option)) });
+      assert.deepEqual([beyond.recommendation.strength, beyond.options[0].beyond_request, beyond.options[0].effort], ['strong', true, 'trivial']);
+      const remediation = { ...REMEDIATION_PLAN, remediation_gate: { ...makePlan().remediation_gate, repeats_surface: true } };
+      const results = remediationResults(CLUSTER, { 'scope-1': limits, 'plan-1': planResult(makePlan(), [beyond]), 'scope-2': limits, 'plan-2': planResult(remediation) });
+      const pauses = [];
+      let launch = LAUNCH;
+      let run = await runWorkflow(launch, results);
+      while (run.result.needs_user === true && pauses.length < 5) {
+        pauses.push(run.result.message);
+        launch = resumeWith(launch, run.result, 'A');
+        run = await runWorkflow(launch, results);
+      }
+      assert.deepEqual(pauses, []);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
+      const acceptance = main.markOutsideLimits(main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js']);
+      const remediationAcceptance = main.markOutsideLimits(main.buildRemediationPlanBrief(remediation), ['src/auth.js']);
+      assert.ok(remediationAcceptance.problem.includes(main.remediationGateTexts().repeats_surface) && remediationAcceptance.problem.endsWith(' It changes 1 file outside the limits you set.'), remediationAcceptance.problem);
+      const shown = [beyond, acceptance, main.buildReviewEscalationBrief(CLUSTER), remediationAcceptance];
+      assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact(shown.map((brief) => ({ brief: brief })))), run.result.message);
+      const body = prBodyOf(run, 'pr-2');
+      const decided = body.slice(body.indexOf('Decided for you'));
+      assert.ok(body.includes('Decided for you'), body);
+      for (const brief of [beyond, acceptance, remediationAcceptance]) {
+        assert.ok(decided.includes(brief.problem), brief.problem + '\n' + body);
+      }
+    });
   }
 };
+
 
 /**
  * Pairs each runner call of a run that carries an inputs_file block with

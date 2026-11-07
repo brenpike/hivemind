@@ -53,9 +53,10 @@
  *   (relay.js) takes that cause as its step cause and stops with it through
  *   stopDelivery (record.js) as a replan, so a commit stop never hides it,
  *   and the loop returns that run end as is. Stops (issue 457): a wave with
- *   an agent failure ends the run; any other blocked wave, a plan that
- *   cannot be scheduled mid-run and a needs_replan at maxReplans() pause
- *   with one step_stop question, and the reply starts a new pass that does
+ *   an agent failure ends the run, and so does a blocked wave or a plan that
+ *   cannot be scheduled mid-run whose lead is report or run_again. A blocked
+ *   wave led by approve or fix_cause and a needs_replan at maxReplans() ask
+ *   one step_stop question, and the reply starts a new pass that does
  *   not count against maxReplans(), the needs_replan one with the worker
  *   reasons. needs_replan is handled only after a successful commit.
  *

@@ -75,13 +75,13 @@
  *           gives the blocker, quoted with a limit equal to its maxLength, so a
  *           valid value is never cut. Through stopDelivery (record.js),
  *           max-iterations-reached and break-fix-break, like an escalation or
- *           root cluster taken at maxReplans(), pause with one step_stop
+ *           root cluster taken at maxReplans(), ask one fix_cause step_stop
  *           question, and the reply starts a new pass outside maxReplans() with
- *           the review projected by projectReplanReview; blocked pauses and the
- *           reply runs local review again; injection-suspect is terminal. A
+ *           the review projected by projectReplanReview; blocked asks the same
+ *           and the reply runs local review again; injection-suspect is terminal. A
  *           review result that fails REVIEW_SCHEMA, gives option ids other than
- *           A, B, C and D in that order, or recommends no option pauses the same
- *           way as blocked. describeReviewProblem reads the result before the
+ *           A, B, C and D in that order, or recommends no option has a report
+ *           lead, so stopDelivery ends the run blocked. describeReviewProblem reads the result before the
  *           commit runner, which takes that problem as its step cause, so a
  *           commit stop never hides it, and a null result, an agent failure that
  *           ends the run, gets the describeNoResult sentence and the run_again
@@ -289,7 +289,7 @@ function buildRejectedFindingsBlock(note, rejectedFindings, undoneFixes = []) {
 function buildReviewOption(option, question) {
   const isRecommended = option.id === question.recommendation.option_id;
   const changes = readOptionChanges(option).map((entry) => ({ category: entry.category, item: encodeUntrustedText(entry.item) }));
-  return { id: option.id, summary: encodeUntrustedText(option.summary), steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: !isRecommended || !question.gate.irreversible, beyond_request: false, destructive: changes };
+  return { ...buildBriefOption(option.id, encodeUntrustedText(option.summary), 'small', 'medium', !isRecommended || !question.gate.irreversible), destructive: changes };
 }
 
 function readOptionChanges(option) {
@@ -313,7 +313,7 @@ function buildReviewQuestionBrief(review) {
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: question.options.map((option) => buildReviewOption(option, question)),
     recommendation: { option_id: question.recommendation.option_id, strength: question.recommendation.strength, why: encodeUntrustedText(question.recommendation.why) },
-    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
+    assumptions: buildUnshownAssumptions(),
     gate: { irreversible: question.gate.irreversible, architectural: question.gate.architectural, safety: false }
   };
 }
