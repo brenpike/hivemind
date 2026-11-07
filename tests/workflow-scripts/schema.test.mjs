@@ -122,6 +122,15 @@ describe('validateSchema keywords', () => {
       assert.doesNotMatch(errors[0], /[\u0000-\u001f]/, JSON.stringify(key));
     }
   });
+  test('an unexpected key longer than 64 code units is cut to 64 and JSON-encoded, so each error stays bounded', () => {
+    const schema = { type: 'object', additionalProperties: false, properties: {} };
+    assert.deepEqual(validate(schema, { ['k'.repeat(64)]: 1 }).errors, ['$: additionalProperties: unexpected ' + 'k'.repeat(64)]);
+    for (const key of ['k'.repeat(65), 'k'.repeat(100000), 'x\n'.repeat(50000)]) {
+      const errors = validate(schema, { [key]: 1 }).errors;
+      assert.deepEqual(errors, ['$: additionalProperties: unexpected ' + JSON.stringify(key.slice(0, 64))]);
+      assert.ok(errors[0].length <= '$: additionalProperties: unexpected '.length + JSON.stringify('\n'.repeat(64)).length);
+    }
+  });
   test('without additionalProperties unlisted keys are allowed', () => {
     assert.equal(validate({ type: 'object', properties: { a: {} } }, { b: 2 }).ok, true);
   });

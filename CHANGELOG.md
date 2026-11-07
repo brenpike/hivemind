@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.6.7] - 2026-11-07
+
+### Changed
+
+- `standard-delivery` on the script engine: a plan, revise or scope result that fails its check now goes back to the planner, up to 2 retries, with the exact problem. A result still failing ends the run with a report cause, not a "reply to try once more" stop. A planner `blocked` outcome with a reason, and a null result, behave as before.
+- A run that starts on a branch outside the branch taxonomy now stops before planning, with the fix line.
+- ADR-0037 amendment 2026-11-07 and four dated notes.
+
+### Fixed
+
+- A plan title that starts with the plan's own commit type, such as `docs: ...` on a docs plan, is cleaned in code and no longer stops the run for a user reply.
+
+The built `standard-delivery` prose is 43647 of its 43800 budget. No prose budget raise.
+
 ## [7.6.6] - 2026-11-06
 
 ### Changed

@@ -35,6 +35,7 @@ export const meta = {
  *   plugin/workflow-src/lib/facts.js
  *   plugin/workflow-src/standard-delivery/approvals.js
  *   plugin/workflow-src/standard-delivery/briefs.js
+ *   plugin/workflow-src/standard-delivery/checks.js
  *   plugin/workflow-src/standard-delivery/gates.js
  *   plugin/workflow-src/standard-delivery/paths.js
  *   plugin/workflow-src/standard-delivery/plan.js
@@ -689,7 +690,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '1b489e556ff510ae';
+const BUILD_ID = '2899d8da7b3fa961';
 
 function supportedSchemaKeywords(){
 return[
@@ -892,7 +893,7 @@ errors.push(path+': additionalProperties: unexpected '+describeUnexpectedSchemaK
 }
 }
 function describeUnexpectedSchemaKey(name){
-return/^[A-Za-z0-9_-]+$/.test(name)?name:JSON.stringify(name);
+return/^[A-Za-z0-9_-]{1,64}$/.test(name)?name:JSON.stringify(name.slice(0,64));
 }
 function collectArrayErrors(schema,list,path,errors){
 if(schema.minItems!==undefined&&list.length<schema.minItems){
@@ -2679,6 +2680,42 @@ why:isLimit
 });
 }
 
+function typedTitlePattern(){
+return new RegExp('^('+Object.values(commitTypeMap()).join('|')+')(\\([^()]*\\))?(!?):','i');
+}
+function normalizePlanTitle(result,schema){
+const plan=validateSchema(schema,result).ok?result.plan:undefined;
+const match=plan===undefined?null:typedTitlePattern().exec(cleanTitleText(plan.title));
+const rest=match===null?'':match.input.slice(match[0].length).trim();
+if(rest===''||match[1].toLowerCase()!==commitTypeMap()[plan.classification]||(match[3]&&!plan.breaking)){
+return result;
+}
+return{...result,plan:{...plan,title:rest}};
+}
+function isFixablePlanResult(result,schema){
+return result!==null&&!(validateSchema(schema,result).ok&&result.plan===undefined&&quoteDiagnostic(result.blocker)!==undefined);
+}
+function buildCheckFixPrompt(prompt,problem,errors){
+const lines=prompt.split('\n');
+return[lines[0],'Fix your result per the check block.',...lines.slice(1),formatDataBlock('check',{problem:problem,schema_errors:errors.slice(0,maxListedItems())})].join('\n');
+}
+function describeCheckLimit(problem){
+return{problem:problem+' It stayed after '+maxCheckRetries()+' retries.',nextAction:'report',terminal:true};
+}
+async function callCheckedPlanner(run,facts,call){
+let prompt=call.prompt;
+for(let retry=0;;retry+=1){
+const label=retry===0?call.label:call.label+'-fix-'+retry;
+const result=normalizePlanTitle(await agent(prompt,plannerCallOptions(label,call.phaseTitle,call.schema)),call.schema);
+const problem=describePlanProblem(result,call.schema,facts,run.trunk,run.references);
+const isFixable=problem!==undefined&&isFixablePlanResult(result,call.schema);
+if(!isFixable||retry===maxCheckRetries()){
+return{planResult:result,problem:problem,isExhausted:isFixable};
+}
+prompt=buildCheckFixPrompt(call.prompt,problem,validateSchema(call.schema,result).errors);
+}
+}
+
 function gateIds(){
 return['validate','review'];
 }
@@ -3064,7 +3101,7 @@ properties:{
 outcome:{
 type:'string',
 enum:['complete','blocked'],
-description:'complete when the plan is done. blocked only when the delivery cannot be planned at all.'
+description:'complete when the plan is done. blocked only when no plan is possible.'
 },
 plan:omitSchemaDialect(planSchema),
 questions:{
@@ -3102,7 +3139,7 @@ boundarySentence(),
 hasAnswers?settledAnswersSentence(undefined):dataBlocksSentence(undefined)
 ];
 if(replan!==undefined){
-lines.push('This is a new plan in a run that already started: the replan block says why.');
+lines.push('A replan of a started run: the replan block says why.');
 }
 lines.push('',buildFactsBlock(facts),formatDataBlock('request',request),formatDataBlock('scope',scope));
 if(replan!==undefined){
@@ -3181,8 +3218,7 @@ if(commandProblem!==''){
 return'The plan names a validation command at validation_commands['+index+'] that '+commandProblem+stopped;
 }
 }
-const typedTitle=new RegExp('^('+Object.values(commitTypeMap()).join('|')+')(\\([^()]*\\))?!?:','i');
-if(typedTitle.test(cleanTitleText(plan.title))){
+if(typedTitlePattern().test(cleanTitleText(plan.title))){
 return'The plan title starts with a commit type, which the workflow writes before it'+stopped;
 }
 if(buildTitleText(plan)===''){
@@ -3190,12 +3226,18 @@ return'The plan title leaves no text once it is cleaned and cut to fit the pull 
 }
 const isOnOtherBranch=facts.head_state==='branch'&&facts.branch!==trunk;
 if(isOnOtherBranch&&plan.branch!==facts.branch){
-return'The run started on branch '+encodeUntrustedText(facts.branch)+' and delivers on it, but the plan names branch '+encodeUntrustedText(plan.branch)+stopped;
+return describeStartBranch(facts)+' and delivers on it, but the plan names branch '+encodeUntrustedText(plan.branch)+stopped;
 }
 if(!new RegExp(PLAN_SCHEMA.properties.branch.pattern,'u').test(plan.branch)){
-return'The plan names branch '+encodeUntrustedText(plan.branch)+', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens'+stopped;
+return'The plan names branch '+encodeUntrustedText(plan.branch)+describeTaxonomyMiss()+stopped;
 }
 return describeClosesProblem(plan,references);
+}
+function describeStartBranch(facts){
+return'The run started on branch '+encodeUntrustedText(facts.branch);
+}
+function describeTaxonomyMiss(){
+return', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens';
 }
 function questionKey(kind,scope,ask){
 return JSON.stringify([kind,scope,renderQuestions([ask])]);
@@ -3322,16 +3364,20 @@ let shownAsks=[];
 let shownResult;
 let shownEntry;
 const settledKinds=new Set();
-const planPrompt=buildPlanPrompt(run.request,facts,scope,replan,listAnswerEntries(run));
-let planResult=await agent(planPrompt,plannerCallOptions('plan-'+run.pass,'Plan',resultSchema));
+if(facts.head_state==='branch'&&facts.branch!==run.trunk&&!new RegExp(PLAN_SCHEMA.properties.branch.pattern,'u').test(facts.branch)){
+return stopDelivery([{problem:describeStartBranch(facts)+describeTaxonomyMiss()+'.'}],run,[],true);
+}
+let checked=await callCheckedPlanner(run,facts,{prompt:buildPlanPrompt(run.request,facts,scope,replan,listAnswerEntries(run)),label:'plan-'+run.pass,phaseTitle:'Plan',schema:resultSchema});
 for(;;){
-const problem=describePlanProblem(planResult,resultSchema,facts,run.trunk,run.references);
+let{planResult,problem}=checked;
 if(problem!==undefined){
 if(shownAsks.length>0){
 logPlanningReply(run,shownEntry,shownAsks,undefined);
 }
-const isPlannerBlock=validateSchema(resultSchema,planResult).ok&&planResult.outcome==='blocked';
-return stopDelivery([isPlannerBlock?{problem:problem,nextAction:readBlockerAction(planResult.blocker)}:describeUnusableResult(problem,planResult)],run,[],true);
+if(checked.isExhausted){
+return stopDelivery([describeCheckLimit(problem)],run,[],true);
+}
+return stopDelivery([planResult===null?describeUnusableResult(problem,null):{problem:problem}],run,[],true);
 }
 if(shownAsks.length>0){
 logPlanningReply(run,shownEntry,shownAsks,planResult);
@@ -3369,7 +3415,7 @@ shownResult=planResult;
 shownEntry={question:questions,labels:listShownLabels(shownAsks),reply:reply};
 resultSchema=buildReviseResultSchema(shownAsks);
 const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:listAnswerEntries(run),plan:planResult.plan,questions:questions,reply:reply});
-planResult=await agent(revisePrompt,plannerCallOptions('revise-'+round,'Revise',resultSchema));
+checked=await callCheckedPlanner(run,facts,{prompt:revisePrompt,label:'revise-'+round,phaseTitle:'Revise',schema:resultSchema});
 }
 }
 
@@ -4591,8 +4637,16 @@ limits:scope.limits.map((limit)=>toLimitEntry(limit,root))
 }
 async function runScopeStep(run,facts,round){
 phase('Scope');
-const scope=await agent(buildScopePrompt(run.request,facts,listAnswerEntries(run)),scopeOptions(run.pass,round));
+const prompt=buildScopePrompt(run.request,facts,listAnswerEntries(run));
+const options=scopeOptions(run.pass,round);
+let scope=await agent(prompt,options);
+for(let retry=1;retry<=maxCheckRetries()&&scope!==null&&describeScopeProblem(scope)!==undefined;retry+=1){
+scope=await agent(buildCheckFixPrompt(prompt,describeScopeProblem(scope).problem,validateSchema(SCOPE_SCHEMA,scope).errors),{...options,label:options.label+'-fix-'+retry});
+}
 const unusable=describeScopeProblem(scope);
+if(unusable!==undefined&&scope!==null){
+return describeCheckLimit(unusable.problem);
+}
 return unusable===undefined?{scope:keepRepositoryPathEntries(scope,facts.root)}:unusable;
 }
 
@@ -4744,7 +4798,7 @@ properties:{
 outcome:{
 type:'string',
 enum:['complete','blocked','needs_replan'],
-description:'complete when the step outcome holds. blocked when the step cannot be done. needs_replan when the plan must change before the step can be done.'
+description:'complete when the step outcome holds. blocked when the step cannot be done. needs_replan when the plan must change first.'
 },
 summary:{type:'string',description:'What you changed, in one or two sentences.'},
 blocker:{type:'string',maxLength:400,description:'Why the step is blocked or needs a new plan, in one or two short sentences written for the user.'},
@@ -4906,6 +4960,9 @@ const REVIEW_SCHEMA=buildReviewSchema();
 const SCOPE_SCHEMA=buildScopeSchema();
 function maxReplans(){
 return 3;
+}
+function maxCheckRetries(){
+return 2;
 }
 function maxFixRounds(){
 return 3;

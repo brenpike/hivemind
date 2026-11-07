@@ -14,7 +14,8 @@
  *   PLANNER_AGENT, SCOPE_MODEL and SCOPE_SCHEMA from main.js.
  *
  * Outputs
- *   runScopeStep(run, facts, round)  {scope} or {problem, nextAction}.
+ *   runScopeStep(run, facts, round)  {scope} or {problem, nextAction},
+ *                             with terminal true once check retries run out.
  *                             The scope holds only the documents and paths
  *                             entries whose path passes isRepositoryPath,
  *                             after a path under the checkout root is made
@@ -38,11 +39,15 @@
  *   A contractRows() check is a function of the built script, not of
  *   main.js: the build bundles this module into it, so a row can name a
  *   function of this module.
- *   The scope result is checked before any field is read: a result that
- *   fails SCOPE_SCHEMA stops the run before planning, through
- *   describeUnusableResult (lib/stop.js): a null result, an agent
- *   failure, adds the agent-failure sentence and next action run_again,
- *   and any other unusable result gets next action report. A path, the field
+ *   The scope result is checked before any field is read. A null result,
+ *   an agent failure, stops the run before planning through
+ *   describeUnusableResult (lib/stop.js), with the agent-failure sentence
+ *   and next action run_again. A non-null result that fails SCOPE_SCHEMA
+ *   goes back to the agent with buildCheckFixPrompt (checks.js), label
+ *   scopeOptions(...).label plus '-fix-N', up to maxCheckRetries() times; a
+ *   fitting retry goes on as a fitting first result does, and one still
+ *   failing ends the run, terminal with next action report, through
+ *   describeCheckLimit. A path, the field
  *   marked with repositoryPathMark(), that starts with the facts root line
  *   and a slash is first cut to the rest after that slash; a root line of
  *   none, or no root line, converts nothing. An entry whose path then fails
@@ -173,7 +178,15 @@ function keepRepositoryPathEntries(scope, root) {
 
 async function runScopeStep(run, facts, round) {
   phase('Scope');
-  const scope = await agent(buildScopePrompt(run.request, facts, listAnswerEntries(run)), scopeOptions(run.pass, round));
+  const prompt = buildScopePrompt(run.request, facts, listAnswerEntries(run));
+  const options = scopeOptions(run.pass, round);
+  let scope = await agent(prompt, options);
+  for (let retry = 1; retry <= maxCheckRetries() && scope !== null && describeScopeProblem(scope) !== undefined; retry += 1) {
+    scope = await agent(buildCheckFixPrompt(prompt, describeScopeProblem(scope).problem, validateSchema(SCOPE_SCHEMA, scope).errors), { ...options, label: options.label + '-fix-' + retry });
+  }
   const unusable = describeScopeProblem(scope);
+  if (unusable !== undefined && scope !== null) {
+    return describeCheckLimit(unusable.problem);
+  }
   return unusable === undefined ? { scope: keepRepositoryPathEntries(scope, facts.root) } : unusable;
 }

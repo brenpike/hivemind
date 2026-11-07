@@ -84,16 +84,20 @@
  *   before the branch step and any later agent call.
  *   Stops (issue 457): a plan, revise or rescope problem goes through
  *   stopDelivery (record.js) with isReplan true, so the reply starts a new
- *   pass outside maxReplans(). A null result, an agent failure, adds the
+ *   pass outside maxReplans(). Each plan and revise call goes through
+ *   callCheckedPlanner (checks.js), which asks a result that fails the
+ *   plan check again, and one still failing ends the run, terminal with
+ *   next action report. A null result, an agent failure, adds the
  *   agent-failure sentence through describeUnusableResult (lib/stop.js)
- *   and ends the run with next action run_again; any other problem pauses,
- *   and the reply reaches the next plan prompt's answers block. A
- *   planner's blocked outcome that fits its schema keeps the fix line,
- *   report when its blocker gives no reason (readBlockerAction); every
- *   other problem is unusable, so describeUnusableResult types it report.
- *   The settled question guard below is report too: a workflow defect. A revise that
- *   fails the plan check logs its reply first, settled [], so the stop
- *   asks the next round.
+ *   and ends the run with next action run_again. A planner's blocked
+ *   outcome that fits its schema and gives a reason pauses with the fix
+ *   line, and the reply reaches the next plan prompt's answers block.
+ *   The settled question guard below is report too: a workflow defect. A
+ *   revise that ends the run on the plan check logs its reply first,
+ *   settled []; one a retry fixed logs the settled labels of the fixed
+ *   result. Before the plan call, a run that started on a branch other
+ *   than the trunk whose name is outside the Branch Taxonomy pauses with
+ *   the fix line.
  *   Each validation_commands entry is one command line: describePlanProblem
  *   refuses a blank entry, or one that holds a line break or another
  *   control character, naming the reason, before the branch step.
@@ -101,7 +105,8 @@
  *   tests first, describePlanProblem refuses a plan.branch outside the
  *   Branch Taxonomy and Branch Naming of ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md,
  *   so a runner with no skill body never creates one (issue 467).
- *   Title type: describePlanProblem refuses a plan whose cleaned
+ *   Title type: normalizePlanTitle (checks.js) first cuts the plan's own
+ *   commit type from plan.title. Then describePlanProblem refuses a plan whose cleaned
  *   plan.title starts with a commitTypeMap() value in any letter case, an optional
  *   parenthesized scope, an optional '!' and ':', with a fixed message that
  *   names no title text, since the pull request step writes the type
@@ -188,7 +193,7 @@ function buildPlanResultSpec(planSchema, briefSchema) {
       outcome: {
         type: 'string',
         enum: ['complete', 'blocked'],
-        description: 'complete when the plan is done. blocked only when the delivery cannot be planned at all.'
+        description: 'complete when the plan is done. blocked only when no plan is possible.'
       },
       plan: omitSchemaDialect(planSchema),
       questions: {
@@ -230,7 +235,7 @@ function buildPlanPrompt(request, facts, scope, replan, answerLog) {
     hasAnswers ? settledAnswersSentence(undefined) : dataBlocksSentence(undefined)
   ];
   if (replan !== undefined) {
-    lines.push('This is a new plan in a run that already started: the replan block says why.');
+    lines.push('A replan of a started run: the replan block says why.');
   }
   lines.push('', buildFactsBlock(facts), formatDataBlock('request', request), formatDataBlock('scope', scope));
   if (replan !== undefined) {
@@ -317,8 +322,7 @@ function describePlanProblem(planResult, resultSchema, facts, trunk, references)
       return 'The plan names a validation command at validation_commands[' + index + '] that ' + commandProblem + stopped;
     }
   }
-  const typedTitle = new RegExp('^(' + Object.values(commitTypeMap()).join('|') + ')(\\([^()]*\\))?!?:', 'i');
-  if (typedTitle.test(cleanTitleText(plan.title))) {
+  if (typedTitlePattern().test(cleanTitleText(plan.title))) {
     return 'The plan title starts with a commit type, which the workflow writes before it' + stopped;
   }
   if (buildTitleText(plan) === '') {
@@ -326,12 +330,24 @@ function describePlanProblem(planResult, resultSchema, facts, trunk, references)
   }
   const isOnOtherBranch = facts.head_state === 'branch' && facts.branch !== trunk;
   if (isOnOtherBranch && plan.branch !== facts.branch) {
-    return 'The run started on branch ' + encodeUntrustedText(facts.branch) + ' and delivers on it, but the plan names branch ' + encodeUntrustedText(plan.branch) + stopped;
+    return describeStartBranch(facts) + ' and delivers on it, but the plan names branch ' + encodeUntrustedText(plan.branch) + stopped;
   }
   if (!new RegExp(PLAN_SCHEMA.properties.branch.pattern, 'u').test(plan.branch)) {
-    return 'The plan names branch ' + encodeUntrustedText(plan.branch) + ', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens' + stopped;
+    return 'The plan names branch ' + encodeUntrustedText(plan.branch) + describeTaxonomyMiss() + stopped;
   }
   return describeClosesProblem(plan, references);
+}
+
+function describeStartBranch(facts) {
+  return 'The run started on branch ' + encodeUntrustedText(facts.branch);
+}
+
+/**
+ * Returns the clause that says a branch named before it is outside the
+ * Branch Taxonomy.
+ */
+function describeTaxonomyMiss() {
+  return ', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens';
 }
 
 /**
@@ -513,16 +529,20 @@ async function runPlanningPass(run, facts, passScope, replan) {
   let shownResult;
   let shownEntry;
   const settledKinds = new Set();
-  const planPrompt = buildPlanPrompt(run.request, facts, scope, replan, listAnswerEntries(run));
-  let planResult = await agent(planPrompt, plannerCallOptions('plan-' + run.pass, 'Plan', resultSchema));
+  if (facts.head_state === 'branch' && facts.branch !== run.trunk && !new RegExp(PLAN_SCHEMA.properties.branch.pattern, 'u').test(facts.branch)) {
+    return stopDelivery([{ problem: describeStartBranch(facts) + describeTaxonomyMiss() + '.' }], run, [], true);
+  }
+  let checked = await callCheckedPlanner(run, facts, { prompt: buildPlanPrompt(run.request, facts, scope, replan, listAnswerEntries(run)), label: 'plan-' + run.pass, phaseTitle: 'Plan', schema: resultSchema });
   for (;;) {
-    const problem = describePlanProblem(planResult, resultSchema, facts, run.trunk, run.references);
+    let { planResult, problem } = checked;
     if (problem !== undefined) {
       if (shownAsks.length > 0) {
         logPlanningReply(run, shownEntry, shownAsks, undefined);
       }
-      const isPlannerBlock = validateSchema(resultSchema, planResult).ok && planResult.outcome === 'blocked';
-      return stopDelivery([isPlannerBlock ? { problem: problem, nextAction: readBlockerAction(planResult.blocker) } : describeUnusableResult(problem, planResult)], run, [], true);
+      if (checked.isExhausted) {
+        return stopDelivery([describeCheckLimit(problem)], run, [], true);
+      }
+      return stopDelivery([planResult === null ? describeUnusableResult(problem, null) : { problem: problem }], run, [], true);
     }
     if (shownAsks.length > 0) {
       logPlanningReply(run, shownEntry, shownAsks, planResult);
@@ -567,6 +587,6 @@ async function runPlanningPass(run, facts, passScope, replan) {
     shownEntry = { question: questions, labels: listShownLabels(shownAsks), reply: reply };
     resultSchema = buildReviseResultSchema(shownAsks);
     const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, answers: listAnswerEntries(run), plan: planResult.plan, questions: questions, reply: reply });
-    planResult = await agent(revisePrompt, plannerCallOptions('revise-' + round, 'Revise', resultSchema));
+    checked = await callCheckedPlanner(run, facts, { prompt: revisePrompt, label: 'revise-' + round, phaseTitle: 'Revise', schema: resultSchema });
   }
 }

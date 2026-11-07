@@ -92,7 +92,7 @@ function buildWorkerSchema() {
       outcome: {
         type: 'string',
         enum: ['complete', 'blocked', 'needs_replan'],
-        description: 'complete when the step outcome holds. blocked when the step cannot be done. needs_replan when the plan must change before the step can be done.'
+        description: 'complete when the step outcome holds. blocked when the step cannot be done. needs_replan when the plan must change first.'
       },
       summary: { type: 'string', description: 'What you changed, in one or two sentences.' },
       blocker: { type: 'string', maxLength: 400, description: 'Why the step is blocked or needs a new plan, in one or two short sentences written for the user.' },

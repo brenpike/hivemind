@@ -411,7 +411,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'f5d685db8cf4ee46';
+const BUILD_ID = 'e3299f63da20988f';
 
 function supportedSchemaKeywords(){
 return[
@@ -614,7 +614,7 @@ errors.push(path+': additionalProperties: unexpected '+describeUnexpectedSchemaK
 }
 }
 function describeUnexpectedSchemaKey(name){
-return/^[A-Za-z0-9_-]+$/.test(name)?name:JSON.stringify(name);
+return/^[A-Za-z0-9_-]{1,64}$/.test(name)?name:JSON.stringify(name.slice(0,64));
 }
 function collectArrayErrors(schema,list,path,errors){
 if(schema.minItems!==undefined&&list.length<schema.minItems){
