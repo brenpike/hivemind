@@ -691,7 +691,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'c2c8d0bfd5dbd7f2';
+const BUILD_ID = '18484cb9af732aa1';
 
 function supportedSchemaKeywords(){
 return[
@@ -1476,7 +1476,7 @@ finished.message=fitWholeMessage('finish',messageBlocks,roomForMessage(finished)
 return assertWithinBudget(finished);
 }
 function buildEmptyPause(caller,resumeArgs,blocks){
-if(!isResultRecord(resumeArgs)){
+if(!isPlainObject(resumeArgs)){
 throw new Error(caller+': resumeArgs must be a plain object');
 }
 if(Object.hasOwn(resumeArgs,replyField())){
@@ -1496,7 +1496,7 @@ throw new Error(caller+': the whole blocks do not fit the completion notice');
 return message;
 }
 function assertPullRequest(pr){
-if(!isResultRecord(pr)){
+if(!isPlainObject(pr)){
 throw new Error('finish: pr must be a plain object');
 }
 for(const key of Object.keys(pr)){
@@ -1626,7 +1626,7 @@ throw new Error(caller+': blocks must be a non-empty array');
 blocks.forEach((block,blockIndex)=>assertBlock(caller,block,blockIndex===blocks.length-1));
 }
 function assertBlock(caller,block,isLast){
-if(!isResultRecord(block)){
+if(!isPlainObject(block)){
 throw new Error(caller+': each block must be a plain object');
 }
 for(const key of Object.keys(block)){
@@ -1642,10 +1642,10 @@ if(Object.hasOwn(block,'shorten')){
 throw new Error(caller+': a whole block cannot have shorten');
 }
 }
-if(!isNonBlankText(block.text)){
+if(!isNonEmptyString(block.text)){
 throw new Error(caller+': block text must be a non-empty string');
 }
-if(Object.hasOwn(block,'compact')&&!isNonBlankText(block.compact)){
+if(Object.hasOwn(block,'compact')&&!isNonEmptyString(block.compact)){
 throw new Error(caller+': block compact must be a non-empty string');
 }
 if(Object.hasOwn(block,'shorten')){
@@ -1657,10 +1657,10 @@ throw new Error(caller+': only the last block may have shorten');
 }
 }
 }
-function isNonBlankText(value){
+function isNonEmptyString(value){
 return typeof value==='string'&&value.trim()!=='';
 }
-function isResultRecord(value){
+function isPlainObject(value){
 return typeof value==='object'&&value!==null&&!Array.isArray(value);
 }
 function countCharacter(text,character){
@@ -2045,12 +2045,6 @@ const keptFlags=pattern.flags.replace(/[gym]/g,'');
 return new RegExp('^(?:'+pattern.source+')$',keptFlags);
 }
 
-function isPlainObject(value){
-return typeof value==='object'&&value!==null&&!Array.isArray(value);
-}
-function isNonEmptyString(value){
-return typeof value==='string'&&value.trim()!=='';
-}
 function readArgsObject(rawArgs){
 if(typeof rawArgs==='string'){
 return{request:rawArgs};
@@ -3675,6 +3669,10 @@ return['Destructive changes you approved:',...approvals.map((change)=>'- '+rende
 function renderSlowTests(cases){
 return['Slow test cases that passed only when run alone:',...cases.map((name)=>'- '+encodeUntrustedText(name))].join('\n');
 }
+function quoteOpenTitle(title){
+const kept=title.slice(0,findLongestCut(title,maxExcerptLength(),encodeUntrustedText));
+return encodeUntrustedText(kept)+(kept===title?'':', shortened');
+}
 function hasListedFindings(run){
 return run.rejected.length>0||run.undone.length>0;
 }
@@ -3691,7 +3689,7 @@ parts.push({id:'gates',text:renderNotRunGates(run.notRunGates),external:false});
 }
 }else{
 parts.push({id:'gates',text:renderPullRequestGates(run,gates),external:false});
-const openLines=(isDraft?run.open??[]:[]).map((finding)=>'- '+quoteShortFindingId(finding.finding_id)+': '+encodeUntrustedText(finding.title));
+const openLines=(isDraft?run.open??[]:[]).map((finding)=>'- '+quoteShortFindingId(finding.finding_id)+': '+quoteOpenTitle(finding.title));
 if(openLines.length>0){
 parts.push({id:'open_findings',text:['Findings local review left open:',...openLines].join('\n'),external:true});
 }

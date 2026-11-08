@@ -16,9 +16,6 @@
  *   replies     the replies so far, round 1 first.
  *
  * Outputs
- *   isPlainObject(value)       true for an object that is not null and not
- *                              an array.
- *   isNonEmptyString(value)    true for a string that is not blank.
  *   readArgsObject(rawArgs)    the args as an object, as above.
  *   defaultTrunk()             'main', the trunk when the trunk arg is
  *                              absent.
@@ -76,21 +73,14 @@
  *   Every problem but the build problem is one sentence ending "so the
  *   <runNoun> did not start.". No problem echoes an arg value. With runNoun 'analysis' the text is the
  *   analysis-only text, byte for byte.
- *   Uses replyField() from result.js.
+ *   Uses replyField(), isPlainObject() and isNonEmptyString() from
+ *   result.js.
  *
  * Why
  *   analysis-only and standard-delivery take the same launch args and pause
  *   the same way. One home keeps their checks and resume rule in step, and
  *   the run noun keeps each workflow's messages in its own words.
  */
-
-function isPlainObject(value) {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isNonEmptyString(value) {
-  return typeof value === 'string' && value.trim() !== '';
-}
 
 function readArgsObject(rawArgs) {
   if (typeof rawArgs === 'string') {

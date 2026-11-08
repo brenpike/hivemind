@@ -52,6 +52,8 @@
  *   canPause      true when pausesSoFar is below pauseLimit().
  *   noticeBudget  the most notice chars a whole result may take.
  *   noticeLength  the chars value takes in the completion notice.
+ *   isPlainObject  true for an object that is not null and not an array.
+ *   isNonEmptyString  true for a string that is not blank.
  *   canCarry      true when a pause result with resumeArgs and an empty
  *                 message takes at most half of noticeBudget().
  *   maxExcerptLength  200, the code points of a quoted excerpt.
@@ -337,7 +339,7 @@ function finish({ outcome, causes, blocks, pr }) {
 }
 
 function buildEmptyPause(caller, resumeArgs, blocks) {
-  if (!isResultRecord(resumeArgs)) {
+  if (!isPlainObject(resumeArgs)) {
     throw new Error(caller + ': resumeArgs must be a plain object');
   }
   if (Object.hasOwn(resumeArgs, replyField())) {
@@ -359,7 +361,7 @@ function fitWholeMessage(caller, blocks, room) {
 }
 
 function assertPullRequest(pr) {
-  if (!isResultRecord(pr)) {
+  if (!isPlainObject(pr)) {
     throw new Error('finish: pr must be a plain object');
   }
   for (const key of Object.keys(pr)) {
@@ -502,7 +504,7 @@ function assertBlocks(caller, blocks) {
 }
 
 function assertBlock(caller, block, isLast) {
-  if (!isResultRecord(block)) {
+  if (!isPlainObject(block)) {
     throw new Error(caller + ': each block must be a plain object');
   }
   for (const key of Object.keys(block)) {
@@ -518,10 +520,10 @@ function assertBlock(caller, block, isLast) {
       throw new Error(caller + ': a whole block cannot have shorten');
     }
   }
-  if (!isNonBlankText(block.text)) {
+  if (!isNonEmptyString(block.text)) {
     throw new Error(caller + ': block text must be a non-empty string');
   }
-  if (Object.hasOwn(block, 'compact') && !isNonBlankText(block.compact)) {
+  if (Object.hasOwn(block, 'compact') && !isNonEmptyString(block.compact)) {
     throw new Error(caller + ': block compact must be a non-empty string');
   }
   if (Object.hasOwn(block, 'shorten')) {
@@ -534,11 +536,11 @@ function assertBlock(caller, block, isLast) {
   }
 }
 
-function isNonBlankText(value) {
+function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim() !== '';
 }
 
-function isResultRecord(value) {
+function isPlainObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 

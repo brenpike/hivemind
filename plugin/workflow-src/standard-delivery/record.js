@@ -44,8 +44,9 @@
  *           order: when gates.draft is set the plain draft line naming its
  *           reason, the reversible effects, the gates, when gates.draft is
  *           set and run.open (undefined read as []) is not empty the open
- *           findings, one line each of the short id and the encoded title
- *           under one label, external, the slow test cases
+ *           findings, one line each of the short id and the title through
+ *           quoteOpenTitle, cut to a hard bound, under one label, external,
+ *           the slow test cases
  *           of gates.slow when it is not empty, the rejected findings
  *           block of buildRejectedFindingsBlock (review.js) when run.rejected
  *           or run.undone is not empty, its note did not hold when the
@@ -198,6 +199,15 @@ function renderSlowTests(cases) {
   return ['Slow test cases that passed only when run alone:', ...cases.map((name) => '- ' + encodeUntrustedText(name))].join('\n');
 }
 
+/**
+ * Returns title encoded by encodeUntrustedText, cut so its messageCost
+ * stays within maxExcerptLength(), ', shortened' added when cut.
+ */
+function quoteOpenTitle(title) {
+  const kept = title.slice(0, findLongestCut(title, maxExcerptLength(), encodeUntrustedText));
+  return encodeUntrustedText(kept) + (kept === title ? '' : ', shortened');
+}
+
 function hasListedFindings(run) {
   return run.rejected.length > 0 || run.undone.length > 0;
 }
@@ -215,7 +225,7 @@ function buildRunRecordParts(run, taken, gates) {
     }
   } else {
     parts.push({ id: 'gates', text: renderPullRequestGates(run, gates), external: false });
-    const openLines = (isDraft ? run.open ?? [] : []).map((finding) => '- ' + quoteShortFindingId(finding.finding_id) + ': ' + encodeUntrustedText(finding.title));
+    const openLines = (isDraft ? run.open ?? [] : []).map((finding) => '- ' + quoteShortFindingId(finding.finding_id) + ': ' + quoteOpenTitle(finding.title));
     if (openLines.length > 0) {
       parts.push({ id: 'open_findings', text: ['Findings local review left open:', ...openLines].join('\n'), external: true });
     }

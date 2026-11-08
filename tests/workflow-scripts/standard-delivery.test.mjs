@@ -909,7 +909,8 @@ function assertPassStopEnd(run, lead, lastLabel, nextAction) {
  * plain draft line of reason, the body's right after its Steps block and
  * the comment's right after its lead, then the gates part; then, only when
  * openFindings is not empty, the external part listing each open finding by
- * its short id and encoded title, neutralized; and the final message naming
+ * its short id and its title through quoteOpenTitle, neutralized; and the
+ * final message naming
  * the draft and reason in place of the held-gates line.
  */
 function assertDraftPullRequest(run, label, reason, openFindings) {
@@ -920,7 +921,7 @@ function assertDraftPullRequest(run, label, reason, openFindings) {
   const inputs = readRunnerInputs(callOf(run, label).prompt);
   assert.equal(inputs.draft, true);
   const draftLine = 'This pull request is a draft: ' + reason;
-  const openLines = openFindings.map((finding) => '- ' + JSON.stringify(finding.finding_id.slice(0, 8)) + ': ' + lib.encodeUntrustedText(finding.title));
+  const openLines = openFindings.map((finding) => '- ' + JSON.stringify(finding.finding_id.slice(0, 8)) + ': ' + main.quoteOpenTitle(finding.title));
   const openPart = main.neutralizePullRequestText(['Findings local review left open:', ...openLines].join('\n'));
   for (const [noun, text] of [['body', inputs.body], ['comment', inputs.comment]]) {
     const parts = text.split('\n\n');
@@ -6105,7 +6106,7 @@ const ROW_TESTS = {
       assert.ok(moduleSource.includes('encodeUntrustedText(review.user_question.found)'));
       assert.equal((moduleCode.match(/\breview\.open_findings\b/g) || []).length, 1);
       assert.ok(moduleSource.includes('  run.open = review.open_findings;\n'));
-      assert.ok(moduleSource.includes("'- ' + quoteShortFindingId(finding.finding_id) + ': ' + encodeUntrustedText(finding.title)"));
+      assert.ok(moduleSource.includes("'- ' + quoteShortFindingId(finding.finding_id) + ': ' + quoteOpenTitle(finding.title)"));
       assert.equal((moduleCode.match(/\bfinding\.title\b/g) || []).length, 1);
       assert.ok(!/\breview\[""\]/.test(moduleCode));
     });
@@ -9541,6 +9542,24 @@ const ROW_TESTS = {
       assert.ok(inputs.body.length <= main.maxPullRequestTextLength() && inputs.comment.length <= main.maxPullRequestTextLength(), String(inputs.body.length));
       assert.ok(!run.result.message.includes('OPEN_ZQ') && !run.result.message.includes('aaaa'), run.result.message);
     });
+    for (const [kind, title] of [['300 emoji', '\u{1F600}'.repeat(300)], ['backslash', '\\'.repeat(300)]]) {
+      test(`a draft listing 50 open findings of ${kind} titles opens, each title cut to the maxExcerptLength() bound and marked shortened, and keeps the pull request texts within maxPullRequestTextLength()`, async () => {
+        const many = Array.from({ length: 50 }, (_, index) => ({ finding_id: index.toString(16).padStart(8, '0') + 'b'.repeat(56), title: title }));
+        const review = { ...maxIterations, open_findings: many };
+        assert.equal(main.describeReviewProblem(review), undefined);
+        const unbounded = main.neutralizePullRequestText(many.map((finding) => lib.encodeUntrustedText(finding.title)).join('\n'));
+        assert.ok(unbounded.length > main.maxPullRequestTextLength(), String(unbounded.length));
+        const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
+        assertDraftPullRequest(run, 'pr-1', capReason(OTHER), many);
+        const quoted = main.quoteOpenTitle(title);
+        const kept = JSON.parse(quoted.slice(0, -', shortened'.length));
+        assert.ok(quoted.endsWith('", shortened') && title.startsWith(kept) && kept.length > 0, quoted);
+        assert.ok(lib.messageCost(lib.encodeUntrustedText(kept)) <= lib.maxExcerptLength(), quoted);
+        assert.ok(lib.messageCost(lib.encodeUntrustedText(title.slice(0, kept.length + 2))) > lib.maxExcerptLength(), quoted);
+        const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
+        assert.ok(inputs.body.length <= main.maxPullRequestTextLength() && inputs.comment.length <= main.maxPullRequestTextLength(), String(inputs.body.length));
+      });
+    }
   },
   'SD-84': () => {
     const USAGE_BLOCKER = 'Codex usage limit reached; try again at 3:05 PM.';

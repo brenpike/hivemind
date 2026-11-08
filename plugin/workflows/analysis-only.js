@@ -412,7 +412,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = '01df3732ec8a7e66';
+const BUILD_ID = '88856bb5953e4ae2';
 
 function supportedSchemaKeywords(){
 return[
@@ -1168,7 +1168,7 @@ finished.message=fitWholeMessage('finish',messageBlocks,roomForMessage(finished)
 return assertWithinBudget(finished);
 }
 function buildEmptyPause(caller,resumeArgs,blocks){
-if(!isResultRecord(resumeArgs)){
+if(!isPlainObject(resumeArgs)){
 throw new Error(caller+': resumeArgs must be a plain object');
 }
 if(Object.hasOwn(resumeArgs,replyField())){
@@ -1188,7 +1188,7 @@ throw new Error(caller+': the whole blocks do not fit the completion notice');
 return message;
 }
 function assertPullRequest(pr){
-if(!isResultRecord(pr)){
+if(!isPlainObject(pr)){
 throw new Error('finish: pr must be a plain object');
 }
 for(const key of Object.keys(pr)){
@@ -1318,7 +1318,7 @@ throw new Error(caller+': blocks must be a non-empty array');
 blocks.forEach((block,blockIndex)=>assertBlock(caller,block,blockIndex===blocks.length-1));
 }
 function assertBlock(caller,block,isLast){
-if(!isResultRecord(block)){
+if(!isPlainObject(block)){
 throw new Error(caller+': each block must be a plain object');
 }
 for(const key of Object.keys(block)){
@@ -1334,10 +1334,10 @@ if(Object.hasOwn(block,'shorten')){
 throw new Error(caller+': a whole block cannot have shorten');
 }
 }
-if(!isNonBlankText(block.text)){
+if(!isNonEmptyString(block.text)){
 throw new Error(caller+': block text must be a non-empty string');
 }
-if(Object.hasOwn(block,'compact')&&!isNonBlankText(block.compact)){
+if(Object.hasOwn(block,'compact')&&!isNonEmptyString(block.compact)){
 throw new Error(caller+': block compact must be a non-empty string');
 }
 if(Object.hasOwn(block,'shorten')){
@@ -1349,10 +1349,10 @@ throw new Error(caller+': only the last block may have shorten');
 }
 }
 }
-function isNonBlankText(value){
+function isNonEmptyString(value){
 return typeof value==='string'&&value.trim()!=='';
 }
-function isResultRecord(value){
+function isPlainObject(value){
 return typeof value==='object'&&value!==null&&!Array.isArray(value);
 }
 function countCharacter(text,character){
@@ -1409,12 +1409,6 @@ const laterBlocks=orderedCauses.slice(1).map((cause)=>({text:cause.problem}));
 return[leadBlock,{text:nextStepLine(orderedCauses[0].nextAction),whole:true}].concat(laterBlocks);
 }
 
-function isPlainObject(value){
-return typeof value==='object'&&value!==null&&!Array.isArray(value);
-}
-function isNonEmptyString(value){
-return typeof value==='string'&&value.trim()!=='';
-}
 function readArgsObject(rawArgs){
 if(typeof rawArgs==='string'){
 return{request:rawArgs};
