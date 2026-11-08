@@ -118,7 +118,7 @@
             <span class="tag tag--ember">JSON</span>
           </article>
         </div>
-        <p class="note">When Claude Code's Workflow tool is available, analysis and delivery requests run as workflow scripts; otherwise they run on the workflow state machine (see <a href="#lifecycle">Lifecycle</a>). <code>tmux</code> is needed only for brood mode. Each strain runs in its own detached tmux session. <code>node</code> is needed only for the optional local Codex review (the codex companion).</p>
+        <p class="note">When Claude Code's Workflow tool is available, analysis requests run as a workflow script, and delivery requests run as one or on Instinct. A refused or blocked <code>standard-delivery</code> launch (denied, not found, or workflows turned off), and a started run that fails, continue on <em>Instinct</em>: the overlord's judgment-driven delivery path, with no script and no run ledger, that keeps the plan, the branch and every gate. A <code>Workflow(hivemind:standard-delivery)</code> deny entry sends delivery to Instinct. The workflow state machine runs the other workflows, a refused <code>analysis-only</code> launch and resumed runs. A delivery request that names neither the engine nor Instinct gets a question with a recommendation, and a brood child takes the engine. A No at the approval prompt still has no fallback (see <a href="#lifecycle">Lifecycle</a>). <code>tmux</code> is needed only for brood mode. Each strain runs in its own detached tmux session. <code>node</code> is needed only for the optional local Codex review (the codex companion).</p>
       </div>
     </section>
 
@@ -214,7 +214,7 @@
               <tr>
                 <td><code>hivemind:overlord</code></td>
                 <td><span class="tag tag--violet">Orchestrator</span></td>
-                <td>Session default agent and your main interface. Routes each request to a workflow, then launches its workflow script or runs the workflow state machine and its run ledger. Owns branches, checkpoint commits, version-bump decisions, PRs, and review routing. Delegates all implementation and never writes code.</td>
+                <td>Session default agent and your main interface. Routes each request to a workflow, then launches its workflow script, runs a <code>standard-delivery</code> request on Instinct, or runs the workflow state machine and its run ledger. A refused or blocked <code>standard-delivery</code> launch (denied, not found, or workflows turned off), and a started run that fails, continue on Instinct: its judgment-driven delivery path, with no script and no run ledger, that keeps the plan, the branch and every gate. A <code>Workflow(hivemind:standard-delivery)</code> deny entry sends delivery to Instinct. The state machine runs the other workflows, a refused <code>analysis-only</code> launch and resumed runs. A delivery request that names neither the engine nor Instinct gets a question with a recommendation, and a brood child takes the engine. A No at the approval prompt still has no fallback. Owns branches, checkpoint commits, version-bump decisions, PRs, and review routing. Delegates all implementation and never writes code.</td>
               </tr>
               <tr>
                 <td><code>hivemind:cerebrate</code></td>
@@ -234,7 +234,7 @@
               <tr>
                 <td><code>hivemind:local-reviewer</code></td>
                 <td><span class="tag tag--violet">Pre-PR reviewer</span></td>
-                <td>Adversarial Codex review loop before the PR opens, up to 10 iterations. Fixes simple findings itself (two files or fewer), escalates complex ones, and stops on break-fix cycles. Needs the codex companion.</td>
+                <td>Adversarial Codex review loop before the PR opens, up to 10 iterations. Fixes simple findings itself (two files or fewer); a fix that fails its check is undone, with only its own files restored, and listed. Escalates complex ones and stops on break-fix cycles. Needs the codex companion.</td>
               </tr>
               <tr>
                 <td><code>hivemind:github-reviewer</code></td>
@@ -310,7 +310,7 @@
               </tr>
               <tr>
                 <td><code>hivemind:open-plan-pr</code></td>
-                <td>Open a pull request after completion, validation, and versioning gates pass, through a committed script that pushes through <code>push-branch.sh</code>, then reuses an open PR on the same head, base and commit (posting an optional comment there) or creates the PR, optionally as a draft, and verifies it. Used by both engines.</td>
+                <td>Open a pull request after completion, validation, and versioning gates pass, through a committed script that pushes through <code>push-branch.sh</code>, then reuses an open PR on the same head, base and commit (posting an optional comment there) or creates the PR, optionally as a draft, and verifies it. It takes the PR body from its own file (<code>--body-file</code>). Used by both engines.</td>
               </tr>
               <tr>
                 <td><code>hivemind:adaptation-cycle</code></td>
@@ -400,7 +400,7 @@
           <header class="panel plate">
             <p class="kicker xs">06 The Pipeline</p>
             <h2 id="lifecycle-heading" class="xg">The Lifecycle</h2>
-            <p class="xs"><code>hivemind:route-workflow</code> selects the workflow first, for every request that is not a Reflex. One of two engines then runs it: when Claude Code's Workflow tool is available, <code>analysis-only</code> and <code>standard-delivery</code> launch as workflow scripts; every other workflow, and a request whose launch is refused, runs on its JSON state machine. <code>analysis-only</code> (<code>hivemind:analysis-only</code>) has been a script since 6.0.0, and <code>standard-delivery</code> (<code>hivemind:standard-delivery</code>) since 7.0.0. In manual mode the Workflow tool shows an approval prompt; in auto mode the launch goes ahead with no prompt. A No at the prompt interrupts the turn, with no fallback. To keep delivery on the state machine, add <code>Workflow(hivemind:standard-delivery)</code> to <code>permissions.deny</code>: the launch is refused with no prompt and the request falls back to the state machine. A script run keeps no run ledger: the working branch, its commits and the PR are the record, and its decisions go on the PR body. Only the state machine keeps a run ledger. A <code>standard-delivery</code> script run, from request to PR:</p>
+            <p class="xs"><code>hivemind:route-workflow</code> selects the workflow first, for every request that is not a Reflex. When Claude Code's Workflow tool is available, <code>analysis-only</code> and <code>standard-delivery</code> launch as workflow scripts. <code>analysis-only</code> (<code>hivemind:analysis-only</code>) has been a script since 6.0.0, and <code>standard-delivery</code> (<code>hivemind:standard-delivery</code>) since 7.0.0. In manual mode the Workflow tool shows an approval prompt; in auto mode the launch goes ahead with no prompt. A No at the prompt interrupts the turn, and still has no fallback. A refused or blocked <code>standard-delivery</code> launch (denied, not found, or workflows turned off), and a started run that fails, continue on <em>Instinct</em>: the overlord's judgment-driven delivery path, with no script and no run ledger, that keeps the plan, the branch and every gate. A <code>Workflow(hivemind:standard-delivery)</code> entry in <code>permissions.deny</code> refuses the launch with no prompt and sends delivery to Instinct. The workflow state machine runs the other workflows, a refused <code>analysis-only</code> launch and resumed runs. A delivery request that names neither the engine nor Instinct gets a question with a recommendation, and a brood child takes the engine. A script run keeps no run ledger: the working branch, its commits and the PR are the record, and the decisions it lists go on the PR (see the PR step). Only the state machine keeps a run ledger. A <code>standard-delivery</code> script run, from request to PR:</p>
           </header>
           <ol class="beats" aria-label="Lifecycle steps">
             <li class="beat panel">
@@ -413,7 +413,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">Plan</h3>
-              <p>The cerebrate plans what is left of the request on this branch, and the plan is checked against <code>plugin/references/plan-schema.json</code>. Routine planner questions are decided by the autonomy table and listed as decided for you; only irreversible, architectural or safety-relevant questions, and hard stops, pause the run with a decision brief.</p>
+              <p>The cerebrate plans what is left of the request on this branch, and the plan is checked against <code>plugin/references/plan-schema.json</code>. A scope, plan or revise result that fails its check goes back to the cerebrate with the exact problem, at most 2 retries. Routine planner questions are decided by the autonomy table. Only a call in the closed Ask Set (<code>plugin/governance/decision-autonomy.md</code>) pauses the run with a decision brief. The run takes any other call with its recommendation, and the PR step below says which taken calls it lists for veto before merge.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Branch</h3>
@@ -425,23 +425,27 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">Validate</h3>
-              <p>A drone runs the project's validation commands, and checks the version read-only against the plan's version files with <code>hivemind:bump-type --version-file</code>. A failure gets a bounded number of fix rounds, one at a time, each one committed; after the last round the run asks you.</p>
+              <p>A drone runs the project's validation commands, and checks the version read-only against the plan's version files with <code>hivemind:bump-type --version-file</code>. A test case that hits its own time limit in a file the branch does not change runs once more alone; if it then passes, it is listed on the PR as slow. A failure gets a bounded number of fix rounds, one at a time, each one committed; after the last round the run asks you.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Review</h3>
-              <p>The local reviewer reviews the branch and commits its simple fixes. It needs the codex companion.</p>
+              <p>The local reviewer reviews the branch and commits its simple fixes. A fix that fails its check is undone, with only its own files restored, and listed. It needs the codex companion.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">PR</h3>
-              <p>A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (<code>hivemind:open-plan-pr</code>). The validation (with its version check) and local review gates each hold only for the commit they ended on, so a later commit reruns the gates it invalidates. Every decision the run took for you is listed in the final message and in the PR body. Agents never merge. You do.</p>
+              <p>A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (<code>hivemind:open-plan-pr</code>). The validation (with its version check) and local review gates each hold only for the commit they ended on, so a later commit reruns the gates it invalidates. The PR body is built in code from the plan digest, the steps and the run record: gates, slow cases, rejected and undone findings, approvals, and decisions. When the run reuses an open PR, the same run record goes in a PR comment instead. The final message and the run record list each call the run took for you under "Decided for you", except accepting the plan, accepting a remediation plan, and rerunning a gate after a later commit. A plan or remediation plan acceptance is listed anyway when the plan changes a file outside your stated limits or repeats a surface whose earlier fix left its class open. A gate rerun is never listed. A script run keeps no decision journal. A step whose own output failed ends the run with its cause instead of asking you to retry. Agents never merge. You do.</p>
             </li>
             <li class="beat panel">
-              <h3 class="xg">State-machine fallback</h3>
-              <p>When the launch is refused, or the Workflow tool is absent, <code>standard-delivery</code> runs on its state machine instead: route, record a run ledger at <code>.hivemind/runs/&lt;run-id&gt;/state.json</code>, plan, git preflight and branch, build in waves with <code>hivemind:next-wave</code>, gate, review, rerun validation on a later commit (<code>gate_check</code>), open the PR, and watch it. A <em>Reflex</em>, a trivial task such as a one-file change or a version-only edit, is checked before routing and skips the router, the run ledger, and the cerebrate.</p>
+              <h3 class="xg">Instinct fallback</h3>
+              <p>When a <code>standard-delivery</code> launch is refused or blocked (denied, not found, or workflows turned off), or the started run fails, the overlord says so in one line and continues on Instinct from the branch's last commit, without asking. Instinct never relaunches the engine. A run you stopped does not fall back. The final report names the switch and where the engine stopped.</p>
+            </li>
+            <li class="beat panel">
+              <h3 class="xg">State machine</h3>
+              <p>A <code>standard-delivery</code> run that started on the state machine resumes there: route, record a run ledger at <code>.hivemind/runs/&lt;run-id&gt;/state.json</code>, plan, git preflight and branch, build in waves with <code>hivemind:next-wave</code>, gate, review, rerun validation on a later commit (<code>gate_check</code>), open the PR, and watch it. The other workflows and a refused <code>analysis-only</code> launch run on the state machine too. A <em>Reflex</em>, a trivial task such as a one-file change or a version-only edit, is checked before routing and skips the router, the run ledger, and the cerebrate.</p>
             </li>
           </ol>
 
-          <div class="code-panel diagram" id="lifecycle-diagram-func" role="img" aria-label="Lifecycle flow: You to Overlord, which routes the request. When the Workflow tool is available, the standard-delivery workflow script runs: a runner gathers the branch facts and scans the named issue and PR text, the Cerebrate plans, a working branch is created or confirmed, Drone and Changeling build in waves with one molt per wave, the validation (with its version check) and local review gates hold on one commit, and the PR is opened or reused. The overlord then watches the PR by default with github-review-loop on the state machine. When the launch is refused or the Workflow tool is absent, standard-delivery runs on its state machine instead." tabindex="0">
+          <div class="code-panel diagram" id="lifecycle-diagram-func" role="img" aria-label="Lifecycle flow: You to Overlord, which routes the request. When the Workflow tool is available, the standard-delivery workflow script runs: a runner gathers the branch facts and scans the named issue and PR text, the Cerebrate plans, a working branch is created or confirmed, Drone and Changeling build in waves with one molt per wave, the validation (with its version check) and local review gates hold on one commit, and the PR is opened or reused. The overlord then watches the PR by default with github-review-loop on the state machine. When the launch is refused or blocked, or the started run fails, standard-delivery continues on Instinct, the overlord's judgment-driven fallback. The state machine runs resumed runs and the other workflows." tabindex="0">
             <pre><code>You
  └─▶ <span class="t-key">Overlord</span>  (route-workflow)
       ├─▶ <span class="t-str">Workflow script</span>  (standard-delivery)
@@ -453,12 +457,14 @@
       │    └─▶ <span class="t-hot">PR opened or reused</span>
       │         └─▶ <span class="t-str">github-review-loop</span>  (default watch, state machine)
       │
-      └─▶ <span class="t-dim">State machine</span>  (fallback: launch refused or no Workflow tool)</code></pre>
+      ├─▶ <span class="t-str">Instinct</span>  (fallback: launch refused or blocked, or run failed)
+      │
+      └─▶ <span class="t-dim">State machine</span>  (resumed runs, other workflows)</code></pre>
           </div>
 
           <div class="panel subpanel">
             <h3 class="xg">Workflows</h3>
-            <p>Every non-Reflex request is routed to one workflow. <code>standard-delivery</code> and <code>analysis-only</code> have workflow scripts: each runs its script when the launch goes ahead, and its JSON state machine otherwise. The other workflows run only on their state machines, where the run ledger records where a run is and which transition comes next. The definitions live in <code>plugin/workflows/</code>: the <code>.json</code> state machines plus the generated <code>.js</code> scripts.</p>
+            <p>Every non-Reflex request is routed to one workflow. <code>standard-delivery</code> and <code>analysis-only</code> have workflow scripts, and each runs its script when the launch goes ahead. A refused or blocked <code>standard-delivery</code> launch (denied, not found, or workflows turned off), and a started run that fails, continue on Instinct: the overlord's judgment-driven delivery path, with no script and no run ledger, that keeps the plan, the branch and every gate. A <code>Workflow(hivemind:standard-delivery)</code> deny entry sends delivery to Instinct. A delivery request that names neither the engine nor Instinct gets a question with a recommendation, and a brood child takes the engine. A No at the approval prompt still has no fallback. The state machine runs the other workflows, a refused <code>analysis-only</code> launch and resumed runs, where the run ledger records where a run is and which transition comes next. The definitions live in <code>plugin/workflows/</code>: the <code>.json</code> state machines plus the generated <code>.js</code> scripts.</p>
             <div class="table-wrap" role="region" aria-label="Hivemind workflows" tabindex="0">
               <table class="ref" aria-label="Hivemind workflows">
                 <thead>
@@ -496,11 +502,11 @@
           <div class="card-grid card-grid--2">
             <article class="panel card" role="region" aria-labelledby="lifecycle-waves-heading">
               <h3 class="xg" id="lifecycle-waves-heading">Waves</h3>
-              <p>Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap, so parallel workers never write the same file. Workers in a wave do not commit; one checkpoint commit (one molt) closes each wave, made by a runner in a script run and by the overlord on the state machine. On the state machine, <code>hivemind:next-wave</code> computes the wave from the run ledger; the <code>standard-delivery</code> script computes its waves in <code>plugin/workflow-src/lib/waves.js</code>.</p>
+              <p>Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap, so parallel workers never write the same file. A worker deletes only files and empty folders in its scope or created by its own task, each by name. Workers in a wave do not commit; one checkpoint commit (one molt) closes each wave, made by a runner in a script run and by the overlord on the state machine. On the state machine, <code>hivemind:next-wave</code> computes the wave from the run ledger; the <code>standard-delivery</code> script computes its waves in <code>plugin/workflow-src/lib/waves.js</code>.</p>
             </article>
             <article class="panel card" role="region" aria-labelledby="lifecycle-watch-heading">
               <h3 class="xg" id="lifecycle-watch-heading">Default PR watch</h3>
-              <p>Watching is the default. It is off only when your original request explicitly says not to watch the PR, or when <code>HIVEMIND_SKIP_PR_WATCH</code> is set. When a script run opened or reused a PR, the overlord runs <code>pr-feedback-remediation</code> with intake <code>watch</code> on the state machine for that PR, a new run with its own run ledger. <code>hivemind:github-review-loop</code> dispatches the <code>github-reviewer</code> to fix, push, reply to, and resolve feedback from the Codex, Copilot, or Claude reviewer bots (<code>reviewer_filter</code> defaults to <code>automated</code>) until approval, merge, close, or an idle hour. <code>max_watch_duration</code> (default <code>3600</code> seconds) is an idle window, re-armed after each remediation cycle. A reviewer question or a high-severity rejection pauses the watch and asks you, and your answer resumes it, back at the GitHub reviewer. Agents never merge. <code>merge-advised</code> is advice to you.</p>
+              <p>Watching is the default. It is off only when your original request explicitly says not to watch the PR, or when <code>HIVEMIND_SKIP_PR_WATCH</code> is set. When a script run opened or reused a PR, the overlord runs <code>pr-feedback-remediation</code> with intake <code>watch</code> on the state machine for that PR, a new run with its own run ledger. <code>hivemind:github-review-loop</code> dispatches the <code>github-reviewer</code> to fix, push, reply to, and resolve feedback from the Codex, Copilot, or Claude reviewer bots (<code>reviewer_filter</code> defaults to <code>automated</code>) until approval, merge, close, or an idle hour. <code>max_watch_duration</code> (default <code>3600</code> seconds) is an idle window, re-armed after each remediation cycle. A reviewer question or a high-severity rejection goes to the question gate. The gate asks you only an Ask Set question and takes any other with its recommendation; the answer goes back to the GitHub reviewer. Agents never merge. <code>merge-advised</code> is advice to you.</p>
             </article>
           </div>
         </div>
@@ -520,7 +526,7 @@
             <ul class="dots" aria-label="Brood mode details">
               <li>The cerebrate decomposes work into independent strains with no shared state between them.</li>
               <li>Approval gate: nothing spawns until you approve the strain list.</li>
-              <li>Each strain runs its own full overlord session in a detached tmux session. Brood children start in auto mode, so they launch the workflow scripts with no approval prompt, and fall back to the state machine as any session does.</li>
+              <li>Each strain runs its own full overlord session in a detached tmux session. Brood children start in auto mode, so they launch the workflow scripts with no approval prompt, and a brood child takes the engine for a delivery request. A refused or blocked <code>standard-delivery</code> launch (denied, not found, or workflows turned off), or a started run that fails, continues on Instinct as in any session: the overlord's judgment-driven delivery path, with no script and no run ledger, that keeps the plan, the branch and every gate. A <code>Workflow(hivemind:standard-delivery)</code> deny entry sends delivery to Instinct, and the state machine runs the other workflows, a refused <code>analysis-only</code> launch and resumed runs.</li>
               <li>Once a strain has started, spawn turns on remote control for it, so you can watch and answer it from claude.ai or the Claude app. Monitoring the brood is your job. Remote control needs a claude.ai subscription login. A strain that had not started when spawn ended needs <code>hivemind:enable-brood-remote</code>.</li>
               <li>Each strain lives in its own git worktree (<code>.claude/worktrees/&lt;brood-id&gt;/&lt;short&gt;</code>), starts on a detached HEAD at the base, names its own branch, and produces its own PR.</li>
               <li>The overlord stays in hatchery mode, monitoring the brood from home base and available as an on-demand helper.</li>
@@ -556,7 +562,7 @@
             <div class="sig-flare"><dt>Flare</dt><dd>Urgent: an agent hit something it cannot resolve alone. The overlord stops, surfaces the problem, and asks you how to proceed.</dd><dd><span class="tag tag--ember">Requires human input</span></dd></div>
             <div class="sig-reflex"><dt>Reflex</dt><dd>Trivial task, such as a one-file change or a version-only edit. The overlord checks for it before routing, skips the router, the run ledger, and the cerebrate, and delegates the change directly.</dd><dd><span class="tag tag--hot">Fast path</span></dd></div>
             <div class="sig-decay"><dt>Mutation Decay</dt><dd>Fixes are fighting each other in a break-fix-break loop. Mandatory stop. You decide which direction to take.</dd><dd><span class="tag tag--violet">Conflict detected</span></dd></div>
-            <div class="sig-stagnation"><dt>Creep Stagnation</dt><dd>Diminishing returns: each review pass yields less. An advisory early exit: the overlord stops the loop and opens the PR on its own, journals the call, and asks you only if the promotion gate trips.</dd><dd><span class="tag tag--cyan">Advisory</span></dd></div>
+            <div class="sig-stagnation"><dt>Creep Stagnation</dt><dd>Diminishing returns: each review pass yields less. An advisory early exit: the overlord stops the loop and opens the PR on its own, and asks you only when the call is in the Ask Set. The state machine journals the call; a script run lists it.</dd><dd><span class="tag tag--cyan">Advisory</span></dd></div>
             <div class="sig-root"><dt>Root-Cluster</dt><dd>Several findings share one root. Instead of patching each instance, the swarm routes to one structural fix.</dd><dd><span class="tag tag--hot">One structural fix</span></dd></div>
             <div class="sig-merge"><dt>Merge-Advised</dt><dd>Only a bounded tail of findings remains on a hardened surface (the Stop-and-Merge rule). The loop recommends merging. Humans merge.</dd><dd><span class="tag tag--ember">Advisory</span></dd></div>
           </dl>
@@ -652,7 +658,7 @@
         <header class="panel plate">
           <p class="kicker xs">11 Configuration</p>
           <h2 id="configuration-heading" class="xg">Configuration</h2>
-          <p class="xs">Optional environment variables. Set them in the <code>env</code> block of <code>.claude/settings.json</code> (committed, so it also applies inside brood worktrees) or <code>.claude/settings.local.json</code> (gitignored, per-account). Leaving one unset keeps the default behavior. To keep a workflow on the state machine, add a <code>Workflow(hivemind:analysis-only)</code> or <code>Workflow(hivemind:standard-delivery)</code> entry to <code>permissions.deny</code> in either file: the launch is then refused with no prompt, and the overlord says so in one line and runs the request on the state machine.</p>
+          <p class="xs">Optional environment variables. Set them in the <code>env</code> block of <code>.claude/settings.json</code> (committed, so it also applies inside brood worktrees) or <code>.claude/settings.local.json</code> (gitignored, per-account). Leaving one unset keeps the default behavior. To keep a workflow off its script, add a <code>Workflow(hivemind:analysis-only)</code> or <code>Workflow(hivemind:standard-delivery)</code> entry to <code>permissions.deny</code> in either file: the launch is then refused with no prompt, and the overlord says so in one line. A <code>Workflow(hivemind:standard-delivery)</code> deny entry sends delivery to Instinct: the overlord's judgment-driven delivery path, with no script and no run ledger, that keeps the plan, the branch and every gate. A blocked launch (not found, or workflows turned off), and a started run that fails, continue on Instinct too. The state machine runs the other workflows, a refused <code>analysis-only</code> launch and resumed runs. A delivery request that names neither the engine nor Instinct gets a question with a recommendation, and a brood child takes the engine. A No at the approval prompt still has no fallback.</p>
         </header>
         <div class="split">
           <div class="table-wrap" role="region" aria-label="Hivemind environment variables" tabindex="0">
@@ -674,7 +680,7 @@
                 </tr>
                 <tr>
                   <td><code>HIVEMIND_ENABLE_DECISION_REPORT</code></td>
-                  <td>Covers state-machine runs only: workflow-script runs keep no run ledger, so the report does not see them, and they show their decisions in the final message and the PR body instead. When set to any non-empty value, the overlord shows the post-merge decision report. Unset or empty: the report is off; the decision journal in the run ledger is still written.</td>
+                  <td>Covers state-machine runs only: workflow-script runs keep no run ledger, so the report does not see them, and they list decisions they took for you instead, for veto before merge; <a href="#lifecycle">Lifecycle</a> says which. When set to any non-empty value, the overlord shows the post-merge decision report. Unset or empty: the report is off; the decision journal in the run ledger is still written.</td>
                 </tr>
               </tbody>
             </table>
