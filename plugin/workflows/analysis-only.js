@@ -22,6 +22,7 @@ export const meta = {
  *   plugin/workflow-src/lib/args.js
  *   plugin/workflow-src/lib/identifier.js
  *   plugin/workflow-src/lib/facts.js
+ *   plugin/workflow-src/lib/retry.js
  *   plugin/workflow-src/analysis-only/main.js
  * Do not edit by hand. Rebuild with `node tools/build_workflows.mjs`.
  */
@@ -411,7 +412,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'c4e8d0d5cc296f9a';
+const BUILD_ID = '01df3732ec8a7e66';
 
 function supportedSchemaKeywords(){
 return[
@@ -605,7 +606,7 @@ errors.push(path+': required: missing '+name);
 }
 }
 for(const name of presentKeys){
-const isListed=Object.prototype.hasOwnProperty.call(properties,name);
+const isListed=Object.hasOwn(properties,name);
 if(isListed){
 collectSchemaErrors(properties[name],record[name],path+'.'+name,errors);
 }else if(schema.additionalProperties===false){
@@ -664,7 +665,7 @@ function listVariantFields(variant){
 return variant.required.concat(variant.optional);
 }
 function assertTaggedSpec(spec,tagValues){
-const isKnownField=(name)=>Object.prototype.hasOwnProperty.call(spec.properties,name);
+const isKnownField=(name)=>Object.hasOwn(spec.properties,name);
 for(const name of spec.required){
 if(!isKnownField(name)){
 failTaggedSchema('required field '+name+' is not in properties');
@@ -686,7 +687,7 @@ failTaggedSchema('field '+name+' is not shared and no variant lists it');
 }
 function assertTaggedVariant(spec,value,isKnownField){
 const variant=spec.variants[value];
-if(!Object.prototype.hasOwnProperty.call(spec.variants,value)||!isSchemaRecord(variant)){
+if(!Object.hasOwn(spec.variants,value)||!isSchemaRecord(variant)){
 failTaggedSchema('tag value '+value+' has no variant');
 }
 if(!Array.isArray(variant.required)||!Array.isArray(variant.optional)){
@@ -744,6 +745,9 @@ removeSchemaAnyOf(schema.items);
 return schema;
 }
 
+function askReasons(){
+return['hard_stop','table_surface','gate_irreversible','gate_architectural','gate_safety','no_recommendation'];
+}
 function listReasons(){
 return['beyond_request','outside_limits','repeats_surface'];
 }
@@ -916,7 +920,7 @@ const choices=readField(round,'chosen')??[];
 assertArray(choices,callerPrefix+'round.chosen',false);
 const choiceLabels=choices.map((choice)=>readField(choice,'label'));
 const settled=shownLabels.filter((label,index)=>(reviseLabels.includes(label)||choiceLabels.includes(label))&&shownLabels.indexOf(label)===index);
-return{question:round.question,settled:settled,reply:round.reply};
+return{question:round.question,settled:settled,reply:round.reply,...round.decided_by&&{decided_by:round.decided_by}};
 }
 function renderReplyLine(count){
 if(count===1){
@@ -1060,10 +1064,7 @@ function noticeBudget(){
 return 8000-256;
 }
 function noticeLength(value){
-const jsonText=JSON.stringify(value);
-if(typeof jsonText!=='string'){
-throw new Error('noticeLength: value must be JSON serializable');
-}
+const jsonText=stringifyValue('noticeLength',value);
 return jsonText.length
 +3*countCharacter(jsonText,'<')
 +3*countCharacter(jsonText,'>')
@@ -1112,11 +1113,14 @@ function toPrintableAscii(text){
 return text.replace(/[^\x20-\x7e]/g,(unit)=>'\\u'+unit.charCodeAt(0).toString(16).padStart(4,'0'));
 }
 function encodeUntrustedText(value){
+return toPrintableAscii(stringifyValue('encodeUntrustedText',value));
+}
+function stringifyValue(caller,value){
 const jsonText=JSON.stringify(value);
 if(typeof jsonText!=='string'){
-throw new Error('encodeUntrustedText: value must be JSON serializable');
+throw new Error(caller+': value must be JSON serializable');
 }
-return toPrintableAscii(jsonText);
+return jsonText;
 }
 function quoteDiagnostic(text,limit=maxExcerptLength()){
 if(typeof text!=='string'){
@@ -1139,8 +1143,10 @@ const emptyPause={needs_user:true,resume_args:resumeArgs,message:''};
 return noticeLength(emptyPause)<=Math.floor(noticeBudget()/2);
 }
 function pauseForUser({resumeArgs,blocks}){
-const paused=buildEmptyPause('pauseForUser',resumeArgs,blocks);
-paused.message=fitWholeMessage('pauseForUser',blocks,roomForMessage(paused));
+return fitPause('pauseForUser',buildEmptyPause('pauseForUser',resumeArgs,blocks),blocks);
+}
+function fitPause(caller,paused,blocks){
+paused.message=fitWholeMessage(caller,blocks,roomForMessage(paused));
 return assertWithinBudget(paused);
 }
 function finish({outcome,causes,blocks,pr}){
@@ -1165,7 +1171,7 @@ function buildEmptyPause(caller,resumeArgs,blocks){
 if(!isResultRecord(resumeArgs)){
 throw new Error(caller+': resumeArgs must be a plain object');
 }
-if(Object.prototype.hasOwnProperty.call(resumeArgs,replyField())){
+if(Object.hasOwn(resumeArgs,replyField())){
 throw new Error(caller+': resumeArgs must not have a '+replyField()+' key');
 }
 if(!canCarry(resumeArgs)){
@@ -1320,21 +1326,21 @@ if(key!=='text'&&key!=='compact'&&key!=='shorten'&&key!=='whole'){
 throw new Error(caller+': block has an unknown key '+JSON.stringify(key));
 }
 }
-if(Object.prototype.hasOwnProperty.call(block,'whole')){
+if(Object.hasOwn(block,'whole')){
 if(block.whole!==true){
 throw new Error(caller+': block whole must be true when present');
 }
-if(Object.prototype.hasOwnProperty.call(block,'shorten')){
+if(Object.hasOwn(block,'shorten')){
 throw new Error(caller+': a whole block cannot have shorten');
 }
 }
 if(!isNonBlankText(block.text)){
 throw new Error(caller+': block text must be a non-empty string');
 }
-if(Object.prototype.hasOwnProperty.call(block,'compact')&&!isNonBlankText(block.compact)){
+if(Object.hasOwn(block,'compact')&&!isNonBlankText(block.compact)){
 throw new Error(caller+': block compact must be a non-empty string');
 }
-if(Object.prototype.hasOwnProperty.call(block,'shorten')){
+if(Object.hasOwn(block,'shorten')){
 if(block.shorten!==true){
 throw new Error(caller+': block shorten must be true when present');
 }
@@ -1473,7 +1479,7 @@ return buildId;
 }
 function readLaunchInputs(argsObject,runNoun,buildId){
 requireBuildId(buildId);
-if(Object.prototype.hasOwnProperty.call(argsObject,'resume_args')){
+if(Object.hasOwn(argsObject,'resume_args')){
 return{problem:'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so '+describeRunNoun(runNoun)+' did not start.'};
 }
 if(isPlainObject(argsObject.answers)&&argsObject.build!==buildId){
@@ -1554,7 +1560,7 @@ const patterns=runnerValuePatterns();
 for(let index=0;index<words.length;index+=2){
 const flag=String(words[index]);
 const value=words[index+1];
-if(!Object.prototype.hasOwnProperty.call(patterns,flag)||typeof value!=='string'||!patterns[flag].test(value)){
+if(!Object.hasOwn(patterns,flag)||typeof value!=='string'||!patterns[flag].test(value)){
 return'its '+flag+' value is not one the script takes';
 }
 }
@@ -1619,7 +1625,7 @@ plugin_root:{pattern:wholeFactsPattern('none|(?:/|[A-Za-z]:/)(?:[^'+pathBytes+']
 }
 function matchesFactsLine(key,value){
 const spec=gatherFactsRoutingSpec();
-if(!Object.prototype.hasOwnProperty.call(spec,key)){
+if(!Object.hasOwn(spec,key)){
 throw new Error('matchesFactsLine: unknown facts key '+JSON.stringify(key));
 }
 return typeof value==='string'&&spec[key].pattern.test(value);
@@ -1753,6 +1759,26 @@ if(!coversEveryText(scan.results,Number(facts.external_texts))){
 return'The injection scan did not return exactly one result for each text from GitHub in the facts, '+stopped;
 }
 return undefined;
+}
+
+function maxCheckRetries(){
+return 2;
+}
+function maxCheckErrors(){
+return 5;
+}
+function isFixableResult(result,schema){
+return result!==null&&!(validateSchema(schema,result).ok&&result.outcome==='blocked'&&quoteDiagnostic(result.blocker)!==undefined);
+}
+function buildCheckFixPrompt(prompt,problem,errors){
+const lines=prompt.split('\n');
+return[lines[0],'Fix your result per the check block.',...lines.slice(1),formatDataBlock('check',{problem:problem,schema_errors:errors.slice(0,maxCheckErrors())})].join('\n');
+}
+function describeCheckLimit(problem){
+return{problem:problem+' It stayed after '+maxCheckRetries()+' retries.',nextAction:'report',terminal:true};
+}
+function hasDefectQuestion(questions,kind,level,table,schema){
+return questions.some((brief)=>!['auto',...askReasons()].includes(decide({kind:kind,level:level,brief:brief},table,schema).reason));
 }
 
 const RUN_NOUN='analysis';
@@ -1903,7 +1929,7 @@ return{cause:scanCause};
 }
 return{facts:facts};
 }
-function describeReplyProblem(analysis,checkSchema){
+function describeReplyProblem(analysis,checkSchema,level){
 if(!isPlainObject(analysis)){
 return describeUnusableResult('The planner returned no result, so the analysis stopped.',analysis);
 }
@@ -1913,7 +1939,27 @@ return describeUnusableResult('The planner returned a result that does not fit t
 if(analysis.outcome==='blocked'){
 return{problem:'The planner could not do the analysis: '+describeReason(analysis.blocker)};
 }
+if(hasDefectQuestion(analysis.questions,QUESTION_KIND,level,AUTONOMY_TABLE,BRIEF_SCHEMA)){
+return{problem:'A planner question fails the decision check, so the analysis stopped.'};
+}
 return undefined;
+}
+async function callCheckedAnalysis(prompt,options,checkSchema,level){
+let analysis=await agent(prompt,options);
+for(let retry=1;;retry+=1){
+const cause=describeReplyProblem(analysis,checkSchema,level);
+if(cause===undefined){
+return{analysis:analysis};
+}
+if(!isFixableResult(analysis,checkSchema)){
+return{cause:cause};
+}
+if(retry>maxCheckRetries()){
+return{cause:describeCheckLimit(cause.problem)};
+}
+const fixPrompt=buildCheckFixPrompt(prompt,cause.problem,validateSchema(checkSchema,analysis).errors);
+analysis=await agent(fixPrompt,{...options,label:options.label+'-fix-'+retry});
+}
 }
 function resolveQuestions(questions,level){
 const asks=[];
@@ -1949,6 +1995,10 @@ return'The analysis is drafted. 1 question needs your answer before the report i
 return'The analysis is drafted. '+questionCount+' questions need your answer before the report is final.';
 }
 function pauseOrStopAsking(report,resolution,questions,answerLog){
+const outsideAsk=resolution.asks.find((ask)=>!askReasons().includes(ask.reason));
+if(outsideAsk!==undefined){
+throw new Error('pauseOrStopAsking: ask '+outsideAsk.reason);
+}
 const resumeArgs=buildResumeArgs(answerLog.map((entry)=>entry.reply),BUILD_ID);
 if(!canCarry(resumeArgs)){
 return finishComplete(report,renderOpenQuestions(resolution.asks,'reply_size'),resolution.taken);
@@ -1974,15 +2024,14 @@ const level=resolveLevel(undefined,AUTONOMY_TABLE);
 const storedAnswers=readStoredAnswers(argsObject);
 let pendingReply=readPendingReply(argsObject);
 const answerLog=[];
-let checkSchema=ANALYSIS_CHECK_SCHEMA;
 let shownRound;
 phase('Analyze');
-let analysis=await agent(buildAnalyzePrompt(argsObject.request,facts),plannerOptions('analyze','Analyze',ANALYSIS_SCHEMA));
+let checkedAnalysis=await callCheckedAnalysis(buildAnalyzePrompt(argsObject.request,facts),plannerOptions('analyze','Analyze',ANALYSIS_SCHEMA),ANALYSIS_CHECK_SCHEMA,level);
 for(let round=1;;round+=1){
-const replyCause=describeReplyProblem(analysis,checkSchema);
-if(replyCause!==undefined){
-return finishBlocked([replyCause]);
+if(checkedAnalysis.cause!==undefined){
+return finishBlocked([checkedAnalysis.cause]);
 }
+const analysis=checkedAnalysis.analysis;
 if(shownRound!==undefined){
 answerLog.push(buildAnswerEntry(shownRound,analysis));
 }
@@ -2006,8 +2055,7 @@ const shownLabels=listShownLabels(resolution.asks);
 const reviseSchemas=buildReviseSchemas(shownLabels);
 phase('Revise');
 const revisePrompt=buildRevisePrompt({request:argsObject.request,facts:facts,answers:answerLog,report:analysis.report,questions:questions,reply:reply});
-analysis=await agent(revisePrompt,plannerOptions('revise-'+round,'Revise',reviseSchemas.agent));
-checkSchema=reviseSchemas.check;
+checkedAnalysis=await callCheckedAnalysis(revisePrompt,plannerOptions('revise-'+round,'Revise',reviseSchemas.agent),reviseSchemas.check,level);
 shownRound={question:questions,labels:shownLabels,reply:reply};
 }
 }

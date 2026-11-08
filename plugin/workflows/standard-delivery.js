@@ -33,6 +33,7 @@ export const meta = {
  *   plugin/workflow-src/lib/args.js
  *   plugin/workflow-src/lib/identifier.js
  *   plugin/workflow-src/lib/facts.js
+ *   plugin/workflow-src/lib/retry.js
  *   plugin/workflow-src/standard-delivery/approvals.js
  *   plugin/workflow-src/standard-delivery/briefs.js
  *   plugin/workflow-src/standard-delivery/checks.js
@@ -690,7 +691,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'ccce9f5bbeb39926';
+const BUILD_ID = 'c2c8d0bfd5dbd7f2';
 
 function supportedSchemaKeywords(){
 return[
@@ -884,7 +885,7 @@ errors.push(path+': required: missing '+name);
 }
 }
 for(const name of presentKeys){
-const isListed=Object.prototype.hasOwnProperty.call(properties,name);
+const isListed=Object.hasOwn(properties,name);
 if(isListed){
 collectSchemaErrors(properties[name],record[name],path+'.'+name,errors);
 }else if(schema.additionalProperties===false){
@@ -943,7 +944,7 @@ function listVariantFields(variant){
 return variant.required.concat(variant.optional);
 }
 function assertTaggedSpec(spec,tagValues){
-const isKnownField=(name)=>Object.prototype.hasOwnProperty.call(spec.properties,name);
+const isKnownField=(name)=>Object.hasOwn(spec.properties,name);
 for(const name of spec.required){
 if(!isKnownField(name)){
 failTaggedSchema('required field '+name+' is not in properties');
@@ -965,7 +966,7 @@ failTaggedSchema('field '+name+' is not shared and no variant lists it');
 }
 function assertTaggedVariant(spec,value,isKnownField){
 const variant=spec.variants[value];
-if(!Object.prototype.hasOwnProperty.call(spec.variants,value)||!isSchemaRecord(variant)){
+if(!Object.hasOwn(spec.variants,value)||!isSchemaRecord(variant)){
 failTaggedSchema('tag value '+value+' has no variant');
 }
 if(!Array.isArray(variant.required)||!Array.isArray(variant.optional)){
@@ -1222,7 +1223,7 @@ const choices=readField(round,'chosen')??[];
 assertArray(choices,callerPrefix+'round.chosen',false);
 const choiceLabels=choices.map((choice)=>readField(choice,'label'));
 const settled=shownLabels.filter((label,index)=>(reviseLabels.includes(label)||choiceLabels.includes(label))&&shownLabels.indexOf(label)===index);
-return{question:round.question,settled:settled,reply:round.reply};
+return{question:round.question,settled:settled,reply:round.reply,...round.decided_by&&{decided_by:round.decided_by}};
 }
 function renderReplyLine(count){
 if(count===1){
@@ -1360,10 +1361,7 @@ function noticeBudget(){
 return 8000-256;
 }
 function noticeLength(value){
-const jsonText=JSON.stringify(value);
-if(typeof jsonText!=='string'){
-throw new Error('noticeLength: value must be JSON serializable');
-}
+const jsonText=stringifyValue('noticeLength',value);
 return jsonText.length
 +3*countCharacter(jsonText,'<')
 +3*countCharacter(jsonText,'>')
@@ -1412,11 +1410,14 @@ function toPrintableAscii(text){
 return text.replace(/[^\x20-\x7e]/g,(unit)=>'\\u'+unit.charCodeAt(0).toString(16).padStart(4,'0'));
 }
 function encodeUntrustedText(value){
+return toPrintableAscii(stringifyValue('encodeUntrustedText',value));
+}
+function stringifyValue(caller,value){
 const jsonText=JSON.stringify(value);
 if(typeof jsonText!=='string'){
-throw new Error('encodeUntrustedText: value must be JSON serializable');
+throw new Error(caller+': value must be JSON serializable');
 }
-return toPrintableAscii(jsonText);
+return jsonText;
 }
 function quoteDiagnostic(text,limit=maxExcerptLength()){
 if(typeof text!=='string'){
@@ -1439,8 +1440,17 @@ const emptyPause={needs_user:true,resume_args:resumeArgs,message:''};
 return noticeLength(emptyPause)<=Math.floor(noticeBudget()/2);
 }
 function pauseForUser({resumeArgs,blocks}){
-const paused=buildEmptyPause('pauseForUser',resumeArgs,blocks);
-paused.message=fitWholeMessage('pauseForUser',blocks,roomForMessage(paused));
+return fitPause('pauseForUser',buildEmptyPause('pauseForUser',resumeArgs,blocks),blocks);
+}
+function pauseForRetry({resumeArgs,retryMinutes,blocks}){
+if(!Number.isSafeInteger(retryMinutes)||retryMinutes<1){
+throw new Error('pauseForRetry: retryMinutes must be a positive safe integer');
+}
+const emptyPause=buildEmptyPause('pauseForRetry',resumeArgs,blocks);
+return fitPause('pauseForRetry',{needs_user:false,retry_minutes:retryMinutes,resume_args:emptyPause.resume_args,message:''},blocks);
+}
+function fitPause(caller,paused,blocks){
+paused.message=fitWholeMessage(caller,blocks,roomForMessage(paused));
 return assertWithinBudget(paused);
 }
 function canShowWhole({resumeArgs,blocks}){
@@ -1469,7 +1479,7 @@ function buildEmptyPause(caller,resumeArgs,blocks){
 if(!isResultRecord(resumeArgs)){
 throw new Error(caller+': resumeArgs must be a plain object');
 }
-if(Object.prototype.hasOwnProperty.call(resumeArgs,replyField())){
+if(Object.hasOwn(resumeArgs,replyField())){
 throw new Error(caller+': resumeArgs must not have a '+replyField()+' key');
 }
 if(!canCarry(resumeArgs)){
@@ -1624,21 +1634,21 @@ if(key!=='text'&&key!=='compact'&&key!=='shorten'&&key!=='whole'){
 throw new Error(caller+': block has an unknown key '+JSON.stringify(key));
 }
 }
-if(Object.prototype.hasOwnProperty.call(block,'whole')){
+if(Object.hasOwn(block,'whole')){
 if(block.whole!==true){
 throw new Error(caller+': block whole must be true when present');
 }
-if(Object.prototype.hasOwnProperty.call(block,'shorten')){
+if(Object.hasOwn(block,'shorten')){
 throw new Error(caller+': a whole block cannot have shorten');
 }
 }
 if(!isNonBlankText(block.text)){
 throw new Error(caller+': block text must be a non-empty string');
 }
-if(Object.prototype.hasOwnProperty.call(block,'compact')&&!isNonBlankText(block.compact)){
+if(Object.hasOwn(block,'compact')&&!isNonBlankText(block.compact)){
 throw new Error(caller+': block compact must be a non-empty string');
 }
-if(Object.prototype.hasOwnProperty.call(block,'shorten')){
+if(Object.hasOwn(block,'shorten')){
 if(block.shorten!==true){
 throw new Error(caller+': block shorten must be true when present');
 }
@@ -1673,10 +1683,7 @@ function readBlockerAction(blocker,nextAction){
 return quoteDiagnostic(blocker)===undefined?'report':nextAction;
 }
 function isTransientFailure(text){
-return typeof text==='string'&&transientFailurePatterns().some((pattern)=>pattern.test(text));
-}
-function transientFailurePatterns(){
-return[
+const patterns=[
 /\bHTTP(?:\/[0-9.]+)?:? (?:error |status )?(?:5[0-9]{2}|429)\b/i,
 /\b(?:5[0-9]{2} (?:Internal Server Error|Bad Gateway|Service Unavailable|Gateway Time-?out)|429 Too Many Requests)\b/i,
 /\b(?:connection (?:reset|refused|aborted)|ECONN(?:RESET|REFUSED|ABORTED))\b/i,
@@ -1686,6 +1693,7 @@ return[
 /\b(?:network (?:is )?unreachable|ENETUNREACH)\b/i,
 /\b(?:connection timed out|RPC failed|early EOF|index-pack failed)\b/i
 ];
+return typeof text==='string'&&patterns.some((pattern)=>pattern.test(text));
 }
 function stopActions(then){
 return{
@@ -1899,7 +1907,7 @@ function parseRoutingLines(text,spec){
 if(typeof text!=='string'){
 throw new Error('parseRoutingLines: text must be a string');
 }
-const compiledSpec=compileRoutingSpec(spec,'spec',true);
+const compiledSpec=compileRoutingSpec(spec,'parseRoutingLines: spec',true);
 const lines=splitRoutingText(text);
 const values={};
 let openBlock=null;
@@ -1908,14 +1916,14 @@ const lineNumber=index+1;
 const line=lines[index];
 const blockMatch=openBlock===null||!/^ {2}\S/.test(line)?null:matchRoutingLine(line.slice(2),openBlock.entries);
 if(blockMatch!==null){
-const blockProblem=Object.prototype.hasOwnProperty.call(openBlock.values,blockMatch.key)?null:readFirstRoutingLine(blockMatch,openBlock.values);
+const blockProblem=Object.hasOwn(openBlock.values,blockMatch.key)?null:readFirstRoutingLine(blockMatch,openBlock.values);
 if(blockProblem!==null){
 return routingLineProblem(blockProblem,lineNumber);
 }
 continue;
 }
 const topMatch=/^\S/.test(line)?matchRoutingLine(line,compiledSpec):null;
-if(topMatch===null||Object.prototype.hasOwnProperty.call(values,topMatch.key)){
+if(topMatch===null||Object.hasOwn(values,topMatch.key)){
 continue;
 }
 const topProblem=readFirstRoutingLine(topMatch,values);
@@ -1970,12 +1978,12 @@ return null;
 }
 function findMissingRoutingKey(compiledSpec,values){
 for(const[key,entry]of compiledSpec){
-if(entry.required&&!Object.prototype.hasOwnProperty.call(values,key)){
+if(entry.required&&!Object.hasOwn(values,key)){
 return key;
 }
 }
 for(const[key,entry]of compiledSpec){
-if(entry.block===null||!Object.prototype.hasOwnProperty.call(values,key)){
+if(entry.block===null||!Object.hasOwn(values,key)){
 continue;
 }
 const missingInBlock=findMissingRoutingKey(entry.block,values[key]);
@@ -1993,12 +2001,12 @@ return Object.prototype.toString.call(value)==='[object Object]';
 }
 function compileRoutingSpec(spec,where,allowBlocks){
 if(!isRoutingRecord(spec)){
-throw new Error('parseRoutingLines: '+where+' must be a plain object');
+throw new Error(where+' must be a plain object');
 }
 const entries=new Map();
 for(const key of Object.keys(spec)){
 if(!routingKeyPattern().test(key)){
-throw new Error('parseRoutingLines: '+where+' has a key that is not a routing key: '+JSON.stringify(key));
+throw new Error(where+' has a key that is not a routing key: '+JSON.stringify(key));
 }
 entries.set(key,compileRoutingEntry(spec[key],where+'.'+key,allowBlocks));
 }
@@ -2006,24 +2014,24 @@ return entries;
 }
 function compileRoutingEntry(entry,where,allowBlocks){
 if(!isRoutingRecord(entry)){
-throw new Error('parseRoutingLines: '+where+' must be a plain object');
+throw new Error(where+' must be a plain object');
 }
 for(const field of Object.keys(entry)){
 if(field!=='pattern'&&field!=='block'&&field!=='required'){
-throw new Error('parseRoutingLines: '+where+' has an unknown field '+JSON.stringify(field));
+throw new Error(where+' has an unknown field '+JSON.stringify(field));
 }
 }
 if(typeof entry.required!=='boolean'){
-throw new Error('parseRoutingLines: '+where+'.required must be a boolean');
+throw new Error(where+'.required must be a boolean');
 }
-const hasPattern=Object.prototype.hasOwnProperty.call(entry,'pattern');
-const hasBlock=Object.prototype.hasOwnProperty.call(entry,'block');
+const hasPattern=Object.hasOwn(entry,'pattern');
+const hasBlock=Object.hasOwn(entry,'block');
 if(hasPattern===hasBlock){
-throw new Error('parseRoutingLines: '+where+' must have exactly one of pattern and block');
+throw new Error(where+' must have exactly one of pattern and block');
 }
 if(hasBlock){
 if(!allowBlocks){
-throw new Error('parseRoutingLines: '+where+' is a block inside a block');
+throw new Error(where+' is a block inside a block');
 }
 return{required:entry.required,pattern:null,block:compileRoutingSpec(entry.block,where+'.block',false)};
 }
@@ -2031,7 +2039,7 @@ return{required:entry.required,pattern:anchorRoutingPattern(entry.pattern,where)
 }
 function anchorRoutingPattern(pattern,where){
 if(Object.prototype.toString.call(pattern)!=='[object RegExp]'){
-throw new Error('parseRoutingLines: '+where+'.pattern must be a RegExp');
+throw new Error(where+'.pattern must be a RegExp');
 }
 const keptFlags=pattern.flags.replace(/[gym]/g,'');
 return new RegExp('^(?:'+pattern.source+')$',keptFlags);
@@ -2107,7 +2115,7 @@ return buildId;
 }
 function readLaunchInputs(argsObject,runNoun,buildId){
 requireBuildId(buildId);
-if(Object.prototype.hasOwnProperty.call(argsObject,'resume_args')){
+if(Object.hasOwn(argsObject,'resume_args')){
 return{problem:'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so '+describeRunNoun(runNoun)+' did not start.'};
 }
 if(isPlainObject(argsObject.answers)&&argsObject.build!==buildId){
@@ -2197,7 +2205,7 @@ const patterns=runnerValuePatterns();
 for(let index=0;index<words.length;index+=2){
 const flag=String(words[index]);
 const value=words[index+1];
-if(!Object.prototype.hasOwnProperty.call(patterns,flag)||typeof value!=='string'||!patterns[flag].test(value)){
+if(!Object.hasOwn(patterns,flag)||typeof value!=='string'||!patterns[flag].test(value)){
 return'its '+flag+' value is not one the script takes';
 }
 }
@@ -2259,7 +2267,7 @@ plugin_root:{pattern:wholeFactsPattern('none|(?:/|[A-Za-z]:/)(?:[^'+pathBytes+']
 }
 function matchesFactsLine(key,value){
 const spec=gatherFactsRoutingSpec();
-if(!Object.prototype.hasOwnProperty.call(spec,key)){
+if(!Object.hasOwn(spec,key)){
 throw new Error('matchesFactsLine: unknown facts key '+JSON.stringify(key));
 }
 return typeof value==='string'&&spec[key].pattern.test(value);
@@ -2302,8 +2310,8 @@ if(!isPlainObject(values)){
 return false;
 }
 const spec=gatherFactsRoutingSpec();
-const hasOnlySpecKeys=Object.keys(values).every((key)=>Object.prototype.hasOwnProperty.call(spec,key));
-const hasBranch=Object.prototype.hasOwnProperty.call(values,'branch');
+const hasOnlySpecKeys=Object.keys(values).every((key)=>Object.hasOwn(spec,key));
+const hasBranch=Object.hasOwn(values,'branch');
 const matchesEveryLine=Object.keys(spec).every((key)=>(key==='branch'&&!hasBranch)||matchesFactsLine(key,values[key]));
 if(!hasOnlySpecKeys||!matchesEveryLine){
 return false;
@@ -2427,6 +2435,26 @@ return'The injection scan did not return exactly one result for each text from G
 return undefined;
 }
 
+function maxCheckRetries(){
+return 2;
+}
+function maxCheckErrors(){
+return 5;
+}
+function isFixableResult(result,schema){
+return result!==null&&!(validateSchema(schema,result).ok&&result.outcome==='blocked'&&quoteDiagnostic(result.blocker)!==undefined);
+}
+function buildCheckFixPrompt(prompt,problem,errors){
+const lines=prompt.split('\n');
+return[lines[0],'Fix your result per the check block.',...lines.slice(1),formatDataBlock('check',{problem:problem,schema_errors:errors.slice(0,maxCheckErrors())})].join('\n');
+}
+function describeCheckLimit(problem){
+return{problem:problem+' It stayed after '+maxCheckRetries()+' retries.',nextAction:'report',terminal:true};
+}
+function hasDefectQuestion(questions,kind,level,table,schema){
+return questions.some((brief)=>!['auto',...askReasons()].includes(decide({kind:kind,level:level,brief:brief},table,schema).reason));
+}
+
 function applyApprovalChoices(approvals,asks,choices){
 const shownLabels=choices.length===0?[]:listShownLabels(asks);
 return choices.reduce((kept,choice)=>applyApprovalChoice(kept,listOptionItems(asks[shownLabels.indexOf(choice.label)]),choice.optionIndex),[...approvals]);
@@ -2501,14 +2529,14 @@ return{
 id:'plan',
 kind:PLAN_ACCEPTANCE_KIND,
 problem:'Start delivering the plan: create or confirm its working branch and run its steps.',
-criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
+criticality:buildUnshownCriticality(),
 options:[
 buildBriefOption('A','Accept the plan and run its steps.','medium'),
 buildBriefOption('B','Stop before any step runs.','trivial','low')
 ],
 recommendation:{option_id:'A',strength:'strong',why:'Every change stays on the working branch, and every decision taken is listed for you before the merge.'},
 assumptions:buildUnshownAssumptions('assumed'),
-gate:{irreversible:false,architectural:false,safety:false},
+gate:buildBriefGate(),
 verbatim:plan.summary
 };
 }
@@ -2531,14 +2559,14 @@ return{
 id:'trunk',
 kind:TRUNK_STALE_KIND,
 problem:'The trunk may not be up to date: its freshness is '+facts.trunk_freshness+', '+Number(facts.trunk_ahead)+' commits ahead of its remote and '+Number(facts.trunk_behind)+' behind. Create or confirm the working branch from it anyway?',
-criticality:{level:'low',likelihood:'occasional',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
+criticality:buildUnshownCriticality('low','occasional'),
 options:[
 buildBriefOption('A','Go on from the trunk as it is.','trivial','medium'),
 buildBriefOption('B','Stop so you can bring the trunk up to date first.','small','medium')
 ],
 recommendation:{option_id:'A',strength:'strong',why:'A stale base costs at most a rebase, and the run goes on.'},
 assumptions:buildUnshownAssumptions(),
-gate:{irreversible:false,architectural:false,safety:false}
+gate:buildBriefGate()
 };
 }
 function buildExternalEffectBrief(summary){
@@ -2546,14 +2574,14 @@ return{
 id:'effect',
 kind:EXTERNAL_EFFECT_KIND,
 problem:'A plan step has an effect outside the repo that cannot be undone. May the run go on to it?',
-criticality:{level:'high',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
+criticality:buildUnshownCriticality('high'),
 options:[
 buildBriefOption('A','Go on and let the step make this effect.','small','high',false),
 buildBriefOption('B','Change or drop the step first.','small','medium')
 ],
 recommendation:{option_id:'A',strength:'none',why:'Only you can decide whether this effect outside the repo may happen.'},
 assumptions:buildUnshownAssumptions('assumed'),
-gate:{irreversible:true,architectural:false,safety:false},
+gate:buildBriefGate(true),
 verbatim:summary
 };
 }
@@ -2573,19 +2601,19 @@ return brief;
 const problem=brief.problem+' It changes '+describeCount(outsidePaths.length,'file')+' outside the limits you set.';
 return Object.assign(brief,{problem:problem.length<=BRIEF_SCHEMA.properties.problem.maxLength?problem:brief.problem});
 }
-function buildTailBrief({kind,problem,goOn,other,strength,why}){
+function buildTailBrief({kind,problem,goOn,other='Plan again: this run gives your reply to the planner before anything goes further.',strength,why}){
 return{
 id:'tail',
 kind:kind,
 problem:problem,
-criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
+criticality:buildUnshownCriticality(),
 options:[
 buildBriefOption('A',goOn),
-buildBriefOption('B',other===undefined?'Plan again: this run gives your reply to the planner before anything goes further.':other,'trivial','low')
+buildBriefOption('B',other,'trivial','low')
 ],
 recommendation:{option_id:strength==='none'?'B':'A',strength:strength,why:why},
 assumptions:buildUnshownAssumptions(),
-gate:{irreversible:false,architectural:false,safety:false}
+gate:buildBriefGate()
 };
 }
 function describeStopThen(isReplan){
@@ -2617,7 +2645,7 @@ return brief;
 function buildApprovalAsk(hold,isReplan,run){
 const ask=buildUndecidedAsk(STEP_STOP_KIND,buildApprovalBrief('A step',{category:hold.category,item:unshownBriefText()},isReplan),run);
 const shown=buildApprovalBrief('Step '+encodeUntrustedText(hold.stepId),{category:hold.category,item:encodeUntrustedText(hold.item)},isReplan);
-return Object.assign({},ask,{brief:shown,items:[[{category:hold.category,item:hold.item}],[]]});
+return{...ask,brief:shown,items:[[{category:hold.category,item:hold.item}],[]]};
 }
 function buildApprovalAsks(holds,isReplan,run){
 return holds.map((hold)=>buildApprovalAsk(hold,isReplan,run));
@@ -2626,6 +2654,12 @@ function raiseVersion(version,bumpType){
 const parts=version.split('.').map(Number);
 const raised={major:[parts[0]+1,0,0],minor:[parts[0],parts[1]+1,0],patch:[parts[0],parts[1],parts[2]+1]};
 return raised[bumpType].join('.');
+}
+function buildUnshownCriticality(level='medium',likelihood='certain'){
+return{level:level,likelihood:likelihood,blast_radius:unshownBriefText(),if_ignored:unshownBriefText()};
+}
+function buildBriefGate(irreversible=false){
+return{irreversible:irreversible,architectural:false,safety:false};
 }
 function buildUnshownAssumptions(origin='repo'){
 return[{statement:unshownBriefText(),origin:origin,evidence:unshownBriefText()}];
@@ -2649,11 +2683,11 @@ kind:VERSION_BUMP_INDETERMINABLE_KIND,
 problem:isUnreadable
 ?'The version check cannot read one version from the version files. It reads the top-level version string of a .json file, the one version = "X.Y.Z" line of a .toml file and any other file whole, each a plain X.Y.Z version, the same at the trunk. Which version should they hold?'
 :'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
-criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
+criticality:buildUnshownCriticality(),
 options:listVersionOptions(values),
 recommendation:{option_id:'A',strength:'none',why:'Only you can decide the version of this delivery.'},
 assumptions:buildUnshownAssumptions(),
-gate:{irreversible:false,architectural:false,safety:false}
+gate:buildBriefGate()
 };
 }
 function buildValidationRemediationBrief(head,round){
@@ -2674,19 +2708,14 @@ strength:'none',
 why:'The fix rounds did not make validation pass, so only you can decide what comes next.'
 });
 }
-function buildGateRerunBrief(staleIds,head,isLimit){
+function buildGateRerunBrief(staleIds,head){
 const names=joinNames(staleIds.map((gateId)=>gateNames()[gateId]),'and');
-const landed='Commit '+head+' landed after '+names+' held on an earlier commit.';
 return buildTailBrief({
 kind:GATE_RERUN_KIND,
-problem:isLimit
-?landed+' The checks already ran again '+maxGateReruns()+' times after later commits. How should the delivery go on?'
-:landed+' Run '+names+' again on the new commit?',
-goOn:isLimit?'Say how to go on: this run plans again from your reply.':'Run the checks again on the new commit.',
-strength:isLimit?'none':'strong',
-why:isLimit
-?'Commits kept landing after the checks, so only you can decide what comes next.'
-:'A check holds only for the commit it ran on, and the pull request needs every check to hold on the commit it pushes.'
+problem:'Commit '+head+' landed after '+names+' held on an earlier commit. Run '+names+' again on the new commit?',
+goOn:'Run the checks again on the new commit.',
+strength:'strong',
+why:'A check holds only for the commit it ran on, and the pull request needs every check to hold on the commit it pushes.'
 });
 }
 
@@ -2702,19 +2731,8 @@ return result;
 }
 return{...result,plan:{...plan,title:rest}};
 }
-function isFixablePlanResult(result,schema){
-return result!==null&&!(validateSchema(schema,result).ok&&result.plan===undefined&&quoteDiagnostic(result.blocker)!==undefined);
-}
-function buildCheckFixPrompt(prompt,problem,errors){
-const lines=prompt.split('\n');
-return[lines[0],'Fix your result per the check block.',...lines.slice(1),formatDataBlock('check',{problem:problem,schema_errors:errors.slice(0,maxListedItems())})].join('\n');
-}
-function describeCheckLimit(problem){
-return{problem:problem+' It stayed after '+maxCheckRetries()+' retries.',nextAction:'report',terminal:true};
-}
 function describeQuestionProblem(planResult,run){
-const isDefect=(brief)=>!['auto',...askReasons()].includes(decide({kind:PLANNER_QUESTION_KIND,level:run.level,brief:brief},AUTONOMY_TABLE,BRIEF_SCHEMA).reason);
-return planResult.questions.some(isDefect)?'A planner question fails the decision check, so '+RUN_NAME+' stopped.':undefined;
+return hasDefectQuestion(planResult.questions,PLANNER_QUESTION_KIND,run.level,AUTONOMY_TABLE,BRIEF_SCHEMA)?'A planner question fails the decision check, so '+RUN_NAME+' stopped.':undefined;
 }
 async function callCheckedPlanner(run,facts,call){
 let prompt=call.prompt;
@@ -2723,7 +2741,7 @@ const label=retry===0?call.label:call.label+'-fix-'+retry;
 const result=normalizePlanTitle(await agent(prompt,plannerCallOptions(label,call.phaseTitle,call.schema)),call.schema);
 const planProblem=describePlanProblem(result,call.schema,facts,run.trunk,run.references);
 const problem=planProblem===undefined?describeQuestionProblem(result,run):planProblem;
-const isFixable=problem!==undefined&&isFixablePlanResult(result,call.schema);
+const isFixable=problem!==undefined&&isFixableResult(result,call.schema);
 if(!isFixable||retry===maxCheckRetries()){
 return{planResult:result,problem:problem,isExhausted:isFixable};
 }
@@ -2791,7 +2809,7 @@ spec.properties.outcome.description='passed when every validation command passes
 spec.variants.not_run={required:[],optional:[]};
 }
 if(hasVersion){
-spec.properties.version=Object.assign(buildRelaySchema(),{description:'The relay of the one hivemind:bump-type run.'});
+spec.properties.version={...buildRelaySchema(),description:'The relay of the one hivemind:bump-type run.'};
 Object.keys(spec.variants).forEach((value)=>spec.variants[value][value==='blocked'?'optional':'required'].push('version'));
 }
 return buildTaggedSchema(spec);
@@ -2811,7 +2829,7 @@ const unusable=describeUnusableEdit(result);
 return{status:'blocked',reason:unusable.problem,files:[],nextAction:unusable.nextAction,agentFailure:unusable.agentFailure};
 }
 if(result.outcome==='blocked'){
-return Object.assign({status:'blocked',reason:describeReason(result.blocker),files:result.files},readGateHold(result,approvals));
+return{status:'blocked',reason:describeReason(result.blocker),files:result.files,...readGateHold(result,approvals)};
 }
 return{status:'complete',files:result.files};
 }
@@ -2825,7 +2843,7 @@ const blocks=commands.length===0?[]:[formatDataBlock('inputs',{commands:commands
 blocks.push(formatDataBlock('git',{base:plan.base}));
 if(hasVersionFiles(plan)){
 lines.push(versionCheckSentence());
-blocks.push(formatDataBlock('version',Object.assign(buildBumpTypeInputs(trunkCommit,plan.versioning),{version_files:plan.versioning.artifact_files})));
+blocks.push(formatDataBlock('version',{...buildBumpTypeInputs(trunkCommit,plan.versioning),version_files:plan.versioning.artifact_files}));
 }
 return lines.concat('',blocks).join('\n');
 }
@@ -2838,7 +2856,7 @@ return hasCommands?VALIDATE_COMMANDS_SCHEMA:VALIDATE_SCHEMA;
 }
 function readValidateOutcome(result,schema){
 if(!validateSchema(schema,result).ok){
-return describeUnusableResult('The validation step returned no usable result, so '+RUN_NAME+' stopped before the pull request.',result);
+return describeUnusableResult('The validation step returned no usable result'+describePullRequestStop(),result);
 }
 if(result.outcome==='blocked'){
 return{problem:'The validation step was blocked, so '+RUN_NAME+' stopped before the pull request: '+describeReason(result.blocker),nextAction:readBlockerAction(result.blocker,result.next_action)};
@@ -2850,13 +2868,12 @@ validation.versionRelay=result.version;
 return validation;
 }
 function checkVersionRelay(relay){
-const stopped='so '+RUN_NAME+' stopped before the pull request.';
 if(relay.outcome==='blocked'){
-return{problem:'The version check of the validation step was blocked, '+stopped+' '+describeRelayBlocker(relay.stderr,true),nextAction:readRelayAction(relay.stderr)};
+return{problem:'The version check of the validation step was blocked'+describePullRequestStop()+' '+describeRelayBlocker(relay.stderr,true),nextAction:readRelayAction(relay.stderr)};
 }
 const values=readRelayedLines(relay,versionCheckRoutingSpec());
 if(values===undefined||!isConsistentVersionRelay(values)){
-return describeUnusableResult('The version check of the validation step returned malformed routing lines, '+stopped,relay);
+return describeUnusableResult('The version check of the validation step returned malformed routing lines'+describePullRequestStop(),relay);
 }
 return{values:values};
 }
@@ -2953,7 +2970,7 @@ const validation=readValidateOutcome(result,schema);
 return validation.problem===undefined?applyVersionCheck(validation,run):validation;
 }
 async function askVersionQuestion(run,plan,gates,validation){
-const asked=askTail(buildUndecidedAsk(VERSION_BUMP_INDETERMINABLE_KIND,buildVersionQuestionBrief(validation.question),run),run,undefined);
+const asked=askTail(buildUndecidedAsk(VERSION_BUMP_INDETERMINABLE_KIND,buildVersionQuestionBrief(validation.question),run),run);
 if(asked.answer===undefined){
 return asked;
 }
@@ -2963,8 +2980,8 @@ const failures=validation.status==='failed'?validation.failures+'\n\n'+versionLi
 return runFixRound(run,plan,{failures:failures,versionLine:versionLine,userAnswer:asked.answer},gates);
 }
 function stopVersionFixLimit(run,gates,kept){
-const cause={problem:'Validation still fails its version check on commit '+run.head+' after '+maxFixRounds()+' fix rounds, so '+RUN_NAME+' stopped before the pull request. '+kept.versionLine};
-const stopped=stopDelivery([cause],run,[],false);
+const cause={problem:'Validation still fails its version check on commit '+run.head+' after '+maxFixRounds()+' fix rounds'+describePullRequestStop()+' '+kept.versionLine};
+const stopped=stopDelivery([cause],run);
 if(stopped.rerun===true){
 gates.fixRounds=0;
 }
@@ -2973,7 +2990,7 @@ return stopped;
 async function runValidateGate(run,plan,facts,gates){
 const validation=hasKeptFailure(run,gates)?gates.failures[run.head]:await runValidateStep(run,plan,facts,gates);
 if(validation.problem!==undefined){
-return stopDelivery([validation],run,[],false);
+return stopDelivery([validation],run);
 }
 if(validation.question!==undefined){
 return askVersionQuestion(run,plan,gates,validation);
@@ -2982,7 +2999,7 @@ if(validation.status==='not_run'){
 listNotRunGate(run,'validation: the project documents no validation commands.');
 }
 if(validation.status!=='failed'){
-gates.slow=validation.slow===undefined?[]:validation.slow;
+gates.slow=validation.slow??[];
 return{held:true,note:describeValidateNote(validation,plan,run)};
 }
 gates.failures[run.head]=validation;
@@ -2998,16 +3015,19 @@ return decided;
 gates.fixRounds+=1;
 return runFixRound(run,plan,validation,gates);
 }
+function requiredGateIds(run,gates){
+return gates.draft===undefined?configuredGateIds(run):['validate'];
+}
 function resolveGateRerun(run,gates){
-const staleIds=configuredGateIds(run).filter((gateId)=>gates.held[gateId]!==undefined&&gates.held[gateId]!==run.head);
+const staleIds=requiredGateIds(run,gates).filter((gateId)=>gates.held[gateId]!==undefined&&gates.held[gateId]!==run.head);
 if(staleIds.length===0){
 return{};
 }
 if(gates.reruns>=maxGateReruns()){
-return replanFromTailAsk(buildUndecidedAsk(GATE_RERUN_KIND,buildGateRerunBrief(staleIds,run.head,true),run),run);
+return{draft:'Commits kept landing after the gates held: they ran again '+maxGateReruns()+' times.'};
 }
 gates.reruns+=1;
-return resolveTailDecision(GATE_RERUN_KIND,buildGateRerunBrief(staleIds,run.head,false),run);
+return resolveTailDecision(GATE_RERUN_KIND,buildGateRerunBrief(staleIds,run.head),run);
 }
 function runGateStep(stepId,run,plan,facts,gates){
 if(stepId==='pr'){
@@ -3024,7 +3044,6 @@ gates.failures={};
 return runCommitStep(run,plan,{files:[],label:gateLabel('head',run,gates.runs.headCheck),stepName:'head'},[]);
 }
 async function runGates(run,plan,facts){
-const gateList=configuredGateIds(run);
 const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0,headCheck:0,pr:0},failures:{},fixRounds:0,reruns:0,answer:undefined,fixAnswer:undefined,slow:[]};
 if(!run.localReview){
 listNotRunGate(run,notConfiguredReviewLine());
@@ -3038,8 +3057,10 @@ const rerun=resolveGateRerun(run,gates);
 if(isRunEnd(rerun)){
 return rerun;
 }
+gates.draft=gates.draft??rerun.draft;
 index=0;
 }
+const gateList=requiredGateIds(run,gates);
 const stepId=index<gateList.length?gateList[index]:'pr';
 if(stepId!=='pr'&&gates.held[stepId]===run.head){
 index+=1;
@@ -3059,6 +3080,7 @@ const ended=await runGateStep(stepId,run,plan,facts,gates);
 if(isRunEnd(ended)){
 return ended;
 }
+gates.draft=gates.draft??ended.draft;
 if(ended.held&&run.headRound===run.answerLog.length){
 gates.held[stepId]=run.head;
 gates.notes[stepId]=ended.note;
@@ -3090,7 +3112,7 @@ if(typeof schema.description==='string'&&schema.description.startsWith(repositor
 found.push({location:location,value:value});
 }
 if(schema.properties!==undefined&&isPlainObject(value)){
-const presentNames=Object.keys(schema.properties).filter((name)=>Object.prototype.hasOwnProperty.call(value,name));
+const presentNames=Object.keys(schema.properties).filter((name)=>Object.hasOwn(value,name));
 presentNames.forEach((name)=>collectRepositoryPaths(schema.properties[name],value[name],location===''?name:location+'.'+name,found));
 }
 if(schema.items!==undefined&&Array.isArray(value)){
@@ -3376,12 +3398,10 @@ for(;;){
 let{planResult,problem}=checked;
 if(problem!==undefined){
 if(shownAsks.length>0){
-logPlanningReply(run,shownEntry,shownAsks,undefined);
+logPlanningReply(run,shownEntry,shownAsks);
 }
-if(checked.isExhausted){
-return stopDelivery([describeCheckLimit(problem)],run,[],true);
-}
-return stopDelivery([planResult===null?describeUnusableResult(problem,null):{problem:problem}],run,[],true);
+const unusable=planResult===null?describeUnusableResult(problem,null):{problem:problem};
+return stopDelivery([checked.isExhausted?describeCheckLimit(problem):unusable],run,[],true);
 }
 if(shownAsks.length>0){
 logPlanningReply(run,shownEntry,shownAsks,planResult);
@@ -3431,7 +3451,7 @@ return{
 }
 function toPullRequestDecision(entry){
 const problem=reviewDecisionProblems()[entry.kind];
-return problem===undefined?entry:{brief:Object.assign({},entry.brief,{problem:problem}),kind:entry.kind,listed:entry.listed};
+return problem===undefined?entry:{brief:{...entry.brief,problem:problem},kind:entry.kind,listed:entry.listed};
 }
 function isPullRequestCharacter(codePoint,keepsLines){
 if(keepsLines&&(codePoint===9||codePoint===10)){
@@ -3505,7 +3525,7 @@ if(!configuredGateIds(run).includes(gateId)){
 lines.push('- '+name+': not configured for this run');
 continue;
 }
-lines.push('- '+name+': '+gates.notes[gateId]+', held on commit '+gates.held[gateId]);
+lines.push('- '+name+': '+(gates.held[gateId]===undefined?'did not hold':gates.notes[gateId]+', held on commit '+gates.held[gateId]));
 }
 return lines.join('\n');
 }
@@ -3516,7 +3536,7 @@ function renderPullRequestRecord(run,gates){
 return buildRunRecordParts(run,run.taken.map(toPullRequestDecision),gates).map(renderPullRequestPart);
 }
 function listCloses(plan){
-return plan.closes===undefined?[]:plan.closes;
+return plan.closes??[];
 }
 function describeClosesProblem(plan,references){
 const index=listCloses(plan).findIndex((number)=>!references.some((reference)=>reference.replace(/^0+/,'')===String(number)));
@@ -3592,14 +3612,14 @@ function checkPullRequestRelay(relay,head){
 const unseenPush=' stopped and did not see whether this step pushed. Taking it again pushes the same commit and reuses a pull request open on it.';
 const stopped='so '+RUN_NAME+unseenPush;
 if(!validateSchema(RELAY_SCHEMA,relay).ok){
-return describeUnusableResult('The pull request step returned a result it could not use, '+stopped,relay);
+return describeUnusableRelay(relay,'pull request',stopped);
 }
 if(relay.outcome==='blocked'){
 return describePullRequestBlocker(relay.stderr,head,unseenPush);
 }
 const values=readRelayedLines(relay,openPlanPrRoutingSpec());
 if(values===undefined||values.commented===values.created){
-return describeUnusableResult('The pull request step returned malformed routing lines, '+stopped,relay);
+return describeUnusableRelay(relay,'pull request',stopped,true);
 }
 if(values.head_ref_oid!==head){
 return{problem:'The pull request step reported a head commit other than the commit every gate held on, '+stopped,terminal:true};
@@ -3612,21 +3632,21 @@ return'pr-'+run.pass+(count===1?'':'-'+count);
 async function runPullRequestStep(run,plan,gates){
 const texts=buildPullRequestTexts(run,plan,gates);
 if(texts.problem!==undefined){
-return stopDelivery([{problem:texts.problem,terminal:true,nextAction:'report'}],run,[],false);
+return stopDelivery([{problem:texts.problem,terminal:true,nextAction:'report'}],run);
 }
 phase('PR');
 const label=describePullRequestLabel(run,gates.runs.pr);
 const commandStop=describeCommandStop('pull request',listPullRequestWords(plan,run,label),listPullRequestWords(plan,run,label+'-retry'));
 if(commandStop!==undefined){
-return stopDelivery([commandStop],run,[],false);
+return stopDelivery([commandStop],run);
 }
-const buildPrompt=(callLabel)=>addResumeNote(buildPullRequestPrompt(listPullRequestWords(plan,run,callLabel),texts,run.draft,run.pluginRoot),run);
+const buildPrompt=(callLabel)=>addResumeNote(buildPullRequestPrompt(listPullRequestWords(plan,run,callLabel),texts,run.draft||gates.draft!==undefined,run.pluginRoot),run);
 const relay=await runRunnerRelay(buildPrompt,label,'PR');
 const checked=checkPullRequestRelay(relay,run.head);
 if(checked.problem===undefined){
 return{result:finishDeliveryComplete(run,plan,checked.values,gates)};
 }
-return stopDelivery([checked],run,[],false);
+return stopDelivery([checked],run);
 }
 
 function renderReversibleEffects(effects){
@@ -3660,20 +3680,27 @@ return run.rejected.length>0||run.undone.length>0;
 }
 function buildRunRecordParts(run,taken,gates){
 const shown=taken.filter(isShownDecision);
-const parts=[];
+const isDraft=gates!==undefined&&gates.draft!==undefined;
+const parts=isDraft?[{id:'draft',text:'This pull request is a draft: '+gates.draft,external:false}]:[];
 if(run.reversibleEffects.length>0){
 parts.push({id:'reversible_effects',text:renderReversibleEffects(run.reversibleEffects),external:true});
 }
-if(gates!==undefined){
-parts.push({id:'gates',text:renderPullRequestGates(run,gates),external:false});
-}else if(run.notRunGates.length>0){
+if(gates===undefined){
+if(run.notRunGates.length>0){
 parts.push({id:'gates',text:renderNotRunGates(run.notRunGates),external:false});
 }
-if(gates!==undefined&&gates.slow.length>0){
+}else{
+parts.push({id:'gates',text:renderPullRequestGates(run,gates),external:false});
+const openLines=(isDraft?run.open??[]:[]).map((finding)=>'- '+quoteShortFindingId(finding.finding_id)+': '+encodeUntrustedText(finding.title));
+if(openLines.length>0){
+parts.push({id:'open_findings',text:['Findings local review left open:',...openLines].join('\n'),external:true});
+}
+if(gates.slow.length>0){
 parts.push({id:'slow_tests',text:renderSlowTests(gates.slow),external:true});
 }
-if(gates!==undefined&&hasListedFindings(run)){
-parts.push({id:'rejected_findings',text:buildRejectedFindingsBlock(gates.notes.review,run.rejected,run.undone).text,external:true});
+if(hasListedFindings(run)){
+parts.push({id:'rejected_findings',text:buildRejectedFindingsBlock(gates.notes.review??'did not hold',run.rejected,run.undone).text,external:true});
+}
 }
 if(run.approvals.length>0){
 parts.push({id:'approvals',text:renderApprovals(run.approvals),external:true});
@@ -3721,12 +3748,12 @@ return notConfigured.length===0?line:line+' Not configured for this run: '+joinN
 }
 function finishDeliveryComplete(run,plan,prValues,gates){
 const pr={url:prValues.url,head_ref_oid:prValues.head_ref_oid,created:prValues.created==='true'};
-const blocks=[{text:describePullRequest(prValues)},{text:describeHeldGates(run)}];
+const blocks=[{text:describePullRequest(prValues)},{text:gates.draft===undefined?describeHeldGates(run):'The pull request is a draft: '+gates.draft}];
 if(prValues.warning!==undefined){
 blocks.push({text:'The pull request step warned: '+prValues.warning+'.'});
 }
 if(hasListedFindings(run)){
-blocks.push(buildRejectedFindingsBlock(gates.notes.review,run.rejected,run.undone));
+blocks.push(buildRejectedFindingsBlock(gates.notes.review??'did not hold',run.rejected,run.undone));
 }
 blocks.push(...buildRecordTailBlocks(run,run.taken));
 return finish({outcome:'complete',blocks:blocks,pr:pr});
@@ -3771,7 +3798,7 @@ return buildApprovalAsks(leadCause.holds,isReplan,run).map((ask)=>({...ask,stop:
 }
 return[{...buildUndecidedAsk(STEP_STOP_KIND,buildStepStopBrief(isReplan),run),stop:'fix_cause'}];
 }
-function stopDelivery(causes,run,endLines,isReplan){
+function stopDelivery(causes,run,endLines=[],isReplan=false){
 const leadCause=orderStopCauses(causes)[0];
 const isAsked=stopAskActions().includes(readStopAction(leadCause.nextAction));
 if(!isAsked||causes.some((cause)=>cause.terminal===true||cause.agentFailure===true)){
@@ -3894,6 +3921,10 @@ return/synapse-gate: /.test(stderr);
 function readRelayAction(stderr,isRefusedFirst=false){
 return isRefusedFirst||quoteRelayBlocker(stderr)===undefined||isGateDenial(stderr)?'report':undefined;
 }
+function describeUnusableRelay(relay,stepNoun,stopped,isRead){
+const what=isRead?'malformed routing lines':'a result it could not use';
+return describeUnusableResult('The '+stepNoun+' step returned '+what+', '+stopped,relay);
+}
 function readRelayedLines(relay,spec){
 if(typeof relay.stdout!=='string'){
 return undefined;
@@ -3956,7 +3987,7 @@ return undefined;
 phase('Scan');
 const isFirstPass=run.pass===1;
 const prompt=isFirstPass?buildScanPrompt(facts):addResumeNote(buildScanPrompt(facts),run);
-const scan=await agent(prompt,isFirstPass?scanOptions():Object.assign(scanOptions(),{label:'scan-'+run.pass}));
+const scan=await agent(prompt,isFirstPass?scanOptions():{...scanOptions(),label:'scan-'+run.pass});
 const problem=describeScanProblem(scan,facts,RUN_NOUN);
 if(problem===undefined){
 return undefined;
@@ -3978,7 +4009,7 @@ return checked;
 run.factsStem=/facts-([^/]+)\.json$/.exec(checked.facts.facts_file)[1];
 run.pluginRoot=checked.facts.plugin_root;
 const scanned=await runPassScan(checked.facts,run);
-return scanned===undefined?checked:scanned;
+return scanned??checked;
 }
 function listBranchWords(plan,freshness,trunk){
 return['--base',plan.base,'--branch',plan.branch,'--classification',plan.classification,'--trunk-freshness',freshness,'--trunk',trunk];
@@ -3989,14 +4020,14 @@ return['Create or confirm the working branch with the command below.',dataBlocks
 function checkBranchRelay(relay,plan,freshness){
 const stopped='so '+RUN_NAME+' stopped before any wave.';
 if(!validateSchema(RELAY_SCHEMA,relay).ok){
-return describeUnusableResult('The branch step returned a result it could not use, '+stopped,relay);
+return describeUnusableRelay(relay,'branch',stopped);
 }
 if(relay.outcome==='blocked'){
 return{problem:'The branch step was blocked, '+stopped+' '+describeRelayBlocker(relay.stderr,true),terminal:true,nextAction:readRelayAction(relay.stderr)};
 }
 const values=readRelayedLines(relay,createWorkingBranchRoutingSpec());
 if(values===undefined||values.warning!==branchWarningTexts()[freshness]){
-return describeUnusableResult('The branch step returned malformed routing lines, '+stopped,relay);
+return describeUnusableRelay(relay,'branch',stopped,true);
 }
 if(values.branch!==plan.branch){
 return{problem:'The branch step reported a branch other than the plan branch, '+stopped,terminal:true};
@@ -4084,14 +4115,14 @@ function checkCommitRelay(relay,plan,stepName){
 const stepNoun=commitStepTexts(stepName).noun;
 const stopped='so '+RUN_NAME+' stopped. Check the branch for a commit of '+stepNoun+'.';
 if(!validateSchema(RELAY_SCHEMA,relay).ok){
-return describeUnusableResult('The commit step returned a result it could not use, '+stopped,relay);
+return describeUnusableRelay(relay,'commit',stopped);
 }
 if(relay.outcome==='blocked'){
 return{problem:describeCommitBlocker(relay.stderr,stepNoun),terminal:true,nextAction:readRelayAction(relay.stderr)};
 }
 const values=readRelayedLines(relay,moltRoutingSpec());
 if(values===undefined){
-return describeUnusableResult('The commit step returned malformed routing lines, '+stopped,relay);
+return describeUnusableRelay(relay,'commit',stopped,true);
 }
 if(values.branch!==plan.branch){
 return{problem:'The commit step reported a branch other than the plan branch, '+stopped,terminal:true};
@@ -4106,7 +4137,7 @@ async function runCommitStep(run,plan,commit,stepCauses){
 if(!Array.isArray(stepCauses)){
 throw new Error('runCommitStep: stepCauses must be an array');
 }
-const subject=commit.subject===undefined?commitStepTexts(commit.stepName).subject:commit.subject;
+const subject=commit.subject??commitStepTexts(commit.stepName).subject;
 const isReplan=commit.stepName==='wave';
 phase('Commit');
 const listWords=(label)=>listCommitWords(run.trunk,buildInputsPath(run,'molt',label));
@@ -4137,26 +4168,27 @@ bounds:{maxLength:64,pattern:'^[0-9a-f]{8,64}$'}
 }
 function reviewFieldTexts(){
 return{
-signals_fired:{type:'list',text:'Each break-fix signal that fired.',isExternal:false,maxItems:10},
+signals_fired:{type:'list',text:'Each break-fix signal that fired.',maxItems:10},
 conflicting_findings:{type:'list',text:'Each finding the fix conflicts with.',isExternal:true,maxItems:20},
-prior_fix_commit:{type:'string',text:'The commit of the earlier fix.',isExternal:false},
+prior_fix_commit:{type:'string',text:'The commit of the earlier fix.'},
 cluster_files:{type:'list',text:'Each file of the root cluster.',isExternal:true,maxItems:20,itemBounds:{maxLength:400}},
 cluster_ids:{type:'list',text:'Each finding id of the root cluster.',isExternal:true,maxItems:20,itemBounds:{maxLength:64}},
 hypothesized_root:{type:'string',text:'The root the cluster findings share.',isExternal:true,bounds:{maxLength:300}},
 root_class:{type:'string',text:'The class of that root.',isExternal:true,bounds:{maxLength:100}},
 same_framing_rationale:{type:'string',text:'Why the findings share one framing.',isExternal:true,bounds:{maxLength:600}},
-signals_observed:{type:'list',text:'Each diminishing returns signal observed.',isExternal:false,maxItems:10},
+signals_observed:{type:'list',text:'Each diminishing returns signal observed.',maxItems:10},
 latest_severity_max:{type:'string',text:'The highest severity of the latest findings.',isExternal:true},
 recommendation_text:{type:'string',text:'What the reviewer recommends, or empty.',isExternal:true,bounds:{maxLength:200,minLength:0}},
 finding_id:findingIdField(),
-pattern_category:{type:'string',text:'The injection pattern category.',isExternal:false,bounds:{enum:['P1','P2','P3','P4']}},
+pattern_category:{type:'string',text:'The injection pattern category.',bounds:{enum:['P1','P2','P3','P4']}},
 field_excerpt:{type:'string',text:'The excerpt of the flagged field.',isExternal:true,bounds:{maxLength:scanExcerptLimit()}},
 classification:{type:'string',text:'The classification of the finding.',isExternal:true,bounds:{maxLength:100}},
 file:{type:'string',text:'The file of the finding.',isExternal:true,bounds:{maxLength:400}},
 title:{type:'string',text:'The title of the finding.',isExternal:true,bounds:{maxLength:300}},
 user_question:{type:'question',text:'The question the user answers about the finding.',isExternal:true},
 blocker:{type:'string',text:'What blocked the review.',isExternal:true,bounds:{maxLength:300}},
-stage:{type:'string',text:'The loop stage that was blocked.',isExternal:false}
+stage:{type:'string',text:'The loop stage that was blocked.'},
+retry_minutes:{type:'integer',text:'Minutes until the blocking service is back, 1 or more.'}
 };
 }
 function describeReviewField(entry){
@@ -4169,9 +4201,7 @@ title:{type:'string',text:reviewFieldTexts().title.text,isExternal:true}
 };
 }
 function rejectedFindingTexts(){
-return Object.assign(undoneFixTexts(),{
-record:{type:'string',text:'The path and section of the recorded decision the reviewer cites.',isExternal:true}
-});
+return{...undoneFixTexts(),record:{type:'string',text:'The path and section of the recorded decision the reviewer cites.',isExternal:true}};
 }
 function buildFindingItemSchema(texts){
 const properties={};
@@ -4245,11 +4275,11 @@ if(entry.maxItems===undefined){
 throw new Error('buildReviewFieldSchema: field '+name+' is a list with no maxItems');
 }
 const itemDescription=(entry.isExternal?externalLabel()+' ':'')+'One entry.';
-const items=Object.assign({type:'string',description:itemDescription},entry.itemBounds);
+const items={type:'string',description:itemDescription,...entry.itemBounds};
 return{type:'array',description:description,minItems:1,maxItems:entry.maxItems,items:items};
 }
-if(entry.type==='string'){
-return Object.assign({type:'string',description:description},entry.bounds);
+if(entry.type==='string'||entry.type==='integer'){
+return{type:entry.type,description:description,...entry.bounds};
 }
 throw new Error('buildReviewFieldSchema: field '+name+' has type '+JSON.stringify(entry.type)+', which states no domain');
 }
@@ -4262,7 +4292,8 @@ findings_open:{type:'integer',description:'How many findings are still open.'},
 fix_commits_exist:{type:'boolean',description:'true when the loop committed at least one fix.'},
 ledger_path:{type:'string',description:'The path of the fix ledger.'},
 rejected_findings:buildFindingListSchema(' The findings the loop rejected under a recorded decision',rejectedFindingTexts()),
-undone_fixes:buildFindingListSchema(' The findings whose failed fix the loop undid',undoneFixTexts())
+undone_fixes:buildFindingListSchema(' The findings whose failed fix the loop undid',undoneFixTexts()),
+open_findings:buildFindingListSchema(' The findings the loop left open',{finding_id:findingIdField(),title:reviewFieldTexts().title})
 };
 const required=Object.keys(properties);
 for(const[name,entry]of Object.entries(reviewFieldTexts())){
@@ -4270,7 +4301,7 @@ properties[name]=buildReviewFieldSchema(name,entry);
 }
 const variants={};
 for(const[exitReason,fields]of Object.entries(reviewExitFields())){
-variants[exitReason]={required:fields,optional:[]};
+variants[exitReason]={required:fields,optional:exitReason==='blocked'?['retry_minutes']:[]};
 }
 return buildTaggedSchema({
 tag:'exit_reason',
@@ -4283,8 +4314,8 @@ variants:variants
 function localReviewRoutes(){
 return{
 clean:'hold',
-'max-iterations-reached':'stop_replan',
-'break-fix-break':'stop_replan',
+'max-iterations-reached':'draft',
+'break-fix-break':'draft',
 'root-cluster-suspected':'replan',
 'diminishing-returns':'diminishing',
 'injection-suspect':'stop',
@@ -4341,7 +4372,7 @@ formatDataBlock('inputs',inputs)
 }
 function describeReviewProblem(review){
 if(!validateSchema(REVIEW_SCHEMA,review).ok||hasUnusableQuestion(review.user_question)){
-return describeUnusableResult('The local review step returned no usable result'+describeReviewEnd(),review);
+return describeUnusableResult('The local review step returned no usable result'+describePullRequestStop(),review);
 }
 return undefined;
 }
@@ -4374,14 +4405,14 @@ function quoteOrEmpty(text,limit){
 return quoteDiagnostic(text,limit)||encodeUntrustedText('');
 }
 function describeReviewStop(review,head){
-const texts=reviewStopTexts(review);
-const lines=[texts.lead+' on commit '+head+' after '+describeCount(review.iterations_completed,'iteration')+', with '+describeCount(review.findings_open,'finding')+' still open'+describeReviewEnd()];
-if(texts.detail!==undefined){
-lines.push(texts.detail);
+const detail=reviewStopTexts(review).detail;
+const line=describeReviewOpen(review,head,' after '+describeCount(review.iterations_completed,'iteration'))+describePullRequestStop();
+return detail===undefined?line:line+'\n'+detail;
 }
-return lines.join('\n');
+function describeReviewOpen(review,head,after){
+return reviewStopTexts(review).lead+' on commit '+head+after+', with '+describeCount(review.findings_open,'finding')+' still open';
 }
-function describeReviewEnd(){
+function describePullRequestStop(){
 return', so '+RUN_NAME+' stopped before the pull request.';
 }
 function quoteShortFindingId(findingId){
@@ -4416,7 +4447,7 @@ return{
 id:'tail',
 kind:reviewQuestionKinds()[review.exit_reason],
 problem:encodeUntrustedText(question.ask),
-criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
+criticality:buildUnshownCriticality(),
 options:question.options.map((option)=>buildReviewOption(option,question)),
 recommendation:{option_id:question.recommendation.option_id,strength:question.recommendation.strength,why:encodeUntrustedText(question.recommendation.why)},
 assumptions:buildUnshownAssumptions(),
@@ -4424,11 +4455,12 @@ gate:{irreversible:question.gate.irreversible,architectural:question.gate.archit
 };
 }
 function removeReviewerText(brief){
-return Object.assign({},brief,{
+return{
+...brief,
 problem:unshownBriefText(),
-options:brief.options.map((option)=>Object.assign({},option,{summary:unshownBriefText(),destructive:readOptionChanges(option).map((entry)=>({category:entry.category,item:unshownBriefText()}))})),
-recommendation:Object.assign({},brief.recommendation,{why:unshownBriefText()})
-});
+options:brief.options.map((option)=>({...option,summary:unshownBriefText(),destructive:readOptionChanges(option).map((entry)=>({category:entry.category,item:unshownBriefText()}))})),
+recommendation:{...brief.recommendation,why:unshownBriefText()}
+};
 }
 function describeReviewQuestionLead(review,head){
 return'Local review on commit '+head+', finding '+quoteShortFindingId(review.finding_id)+': '+encodeUntrustedText(review.user_question.found);
@@ -4438,7 +4470,7 @@ acceptResolution({taken:[{brief:listReviewCall(review,shown),kind:shown.kind}],r
 return{answer:{question:lead+'\n\n'+renderQuestions([{brief:shown}]),reply:shown.recommendation.option_id,decided_by:'run'}};
 }
 function listReviewCall(review,shown){
-return Object.assign({},shown,{problem:'Local review finding '+quoteShortFindingId(review.finding_id)+': '+shown.problem});
+return{...shown,problem:'Local review finding '+quoteShortFindingId(review.finding_id)+': '+shown.problem};
 }
 function askReviewQuestion(review,run){
 const shown=buildReviewQuestionBrief(review);
@@ -4485,6 +4517,7 @@ kept.push(finding);
 function keepReviewLists(run,review){
 keepNewFindings(run.rejected,review.rejected_findings);
 keepNewFindings(run.undone,review.undone_fixes);
+run.open=review.open_findings;
 }
 function resolveDiminishingReturns(review,run){
 const decided=resolveTailDecision(DIMINISHING_RETURNS_EXIT_KIND,buildDiminishingReturnsBrief(review,run.head),run);
@@ -4505,13 +4538,17 @@ why:'The finding needs more than a simple fix, and a remediation plan that canno
 function projectReplanReview(review){
 const projected={exit_reason:review.exit_reason};
 for(const field of reviewExitFields()[review.exit_reason]){
-if(Object.prototype.hasOwnProperty.call(review,field)){
+if(Object.hasOwn(review,field)){
 projected[field]=review[field];
 }
 }
 return projected;
 }
 function requestReviewReplan(review,run){
+const returned='Local review returned '+review.exit_reason;
+if(run.replans>=maxReplans()){
+return{draft:returned+' after '+maxReplans()+' replans.'};
+}
 const brief=buildReviewEscalationBrief(review);
 const decided=review.exit_reason==='root-cluster-suspected'
 ?resolveTailDecision(ROOT_CLUSTER_ROUTING_KIND,brief,run)
@@ -4519,17 +4556,25 @@ const decided=review.exit_reason==='root-cluster-suspected'
 if(isRunEnd(decided)){
 return decided;
 }
-const returned='Local review returned '+review.exit_reason;
-if(run.replans>=maxReplans()){
-return stopForReviewReplan({problem:returned+' after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.'},review,run);
-}
 run.replans+=1;
 const reason=returned+', so plan the remediation of what the review block reports, from the fresh facts.';
 return{replan:{reason:reason,review:projectReplanReview(review)}};
 }
-function stopForReviewReplan(cause,review,run){
-const stopped=stopDelivery([cause],run,[],true);
-return stopped.replan===undefined?stopped:{replan:{reason:stopped.replan.reason,review:projectReplanReview(review)}};
+function waitForService(review,run){
+const resumeArgs=buildResumeArgs(run.answerLog.map((entry)=>entry.reply),BUILD_ID);
+if(review.retry_minutes>(maxServiceWaits()-run.waits)*maxWaitMinutes()||!canCarry(resumeArgs)){
+return{draft:'Local review was blocked by an outside service, past the waits the run makes.'};
+}
+const minutes=Math.min(review.retry_minutes,maxWaitMinutes());
+const texts=reviewStopTexts(review);
+const lead=texts.lead+' on commit '+run.head+', so '+RUN_NAME+' waits '+describeCount(minutes,'minute')+'.';
+const reply=takeNextReply(run,run.answerLog.length+1);
+if(reply===undefined){
+return{result:pauseForRetry({resumeArgs:resumeArgs,retryMinutes:minutes,blocks:[{text:lead},{text:texts.detail}]})};
+}
+run.answerLog.push(buildAnswerEntry({question:lead,labels:[],reply:reply,decided_by:'run'}));
+run.waits+=1;
+return{rerun:true};
 }
 function routeLocalReview(review,run){
 switch(localReviewRoutes()[review.exit_reason]){
@@ -4541,12 +4586,15 @@ case'replan':
 return requestReviewReplan(review,run);
 case'question':
 return askReviewQuestion(review,run);
-case'stop_replan':
-return stopForReviewReplan({problem:describeReviewStop(review,run.head)},review,run);
+case'draft':
+return{draft:describeReviewOpen(review,run.head,'')+'.'};
 case'stop_rerun':
-return stopDelivery([{problem:describeReviewStop(review,run.head)}],run,[],false);
+if(review.retry_minutes>=1){
+return waitForService(review,run);
+}
+return stopDelivery([{problem:describeReviewStop(review,run.head)}],run);
 case'stop':
-return stopDelivery([{problem:describeReviewStop(review,run.head),terminal:true}],run,[],false);
+return stopDelivery([{problem:describeReviewStop(review,run.head),terminal:true}],run);
 default:
 throw new Error('routeLocalReview: no route for exit reason '+JSON.stringify(review.exit_reason));
 }
@@ -4636,7 +4684,7 @@ const prefix=root.endsWith('/')?root:root+'/';
 return path.startsWith(prefix)?path.slice(prefix.length):path;
 }
 function relativizeScopeEntry(entry,root){
-return Object.assign({},entry,{path:toRepositoryRelativePath(entry.path,root)});
+return{...entry,path:toRepositoryRelativePath(entry.path,root)};
 }
 function toLimitEntry(limit,root){
 const entry=relativizeScopeEntry(limit,root);
@@ -4722,11 +4770,12 @@ function semverCorePattern(){
 return/^(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})$/;
 }
 function versionCheckRoutingSpec(){
-return Object.assign(bumpTypeRoutingSpec(),{
+return{
+...bumpTypeRoutingSpec(),
 version_check:{pattern:/^(?:match|mismatch|unreadable|undetermined)$/,required:true},
 trunk_version:{pattern:semverCorePattern(),required:false},
 expected_version:{pattern:semverCorePattern(),required:false}
-});
+};
 }
 function isConsistentBumpRelay(values){
 const counts=values.counts;
@@ -4757,7 +4806,7 @@ return{result:pauseDelivery({asks:asks,taken:[]},run,leadText)};
 }
 const question=leadText+'\n\n'+renderQuestions(asks);
 const choices=readReplyChoices(reply,asks);
-run.answerLog.push(buildAnswerEntry({question:question,labels:listShownLabels(asks),reply:reply,chosen:choices},undefined));
+run.answerLog.push(buildAnswerEntry({question:question,labels:listShownLabels(asks),reply:reply,chosen:choices}));
 run.approvals=applyApprovalChoices(run.approvals,asks,choices);
 return{answer:{question:question,reply:reply}};
 }
@@ -4765,7 +4814,7 @@ function askTail(ask,run,lead){
 return askTails([ask],run,lead);
 }
 function replanFromTailAsk(ask,run){
-const asked=askTail(ask,run,undefined);
+const asked=askTail(ask,run);
 if(asked.answer===undefined){
 return asked;
 }
@@ -4833,7 +4882,7 @@ function buildWorkerPrompt(step,waveScopes,plan,run){
 return[
 'Do one step of the approved delivery plan: the step in the step block below.',
 boundarySentence(),
-dataBlocksSentence(describeApprovalsHome(run.approvals,undefined)),
+dataBlocksSentence(describeApprovalsHome(run.approvals)),
 '',
 formatDataBlock('step',step),
 formatDataBlock('wave_scopes',waveScopes),
@@ -4875,7 +4924,7 @@ return{stepId:step.id,status:'blocked',reason:unusable.problem,nextAction:unusab
 if(result.outcome==='complete'){
 return{stepId:step.id,status:'complete'};
 }
-return Object.assign({stepId:step.id,status:result.outcome,reason:describeReason(result.blocker)},readGateHold(result,approvals));
+return{stepId:step.id,status:result.outcome,reason:describeReason(result.blocker),...readGateHold(result,approvals)};
 }
 function describeBlockedVerb(outcome){
 if(outcome.holds===undefined){
@@ -4976,9 +5025,6 @@ const SCOPE_SCHEMA=buildScopeSchema();
 function maxReplans(){
 return 3;
 }
-function maxCheckRetries(){
-return 2;
-}
 function maxFixRounds(){
 return 3;
 }
@@ -4987,6 +5033,12 @@ return 4;
 }
 function maxReviewIterations(){
 return 10;
+}
+function maxServiceWaits(){
+return 6;
+}
+function maxWaitMinutes(){
+return 60;
 }
 function maxTitleLength(){
 return 256;
@@ -5062,7 +5114,7 @@ return describeLaunchProblem('The decisions launch arg must be a list of 1 to '+
 }
 function listAnswerEntries(run){
 const label=questionLabel(0);
-const decisionEntries=run.decisions.map((decision)=>buildAnswerEntry({question:label+'. A decision you settled before the run started.',labels:[label],chosen:[{label:label}],reply:decision},undefined));
+const decisionEntries=run.decisions.map((decision)=>buildAnswerEntry({question:label+'. A decision you settled before the run started.',labels:[label],chosen:[{label:label}],reply:decision}));
 return decisionEntries.concat(run.answerLog);
 }
 function createRunState(launch){
@@ -5083,6 +5135,8 @@ reversibleEffects:[],
 approvals:[],
 rejected:[],
 undone:[],
+open:[],
+waits:0,
 head:undefined,
 branch:undefined,
 headRound:undefined,
@@ -5103,13 +5157,14 @@ return passEnd;
 return{replan:{reason:passEnd.replan.reason,review:replan.review}};
 }
 async function runDeliveryPass(run,replan){
+const stopPass=(cause)=>keepReplanReview(stopDelivery([cause],run,[],true),replan);
 const checked=await runFactsStep(run);
 if(checked.problem!==undefined){
-return keepReplanReview(stopDelivery([checked],run,[],true),replan);
+return stopPass(checked);
 }
 const scoped=await runScopeStep(run,checked.facts);
 if(scoped.problem!==undefined){
-return keepReplanReview(stopDelivery([scoped],run,[],true),replan);
+return stopPass(scoped);
 }
 const planned=await runPlanningPass(run,checked.facts,scoped.scope,replan);
 if(planned.plan===undefined){
@@ -5117,7 +5172,7 @@ return keepReplanReview(planned,replan);
 }
 const branched=await runBranchStep(run,planned.plan,planned.freshness);
 if(branched.problem!==undefined){
-return keepReplanReview(stopDelivery([branched],run,[],true),replan);
+return stopPass(branched);
 }
 if(needsBranchReplan(branched.values,checked.facts,planned.plan)){
 return requestBranchReplan(run);

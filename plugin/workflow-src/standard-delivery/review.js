@@ -513,7 +513,7 @@ function waitForService(review, run) {
   if (reply === undefined) {
     return { result: pauseForRetry({ resumeArgs: resumeArgs, retryMinutes: minutes, blocks: [{ text: lead }, { text: texts.detail }] }) };
   }
-  run.answerLog.push({ ...buildAnswerEntry({ question: lead, labels: [], reply: reply }), decided_by: 'run' });
+  run.answerLog.push(buildAnswerEntry({ question: lead, labels: [], reply: reply, decided_by: 'run' }));
   run.waits += 1;
   return { rerun: true };
 }
