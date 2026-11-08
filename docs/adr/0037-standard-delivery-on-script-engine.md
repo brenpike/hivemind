@@ -2613,14 +2613,14 @@ Links: https://github.com/brenpike/hivemind/issues/549, https://github.com/brenp
 
 ### Local review finding 0c0cf284: the docs point to the Ask Set instead of copying it (2026-11-07)
 
-**The finding.** `README.md`, `CONTEXT.md` and the site pages `web/index.html`, `web/functionality.html` and `web/benefits.html` said things about who the run asks and what it lists that disagree with governance. Some said every open question or reviewer question pauses the run. Some left out that an agreed review call is taken even when it is safety-relevant. Some said every taken call is listed, but plan acceptance, remediation plan acceptance and gate reruns are not listed unless a listed reason holds.
+**The finding.** `README.md`, `CONTEXT.md` and the site pages `web/index.html`, `web/functionality.html` and `web/benefits.html` said things about who the run asks and what it lists that disagree with governance. Some said every open question or reviewer question pauses the run. Some left out which review calls the run takes, per `plugin/governance/decision-autonomy.md` (Review Calls). Some said every taken call is listed, though some kinds of taken call are not listed; "Decisions on the PR" in `README.md` names them.
 
 **Root cause.** Each docs surface copied the decision-autonomy rules in its own words instead of naming them, and each copy lost an exception. Earlier passes on this branch corrected one copy at a time on the same young surfaces, so the class stayed open.
 
 **Decision.**
 
 - **Who the run asks has one home.** It is `plugin/governance/decision-autonomy.md` (Decision Tiers, Review Calls). `README.md`, `CONTEXT.md` and the site pages name the closed Ask Set and point there. They never copy its members. An example uses "such as" and draws only on members with no exception: an irreversible call, an architectural call, a hard stop, a call with no recommendation.
-- **What a script run lists has one docs home per published surface.** They are "Decisions on the PR" in `README.md` and the PR step of `web/functionality.html`. Each states the three kinds that are not listed and when an acceptance is listed anyway. Every other mention points there and never says every taken call is listed.
+- **What a script run lists has one docs home per published surface.** They are "Decisions on the PR" in `README.md` and the PR step of `web/functionality.html`. Each states which taken calls are not listed. Every other mention points there and never says every taken call is listed.
 - **Only a copy of the rule is a defect.** A docs sentence outside those homes is a defect of this class only when it restates the rule itself, in one of three ways:
   - it copies Ask Set members beyond a "such as" example drawn from members with no exception;
   - it makes an every, all, any or no claim about which questions or calls ask or are taken, without naming the Ask Set;
