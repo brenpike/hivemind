@@ -691,7 +691,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '18484cb9af732aa1';
+const BUILD_ID = 'f633ce52d3a7134d';
 
 function supportedSchemaKeywords(){
 return[
@@ -4360,6 +4360,10 @@ inputs.approvals=run.approvals;
 if(answer!==undefined){
 inputs.user_answer=answer;
 }
+if(run.ledger){
+inputs.resume_from_ledger=run.ledger;
+run.ledger=undefined;
+}
 return[
 'Run your pre-PR local review loop once on the working branch as it is checked out, with the inputs in the inputs block below.',
 boundarySentence(),
@@ -4548,9 +4552,7 @@ if(run.replans>=maxReplans()){
 return{draft:returned+' after '+maxReplans()+' replans.'};
 }
 const brief=buildReviewEscalationBrief(review);
-const decided=review.exit_reason==='root-cluster-suspected'
-?resolveTailDecision(ROOT_CLUSTER_ROUTING_KIND,brief,run)
-:resolveTailDecision(PLANNER_ESCALATION_ROUTING_KIND,brief,run);
+const decided=resolveTailDecision(brief.kind,brief,run);
 if(isRunEnd(decided)){
 return decided;
 }
@@ -4587,6 +4589,7 @@ return askReviewQuestion(review,run);
 case'draft':
 return{draft:describeReviewOpen(review,run.head,'')+'.'};
 case'stop_rerun':
+run.ledger=review.ledger_path;
 if(review.retry_minutes>=1){
 return waitForService(review,run);
 }

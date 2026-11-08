@@ -87,7 +87,10 @@
  *           review again; past the waits it returns {draft}. blocked with no
  *           retry_minutes asks one fix_cause step_stop question through
  *           stopDelivery (record.js), and the reply runs local review again;
- *           injection-suspect is terminal. A
+ *           injection-suspect is terminal. Either rerun of a blocked
+ *           review passes its ledger_path as resume_from_ledger, once, so
+ *           the next loop keeps its iteration count and its break-fix and
+ *           root-cluster history. A
  *           review result that fails REVIEW_SCHEMA, gives option ids other than
  *           A, B, C and D in that order, or recommends no option has a report
  *           lead, so stopDelivery ends the run blocked. describeReviewProblem reads the result before the
@@ -190,6 +193,14 @@ function buildReviewPrompt(plan, run, answer) {
   }
   if (answer !== undefined) {
     inputs.user_answer = answer;
+  }
+  /*
+   * A rerun after a blocked review resumes its fix ledger, so its
+   * iteration count and break-fix and root-cluster history carry over.
+   */
+  if (run.ledger) {
+    inputs.resume_from_ledger = run.ledger;
+    run.ledger = undefined;
   }
   return [
     'Run your pre-PR local review loop once on the working branch as it is checked out, with the inputs in the inputs block below.',
@@ -479,9 +490,7 @@ function requestReviewReplan(review, run) {
     return { draft: returned + ' after ' + maxReplans() + ' replans.' };
   }
   const brief = buildReviewEscalationBrief(review);
-  const decided = review.exit_reason === 'root-cluster-suspected'
-    ? resolveTailDecision(ROOT_CLUSTER_ROUTING_KIND, brief, run)
-    : resolveTailDecision(PLANNER_ESCALATION_ROUTING_KIND, brief, run);
+  const decided = resolveTailDecision(brief.kind, brief, run);
   if (isRunEnd(decided)) {
     return decided;
   }
@@ -531,6 +540,7 @@ function routeLocalReview(review, run) {
     case 'draft':
       return { draft: describeReviewOpen(review, run.head, '') + '.' };
     case 'stop_rerun':
+      run.ledger = review.ledger_path;
       if (review.retry_minutes >= 1) {
         return waitForService(review, run);
       }

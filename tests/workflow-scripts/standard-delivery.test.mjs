@@ -9614,8 +9614,23 @@ const ROW_TESTS = {
       assert.ok(!run.result.message.includes('draft') && !prBodyOf(run, 'pr-1').includes('is a draft'), run.result.message);
       for (const label of ['review-1-2', 'review-1-3']) {
         assert.equal(Object.hasOwn(readDataBlock(callOf(run, label).prompt, 'inputs'), 'user_answer'), false, label);
+        assert.equal(readDataBlock(callOf(run, label).prompt, 'inputs').resume_from_ledger, LEDGER_PATH, label);
       }
+      assert.equal(Object.hasOwn(readDataBlock(callOf(run, 'review-1-1').prompt, 'inputs'), 'resume_from_ledger'), false);
       assert.ok(!callOf(run, 'review-1-1').prompt.includes(main.resumedReplySentence()));
+    });
+    test('an outage after review iterations resumes the blocked review\'s fix ledger once, so the iteration count and break-fix and root-cluster history carry over', async () => {
+      const ledger = '.hivemind/review-ledger-outage.json';
+      const results = waitResults([{ ...waitReview(30), iterations_completed: 4, findings_resolved: 3, fix_commits_exist: true, ledger_path: ledger }, REVIEW_CLEAN]);
+      const { run, waits } = await runThroughWaits(results);
+      assert.equal(waits.length, 1);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.equal(readDataBlock(callOf(run, 'review-1-2').prompt, 'inputs').resume_from_ledger, ledger);
+      const state = newRunState({});
+      state.ledger = ledger;
+      assert.equal(readDataBlock(main.buildReviewPrompt(makePlan(), state), 'inputs').resume_from_ledger, ledger);
+      assert.equal(state.ledger, undefined);
+      assert.equal(Object.hasOwn(readDataBlock(main.buildReviewPrompt(makePlan(), state), 'inputs'), 'resume_from_ledger'), false);
     });
     test('a wait is at most maxWaitMinutes(), and a stated time up to the waits left waits while one past them opens a draft listing the open findings', async () => {
       const longest = await runWorkflow(LAUNCH, waitResults([waitReview(360)]));
@@ -9661,6 +9676,7 @@ const ROW_TESTS = {
         const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Codex is back.'), results);
         assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
         assert.deepEqual(labelsOf(resumed).slice(-3), ['review-1-2', 'review-commit-1-2', 'pr-1']);
+        assert.equal(readDataBlock(callOf(resumed, 'review-1-2').prompt, 'inputs').resume_from_ledger, LEDGER_PATH);
       });
     }
   }
