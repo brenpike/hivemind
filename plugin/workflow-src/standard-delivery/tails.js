@@ -71,7 +71,7 @@ function askTails(asks, run, lead) {
   }
   const question = leadText + '\n\n' + renderQuestions(asks);
   const choices = readReplyChoices(reply, asks);
-  run.answerLog.push(buildAnswerEntry({ question: question, labels: listShownLabels(asks), reply: reply, chosen: choices }, undefined));
+  run.answerLog.push(buildAnswerEntry({ question: question, labels: listShownLabels(asks), reply: reply, chosen: choices }));
   run.approvals = applyApprovalChoices(run.approvals, asks, choices);
   return { answer: { question: question, reply: reply } };
 }
@@ -81,7 +81,7 @@ function askTail(ask, run, lead) {
 }
 
 function replanFromTailAsk(ask, run) {
-  const asked = askTail(ask, run, undefined);
+  const asked = askTail(ask, run);
   if (asked.answer === undefined) {
     return asked;
   }

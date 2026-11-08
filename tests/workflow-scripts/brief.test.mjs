@@ -855,6 +855,13 @@ describe('buildAnswerEntry', () => {
     assert.deepEqual([...entry.settled], ['Q2']);
     assert.deepEqual(Object.keys(entry), ['question', 'settled', 'reply']);
   });
+  test('a round decided_by follows reply as decided_by, and a round with none writes no decided_by key', () => {
+    const entry = lib.buildAnswerEntry({ question: 'QUESTION_TEXT', labels: [], reply: 'REPLY_TEXT', decided_by: 'run' }, undefined);
+    assert.deepEqual(Object.keys(entry), ['question', 'settled', 'reply', 'decided_by']);
+    assert.equal(entry.decided_by, 'run');
+    assert.deepEqual([...entry.settled], []);
+    assert.equal(Object.hasOwn(lib.buildAnswerEntry(round, undefined), 'decided_by'), false);
+  });
   test('argument checks', () => {
     assert.throws(() => lib.buildAnswerEntry({ ...round, chosen: 'Q1' }, undefined), /buildAnswerEntry: round.chosen must be an array/);
     assert.throws(() => lib.buildAnswerEntry({ question: 'Q', reply: 'R' }, undefined), /buildAnswerEntry: round.labels must be an array/);

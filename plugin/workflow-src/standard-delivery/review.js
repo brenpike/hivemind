@@ -6,7 +6,7 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState: pass, answerLog, head,
- *          trunk, approvals, taken, rejected and undone.
+ *          trunk, approvals, taken, rejected, undone, open and waits.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   gates  the gate loop state of runGates (gates.js): runs.review, answer
  *          and takenReview, which only this module sets and reads: the review
@@ -14,10 +14,12 @@
  *   review the local reviewer result, under REVIEW_SCHEMA.
  *
  * Outputs
- *   runReviewGate(run, plan, gates)  {held, note}, {replan}, or {result}:
- *          a pause or a blocked finish, or {rerun: true} when the user
- *          replied to a stop of its commit step or to a blocked review, so
- *          local review runs again, its commit runner reading the head.
+ *   runReviewGate(run, plan, gates)  {held, note}, {replan}, {draft:
+ *          reason} at a loop cap, so the pull request opens as a draft, or
+ *          {result}: a pause, a wait or a blocked finish, or {rerun: true}
+ *          when the user replied to a stop of its commit step or to a
+ *          blocked review, or a wait ended, so local review runs again, its
+ *          commit runner reading the head.
  *   The step, as meta.js names it:
  *   Review  a gate when configured. hivemind:local-reviewer runs its loop on
  *           the branch with base, working_branch, trunk, max_iterations and
@@ -73,12 +75,22 @@
  *           injection-suspect names the short finding id and the category in its
  *           line, and its detail line shows the whole encoded excerpt. blocked
  *           gives the blocker, quoted with a limit equal to its maxLength, so a
- *           valid value is never cut. Through stopDelivery (record.js),
- *           max-iterations-reached and break-fix-break, like an escalation or
- *           root cluster taken at maxReplans(), ask one fix_cause step_stop
- *           question, and the reply starts a new pass outside maxReplans() with
- *           the review projected by projectReplanReview; blocked asks the same
- *           and the reply runs local review again; injection-suspect is terminal. A
+ *           valid value is never cut. max-iterations-reached and
+ *           break-fix-break return {draft} with the lead, the head and the
+ *           open finding count (issue 549); an escalation or root cluster at
+ *           maxReplans() returns {draft} before decide() reads it. blocked
+ *           with retry_minutes 1 or more waits (waitForService) while the
+ *           wait fits the waits left, maxServiceWaits() of at most
+ *           maxWaitMinutes() each, and the resume args fit: with no reply for
+ *           its round it pauses through pauseForRetry (lib/result.js), and the
+ *           reply, logged with settled [] and decided_by run, runs local
+ *           review again; past the waits it returns {draft}. blocked with no
+ *           retry_minutes asks one fix_cause step_stop question through
+ *           stopDelivery (record.js), and the reply runs local review again;
+ *           injection-suspect is terminal. Either rerun of a blocked
+ *           review passes its ledger_path as resume_from_ledger, once, so
+ *           the next loop keeps its iteration count and its break-fix and
+ *           root-cluster history. A
  *           review result that fails REVIEW_SCHEMA, gives option ids other than
  *           A, B, C and D in that order, or recommends no option has a report
  *           lead, so stopDelivery ends the run blocked. describeReviewProblem reads the result before the
@@ -95,7 +107,8 @@
  *           recorded decisions (remediation-doctrine.md, Recorded Decisions and
  *           Repeat Findings), and undone_fixes the findings whose failed fix the
  *           loop undid. keepReviewLists keeps each new finding_id of a usable
- *           review in run.rejected or run.undone before its route: a held gate's
+ *           review in run.rejected or run.undone, and sets run.open to its
+ *           open_findings, before its route: a held gate's
  *           note counts each run list, and the block of the final complete
  *           message and the pull request record names each finding by its short
  *           id alone. localReviewRoutes() keys only on exit_reason.
@@ -128,8 +141,8 @@
 function localReviewRoutes() {
   return {
     clean: 'hold',
-    'max-iterations-reached': 'stop_replan',
-    'break-fix-break': 'stop_replan',
+    'max-iterations-reached': 'draft',
+    'break-fix-break': 'draft',
     'root-cluster-suspected': 'replan',
     'diminishing-returns': 'diminishing',
     'injection-suspect': 'stop',
@@ -181,6 +194,14 @@ function buildReviewPrompt(plan, run, answer) {
   if (answer !== undefined) {
     inputs.user_answer = answer;
   }
+  /*
+   * A rerun after a blocked review resumes its fix ledger, so its
+   * iteration count and break-fix and root-cluster history carry over.
+   */
+  if (run.ledger) {
+    inputs.resume_from_ledger = run.ledger;
+    run.ledger = undefined;
+  }
   return [
     'Run your pre-PR local review loop once on the working branch as it is checked out, with the inputs in the inputs block below.',
     boundarySentence(),
@@ -199,7 +220,7 @@ function buildReviewPrompt(plan, run, answer) {
  */
 function describeReviewProblem(review) {
   if (!validateSchema(REVIEW_SCHEMA, review).ok || hasUnusableQuestion(review.user_question)) {
-    return describeUnusableResult('The local review step returned no usable result' + describeReviewEnd(), review);
+    return describeUnusableResult('The local review step returned no usable result' + describePullRequestStop(), review);
   }
   return undefined;
 }
@@ -247,15 +268,24 @@ function quoteOrEmpty(text, limit) {
 }
 
 function describeReviewStop(review, head) {
-  const texts = reviewStopTexts(review);
-  const lines = [texts.lead + ' on commit ' + head + ' after ' + describeCount(review.iterations_completed, 'iteration') + ', with ' + describeCount(review.findings_open, 'finding') + ' still open' + describeReviewEnd()];
-  if (texts.detail !== undefined) {
-    lines.push(texts.detail);
-  }
-  return lines.join('\n');
+  const detail = reviewStopTexts(review).detail;
+  const line = describeReviewOpen(review, head, ' after ' + describeCount(review.iterations_completed, 'iteration')) + describePullRequestStop();
+  return detail === undefined ? line : line + '\n' + detail;
 }
 
-function describeReviewEnd() {
+/**
+ * Returns the lead of review on commit head, then after, then the count of
+ * findings still open.
+ */
+function describeReviewOpen(review, head, after) {
+  return reviewStopTexts(review).lead + ' on commit ' + head + after + ', with ' + describeCount(review.findings_open, 'finding') + ' still open';
+}
+
+/**
+ * Returns the tail of a stop before the pull request, also read by
+ * gates.js.
+ */
+function describePullRequestStop() {
   return ', so ' + RUN_NAME + ' stopped before the pull request.';
 }
 
@@ -310,7 +340,7 @@ function buildReviewQuestionBrief(review) {
     id: 'tail',
     kind: reviewQuestionKinds()[review.exit_reason],
     problem: encodeUntrustedText(question.ask),
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
+    criticality: buildUnshownCriticality(),
     options: question.options.map((option) => buildReviewOption(option, question)),
     recommendation: { option_id: question.recommendation.option_id, strength: question.recommendation.strength, why: encodeUntrustedText(question.recommendation.why) },
     assumptions: buildUnshownAssumptions(),
@@ -325,11 +355,12 @@ function buildReviewQuestionBrief(review) {
  * decide() reads it, and no message shows it.
  */
 function removeReviewerText(brief) {
-  return Object.assign({}, brief, {
+  return {
+    ...brief,
     problem: unshownBriefText(),
-    options: brief.options.map((option) => Object.assign({}, option, { summary: unshownBriefText(), destructive: readOptionChanges(option).map((entry) => ({ category: entry.category, item: unshownBriefText() })) })),
-    recommendation: Object.assign({}, brief.recommendation, { why: unshownBriefText() })
-  });
+    options: brief.options.map((option) => ({ ...option, summary: unshownBriefText(), destructive: readOptionChanges(option).map((entry) => ({ category: entry.category, item: unshownBriefText() })) })),
+    recommendation: { ...brief.recommendation, why: unshownBriefText() }
+  };
 }
 
 function describeReviewQuestionLead(review, head) {
@@ -348,7 +379,7 @@ function takeReviewCall(review, run, shown, lead) {
 }
 
 function listReviewCall(review, shown) {
-  return Object.assign({}, shown, { problem: 'Local review finding ' + quoteShortFindingId(review.finding_id) + ': ' + shown.problem });
+  return { ...shown, problem: 'Local review finding ' + quoteShortFindingId(review.finding_id) + ': ' + shown.problem };
 }
 
 function askReviewQuestion(review, run) {
@@ -418,6 +449,7 @@ function keepNewFindings(kept, findings) {
 function keepReviewLists(run, review) {
   keepNewFindings(run.rejected, review.rejected_findings);
   keepNewFindings(run.undone, review.undone_fixes);
+  run.open = review.open_findings;
 }
 
 function resolveDiminishingReturns(review, run) {
@@ -445,7 +477,7 @@ function buildReviewEscalationBrief(review) {
 function projectReplanReview(review) {
   const projected = { exit_reason: review.exit_reason };
   for (const field of reviewExitFields()[review.exit_reason]) {
-    if (Object.prototype.hasOwnProperty.call(review, field)) {
+    if (Object.hasOwn(review, field)) {
       projected[field] = review[field];
     }
   }
@@ -453,25 +485,46 @@ function projectReplanReview(review) {
 }
 
 function requestReviewReplan(review, run) {
-  const brief = buildReviewEscalationBrief(review);
-  const decided = review.exit_reason === 'root-cluster-suspected'
-    ? resolveTailDecision(ROOT_CLUSTER_ROUTING_KIND, brief, run)
-    : resolveTailDecision(PLANNER_ESCALATION_ROUTING_KIND, brief, run);
-  if (isRunEnd(decided)) {
-    return decided;
-  }
   const returned = 'Local review returned ' + review.exit_reason;
   if (run.replans >= maxReplans()) {
-    return stopForReviewReplan({ problem: returned + ' after ' + maxReplans() + ' replans, so ' + RUN_NAME + ' stopped.' }, review, run);
+    return { draft: returned + ' after ' + maxReplans() + ' replans.' };
+  }
+  const brief = buildReviewEscalationBrief(review);
+  const decided = resolveTailDecision(brief.kind, brief, run);
+  if (isRunEnd(decided)) {
+    return decided;
   }
   run.replans += 1;
   const reason = returned + ', so plan the remediation of what the review block reports, from the fresh facts.';
   return { replan: { reason: reason, review: projectReplanReview(review) } };
 }
 
-function stopForReviewReplan(cause, review, run) {
-  const stopped = stopDelivery([cause], run, [], true);
-  return stopped.replan === undefined ? stopped : { replan: { reason: stopped.replan.reason, review: projectReplanReview(review) } };
+/**
+ * Waits out the outside service a blocked review names, when its
+ * retry_minutes fits the waits the run has left and the resume args fit:
+ * with no reply for the next round, pauses through pauseForRetry for at
+ * most maxWaitMinutes(); with one, logs it as the run's own wait, settled
+ * [] and decided_by run, and returns {rerun: true}. Else returns {draft}.
+ */
+function waitForService(review, run) {
+  const resumeArgs = buildResumeArgs(run.answerLog.map((entry) => entry.reply), BUILD_ID);
+  /*
+   * INVARIANT: retry_minutes is 1 or more (routeLocalReview), so the waits
+   * left bound it to 0 once run.waits reaches maxServiceWaits().
+   */
+  if (review.retry_minutes > (maxServiceWaits() - run.waits) * maxWaitMinutes() || !canCarry(resumeArgs)) {
+    return { draft: 'Local review was blocked by an outside service, past the waits the run makes.' };
+  }
+  const minutes = Math.min(review.retry_minutes, maxWaitMinutes());
+  const texts = reviewStopTexts(review);
+  const lead = texts.lead + ' on commit ' + run.head + ', so ' + RUN_NAME + ' waits ' + describeCount(minutes, 'minute') + '.';
+  const reply = takeNextReply(run, run.answerLog.length + 1);
+  if (reply === undefined) {
+    return { result: pauseForRetry({ resumeArgs: resumeArgs, retryMinutes: minutes, blocks: [{ text: lead }, { text: texts.detail }] }) };
+  }
+  run.answerLog.push(buildAnswerEntry({ question: lead, labels: [], reply: reply, decided_by: 'run' }));
+  run.waits += 1;
+  return { rerun: true };
 }
 
 function routeLocalReview(review, run) {
@@ -484,12 +537,16 @@ function routeLocalReview(review, run) {
       return requestReviewReplan(review, run);
     case 'question':
       return askReviewQuestion(review, run);
-    case 'stop_replan':
-      return stopForReviewReplan({ problem: describeReviewStop(review, run.head) }, review, run);
+    case 'draft':
+      return { draft: describeReviewOpen(review, run.head, '') + '.' };
     case 'stop_rerun':
-      return stopDelivery([{ problem: describeReviewStop(review, run.head) }], run, [], false);
+      run.ledger = review.ledger_path;
+      if (review.retry_minutes >= 1) {
+        return waitForService(review, run);
+      }
+      return stopDelivery([{ problem: describeReviewStop(review, run.head) }], run);
     case 'stop':
-      return stopDelivery([{ problem: describeReviewStop(review, run.head), terminal: true }], run, [], false);
+      return stopDelivery([{ problem: describeReviewStop(review, run.head), terminal: true }], run);
     default:
       throw new Error('routeLocalReview: no route for exit reason ' + JSON.stringify(review.exit_reason));
   }

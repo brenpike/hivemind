@@ -11,8 +11,8 @@
  *          reaches only the pull request title, and plan.digest, the
  *          step ids, outcomes and files and the optional plan.closes only
  *          the body. plan.summary reaches no pull request text.
- *   gates  the gate loop state of runGates (gates.js): notes and
- *          runs.pr, the count of this step's runs in the pass.
+ *   gates  the gate loop state of runGates (gates.js): held, notes, draft
+ *          and runs.pr, the count of this step's runs in the pass.
  *   maxTitleLength() and maxPullRequestTextLength() from main.js.
  *
  * Outputs
@@ -27,13 +27,14 @@
  *          number that is not the number of one of references, the launch
  *          references of run.references, naming its index, else undefined.
  *   The step, as meta.js names it:
- *   PR      once every configured gate held on one commit H, a haiku
+ *   PR      once every required gate held on one commit H, a haiku
  *           synapse runner runs the open-plan-pr command once. The
  *           command carries only --head, --base, --expect-commit H,
  *           --inputs, the path buildInputsPath (relay.js) builds for the
  *           call label, and --body-file, the one it builds for that label
  *           and -body. The inputs_file content is a JSON string of only the
- *           title and comment the code builds and draft from the launch,
+ *           title and comment the code builds and draft, true when the
+ *           launch asks for a draft or gates.draft is set,
  *           and the body_file content the body the code builds, the raw
  *           text the script reads whole. This runner is the only push the
  *           workflow makes, so every push carries --expect-commit. A
@@ -128,7 +129,7 @@ function reviewDecisionProblems() {
 
 function toPullRequestDecision(entry) {
   const problem = reviewDecisionProblems()[entry.kind];
-  return problem === undefined ? entry : { brief: Object.assign({}, entry.brief, { problem: problem }), kind: entry.kind, listed: entry.listed };
+  return problem === undefined ? entry : { brief: { ...entry.brief, problem: problem }, kind: entry.kind, listed: entry.listed };
 }
 
 function isPullRequestCharacter(codePoint, keepsLines) {
@@ -226,6 +227,11 @@ function buildPullRequestTitle(plan) {
   return text === '' ? prefix : prefix + ' ' + text;
 }
 
+/**
+ * Returns the Gates: part: one line per gate, its note and held commit, did
+ * not hold for a configured gate with no hold (draft mode, gates.js), or
+ * not configured for this run.
+ */
 function renderPullRequestGates(run, gates) {
   const lines = ['Gates:'];
   for (const gateId of gateIds()) {
@@ -234,7 +240,7 @@ function renderPullRequestGates(run, gates) {
       lines.push('- ' + name + ': not configured for this run');
       continue;
     }
-    lines.push('- ' + name + ': ' + gates.notes[gateId] + ', held on commit ' + gates.held[gateId]);
+    lines.push('- ' + name + ': ' + (gates.held[gateId] === undefined ? 'did not hold' : gates.notes[gateId] + ', held on commit ' + gates.held[gateId]));
   }
   return lines.join('\n');
 }
@@ -248,7 +254,7 @@ function renderPullRequestRecord(run, gates) {
 }
 
 function listCloses(plan) {
-  return plan.closes === undefined ? [] : plan.closes;
+  return plan.closes ?? [];
 }
 
 /**
@@ -363,14 +369,14 @@ function checkPullRequestRelay(relay, head) {
   const unseenPush = ' stopped and did not see whether this step pushed. Taking it again pushes the same commit and reuses a pull request open on it.';
   const stopped = 'so ' + RUN_NAME + unseenPush;
   if (!validateSchema(RELAY_SCHEMA, relay).ok) {
-    return describeUnusableResult('The pull request step returned a result it could not use, ' + stopped, relay);
+    return describeUnusableRelay(relay, 'pull request', stopped);
   }
   if (relay.outcome === 'blocked') {
     return describePullRequestBlocker(relay.stderr, head, unseenPush);
   }
   const values = readRelayedLines(relay, openPlanPrRoutingSpec());
   if (values === undefined || values.commented === values.created) {
-    return describeUnusableResult('The pull request step returned malformed routing lines, ' + stopped, relay);
+    return describeUnusableRelay(relay, 'pull request', stopped, true);
   }
   if (values.head_ref_oid !== head) {
     return { problem: 'The pull request step reported a head commit other than the commit every gate held on, ' + stopped, terminal: true };
@@ -385,19 +391,19 @@ function describePullRequestLabel(run, count) {
 async function runPullRequestStep(run, plan, gates) {
   const texts = buildPullRequestTexts(run, plan, gates);
   if (texts.problem !== undefined) {
-    return stopDelivery([{ problem: texts.problem, terminal: true, nextAction: 'report' }], run, [], false);
+    return stopDelivery([{ problem: texts.problem, terminal: true, nextAction: 'report' }], run);
   }
   phase('PR');
   const label = describePullRequestLabel(run, gates.runs.pr);
   const commandStop = describeCommandStop('pull request', listPullRequestWords(plan, run, label), listPullRequestWords(plan, run, label + '-retry'));
   if (commandStop !== undefined) {
-    return stopDelivery([commandStop], run, [], false);
+    return stopDelivery([commandStop], run);
   }
-  const buildPrompt = (callLabel) => addResumeNote(buildPullRequestPrompt(listPullRequestWords(plan, run, callLabel), texts, run.draft, run.pluginRoot), run);
+  const buildPrompt = (callLabel) => addResumeNote(buildPullRequestPrompt(listPullRequestWords(plan, run, callLabel), texts, run.draft || gates.draft !== undefined, run.pluginRoot), run);
   const relay = await runRunnerRelay(buildPrompt, label, 'PR');
   const checked = checkPullRequestRelay(relay, run.head);
   if (checked.problem === undefined) {
     return { result: finishDeliveryComplete(run, plan, checked.values, gates) };
   }
-  return stopDelivery([checked], run, [], false);
+  return stopDelivery([checked], run);
 }

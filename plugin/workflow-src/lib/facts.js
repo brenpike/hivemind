@@ -308,7 +308,7 @@ function describeRunnerWordProblem(words) {
   for (let index = 0; index < words.length; index += 2) {
     const flag = String(words[index]);
     const value = words[index + 1];
-    if (!Object.prototype.hasOwnProperty.call(patterns, flag) || typeof value !== 'string' || !patterns[flag].test(value)) {
+    if (!Object.hasOwn(patterns, flag) || typeof value !== 'string' || !patterns[flag].test(value)) {
       return 'its ' + flag + ' value is not one the script takes';
     }
   }
@@ -386,7 +386,7 @@ function gatherFactsRoutingSpec() {
 
 function matchesFactsLine(key, value) {
   const spec = gatherFactsRoutingSpec();
-  if (!Object.prototype.hasOwnProperty.call(spec, key)) {
+  if (!Object.hasOwn(spec, key)) {
     throw new Error('matchesFactsLine: unknown facts key ' + JSON.stringify(key));
   }
   return typeof value === 'string' && spec[key].pattern.test(value);
@@ -436,8 +436,8 @@ function isConsistentFactsRelay(values, trunk) {
     return false;
   }
   const spec = gatherFactsRoutingSpec();
-  const hasOnlySpecKeys = Object.keys(values).every((key) => Object.prototype.hasOwnProperty.call(spec, key));
-  const hasBranch = Object.prototype.hasOwnProperty.call(values, 'branch');
+  const hasOnlySpecKeys = Object.keys(values).every((key) => Object.hasOwn(spec, key));
+  const hasBranch = Object.hasOwn(values, 'branch');
   const matchesEveryLine = Object.keys(spec).every((key) => (key === 'branch' && !hasBranch) || matchesFactsLine(key, values[key]));
   if (!hasOnlySpecKeys || !matchesEveryLine) {
     return false;

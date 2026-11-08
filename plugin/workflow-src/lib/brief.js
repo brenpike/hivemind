@@ -120,7 +120,8 @@
  *     that key order. question and reply are copied from round unchanged.
  *     settled holds the labels of round.labels that revise.settled names or
  *     a round.chosen entry labels, in shown order, once each; [] when both
- *     name none, and [] when round.labels is empty.
+ *     name none, and [] when round.labels is empty. A non-empty
+ *     round.decided_by follows reply as decided_by.
  *
  * Invariants
  *   Bounded fields: the brief text fields shown are written for the user
@@ -316,7 +317,7 @@ function buildAnswerEntry(round, revise) {
   assertArray(choices, callerPrefix + 'round.chosen', false);
   const choiceLabels = choices.map((choice) => readField(choice, 'label'));
   const settled = shownLabels.filter((label, index) => (reviseLabels.includes(label) || choiceLabels.includes(label)) && shownLabels.indexOf(label) === index);
-  return { question: round.question, settled: settled, reply: round.reply };
+  return { question: round.question, settled: settled, reply: round.reply, ...round.decided_by && { decided_by: round.decided_by } };
 }
 
 function renderReplyLine(count) {

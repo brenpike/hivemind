@@ -31,7 +31,7 @@ Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` whole, `${CLA
 | `max_watch_duration` | `3600` | Idle-window seconds per Monitor arm (1h). |
 | `max_remediation_cycles` | `$(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh" floor)` | Max real remediation rounds (findings_resolved ≥ 1). |
 | `poll_interval` | `60` | Seconds between polls. |
-| `user_answer` | (none) | Optional `{candidate_url, question, reply}`: the user's answer to a question the reviewer asked, per `${CLAUDE_PLUGIN_ROOT}/agents/github-reviewer.md` (Fix Mode Input). |
+| `user_answer` | (none) | Optional `{candidate_url, question, reply, decided_by}`: the user's answer to a question the reviewer asked, or the run's when `decided_by: run`, per `${CLAUDE_PLUGIN_ROOT}/agents/github-reviewer.md` (Fix Mode Input). |
 
 `max_watch_duration` is an idle window, not a total budget: a completed remediation
 cycle re-arms a fresh full window, and a window that elapses with no actionable
@@ -120,7 +120,7 @@ and leaves the baseline where it was. An arm boundary (step 4) and a post-dispat
 re-arm (step 6) are not capture sites: each must reuse the seed it already carries,
 and a fresh `--snapshot` at either is forbidden. The resulting duplicate wakes, and
 re-fires on our own `Fixed in <SHA>` replies, are absorbed by `prefilter.sh` as
-`PREFILTER_SKIP`. Assume no specific figure for the Monitor's own per-arm ceiling.
+`PREFILTER_SKIP`.
 
 **5. Per event.** `CHANGED` → run
 `bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh" <OWNER> <REPO> <PR_NUMBER> <reviewer_filter> <SELF_LOGIN>`:

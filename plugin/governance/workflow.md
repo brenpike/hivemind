@@ -1,6 +1,6 @@
 # Workflow
 
-Branch, commit and PR conventions. Loaded by overlord only.
+Branch, commit and PR conventions.
 
 ## Branch Taxonomy
 
@@ -44,7 +44,9 @@ Judge whether a change needs a version bump, and its type, by `${CLAUDE_PLUGIN_R
 
 Open PR only when: plan complete, validation passed, version bump included if required, branch pushed.
 
-Local review gate: if local review ran on the branch, the PR opens only when its last exit reason holds the gate. Gate-holding exits: `clean`, and `diminishing-returns` once its advisory exit is taken. Any other exit, max-iterations-reached included, holds nothing and stops the PR on every path: workflow script, state machine, or any step outside both. Local review that did not run (not configured, or skipped) neither holds nor blocks the PR.
+Local review gate: if local review ran on the branch, a ready-for-review PR opens only when its last exit reason holds the gate. Gate-holding exits: `clean`, and `diminishing-returns` once its advisory exit is taken. Any other exit holds nothing and stops that PR on every path: workflow script, state machine, or any step outside both. Local review that did not run (not configured, or skipped) neither holds nor blocks the PR.
+
+Loop-cap draft: at a loop cap, only the workflow script opens the PR as a draft whose body says why and lists open findings; validation still passes. Other paths stop.
 
 PR body must include: what changed and why, at the length the change needs; modified paths grouped by plan step; validation status; version and release notes when a bump applies.
 
@@ -57,10 +59,6 @@ PR body must include: what changed and why, at the length the change needs; modi
 
 ## Brood Execution
 
-When cerebrate finds the work splits into independent strains with minimal file-scope overlap, it may recommend `delivery: brood`. The overlord confirms with the user before dispatch, then in hatchery mode:
+When work splits into independent strains with minimal file-scope overlap, cerebrate may recommend `delivery: brood`. Once the user confirms, the overlord in hatchery mode spawns via `hivemind:spawn-brood`, monitors via `hivemind:brood-status` on demand and reports aggregate status when all strains finish.
 
-1. invokes `hivemind:spawn-brood` to spawn child sessions
-2. monitors via `hivemind:brood-status` on demand
-3. reports aggregate status when all strains complete
-
-Each child is a standard overlord with no brood awareness, so one plan = one branch = one PR holds per child; it handles its own version bumps, merge conflicts and PR ordering.
+Each child, a brood-unaware overlord with one plan, branch and PR, owns its version bumps, merge conflicts and PR ordering.

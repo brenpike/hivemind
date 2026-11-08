@@ -2,6 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 import { loadLibs, loadWorkflow } from './harness.mjs';
 import { readDataConstant } from '../../tools/build_workflows.mjs';
 
@@ -29,6 +30,24 @@ const MALFORMED_SCAN = 'The injection scan returned a result it could not use, s
 const MALFORMED_ANALYSIS = 'The planner returned a result that does not fit the analysis schema, so the analysis stopped.';
 const BUILD_ID = builtSource.match(/^const BUILD_ID = '([0-9a-f]{16})';$/m)[1];
 const FACTS_BLOCK = '<facts>\n' + JSON.stringify({ file: FACTS_FILE, lines: '812' }) + '\n</facts>';
+const main = loadMainFunctions(builtSource);
+const DEFECT_PROBLEM = 'A planner question fails the decision check, so the analysis stopped.';
+const NO_REASON_PROBLEM = 'The planner could not do the analysis: it gave no reason.';
+const FIX_PROMPT_LINE = 'Fix your result per the check block.';
+const CHECK_LIMIT_SUFFIX = ' It stayed after 2 retries.';
+
+/**
+ * Runs the built script with its last statement, the runAnalysis call, cut
+ * off and returns the context: each top-level function is a property of it.
+ */
+function loadMainFunctions(source) {
+  const lastStatement = '\nreturn await runAnalysis(args);\n';
+  assert.ok(source.endsWith(lastStatement), 'main.js ends with the runAnalysis call');
+  const body = source.replace(/^export const meta\b/m, 'const meta').slice(0, -lastStatement.length + 1);
+  const context = vm.createContext({});
+  vm.runInContext(body, context, { filename: 'analysis-only functions' });
+  return context;
+}
 
 function factsWithTexts(count) {
   return { ...FACTS_RAN, external_texts: String(count) };
@@ -86,6 +105,71 @@ async function runWorkflow(args, results) {
 
 function labelsOf(calls) {
   return calls.map((call) => call.opts.label);
+}
+
+function callOf(run, label) {
+  const call = run.calls.find((candidate) => candidate.opts.label === label);
+  assert.ok(call !== undefined, 'no call labeled ' + label);
+  return call;
+}
+
+function readDataBlock(prompt, name) {
+  const lines = prompt.split('\n');
+  const start = lines.indexOf('<' + name + '>');
+  assert.notEqual(start, -1, 'the prompt has a ' + name + ' block');
+  assert.equal(lines[start + 2], '</' + name + '>');
+  return JSON.parse(lines[start + 1]);
+}
+
+/**
+ * Returns the check retry labels of a call label, label-fix-1 and
+ * label-fix-2.
+ */
+function listFixLabels(label) {
+  return [label + '-fix-1', label + '-fix-2'];
+}
+
+/**
+ * Returns results that give label and each of its check retry labels the
+ * same result, so a result failing its check fails every retry.
+ */
+function repeatCheckResult(label, result) {
+  return Object.fromEntries([label, ...listFixLabels(label)].map((callLabel) => [callLabel, result]));
+}
+
+/**
+ * Returns the fix prompt a check retry sends: the first prompt with the fix
+ * line after its first line and the check block of problem and errors at
+ * its end.
+ */
+function expectedFixPrompt(prompt, problem, errors) {
+  const [taskLine, ...rest] = prompt.split('\n');
+  const checkBlock = '<check>\n' + JSON.stringify({ problem: problem, schema_errors: errors }).replace(/</g, '\\u003c') + '\n</check>';
+  return [taskLine, FIX_PROMPT_LINE, ...rest, checkBlock].join('\n');
+}
+
+/**
+ * Asserts that each retry call of label carries the fix prompt of the first
+ * call of label, with problem and errors in its check block.
+ */
+function assertFixPrompts(run, label, fixLabels, problem, errors) {
+  for (const fixLabel of fixLabels) {
+    assert.equal(callOf(run, fixLabel).prompt, expectedFixPrompt(callOf(run, label).prompt, problem, errors), fixLabel);
+  }
+}
+
+/**
+ * Asserts a run that ended blocked because the result of label failed its
+ * check on every retry: the lead is problem with the retry limit sentence,
+ * the Next line is the report line, no question is in the message, each
+ * retry prompt carries problem and errors, and label-fix-2 is the last call.
+ */
+function assertCheckLimitEnd(run, label, problem, errors) {
+  assert.deepEqual(run.result, stopResult(problem + CHECK_LIMIT_SUFFIX, 'report'));
+  assert.ok(!run.result.message.includes('Reply with an option'), run.result.message);
+  assertFixPrompts(run, label, listFixLabels(label), problem, errors);
+  assert.equal(labelsOf(run.calls).at(-1), label + '-fix-2');
+  assert.equal(labelsOf(run.calls).filter((callLabel) => callLabel.startsWith(label + '-fix-')).length, 2);
 }
 
 function plannerCalls(calls) {
@@ -598,23 +682,89 @@ describe('analysis-only: autonomy level', () => {
       assert.equal(run.result.message, lib.renderDecisionsCompact([{ brief: beyond }]) + '\n\nREPORT_TEXT');
     });
   }
-  for (const [strength, effort] of [['weak', 'small'], ['strong', 'medium'], ['strong', 'large']]) {
-    test(`a ${strength} recommendation of a ${effort} option beyond the request is asked as malformed_brief, its line marked`, async () => {
-      const beyond = makeBrief();
-      Object.assign(beyond.options[0], { beyond_request: true, effort: effort });
-      beyond.recommendation.strength = strength;
-      assert.equal(lib.decide({ kind: 'planner_question', brief: beyond }, readDataConstant(repoRoot, 'AUTONOMY_TABLE'), briefSchema).reason, 'malformed_brief');
-      const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: [beyond] }) });
-      assert.equal(run.result.needs_user, true);
-      assert.equal(run.result.message, ONE_QUESTION_LEAD + '\n\n' + lib.renderQuestions([{ brief: beyond, reason: 'malformed_brief' }]));
-      assert.ok(run.result.message.includes('- A: Hash the path. (recommended) This goes beyond what you asked for.'), run.result.message);
+  function makeBeyondBrief(strength, effort) {
+    const beyond = makeBrief();
+    Object.assign(beyond.options[0], { beyond_request: true, effort: effort });
+    beyond.recommendation.strength = strength;
+    return beyond;
+  }
+  const defectCases = [
+    { name: 'a weak recommendation of a small option beyond the request', brief: makeBeyondBrief('weak', 'small'), reason: 'malformed_brief' },
+    { name: 'a strong recommendation of a medium option beyond the request', brief: makeBeyondBrief('strong', 'medium'), reason: 'malformed_brief' },
+    { name: 'a strong recommendation of a large option beyond the request', brief: makeBeyondBrief('strong', 'large'), reason: 'malformed_brief' },
+    { name: 'a malformed brief', brief: makeBrief({ options: [] }), reason: 'malformed_brief' },
+    { name: 'a recommendation that names no option', brief: makeBrief({ recommendation: { option_id: 'Z', strength: 'strong', why: 'Less effort for more value.' } }), reason: 'recommendation_not_an_option' }
+  ];
+  for (const defectCase of defectCases) {
+    test(`${defectCase.name} is a ${defectCase.reason} defect: it goes back to the planner under analyze-fix-1, never asked`, async () => {
+      assert.equal(lib.decide({ kind: 'planner_question', brief: defectCase.brief }, readDataConstant(repoRoot, 'AUTONOMY_TABLE'), briefSchema).reason, defectCase.reason);
+      assert.ok(!lib.askReasons().includes(defectCase.reason));
+      const results = { analyze: makeAnalysis({ questions: [defectCase.brief] }), 'analyze-fix-1': makeAnalysis({ report: 'FIXED_REPORT' }), 'analyze-fix-2': makeAnalysis({ report: 'SECOND_FIX_REPORT' }) };
+      const run = await runWorkflow({ request: REQUEST }, results);
+      assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze', 'analyze-fix-1']);
+      assertFixPrompts(run, 'analyze', ['analyze-fix-1'], DEFECT_PROBLEM, []);
+      assert.deepEqual(readDataBlock(callOf(run, 'analyze-fix-1').prompt, 'check'), { problem: DEFECT_PROBLEM, schema_errors: [] });
+      assert.deepEqual(callOf(run, 'analyze-fix-1').opts, { ...callOf(run, 'analyze').opts, label: 'analyze-fix-1' });
+      assert.deepEqual(run.result, { needs_user: false, outcome: 'complete', message: 'FIXED_REPORT' });
     });
   }
-  test('a malformed brief is asked, not taken', async () => {
-    const malformed = makeBrief({ options: [] });
-    const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: [malformed] }) });
+  test('a defect brief still there after 2 retries finishes blocked with the report line, no question and no further call', async () => {
+    const defect = makeBrief({ options: [] });
+    const results = { ...repeatCheckResult('analyze', makeAnalysis({ questions: [defect] })), 'analyze-fix-3': makeAnalysis() };
+    const run = await runWorkflow({ request: REQUEST }, results);
+    assert.equal(main.maxCheckRetries(), 2);
+    assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze', 'analyze-fix-1', 'analyze-fix-2']);
+    assertCheckLimitEnd(run, 'analyze', DEFECT_PROBLEM, []);
+    assert.equal(run.result.message, 'A planner question fails the decision check, so the analysis stopped. It stayed after 2 retries.\n\n' + lib.nextStepLine('report'));
+  });
+  test('a defect fixed by the second retry goes on as a first result does', async () => {
+    const gated = makeGatedBrief('GATED_PROBLEM');
+    const results = { analyze: makeAnalysis({ questions: [makeBrief({ options: [] })] }), 'analyze-fix-1': makeAnalysis({ questions: [makeBeyondBrief('weak', 'small')] }), 'analyze-fix-2': makeAnalysis({ questions: [gated] }) };
+    const run = await runWorkflow({ request: REQUEST }, results);
+    assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze', 'analyze-fix-1', 'analyze-fix-2']);
+    assertFixPrompts(run, 'analyze', listFixLabels('analyze'), DEFECT_PROBLEM, []);
     assert.equal(run.result.needs_user, true);
-    assert.equal(run.result.message, ONE_QUESTION_LEAD + '\n\n' + lib.renderQuestions([{ brief: malformed, reason: 'malformed_brief' }]));
+    assert.equal(run.result.message, ONE_QUESTION_LEAD + '\n\n' + lib.renderQuestions([{ brief: gated, reason: 'gate_architectural' }]));
+  });
+  test('a revise-1 defect goes back to the planner under revise-1-fix-1, and the fixed result fills the answer log', async () => {
+    const results = {
+      analyze: makeAnalysis({ questions: [makeGatedBrief('FIRST_PROBLEM')] }),
+      'revise-1': reviseResult(makeAnalysis({ questions: [makeBrief({ options: [] })] }), []),
+      'revise-1-fix-1': reviseResult(makeAnalysis({ report: 'REPORT_ONE', questions: [makeGatedBrief('SECOND_PROBLEM')] }), ['Q1']),
+      'revise-2': reviseResult(makeAnalysis({ report: 'REPORT_TWO' }))
+    };
+    const run = await runWorkflow({ request: REQUEST, build: BUILD_ID, answers: { 'round-1': 'R1', 'round-2': 'R2' } }, results);
+    assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze', 'revise-1', 'revise-1-fix-1', 'revise-2']);
+    assertFixPrompts(run, 'revise-1', ['revise-1-fix-1'], DEFECT_PROBLEM, []);
+    assert.deepEqual(callOf(run, 'revise-1-fix-1').opts, { ...callOf(run, 'revise-1').opts, label: 'revise-1-fix-1' });
+    const answers = readDataBlock(callOf(run, 'revise-2').prompt, 'answers');
+    assert.deepEqual(answers.map((entry) => [entry.settled, entry.reply]), [[['Q1'], 'R1']]);
+    assert.ok(callOf(run, 'revise-2').prompt.includes('<earlier_report>\n' + JSON.stringify('REPORT_ONE') + '\n</earlier_report>'));
+    assert.deepEqual(run.result, { needs_user: false, outcome: 'complete', message: 'REPORT_TWO' });
+  });
+  test('a revise-2 defect goes back under revise-2-fix-1 and revise-2-fix-2, and still failing finishes blocked', async () => {
+    const results = {
+      analyze: makeAnalysis({ questions: [makeGatedBrief('FIRST_PROBLEM')] }),
+      'revise-1': reviseResult(makeAnalysis({ questions: [makeGatedBrief('SECOND_PROBLEM')] })),
+      ...repeatCheckResult('revise-2', reviseResult(makeAnalysis({ questions: [makeBeyondBrief('strong', 'large')] }))),
+      'revise-2-fix-3': reviseResult(makeAnalysis())
+    };
+    const run = await runWorkflow({ request: REQUEST, build: BUILD_ID, answers: { 'round-1': 'R1', 'round-2': 'R2' } }, results);
+    assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze', 'revise-1', 'revise-2', 'revise-2-fix-1', 'revise-2-fix-2']);
+    assertCheckLimitEnd(run, 'revise-2', DEFECT_PROBLEM, []);
+  });
+  test('pauseOrStopAsking throws on an ask whose reason is outside askReasons(), so only the Ask Set pauses', () => {
+    const brief = makeGatedBrief('GUARD_PROBLEM');
+    const pauseWith = (asks) => main.pauseOrStopAsking('GUARD_REPORT', { asks: asks, taken: [] }, 'GUARD_QUESTIONS', []);
+    for (const reason of ['malformed_brief', 'recommendation_not_an_option', 'unknown_kind', 'bad_cell', ...lib.listReasons(), 'auto']) {
+      assert.throws(() => pauseWith([{ brief: brief, reason: reason }]), new RegExp('^Error: pauseOrStopAsking: ask ' + reason + '$'), reason);
+      assert.throws(() => pauseWith([{ brief: brief, reason: 'gate_architectural' }, { brief: brief, reason: reason }]), new RegExp('^Error: pauseOrStopAsking: ask ' + reason + '$'), reason);
+    }
+    for (const reason of lib.askReasons()) {
+      const paused = pauseWith([{ brief: brief, reason: reason }]);
+      assert.equal(paused.needs_user, true, reason);
+      assert.equal(paused.message, ONE_QUESTION_LEAD + '\n\nGUARD_QUESTIONS', reason);
+    }
   });
 });
 
@@ -655,54 +805,85 @@ describe('analysis-only: planner failures', () => {
     assert.equal(run.result.message, stopMessage(NO_RESULT_PLANNER + ' ' + lib.describeNoResult(null), 'run_again'));
   });
   for (const analysis of ['REPORT_TEXT', [], 7]) {
-    test(`a non-object analyze result ${JSON.stringify(analysis)} finishes blocked with no agent-failure sentence`, async () => {
-      const run = await runWorkflow({ request: REQUEST }, { analyze: analysis });
-      assert.deepEqual(run.result, stopResult(NO_RESULT_PLANNER, 'report'));
+    test(`a non-object analyze result ${JSON.stringify(analysis)} goes back to the planner, and still failing finishes blocked with no agent-failure sentence`, async () => {
+      const run = await runWorkflow({ request: REQUEST }, repeatCheckResult('analyze', analysis));
+      assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze', 'analyze-fix-1', 'analyze-fix-2']);
+      assertCheckLimitEnd(run, 'analyze', NO_RESULT_PLANNER, ['$: type object expected']);
+      assert.ok(!run.result.message.includes(lib.describeNoResult(null)));
     });
   }
+  test('a non-object analyze result fixed by its retry finishes complete', async () => {
+    const run = await runWorkflow({ request: REQUEST }, { analyze: 'REPORT_TEXT', 'analyze-fix-1': makeAnalysis({ report: 'FIXED_REPORT' }) });
+    assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze', 'analyze-fix-1']);
+    assertFixPrompts(run, 'analyze', ['analyze-fix-1'], NO_RESULT_PLANNER, ['$: type object expected']);
+    assert.deepEqual(run.result, { needs_user: false, outcome: 'complete', message: 'FIXED_REPORT' });
+  });
   test('a planner outcome blocked finishes blocked with its blocker', async () => {
     const blocked = makeBlockedAnalysis({ blocker: 'The repository is empty.' });
     const run = await runWorkflow({ request: REQUEST }, { analyze: blocked });
     assert.equal(run.result.outcome, 'blocked');
     assert.equal(run.result.message, stopMessage('The planner could not do the analysis: it says "The repository is empty.".'));
   });
-  test('a planner outcome blocked with no blocker still gives a plain message', async () => {
-    const run = await runWorkflow({ request: REQUEST }, { analyze: makeBlockedAnalysis() });
-    assert.equal(run.result.message, stopMessage('The planner could not do the analysis: it gave no reason.'));
+  test('a planner outcome blocked with no blocker goes back to the planner, and still failing finishes blocked at the retry limit', async () => {
+    const run = await runWorkflow({ request: REQUEST }, repeatCheckResult('analyze', makeBlockedAnalysis()));
+    assertCheckLimitEnd(run, 'analyze', NO_REASON_PROBLEM, []);
+    assert.equal(run.result.message, stopMessage('The planner could not do the analysis: it gave no reason. It stayed after 2 retries.', 'report'));
   });
-  test('an empty report finishes blocked', async () => {
-    const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ report: '  ' }) });
+  test('a planner outcome blocked with a blank blocker fails the analysis schema, goes back to the planner, and its fix goes on', async () => {
+    const run = await runWorkflow({ request: REQUEST }, { analyze: makeBlockedAnalysis({ blocker: ' \n ' }), 'analyze-fix-1': makeAnalysis({ report: 'FIXED_REPORT' }) });
+    assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze', 'analyze-fix-1']);
+    assertFixPrompts(run, 'analyze', ['analyze-fix-1'], MALFORMED_ANALYSIS, ['$.blocker: type string: blank']);
+    assert.deepEqual(run.result, { needs_user: false, outcome: 'complete', message: 'FIXED_REPORT' });
+  });
+  test('an empty report goes back to the planner, and still failing finishes blocked', async () => {
+    const run = await runWorkflow({ request: REQUEST }, repeatCheckResult('analyze', makeAnalysis({ report: '  ' })));
     assert.equal(run.result.outcome, 'blocked');
-    assert.equal(run.result.message, stopMessage(MALFORMED_ANALYSIS, 'report'));
+    assertCheckLimitEnd(run, 'analyze', MALFORMED_ANALYSIS, ['$.report: type string: blank']);
+    assert.equal(run.result.message, stopMessage(MALFORMED_ANALYSIS + CHECK_LIMIT_SUFFIX, 'report'));
   });
   const malformedAnalyses = [
-    { name: 'a complete analysis with a blocker', analysis: makeAnalysis({ blocker: 'STRAY_BLOCKER' }) },
-    { name: 'a blocked analysis with a report', analysis: makeBlockedAnalysis({ report: 'STRAY_REPORT', blocker: 'The repository is empty.' }) },
-    { name: 'a complete analysis with no report', analysis: { outcome: 'complete', questions: [] } },
-    { name: 'an unknown outcome', analysis: makeAnalysis({ outcome: 'done' }) },
-    { name: 'questions that are not a list', analysis: makeAnalysis({ questions: 'none' }) },
-    { name: 'an analysis with no questions', analysis: { outcome: 'complete', report: 'REPORT_TEXT' } },
-    { name: 'an analysis with an unknown field', analysis: makeAnalysis({ extra: true }) }
+    { name: 'a complete analysis with a blocker', analysis: makeAnalysis({ blocker: 'STRAY_BLOCKER' }), errors: ['$: anyOf: matches no branch'] },
+    { name: 'a blocked analysis with a report', analysis: makeBlockedAnalysis({ report: 'STRAY_REPORT', blocker: 'The repository is empty.' }), errors: ['$: anyOf: matches no branch'] },
+    { name: 'a complete analysis with no report', analysis: { outcome: 'complete', questions: [] }, errors: ['$: anyOf: matches no branch'] },
+    { name: 'an unknown outcome', analysis: makeAnalysis({ outcome: 'done' }), errors: ['$: anyOf: matches no branch', '$.outcome: enum: not one of complete, blocked'] },
+    { name: 'questions that are not a list', analysis: makeAnalysis({ questions: 'none' }), errors: ['$.questions: type array expected'] },
+    { name: 'an analysis with no questions', analysis: { outcome: 'complete', report: 'REPORT_TEXT' }, errors: ['$: required: missing questions'] },
+    { name: 'an analysis with an unknown field', analysis: makeAnalysis({ extra: true }), errors: ['$: anyOf: matches no branch', '$: additionalProperties: unexpected extra'] }
   ];
   for (const malformedCase of malformedAnalyses) {
-    test(`${malformedCase.name} blocks as a malformed result`, async () => {
-      const run = await runWorkflow({ request: REQUEST }, { analyze: malformedCase.analysis });
-      assert.deepEqual(run.result, stopResult(MALFORMED_ANALYSIS, 'report'));
+    test(`${malformedCase.name} goes back to the planner with its schema errors, and still failing blocks as a malformed result`, async () => {
+      const run = await runWorkflow({ request: REQUEST }, repeatCheckResult('analyze', malformedCase.analysis));
+      assertCheckLimitEnd(run, 'analyze', MALFORMED_ANALYSIS, malformedCase.errors);
       assert.ok(!run.result.message.includes('STRAY_'));
     });
+    test(`${malformedCase.name} fixed by its retry goes on as a first result does`, async () => {
+      const run = await runWorkflow({ request: REQUEST }, { analyze: malformedCase.analysis, 'analyze-fix-1': makeAnalysis({ report: 'FIXED_REPORT' }) });
+      assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze', 'analyze-fix-1']);
+      assertFixPrompts(run, 'analyze', ['analyze-fix-1'], MALFORMED_ANALYSIS, malformedCase.errors);
+      assert.deepEqual(run.result, { needs_user: false, outcome: 'complete', message: 'FIXED_REPORT' });
+    });
   }
+  test('a check retry prompt lists at most 5 schema errors', async () => {
+    assert.equal(main.maxCheckErrors(), 5);
+    const manyErrors = { outcome: 'done', report: 7, blocker: 7, questions: 'none', extra: true, other: true };
+    const run = await runWorkflow({ request: REQUEST }, { analyze: manyErrors, 'analyze-fix-1': makeAnalysis() });
+    const check = readDataBlock(callOf(run, 'analyze-fix-1').prompt, 'check');
+    assert.equal(check.problem, MALFORMED_ANALYSIS);
+    assert.equal(check.schema_errors.length, 5);
+  });
   const unsettledRevises = [
-    { name: 'a complete revise result with no settled', revise: makeAnalysis() },
-    { name: 'a blocked revise result with no settled', revise: makeBlockedAnalysis({ blocker: 'STRAY_BLOCKER' }) },
-    { name: 'a revise result settling a label past the shown ones', revise: reviseResult(makeAnalysis(), ['Q2']) },
-    { name: 'a revise result settling a decision label not shown', revise: reviseResult(makeAnalysis(), ['D1']) }
+    { name: 'a complete revise result with no settled', revise: makeAnalysis(), errors: ['$: required: missing settled'] },
+    { name: 'a blocked revise result with no settled', revise: makeBlockedAnalysis({ blocker: 'STRAY_BLOCKER' }), errors: ['$: required: missing settled'] },
+    { name: 'a revise result settling a label past the shown ones', revise: reviseResult(makeAnalysis(), ['Q2']), errors: ['$.settled[0]: enum: not one of Q1'] },
+    { name: 'a revise result settling a decision label not shown', revise: reviseResult(makeAnalysis(), ['D1']), errors: ['$.settled[0]: enum: not one of Q1'] }
   ];
   for (const unsettledCase of unsettledRevises) {
-    test(`${unsettledCase.name} blocks as a malformed result`, async () => {
-      const results = { analyze: makeAnalysis({ questions: [makeGatedBrief('P')] }), 'revise-1': unsettledCase.revise };
+    test(`${unsettledCase.name} goes back to the planner under revise-1-fix-N, and still failing blocks as a malformed result`, async () => {
+      const results = { analyze: makeAnalysis({ questions: [makeGatedBrief('P')] }), ...repeatCheckResult('revise-1', unsettledCase.revise) };
       const run = await runWorkflow({ request: REQUEST, build: BUILD_ID, answers: { 'round-1': 'R1' } }, results);
-      assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze', 'revise-1']);
-      assert.deepEqual(run.result, stopResult(MALFORMED_ANALYSIS, 'report'));
+      assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze', 'revise-1', 'revise-1-fix-1', 'revise-1-fix-2']);
+      assertCheckLimitEnd(run, 'revise-1', MALFORMED_ANALYSIS, unsettledCase.errors);
+      assert.ok(!run.result.message.includes('STRAY_'));
     });
   }
   test('a blocked revise result with settled finishes blocked with its blocker', async () => {
@@ -710,10 +891,68 @@ describe('analysis-only: planner failures', () => {
     const run = await runWorkflow({ request: REQUEST, build: BUILD_ID, answers: { 'round-1': 'R1' } }, results);
     assert.deepEqual(run.result, stopResult('The planner could not do the analysis: it says "The repository is empty.".'));
   });
-  test('a malformed revise result blocks as a malformed result', async () => {
-    const results = { analyze: makeAnalysis({ questions: [makeGatedBrief('P')] }), 'revise-1': reviseResult(makeAnalysis({ blocker: 'STRAY_BLOCKER' })) };
+  test('a malformed revise result goes back to the planner, and still failing blocks as a malformed result', async () => {
+    const results = { analyze: makeAnalysis({ questions: [makeGatedBrief('P')] }), ...repeatCheckResult('revise-1', reviseResult(makeAnalysis({ blocker: 'STRAY_BLOCKER' }))) };
     const run = await runWorkflow({ request: REQUEST, build: BUILD_ID, answers: { 'round-1': 'R1' } }, results);
-    assert.deepEqual(run.result, stopResult(MALFORMED_ANALYSIS, 'report'));
+    assertCheckLimitEnd(run, 'revise-1', MALFORMED_ANALYSIS, ['$: anyOf: matches no branch']);
+    assert.ok(!run.result.message.includes('STRAY_'));
+  });
+  test('a malformed revise result fixed by its retry goes on as a first result does', async () => {
+    const results = { analyze: makeAnalysis({ questions: [makeGatedBrief('P')] }), 'revise-1': makeAnalysis(), 'revise-1-fix-1': reviseResult(makeAnalysis({ report: 'REVISED_REPORT' })) };
+    const run = await runWorkflow({ request: REQUEST, build: BUILD_ID, answers: { 'round-1': 'R1' } }, results);
+    assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze', 'revise-1', 'revise-1-fix-1']);
+    assertFixPrompts(run, 'revise-1', ['revise-1-fix-1'], MALFORMED_ANALYSIS, ['$: required: missing settled']);
+    assert.deepEqual(callOf(run, 'revise-1-fix-1').opts, { ...callOf(run, 'revise-1').opts, label: 'revise-1-fix-1' });
+    assert.deepEqual(run.result, { needs_user: false, outcome: 'complete', message: 'REVISED_REPORT' });
+  });
+  test('a null result or a blocked result that fits and gives a reason is never retried', async () => {
+    const fixes = { 'analyze-fix-1': makeAnalysis({ report: 'NOT_CALLED' }), 'revise-1-fix-1': reviseResult(makeAnalysis({ report: 'NOT_CALLED' })) };
+    const analyzeNull = await runWorkflow({ request: REQUEST }, { analyze: null, ...fixes });
+    assert.deepEqual(labelsOf(analyzeNull.calls), ['facts', 'analyze']);
+    assert.deepEqual(analyzeNull.result, stopResult(NO_RESULT_PLANNER + ' ' + lib.describeNoResult(null), 'run_again'));
+    const analyzeBlocked = await runWorkflow({ request: REQUEST }, { analyze: makeBlockedAnalysis({ blocker: 'The repository is empty.' }), ...fixes });
+    assert.deepEqual(labelsOf(analyzeBlocked.calls), ['facts', 'analyze']);
+    assert.deepEqual(analyzeBlocked.result, stopResult('The planner could not do the analysis: it says "The repository is empty.".'));
+    const resumed = { request: REQUEST, build: BUILD_ID, answers: { 'round-1': 'R1' } };
+    const gatedAnalysis = makeAnalysis({ questions: [makeGatedBrief('P')] });
+    const reviseNull = await runWorkflow(resumed, { analyze: gatedAnalysis, 'revise-1': null, ...fixes });
+    assert.deepEqual(labelsOf(reviseNull.calls), ['facts', 'analyze', 'revise-1']);
+    assert.deepEqual(reviseNull.result, stopResult(NO_RESULT_PLANNER + ' ' + lib.describeNoResult(null), 'run_again'));
+    const reviseBlocked = await runWorkflow(resumed, { analyze: gatedAnalysis, 'revise-1': reviseResult(makeBlockedAnalysis({ blocker: 'The repository is empty.' }), []), ...fixes });
+    assert.deepEqual(labelsOf(reviseBlocked.calls), ['facts', 'analyze', 'revise-1']);
+    assert.deepEqual(reviseBlocked.result, stopResult('The planner could not do the analysis: it says "The repository is empty.".'));
+  });
+  test('a null retry result ends the run as a null first result does', async () => {
+    const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ extra: true }), 'analyze-fix-1': null, 'analyze-fix-2': makeAnalysis() });
+    assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze', 'analyze-fix-1']);
+    assert.deepEqual(run.result, stopResult(NO_RESULT_PLANNER + ' ' + lib.describeNoResult(null), 'run_again'));
+  });
+  test('a resumed run replays each fix label from cache with a byte-identical prompt', async () => {
+    const launchArgs = { request: REQUEST };
+    const results = {
+      analyze: makeAnalysis({ questions: [makeBrief({ options: [] })] }),
+      'analyze-fix-1': makeAnalysis({ questions: [makeGatedBrief('FIRST_PROBLEM')] }),
+      'revise-1': makeAnalysis({ report: 'REPORT_ONE', questions: [makeGatedBrief('SECOND_PROBLEM')] }),
+      'revise-1-fix-1': reviseResult(makeAnalysis({ report: 'REPORT_ONE', questions: [makeGatedBrief('SECOND_PROBLEM')] })),
+      'revise-2': reviseResult(makeAnalysis({ report: 'REPORT_TWO' }))
+    };
+    const first = await runWorkflow(launchArgs, results);
+    assert.deepEqual(labelsOf(first.calls), ['facts', 'analyze', 'analyze-fix-1']);
+    assert.equal(first.result.needs_user, true);
+    const second = await runWorkflow(resumeWith(launchArgs, first.result, 'REPLY_ONE'), results);
+    assert.deepEqual(labelsOf(second.calls), ['facts', 'analyze', 'analyze-fix-1', 'revise-1', 'revise-1-fix-1']);
+    assert.equal(second.result.needs_user, true);
+    assert.deepEqual(second.result.resume_args, { answers: { 'round-1': 'REPLY_ONE' }, build: BUILD_ID });
+    const third = await runWorkflow(resumeWith(launchArgs, second.result, 'REPLY_TWO'), results);
+    assert.deepEqual(labelsOf(third.calls), ['facts', 'analyze', 'analyze-fix-1', 'revise-1', 'revise-1-fix-1', 'revise-2']);
+    for (const index of [0, 1, 2]) {
+      assert.equal(second.calls[index].prompt, first.calls[index].prompt, labelsOf(first.calls)[index]);
+    }
+    for (const index of [0, 1, 2, 3, 4]) {
+      assert.equal(third.calls[index].prompt, second.calls[index].prompt, labelsOf(second.calls)[index]);
+    }
+    assertFixPrompts(third, 'revise-1', ['revise-1-fix-1'], MALFORMED_ANALYSIS, ['$: required: missing settled']);
+    assert.equal(third.result.message, 'REPORT_TWO');
   });
 });
 
@@ -823,9 +1062,10 @@ describe('analysis-only: notice budget', () => {
     assert.ok(message.endsWith(lib.noticeMarker('shortened')));
   });
   test('many gated questions with long details pause in full with the lead and every label', async () => {
-    const gated = Array.from({ length: 10 }, (_, index) => makeLongGatedBrief(index, 20, 2400));
+    const gated = Array.from({ length: 10 }, (_, index) => makeLongGatedBrief(index, 20, 160));
     const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: gated }) });
     assertWithinNotice(run.result);
+    assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze']);
     assert.equal(run.result.needs_user, true);
     assert.deepEqual(run.result.resume_args, { answers: {}, build: BUILD_ID });
     const message = run.result.message;
@@ -837,9 +1077,10 @@ describe('analysis-only: notice budget', () => {
     }
   });
   test('gated questions too long for the notice pause with the lead and a hard cut', async () => {
-    const gated = Array.from({ length: 60 }, (_, index) => makeLongGatedBrief(index, 280, 2400));
+    const gated = Array.from({ length: 60 }, (_, index) => makeLongGatedBrief(index, 280, 160));
     const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: gated }) });
     assertWithinNotice(run.result);
+    assert.deepEqual(labelsOf(run.calls), ['facts', 'analyze']);
     assert.equal(run.result.needs_user, true);
     assert.deepEqual(run.result.resume_args, { answers: {}, build: BUILD_ID });
     const message = run.result.message;
@@ -872,7 +1113,7 @@ describe('analysis-only: notice budget', () => {
     }
   });
   test('a resume rebuilds the request from the launch args and gives revise the questions the user saw', async () => {
-    const gated = Array.from({ length: 10 }, (_, index) => makeLongGatedBrief(index, 20, 2400));
+    const gated = Array.from({ length: 10 }, (_, index) => makeLongGatedBrief(index, 20, 160));
     const results = {
       analyze: makeAnalysis({ questions: gated }),
       'revise-1': reviseResult(makeAnalysis({ report: 'REPORT_ONE', questions: [makeGatedBrief('SECOND_PROBLEM')] })),
@@ -904,12 +1145,14 @@ describe('analysis-only: notice budget', () => {
     assert.equal(run.calls.length, 0);
     assert.deepEqual(run.result, stopResult('No request was given, so there is nothing to analyze.'));
   });
-  test('a planner blocker over 400 code points fails the analysis schema and finishes blocked within the budget', async () => {
+  test('a planner blocker over 400 code points fails the analysis schema, goes back to the planner, and still failing finishes blocked within the budget', async () => {
     const blocker = 'BLOCKER_START ' + '<&> '.repeat(10000);
-    const run = await runWorkflow({ request: REQUEST }, { analyze: makeBlockedAnalysis({ blocker: blocker }) });
+    const run = await runWorkflow({ request: REQUEST }, repeatCheckResult('analyze', makeBlockedAnalysis({ blocker: blocker })));
     assertWithinNotice(run.result);
     assert.equal(run.result.outcome, 'blocked');
-    assert.equal(run.result.message, stopMessage(MALFORMED_ANALYSIS, 'report'));
+    assertCheckLimitEnd(run, 'analyze', MALFORMED_ANALYSIS, ['$.blocker: maxLength: more than 400 characters']);
+    assert.equal(run.result.message, stopMessage(MALFORMED_ANALYSIS + CHECK_LIMIT_SUFFIX, 'report'));
+    assert.ok(!callOf(run, 'analyze-fix-1').prompt.includes('BLOCKER_START'));
   });
   test('a planner blocker of 400 code points is quoted whole', async () => {
     const blocker = 'BLOCKER_START ' + '<&> '.repeat(95) + 'END_ZQ';
@@ -1405,10 +1648,10 @@ describe('analysis-only: blocked stop shape', () => {
   const RESUMED = { request: REQUEST, references: [12], build: BUILD_ID, answers: { 'round-1': 'R1' } };
   const UPSTREAM = { facts: factsWithTexts(1), scan: cleanScan(1), analyze: makeAnalysis({ questions: [makeGatedBrief('P')] }) };
   const stepCases = [
-    { label: 'facts', lead: MALFORMED_FACTS, malformed: {}, malformedLead: MALFORMED_FACTS },
-    { label: 'scan', lead: MALFORMED_SCAN, malformed: {}, malformedLead: MALFORMED_SCAN },
-    { label: 'analyze', lead: NO_RESULT_PLANNER, malformed: makeAnalysis({ extra: true }), malformedLead: MALFORMED_ANALYSIS },
-    { label: 'revise-1', lead: NO_RESULT_PLANNER, malformed: reviseResult(makeAnalysis({ extra: true })), malformedLead: MALFORMED_ANALYSIS }
+    { label: 'facts', lead: MALFORMED_FACTS, malformed: {}, malformedLead: MALFORMED_FACTS, retried: false },
+    { label: 'scan', lead: MALFORMED_SCAN, malformed: {}, malformedLead: MALFORMED_SCAN, retried: false },
+    { label: 'analyze', lead: NO_RESULT_PLANNER, malformed: makeAnalysis({ extra: true }), malformedLead: MALFORMED_ANALYSIS + CHECK_LIMIT_SUFFIX, retried: true },
+    { label: 'revise-1', lead: NO_RESULT_PLANNER, malformed: reviseResult(makeAnalysis({ extra: true })), malformedLead: MALFORMED_ANALYSIS + CHECK_LIMIT_SUFFIX, retried: true }
   ];
   function countSentence(message) {
     return message.split(lib.describeNoResult(null)).length - 1;
@@ -1422,8 +1665,9 @@ describe('analysis-only: blocked stop shape', () => {
       assert.equal(countSentence(run.result.message), 1);
     });
     test(`a malformed non-null ${stepCase.label} result gives the lead alone, then the report line`, async () => {
-      const run = await runWorkflow(RESUMED, { ...UPSTREAM, [stepCase.label]: stepCase.malformed });
-      assert.equal(labelsOf(run.calls).at(-1), stepCase.label);
+      const malformedResults = stepCase.retried ? repeatCheckResult(stepCase.label, stepCase.malformed) : { [stepCase.label]: stepCase.malformed };
+      const run = await runWorkflow(RESUMED, { ...UPSTREAM, ...malformedResults });
+      assert.equal(labelsOf(run.calls).at(-1), stepCase.retried ? stepCase.label + '-fix-2' : stepCase.label);
       assert.equal(run.result.outcome, 'blocked');
       assert.deepEqual(run.result.message.split('\n\n'), [stepCase.malformedLead, lib.nextStepLine('report')]);
       assert.equal(countSentence(run.result.message), 0);

@@ -100,11 +100,12 @@ function semverCorePattern() {
 }
 
 function versionCheckRoutingSpec() {
-  return Object.assign(bumpTypeRoutingSpec(), {
+  return {
+    ...bumpTypeRoutingSpec(),
     version_check: { pattern: /^(?:match|mismatch|unreadable|undetermined)$/, required: true },
     trunk_version: { pattern: semverCorePattern(), required: false },
     expected_version: { pattern: semverCorePattern(), required: false }
-  });
+  };
 }
 
 function isConsistentBumpRelay(values) {

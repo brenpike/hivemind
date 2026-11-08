@@ -277,6 +277,16 @@ function readRelayAction(stderr, isRefusedFirst = false) {
   return isRefusedFirst || quoteRelayBlocker(stderr) === undefined || isGateDenial(stderr) ? 'report' : undefined;
 }
 
+/**
+ * Returns describeUnusableResult of relay, a relay of the stepNoun step
+ * that fails RELAY_SCHEMA, or when isRead is true whose routing lines do not read,
+ * with stopped, the rest of the sentence, after it.
+ */
+function describeUnusableRelay(relay, stepNoun, stopped, isRead) {
+  const what = isRead ? 'malformed routing lines' : 'a result it could not use';
+  return describeUnusableResult('The ' + stepNoun + ' step returned ' + what + ', ' + stopped, relay);
+}
+
 function readRelayedLines(relay, spec) {
   if (typeof relay.stdout !== 'string') {
     return undefined;
@@ -345,7 +355,7 @@ async function runPassScan(facts, run) {
   phase('Scan');
   const isFirstPass = run.pass === 1;
   const prompt = isFirstPass ? buildScanPrompt(facts) : addResumeNote(buildScanPrompt(facts), run);
-  const scan = await agent(prompt, isFirstPass ? scanOptions() : Object.assign(scanOptions(), { label: 'scan-' + run.pass }));
+  const scan = await agent(prompt, isFirstPass ? scanOptions() : { ...scanOptions(), label: 'scan-' + run.pass });
   const problem = describeScanProblem(scan, facts, RUN_NOUN);
   if (problem === undefined) {
     return undefined;
@@ -368,7 +378,7 @@ async function runFactsStep(run) {
   run.factsStem = /facts-([^/]+)\.json$/.exec(checked.facts.facts_file)[1];
   run.pluginRoot = checked.facts.plugin_root;
   const scanned = await runPassScan(checked.facts, run);
-  return scanned === undefined ? checked : scanned;
+  return scanned ?? checked;
 }
 
 function listBranchWords(plan, freshness, trunk) {
@@ -382,14 +392,14 @@ function buildBranchPrompt(words, pluginRoot) {
 function checkBranchRelay(relay, plan, freshness) {
   const stopped = 'so ' + RUN_NAME + ' stopped before any wave.';
   if (!validateSchema(RELAY_SCHEMA, relay).ok) {
-    return describeUnusableResult('The branch step returned a result it could not use, ' + stopped, relay);
+    return describeUnusableRelay(relay, 'branch', stopped);
   }
   if (relay.outcome === 'blocked') {
     return { problem: 'The branch step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true), terminal: true, nextAction: readRelayAction(relay.stderr) };
   }
   const values = readRelayedLines(relay, createWorkingBranchRoutingSpec());
   if (values === undefined || values.warning !== branchWarningTexts()[freshness]) {
-    return describeUnusableResult('The branch step returned malformed routing lines, ' + stopped, relay);
+    return describeUnusableRelay(relay, 'branch', stopped, true);
   }
   if (values.branch !== plan.branch) {
     return { problem: 'The branch step reported a branch other than the plan branch, ' + stopped, terminal: true };
@@ -490,14 +500,14 @@ function checkCommitRelay(relay, plan, stepName) {
   const stepNoun = commitStepTexts(stepName).noun;
   const stopped = 'so ' + RUN_NAME + ' stopped. Check the branch for a commit of ' + stepNoun + '.';
   if (!validateSchema(RELAY_SCHEMA, relay).ok) {
-    return describeUnusableResult('The commit step returned a result it could not use, ' + stopped, relay);
+    return describeUnusableRelay(relay, 'commit', stopped);
   }
   if (relay.outcome === 'blocked') {
     return { problem: describeCommitBlocker(relay.stderr, stepNoun), terminal: true, nextAction: readRelayAction(relay.stderr) };
   }
   const values = readRelayedLines(relay, moltRoutingSpec());
   if (values === undefined) {
-    return describeUnusableResult('The commit step returned malformed routing lines, ' + stopped, relay);
+    return describeUnusableRelay(relay, 'commit', stopped, true);
   }
   if (values.branch !== plan.branch) {
     return { problem: 'The commit step reported a branch other than the plan branch, ' + stopped, terminal: true };
@@ -514,7 +524,7 @@ async function runCommitStep(run, plan, commit, stepCauses) {
   if (!Array.isArray(stepCauses)) {
     throw new Error('runCommitStep: stepCauses must be an array');
   }
-  const subject = commit.subject === undefined ? commitStepTexts(commit.stepName).subject : commit.subject;
+  const subject = commit.subject ?? commitStepTexts(commit.stepName).subject;
   const isReplan = commit.stepName === 'wave';
   phase('Commit');
   const listWords = (label) => listCommitWords(run.trunk, buildInputsPath(run, 'molt', label));

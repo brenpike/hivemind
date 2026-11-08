@@ -117,8 +117,9 @@
  *   A non-null scope, plan or revise result that fails its check, other
  *   than a planner blocked outcome that gives a reason, goes back to its
  *   agent with the check, up to maxCheckRetries() times
- *   (buildCheckFixPrompt, checks.js); a result still failing then is a
- *   terminal stop with next action report (describeCheckLimit), so a check
+ *   (buildCheckFixPrompt, lib/retry.js); a result still failing then is a
+ *   terminal stop with next action report (describeCheckLimit,
+ *   lib/retry.js), so a check
  *   slip never asks the user.
  *   Every undecided question, a step_stop, a version question, the fix
  *   limit and the gate rerun limit, resolves through decide() in
@@ -135,6 +136,9 @@
  *   listAnswerEntries(run) puts one settled entry per decision ahead of
  *   run.answerLog, and only the scope, plan and revise prompts read it;
  *   run.answerLog, its rounds and resume_args never hold a decision.
+ *   run.open, the open findings of the last usable review, and run.waits,
+ *   the waits for an outside service the run made, start [] and 0
+ *   (review.js waitForService).
  *   run.approvals starts [] and changes only through applyApprovalChoices
  *   (approvals.js) at each reply round, so it holds only the destructive
  *   changes the user's own replies approved, never a decision the run took.
@@ -275,7 +279,7 @@
  *   Labels come only from the pass, the round, the step id, the wave
  *   number, the gate step with its run count (gateLabel), and a check
  *   retry's '-fix-N' suffix on its call's label, N from 1 to
- *   maxCheckRetries(), so each is
+ *   maxCheckRetries() (lib/retry.js), so each is
  *   unique and a resume replays every earlier prompt byte for byte and gets
  *   every earlier result, side effects included, from cache. A commit or
  *   pull request inputs path is the pass's facts file stem, run.factsStem,
@@ -326,10 +330,6 @@ function maxReplans() {
   return 3;
 }
 
-function maxCheckRetries() {
-  return 2;
-}
-
 function maxFixRounds() {
   return 3;
 }
@@ -340,6 +340,14 @@ function maxGateReruns() {
 
 function maxReviewIterations() {
   return 10;
+}
+
+function maxServiceWaits() {
+  return 6;
+}
+
+function maxWaitMinutes() {
+  return 60;
 }
 
 function maxTitleLength() {
@@ -434,7 +442,7 @@ function readDecisions(argsObject) {
  */
 function listAnswerEntries(run) {
   const label = questionLabel(0);
-  const decisionEntries = run.decisions.map((decision) => buildAnswerEntry({ question: label + '. A decision you settled before the run started.', labels: [label], chosen: [{ label: label }], reply: decision }, undefined));
+  const decisionEntries = run.decisions.map((decision) => buildAnswerEntry({ question: label + '. A decision you settled before the run started.', labels: [label], chosen: [{ label: label }], reply: decision }));
   return decisionEntries.concat(run.answerLog);
 }
 
@@ -456,6 +464,8 @@ function createRunState(launch) {
     approvals: [],
     rejected: [],
     undone: [],
+    open: [],
+    waits: 0,
     head: undefined,
     branch: undefined,
     headRound: undefined,
@@ -483,13 +493,14 @@ function keepReplanReview(passEnd, replan) {
 }
 
 async function runDeliveryPass(run, replan) {
+  const stopPass = (cause) => keepReplanReview(stopDelivery([cause], run, [], true), replan);
   const checked = await runFactsStep(run);
   if (checked.problem !== undefined) {
-    return keepReplanReview(stopDelivery([checked], run, [], true), replan);
+    return stopPass(checked);
   }
   const scoped = await runScopeStep(run, checked.facts);
   if (scoped.problem !== undefined) {
-    return keepReplanReview(stopDelivery([scoped], run, [], true), replan);
+    return stopPass(scoped);
   }
   const planned = await runPlanningPass(run, checked.facts, scoped.scope, replan);
   if (planned.plan === undefined) {
@@ -497,7 +508,7 @@ async function runDeliveryPass(run, replan) {
   }
   const branched = await runBranchStep(run, planned.plan, planned.freshness);
   if (branched.problem !== undefined) {
-    return keepReplanReview(stopDelivery([branched], run, [], true), replan);
+    return stopPass(branched);
   }
   if (needsBranchReplan(branched.values, checked.facts, planned.plan)) {
     return requestBranchReplan(run);

@@ -80,6 +80,7 @@ const questionGateParagraph = stateExecutionSection.split('\n\n').find((paragrap
 const engineSentences = engineSection.split(/(?<=[.!?])\s+/);
 const handOffParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('After you show `message`, when the result carries `pr`,')) ?? '';
 const stopParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('When the user asks to stop a launched run')) ?? '';
+const waitParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('When the result carries `retry_minutes`,')) ?? '';
 
 function readDeliveryLaunchArgNames() {
   const template = engineSection.match(/only these args: `(\{[^`]*\})`/);
@@ -171,9 +172,21 @@ describe('overlord Engine section', () => {
       assert.ok(!engineSection.includes(phrase), `## Engine still contains ${phrase}`);
     }
   });
-  test('Engine does not mention Bash', () => {
-    const bashCount = (engineSection.match(/Bash/g) ?? []).length;
-    assert.equal(bashCount, 0, '## Engine mentions Bash');
+  test('Engine mentions Bash only in the retry wait paragraph', () => {
+    const bashCount = (engineSection.replace(waitParagraph, '').match(/Bash/g) ?? []).length;
+    assert.equal(bashCount, 0, '## Engine mentions Bash outside the retry wait paragraph');
+  });
+  test('Engine waits out retry_minutes with one background sleep, then resumes with reply retry', () => {
+    assert.notEqual(waitParagraph, '', '## Engine has no paragraph starting When the result carries `retry_minutes`,');
+    for (const phrase of [
+      'show `message`, then wait with one `sleep <retry_minutes*60>` Bash call run with `run_in_background`, per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Bash Command Discipline).',
+      'On its completion notice, resume the same run by name exactly as for a reply, with `reply` set to `retry`.',
+      'The wait is neither a question nor a run end: nothing is asked; `retry` is not an answer for the user.',
+      'A user message during the wait that cancels the request ends the wait with no resume.',
+      'The run bounds its own waits.',
+    ]) {
+      assert.ok(waitParagraph.includes(phrase), `retry wait paragraph lacks ${phrase}`);
+    }
   });
   test('Engine launch args name the trunk and references', () => {
     for (const phrase of ['"trunk": "<the resolved trunk>"', '"references": [']) {
@@ -339,7 +352,7 @@ describe('overlord workflow definition reads', () => {
     }
   });
   test('the Question gate reruns the state that asked with user_answer', () => {
-    for (const phrase of ['run the state that asked again and pass `user_answer`', 'the user\'s reply verbatim', '`candidate_url`', 'take it as their `user_answer` input', 'the user\'s decision on that question']) {
+    for (const phrase of ['run the state that asked again and pass `user_answer`', 'the user\'s reply verbatim', '`candidate_url`', 'take it as their `user_answer` input', '`hivemind:cerebrate` gets it in the delegation as the decision on that question: the run\'s when marked `decided_by: run`, otherwise the user\'s.']) {
       assert.ok(questionGateParagraph.includes(phrase), `Question gate paragraph lacks ${phrase}`);
     }
   });

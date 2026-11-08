@@ -6,8 +6,10 @@
  * Inputs
  *   run     the run state of main.js createRunState, or undefined when the
  *           launch check failed: reversibleEffects, notRunGates, taken,
- *           approvals, branch, head, headRound, waveCount and answerLog.
- *   gates   the gate loop state of runGates (gates.js), once the gates ran.
+ *           approvals, branch, head, headRound, waveCount, answerLog and
+ *           open, the findings local review left open.
+ *   gates   the gate loop state of runGates (gates.js), once the gates ran:
+ *           notes, slow and draft.
  *   lead    the what-happened line of a pause, built by its call site.
  *   causes  the causes of a stop, {problem, nextAction?, terminal?,
  *           agentFailure?, holds?} each: terminal true marks a cause no
@@ -15,10 +17,12 @@
  *           describeUnusableResult, and a cause with next action approve
  *           carries holds, its held items {stepId, category, item}, never
  *           empty.
- *   endLines  lines a stop shows after its causes, such as a commit end.
+ *   endLines  lines a stop shows after its causes, such as a commit end,
+ *           [] when left out.
  *   commit, branch  a head read from a checked relay: the commit line of
  *           a molt relay or of a branch relay, and the plan branch.
- *   isReplan  true when a reply to a stop plans again from fresh facts.
+ *   isReplan  true when a reply to a stop plans again from fresh facts,
+ *           false when left out.
  *   result.js finish, which builds a blocked message from the causes,
  *   pauseForUser and the fit helpers, and brief.js renderQuestions,
  *   renderOpenQuestions, renderDecisionsCompact and
@@ -37,10 +41,16 @@
  *           to branch and run.headRound to the run.answerLog length.
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
  *           request body and its comment carry, with no commit list, in
- *           order: the reversible effects, the gates, the slow test cases
+ *           order: when gates.draft is set the plain draft line naming its
+ *           reason, the reversible effects, the gates, when gates.draft is
+ *           set and run.open (undefined read as []) is not empty the open
+ *           findings, one line each of the short id and the title through
+ *           quoteOpenTitle, cut to a hard bound, under one label, external,
+ *           the slow test cases
  *           of gates.slow when it is not empty, the rejected findings
  *           block of buildRejectedFindingsBlock (review.js) when run.rejected
- *           or run.undone is not empty, the approvals of run.approvals one
+ *           or run.undone is not empty, its note did not hold when the
+ *           review gate never held, the approvals of run.approvals one
  *           line each through renderDestructiveChange under one label, then
  *           the decisions through renderDecisionsCompact alone. Each taken
  *           entry keeps its kind and listed, so the routine ones drop out.
@@ -99,7 +109,8 @@
  *           (ADR-0037 decision 3).
  *   finishDeliveryComplete  one line naming the pull request opened or
  *           pushed to and its commit, one line naming the gates that held and
- *           any gate not configured, the warning line when there is one, the
+ *           any gate not configured, or when gates.draft is set the line
+ *           naming the draft and its reason, the warning line when there is one, the
  *           rejected findings block when run.rejected or run.undone is not
  *           empty, then the reversible effects and the shown taken
  *           decisions, one line each.
@@ -188,26 +199,42 @@ function renderSlowTests(cases) {
   return ['Slow test cases that passed only when run alone:', ...cases.map((name) => '- ' + encodeUntrustedText(name))].join('\n');
 }
 
+/**
+ * Returns title encoded by encodeUntrustedText, cut so its messageCost
+ * stays within maxExcerptLength(), ', shortened' added when cut.
+ */
+function quoteOpenTitle(title) {
+  const kept = title.slice(0, findLongestCut(title, maxExcerptLength(), encodeUntrustedText));
+  return encodeUntrustedText(kept) + (kept === title ? '' : ', shortened');
+}
+
 function hasListedFindings(run) {
   return run.rejected.length > 0 || run.undone.length > 0;
 }
 
 function buildRunRecordParts(run, taken, gates) {
   const shown = taken.filter(isShownDecision);
-  const parts = [];
+  const isDraft = gates !== undefined && gates.draft !== undefined;
+  const parts = isDraft ? [{ id: 'draft', text: 'This pull request is a draft: ' + gates.draft, external: false }] : [];
   if (run.reversibleEffects.length > 0) {
     parts.push({ id: 'reversible_effects', text: renderReversibleEffects(run.reversibleEffects), external: true });
   }
-  if (gates !== undefined) {
+  if (gates === undefined) {
+    if (run.notRunGates.length > 0) {
+      parts.push({ id: 'gates', text: renderNotRunGates(run.notRunGates), external: false });
+    }
+  } else {
     parts.push({ id: 'gates', text: renderPullRequestGates(run, gates), external: false });
-  } else if (run.notRunGates.length > 0) {
-    parts.push({ id: 'gates', text: renderNotRunGates(run.notRunGates), external: false });
-  }
-  if (gates !== undefined && gates.slow.length > 0) {
-    parts.push({ id: 'slow_tests', text: renderSlowTests(gates.slow), external: true });
-  }
-  if (gates !== undefined && hasListedFindings(run)) {
-    parts.push({ id: 'rejected_findings', text: buildRejectedFindingsBlock(gates.notes.review, run.rejected, run.undone).text, external: true });
+    const openLines = (isDraft ? run.open ?? [] : []).map((finding) => '- ' + quoteShortFindingId(finding.finding_id) + ': ' + quoteOpenTitle(finding.title));
+    if (openLines.length > 0) {
+      parts.push({ id: 'open_findings', text: ['Findings local review left open:', ...openLines].join('\n'), external: true });
+    }
+    if (gates.slow.length > 0) {
+      parts.push({ id: 'slow_tests', text: renderSlowTests(gates.slow), external: true });
+    }
+    if (hasListedFindings(run)) {
+      parts.push({ id: 'rejected_findings', text: buildRejectedFindingsBlock(gates.notes.review ?? 'did not hold', run.rejected, run.undone).text, external: true });
+    }
   }
   if (run.approvals.length > 0) {
     parts.push({ id: 'approvals', text: renderApprovals(run.approvals), external: true });
@@ -261,12 +288,12 @@ function describeHeldGates(run) {
 
 function finishDeliveryComplete(run, plan, prValues, gates) {
   const pr = { url: prValues.url, head_ref_oid: prValues.head_ref_oid, created: prValues.created === 'true' };
-  const blocks = [{ text: describePullRequest(prValues) }, { text: describeHeldGates(run) }];
+  const blocks = [{ text: describePullRequest(prValues) }, { text: gates.draft === undefined ? describeHeldGates(run) : 'The pull request is a draft: ' + gates.draft }];
   if (prValues.warning !== undefined) {
     blocks.push({ text: 'The pull request step warned: ' + prValues.warning + '.' });
   }
   if (hasListedFindings(run)) {
-    blocks.push(buildRejectedFindingsBlock(gates.notes.review, run.rejected, run.undone));
+    blocks.push(buildRejectedFindingsBlock(gates.notes.review ?? 'did not hold', run.rejected, run.undone));
   }
   blocks.push(...buildRecordTailBlocks(run, run.taken));
   return finish({ outcome: 'complete', blocks: blocks, pr: pr });
@@ -322,7 +349,7 @@ function listStopAsks(leadCause, run, isReplan) {
   return [{ ...buildUndecidedAsk(STEP_STOP_KIND, buildStepStopBrief(isReplan), run), stop: 'fix_cause' }];
 }
 
-function stopDelivery(causes, run, endLines, isReplan) {
+function stopDelivery(causes, run, endLines = [], isReplan = false) {
   const leadCause = orderStopCauses(causes)[0];
   const isAsked = stopAskActions().includes(readStopAction(leadCause.nextAction));
   if (!isAsked || causes.some((cause) => cause.terminal === true || cause.agentFailure === true)) {

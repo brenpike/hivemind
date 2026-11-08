@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.6.9] - 2026-11-07
+
+### Changed
+
+- `standard-delivery` at a loop cap (local review iteration limit, break-fix-break, replan cap, gate rerun cap, outside-service wait cap) opens a draft PR that says why and lists the open findings, instead of asking (#549).
+- Validation still must pass. The validation fix limit still asks.
+- When local review is blocked by an outside service that states a retry time (for example a Codex usage limit), the run waits it out by itself and resumes. At most 60 minutes per wait, 6 waits.
+- `analysis-only` sends malformed planner briefs back to the planner (at most 2 retries) instead of asking.
+- A decision the run takes for the user is recorded as the run's (`decided_by`), not the user's.
+- ADR-0037 amendment 2026-11-07 (PR 2).
+
+The built `standard-delivery` length is 189872 of 190000 and its prose 43423 of 43800. The analysis-only prose is 15740 of 16050. No budget raised: the built script was trimmed by merging duplicate code.
+
+Closes #549.
+
 ## [7.6.8] - 2026-11-07
 
 ### Changed

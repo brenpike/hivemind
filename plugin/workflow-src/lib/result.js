@@ -6,6 +6,10 @@
  *     resumeArgs  plain JSON object, the args to relaunch with before the
  *                 reply is added, with no replyField() key and canCarry true.
  *     blocks      the text the user reads, as below.
+ *   pauseForRetry({resumeArgs, retryMinutes, blocks})
+ *     resumeArgs, blocks  as for pauseForUser.
+ *     retryMinutes  a positive safe integer, the minutes to wait before the
+ *                 run resumes.
  *   finish({outcome, causes, blocks, pr})
  *     outcome     'complete' or 'blocked'.
  *     causes      as for buildStopBlocks (lib/stop.js), given exactly when
@@ -34,6 +38,9 @@
  *
  * Outputs
  *   pauseForUser  {needs_user: true, resume_args, message}
+ *   pauseForRetry {needs_user: false, retry_minutes, resume_args, message}:
+ *                 a wait, not an ask. The run resumes after retry_minutes
+ *                 with no user reply, and the message tells the user why.
  *   finish        {needs_user: false, outcome, pr?, message}, with pr only
  *                 when given. Blocked: buildStopBlocks(causes), then blocks.
  *   message       the blocks fitted to the completion notice, see Size.
@@ -45,6 +52,8 @@
  *   canPause      true when pausesSoFar is below pauseLimit().
  *   noticeBudget  the most notice chars a whole result may take.
  *   noticeLength  the chars value takes in the completion notice.
+ *   isPlainObject  true for an object that is not null and not an array.
+ *   isNonEmptyString  true for a string that is not blank.
  *   canCarry      true when a pause result with resumeArgs and an empty
  *                 message takes at most half of noticeBudget().
  *   maxExcerptLength  200, the code points of a quoted excerpt.
@@ -71,14 +80,15 @@
  *                 undefined. A reason is quoted whole up to 600 code points.
  *
  * Contract the overlord relays
- *   The relay and resume rule has one home,
+ *   The relay, resume and wait rule has one home,
  *   ${CLAUDE_PLUGIN_ROOT}/agents/overlord.md (## Engine), and is not
  *   restated here.
  *
  * Size
  *   The harness cuts the completion notice at a fixed length of the escaped
- *   result text. Every result pauseForUser or finish returns has a
- *   noticeLength of at most noticeBudget(), so the notice is never cut.
+ *   result text. Every result pauseForUser, pauseForRetry or finish
+ *   returns has a noticeLength of at most noticeBudget(), so the notice is
+ *   never cut.
  *   The message is the first tier that fits the room the other fields leave:
  *     T0  every block text, joined with blank lines. No marker.
  *     T1  needs a shorten block. Earlier block texts as they are, then the
@@ -92,7 +102,7 @@
  *         block: every block up to and including it stays intact.
  *   A whole block shows as its text, or as its compact form in T2 and T3,
  *   and is never cut. When even the T3 text cannot keep every whole block
- *   intact, pauseForUser and finish throw.
+ *   intact, pauseForUser, pauseForRetry and finish throw.
  *   Every marker says the text was shortened to fit the completion notice
  *   and that the full text is in this run's per-agent results.
  *   A cut never splits a surrogate pair.
@@ -115,7 +125,8 @@
  *   nothing the overlord could not get by misquoting the reply
  *   (ADR-0036 decision 13).
  *   Invalid input throws instead of returning a partial result.
- *   message is the last key, after needs_user, outcome, resume_args and pr.
+ *   message is the last key, after needs_user, outcome, retry_minutes,
+ *   resume_args and pr.
  *   Encode at output: every step- or script-written diagnostic or name a
  *   workflow puts in a message goes through encodeUntrustedText, most
  *   through quoteDiagnostic or describeReason, so it shows as one quoted
@@ -150,7 +161,7 @@
  */
 
 function resultFields() {
-  return ['needs_user', 'outcome', 'resume_args', 'pr', 'message'];
+  return ['needs_user', 'outcome', 'retry_minutes', 'resume_args', 'pr', 'message'];
 }
 
 function replyField() {
@@ -187,10 +198,7 @@ function noticeLength(value) {
    * as &amp;, 4 more chars, whether or not the notice escapes it. Lengths
    * are UTF-16 code units, as the cut counts them.
    */
-  const jsonText = JSON.stringify(value);
-  if (typeof jsonText !== 'string') {
-    throw new Error('noticeLength: value must be JSON serializable');
-  }
+  const jsonText = stringifyValue('noticeLength', value);
   return jsonText.length
     + 3 * countCharacter(jsonText, '<')
     + 3 * countCharacter(jsonText, '>')
@@ -247,11 +255,19 @@ function toPrintableAscii(text) {
 }
 
 function encodeUntrustedText(value) {
+  return toPrintableAscii(stringifyValue('encodeUntrustedText', value));
+}
+
+/**
+ * Returns JSON.stringify(value). Throws, naming caller, when value is not
+ * JSON serializable.
+ */
+function stringifyValue(caller, value) {
   const jsonText = JSON.stringify(value);
   if (typeof jsonText !== 'string') {
-    throw new Error('encodeUntrustedText: value must be JSON serializable');
+    throw new Error(caller + ': value must be JSON serializable');
   }
-  return toPrintableAscii(jsonText);
+  return jsonText;
 }
 
 function quoteDiagnostic(text, limit = maxExcerptLength()) {
@@ -278,8 +294,23 @@ function canCarry(resumeArgs) {
 }
 
 function pauseForUser({ resumeArgs, blocks }) {
-  const paused = buildEmptyPause('pauseForUser', resumeArgs, blocks);
-  paused.message = fitWholeMessage('pauseForUser', blocks, roomForMessage(paused));
+  return fitPause('pauseForUser', buildEmptyPause('pauseForUser', resumeArgs, blocks), blocks);
+}
+
+function pauseForRetry({ resumeArgs, retryMinutes, blocks }) {
+  if (!Number.isSafeInteger(retryMinutes) || retryMinutes < 1) {
+    throw new Error('pauseForRetry: retryMinutes must be a positive safe integer');
+  }
+  const emptyPause = buildEmptyPause('pauseForRetry', resumeArgs, blocks);
+  return fitPause('pauseForRetry', { needs_user: false, retry_minutes: retryMinutes, resume_args: emptyPause.resume_args, message: '' }, blocks);
+}
+
+/**
+ * Returns paused with its message set to blocks fitted whole to the room
+ * the other fields leave, for caller, a pause function name.
+ */
+function fitPause(caller, paused, blocks) {
+  paused.message = fitWholeMessage(caller, blocks, roomForMessage(paused));
   return assertWithinBudget(paused);
 }
 
@@ -308,10 +339,10 @@ function finish({ outcome, causes, blocks, pr }) {
 }
 
 function buildEmptyPause(caller, resumeArgs, blocks) {
-  if (!isResultRecord(resumeArgs)) {
+  if (!isPlainObject(resumeArgs)) {
     throw new Error(caller + ': resumeArgs must be a plain object');
   }
-  if (Object.prototype.hasOwnProperty.call(resumeArgs, replyField())) {
+  if (Object.hasOwn(resumeArgs, replyField())) {
     throw new Error(caller + ': resumeArgs must not have a ' + replyField() + ' key');
   }
   if (!canCarry(resumeArgs)) {
@@ -330,7 +361,7 @@ function fitWholeMessage(caller, blocks, room) {
 }
 
 function assertPullRequest(pr) {
-  if (!isResultRecord(pr)) {
+  if (!isPlainObject(pr)) {
     throw new Error('finish: pr must be a plain object');
   }
   for (const key of Object.keys(pr)) {
@@ -473,7 +504,7 @@ function assertBlocks(caller, blocks) {
 }
 
 function assertBlock(caller, block, isLast) {
-  if (!isResultRecord(block)) {
+  if (!isPlainObject(block)) {
     throw new Error(caller + ': each block must be a plain object');
   }
   for (const key of Object.keys(block)) {
@@ -481,21 +512,21 @@ function assertBlock(caller, block, isLast) {
       throw new Error(caller + ': block has an unknown key ' + JSON.stringify(key));
     }
   }
-  if (Object.prototype.hasOwnProperty.call(block, 'whole')) {
+  if (Object.hasOwn(block, 'whole')) {
     if (block.whole !== true) {
       throw new Error(caller + ': block whole must be true when present');
     }
-    if (Object.prototype.hasOwnProperty.call(block, 'shorten')) {
+    if (Object.hasOwn(block, 'shorten')) {
       throw new Error(caller + ': a whole block cannot have shorten');
     }
   }
-  if (!isNonBlankText(block.text)) {
+  if (!isNonEmptyString(block.text)) {
     throw new Error(caller + ': block text must be a non-empty string');
   }
-  if (Object.prototype.hasOwnProperty.call(block, 'compact') && !isNonBlankText(block.compact)) {
+  if (Object.hasOwn(block, 'compact') && !isNonEmptyString(block.compact)) {
     throw new Error(caller + ': block compact must be a non-empty string');
   }
-  if (Object.prototype.hasOwnProperty.call(block, 'shorten')) {
+  if (Object.hasOwn(block, 'shorten')) {
     if (block.shorten !== true) {
       throw new Error(caller + ': block shorten must be true when present');
     }
@@ -505,11 +536,11 @@ function assertBlock(caller, block, isLast) {
   }
 }
 
-function isNonBlankText(value) {
+function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim() !== '';
 }
 
-function isResultRecord(value) {
+function isPlainObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 

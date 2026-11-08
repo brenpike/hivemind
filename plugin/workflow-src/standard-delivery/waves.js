@@ -114,7 +114,7 @@ function buildWorkerPrompt(step, waveScopes, plan, run) {
   return [
     'Do one step of the approved delivery plan: the step in the step block below.',
     boundarySentence(),
-    dataBlocksSentence(describeApprovalsHome(run.approvals, undefined)),
+    dataBlocksSentence(describeApprovalsHome(run.approvals)),
     '',
     formatDataBlock('step', step),
     formatDataBlock('wave_scopes', waveScopes),
@@ -161,7 +161,7 @@ function readWorkerOutcome(step, result, approvals) {
   if (result.outcome === 'complete') {
     return { stepId: step.id, status: 'complete' };
   }
-  return Object.assign({ stepId: step.id, status: result.outcome, reason: describeReason(result.blocker) }, readGateHold(result, approvals));
+  return { stepId: step.id, status: result.outcome, reason: describeReason(result.blocker), ...readGateHold(result, approvals) };
 }
 
 function describeBlockedVerb(outcome) {

@@ -134,9 +134,10 @@ describe('result contract', () => {
     const paused = lib.pauseForUser({ resumeArgs: {}, blocks: [{ text: 'm' }] });
     const finished = lib.finish({ outcome: 'complete', blocks: [{ text: 'm' }] });
     const finishedWithPr = lib.finish({ outcome: 'complete', blocks: [{ text: 'm' }], pr: PULL_REQUEST });
-    const used = new Set([...Object.keys(paused), ...Object.keys(finished), ...Object.keys(finishedWithPr)]);
+    const waiting = lib.pauseForRetry({ resumeArgs: {}, retryMinutes: 5, blocks: [{ text: 'm' }] });
+    const used = new Set([...Object.keys(paused), ...Object.keys(finished), ...Object.keys(finishedWithPr), ...Object.keys(waiting)]);
     assert.deepEqual([...lib.resultFields()].sort(), [...used].sort());
-    assert.deepEqual([...lib.resultFields()], ['needs_user', 'outcome', 'resume_args', 'pr', 'message']);
+    assert.deepEqual([...lib.resultFields()], ['needs_user', 'outcome', 'retry_minutes', 'resume_args', 'pr', 'message']);
   });
   test('the reply goes under the args key reply, which is not a result field', () => {
     assert.equal(lib.replyField(), 'reply');
@@ -327,6 +328,47 @@ describe('canCarry', () => {
     assert.equal(lib.canCarry({ request: '<'.repeat(Math.floor((half - baseLength) / 4) + 1) }), false);
     assertFitted(lib.pauseForUser({ resumeArgs: atBoundary, blocks: [{ text: 'z'.repeat(9000), shorten: true }] }));
     assert.throws(() => lib.pauseForUser({ resumeArgs: overBoundary, blocks: [{ text: 'Q?' }] }), /too long to carry/);
+  });
+});
+
+describe('pauseForRetry', () => {
+  const resumeArgs = { request: 'R', answers: { 'round-1': 'earlier' } };
+  test('returns the wait shape with message last', () => {
+    const waiting = structuredClone(lib.pauseForRetry({ resumeArgs, retryMinutes: 30, blocks: [{ text: 'Waiting.' }] }));
+    assert.deepEqual(waiting, { needs_user: false, retry_minutes: 30, resume_args: resumeArgs, message: 'Waiting.' });
+    assert.deepEqual(Object.keys(waiting), ['needs_user', 'retry_minutes', 'resume_args', 'message']);
+  });
+  test('fits the message to the notice budget like a pause', () => {
+    const half = Math.floor(lib.noticeBudget() / 2);
+    const baseLength = lib.noticeLength({ needs_user: true, resume_args: { request: '' }, message: '' });
+    const atBoundary = { request: 'a'.repeat(half - baseLength) };
+    const blocks = [{ text: 'Lead.', whole: true }, { text: '<&'.repeat(6000), shorten: true }];
+    for (const args of [resumeArgs, atBoundary]) {
+      const waiting = lib.pauseForRetry({ resumeArgs: args, retryMinutes: Number.MAX_SAFE_INTEGER, blocks });
+      assertFitted(waiting);
+      assert.ok(waiting.message.startsWith('Lead.\n\n'));
+      assert.ok(waiting.message.endsWith(lib.noticeMarker('shortened')));
+    }
+    const shortMessage = lib.pauseForRetry({ resumeArgs, retryMinutes: 1, blocks: [{ text: 'Q' }, { text: 'x'.repeat(9000), compact: 'c' }] }).message;
+    assert.equal(shortMessage, lib.noticeMarker('compact') + '\n\nQ\n\nc');
+  });
+  test('throws unless retryMinutes is a positive safe integer', () => {
+    for (const retryMinutes of [0, -1, 1.5, '5', undefined, null, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      assert.throws(() => lib.pauseForRetry({ resumeArgs, retryMinutes, blocks: [{ text: 'Q' }] }), /^Error: pauseForRetry: retryMinutes must be a positive safe integer$/);
+    }
+  });
+  test('throws unless resumeArgs keeps the pause contract', () => {
+    const overBoundary = { request: 'a'.repeat(lib.noticeBudget()) };
+    const invalidCases = [
+      [[], /pauseForRetry: resumeArgs must be a plain object/],
+      [{ answers: {}, reply: 'retry' }, /pauseForRetry: resumeArgs must not have a reply key/],
+      [overBoundary, /pauseForRetry: resumeArgs is too long to carry/]
+    ];
+    for (const [args, expected] of invalidCases) {
+      assert.throws(() => lib.pauseForRetry({ resumeArgs: args, retryMinutes: 5, blocks: [{ text: 'Q' }] }), expected);
+    }
+    assert.throws(() => lib.pauseForRetry({ resumeArgs, retryMinutes: 5, blocks: [] }), /pauseForRetry: blocks must be a non-empty array/);
+    assert.throws(() => lib.pauseForRetry({ resumeArgs, retryMinutes: 5, blocks: [{ text: 'x'.repeat(9000), whole: true }] }), /pauseForRetry: the whole blocks do not fit/);
   });
 });
 
