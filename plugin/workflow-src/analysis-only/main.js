@@ -109,7 +109,8 @@
  *   schema and its check schema are both built from that spec each round,
  *   the check one with the questions items check left out, as for analyze.
  *   Each reply a pause consumes goes once into the answer log as {question,
- *   settled, reply}, and only after its revise result passes its check. The
+ *   settled, reply}, and only after its revise result, or a retry of it,
+ *   passes its check. The
  *   shared lib buildAnswerEntry is the one writer of settled: the question is
  *   the questions text of its round, renderQuestions of its asks, settled
  *   the labels of result.settled in shown order, and a reply that settles
@@ -134,16 +135,27 @@
  *   outcome and questions are shared, complete requires report, and blocked
  *   may carry blocker. A planner result is checked against the full
  *   analysis schema, or on a revise its revise schema, with the questions
- *   items check left out, so decide()
- *   still checks each brief and a malformed brief is asked, never a reason
- *   to stop. A result that fails the check, a field of the other outcome
- *   included, finishes blocked with one plain malformed-result message.
+ *   items check left out, then each of its questions through decide()
+ *   (kind planner_question, the run level): a question decide() gives a
+ *   reason in neither askReasons() nor auto, such as malformed_brief, is a
+ *   defect in the brief, which fails the check.
+ *   Each analyze and revise-R call goes through callCheckedAnalysis: a
+ *   result that is not an object, fails its check schema, a field of the
+ *   other outcome included, or holds a defect question goes back to the
+ *   planner with buildCheckFixPrompt (lib/retry.js), label analyze-fix-N or
+ *   revise-R-fix-N, N from 1 to maxCheckRetries(), and a fixed retry goes
+ *   on as a first result does. A result isFixableResult refuses, null or a
+ *   blocked outcome that fits and gives a reason, ends the run as before.
+ *   A result still failing after maxCheckRetries() retries finishes blocked
+ *   through describeCheckLimit, with no further call and no question. So a
+ *   defect is never asked of the user, and the pause path throws on an ask
+ *   whose reason is outside askReasons(). A fix prompt depends only on its
+ *   first prompt and the result it fixes, so a resume replays it from cache.
  *   Each agent gets toAgentSchema of its full schema, the same schema with
  *   every anyOf removed, because the Messages API rejects a tool input
  *   schema that has anyOf at its top level.
  *   The planner blocker has maxLength 400 in the analysis schema, so a
- *   result with a longer one fails the check and finishes blocked as
- *   malformed.
+ *   result with a longer one fails the check and goes back to the planner.
  *   agent() returns null on an agent API error, such as an expired login.
  *   A null facts result blocks as malformed facts, a null scan result as a
  *   scan it cannot use, and a null analyze or revise result as no result.
@@ -361,7 +373,7 @@ async function gatherCheckedFacts(launchInputs) {
   return { facts: facts };
 }
 
-function describeReplyProblem(analysis, checkSchema) {
+function describeReplyProblem(analysis, checkSchema, level) {
   if (!isPlainObject(analysis)) {
     return describeUnusableResult('The planner returned no result, so the analysis stopped.', analysis);
   }
@@ -371,7 +383,35 @@ function describeReplyProblem(analysis, checkSchema) {
   if (analysis.outcome === 'blocked') {
     return { problem: 'The planner could not do the analysis: ' + describeReason(analysis.blocker) };
   }
+  if (hasDefectQuestion(analysis.questions, QUESTION_KIND, level, AUTONOMY_TABLE, BRIEF_SCHEMA)) {
+    return { problem: 'A planner question fails the decision check, so the analysis stopped.' };
+  }
   return undefined;
+}
+
+/**
+ * Calls the planner with prompt and checks its result. A problem that
+ * isFixableResult accepts calls it again with buildCheckFixPrompt, label
+ * options.label plus '-fix-N', up to maxCheckRetries() times. Returns
+ * {analysis} of a result that passes, else {cause}: the problem of a result
+ * isFixableResult refuses, or describeCheckLimit of one still failing.
+ */
+async function callCheckedAnalysis(prompt, options, checkSchema, level) {
+  let analysis = await agent(prompt, options);
+  for (let retry = 1; ; retry += 1) {
+    const cause = describeReplyProblem(analysis, checkSchema, level);
+    if (cause === undefined) {
+      return { analysis: analysis };
+    }
+    if (!isFixableResult(analysis, checkSchema)) {
+      return { cause: cause };
+    }
+    if (retry > maxCheckRetries()) {
+      return { cause: describeCheckLimit(cause.problem) };
+    }
+    const fixPrompt = buildCheckFixPrompt(prompt, cause.problem, validateSchema(checkSchema, analysis).errors);
+    analysis = await agent(fixPrompt, { ...options, label: options.label + '-fix-' + retry });
+  }
 }
 
 function resolveQuestions(questions, level) {
@@ -412,6 +452,10 @@ function renderPauseLead(questionCount) {
 }
 
 function pauseOrStopAsking(report, resolution, questions, answerLog) {
+  const outsideAsk = resolution.asks.find((ask) => !askReasons().includes(ask.reason));
+  if (outsideAsk !== undefined) {
+    throw new Error('pauseOrStopAsking: ask ' + outsideAsk.reason);
+  }
   const resumeArgs = buildResumeArgs(answerLog.map((entry) => entry.reply), BUILD_ID);
   if (!canCarry(resumeArgs)) {
     return finishComplete(report, renderOpenQuestions(resolution.asks, 'reply_size'), resolution.taken);
@@ -438,15 +482,14 @@ async function runAnalysis(rawArgs) {
   const storedAnswers = readStoredAnswers(argsObject);
   let pendingReply = readPendingReply(argsObject);
   const answerLog = [];
-  let checkSchema = ANALYSIS_CHECK_SCHEMA;
   let shownRound;
   phase('Analyze');
-  let analysis = await agent(buildAnalyzePrompt(argsObject.request, facts), plannerOptions('analyze', 'Analyze', ANALYSIS_SCHEMA));
+  let checkedAnalysis = await callCheckedAnalysis(buildAnalyzePrompt(argsObject.request, facts), plannerOptions('analyze', 'Analyze', ANALYSIS_SCHEMA), ANALYSIS_CHECK_SCHEMA, level);
   for (let round = 1; ; round += 1) {
-    const replyCause = describeReplyProblem(analysis, checkSchema);
-    if (replyCause !== undefined) {
-      return finishBlocked([replyCause]);
+    if (checkedAnalysis.cause !== undefined) {
+      return finishBlocked([checkedAnalysis.cause]);
     }
+    const analysis = checkedAnalysis.analysis;
     if (shownRound !== undefined) {
       answerLog.push(buildAnswerEntry(shownRound, analysis));
     }
@@ -470,8 +513,7 @@ async function runAnalysis(rawArgs) {
     const reviseSchemas = buildReviseSchemas(shownLabels);
     phase('Revise');
     const revisePrompt = buildRevisePrompt({ request: argsObject.request, facts: facts, answers: answerLog, report: analysis.report, questions: questions, reply: reply });
-    analysis = await agent(revisePrompt, plannerOptions('revise-' + round, 'Revise', reviseSchemas.agent));
-    checkSchema = reviseSchemas.check;
+    checkedAnalysis = await callCheckedAnalysis(revisePrompt, plannerOptions('revise-' + round, 'Revise', reviseSchemas.agent), reviseSchemas.check, level);
     shownRound = { question: questions, labels: shownLabels, reply: reply };
   }
 }

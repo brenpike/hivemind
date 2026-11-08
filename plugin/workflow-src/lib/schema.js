@@ -330,7 +330,7 @@ function collectObjectErrors(schema, record, path, errors) {
     }
   }
   for (const name of presentKeys) {
-    const isListed = Object.prototype.hasOwnProperty.call(properties, name);
+    const isListed = Object.hasOwn(properties, name);
     if (isListed) {
       collectSchemaErrors(properties[name], record[name], path + '.' + name, errors);
     } else if (schema.additionalProperties === false) {
@@ -396,7 +396,7 @@ function listVariantFields(variant) {
 }
 
 function assertTaggedSpec(spec, tagValues) {
-  const isKnownField = (name) => Object.prototype.hasOwnProperty.call(spec.properties, name);
+  const isKnownField = (name) => Object.hasOwn(spec.properties, name);
   for (const name of spec.required) {
     if (!isKnownField(name)) {
       failTaggedSchema('required field ' + name + ' is not in properties');
@@ -419,7 +419,7 @@ function assertTaggedSpec(spec, tagValues) {
 
 function assertTaggedVariant(spec, value, isKnownField) {
   const variant = spec.variants[value];
-  if (!Object.prototype.hasOwnProperty.call(spec.variants, value) || !isSchemaRecord(variant)) {
+  if (!Object.hasOwn(spec.variants, value) || !isSchemaRecord(variant)) {
     failTaggedSchema('tag value ' + value + ' has no variant');
   }
   if (!Array.isArray(variant.required) || !Array.isArray(variant.optional)) {

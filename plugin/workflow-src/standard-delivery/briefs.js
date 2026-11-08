@@ -10,13 +10,13 @@
  *            runPlanningPass (plan.js).
  *   facts    the checked facts of the pass, from runFactsStep (relay.js).
  *   scope    the checked scope of the pass, from runScopeStep (scope.js).
- *   head, round, staleIds and isLimit  the commit, fix round, stale gate
- *            ids and limit flag of a gate decision (gates.js).
+ *   head, round and staleIds  the commit, fix round and stale gate ids
+ *            of a gate decision (gates.js).
  *   values   the routing values of a version check whose version_check is
  *            undetermined or unreadable (gates.js).
  *   The kind constants of main.js, unshownBriefText and describeCount
  *   (plan.js), isRepositoryPath and listPlanPaths (paths.js), and
- *   gateNames, joinNames, maxFixRounds and maxGateReruns.
+ *   gateNames, joinNames and maxFixRounds.
  *
  * Outputs
  *   buildPlanAcceptanceBrief(plan), buildRemediationPlanBrief(plan),
@@ -33,9 +33,12 @@
  *            plan.js passes listed outside_limits to decide().
  *   buildTailBrief({kind, problem, goOn, other, strength, why})  the
  *            shared shape of a tail brief, also used by review.js.
- *   buildBriefOption(id, summary, effort, value, reversible) and
- *   buildUnshownAssumptions(origin)  the option and assumptions of a
- *            code-built brief, also used by review.js.
+ *   buildBriefOption(id, summary, effort, value, reversible),
+ *   buildUnshownCriticality(level, likelihood) and
+ *   buildUnshownAssumptions(origin)  the option, criticality and
+ *            assumptions of a code-built brief, also used by review.js.
+ *   buildBriefGate(irreversible)  the gate of a code-built brief, never
+ *            architectural or safety.
  *   buildValidationRemediationBrief, buildFixLimitBrief and
  *   buildGateRerunBrief  the tail briefs gates.js resolves.
  *   buildStepStopBrief(isReplan)  the fix_cause step_stop brief
@@ -97,14 +100,14 @@ function buildPlanAcceptanceBrief(plan) {
     id: 'plan',
     kind: PLAN_ACCEPTANCE_KIND,
     problem: 'Start delivering the plan: create or confirm its working branch and run its steps.',
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
+    criticality: buildUnshownCriticality(),
     options: [
       buildBriefOption('A', 'Accept the plan and run its steps.', 'medium'),
       buildBriefOption('B', 'Stop before any step runs.', 'trivial', 'low')
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'Every change stays on the working branch, and every decision taken is listed for you before the merge.' },
     assumptions: buildUnshownAssumptions('assumed'),
-    gate: { irreversible: false, architectural: false, safety: false },
+    gate: buildBriefGate(),
     verbatim: plan.summary
   };
 }
@@ -129,14 +132,14 @@ function buildTrunkStaleBrief(facts) {
     id: 'trunk',
     kind: TRUNK_STALE_KIND,
     problem: 'The trunk may not be up to date: its freshness is ' + facts.trunk_freshness + ', ' + Number(facts.trunk_ahead) + ' commits ahead of its remote and ' + Number(facts.trunk_behind) + ' behind. Create or confirm the working branch from it anyway?',
-    criticality: { level: 'low', likelihood: 'occasional', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
+    criticality: buildUnshownCriticality('low', 'occasional'),
     options: [
       buildBriefOption('A', 'Go on from the trunk as it is.', 'trivial', 'medium'),
       buildBriefOption('B', 'Stop so you can bring the trunk up to date first.', 'small', 'medium')
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'A stale base costs at most a rebase, and the run goes on.' },
     assumptions: buildUnshownAssumptions(),
-    gate: { irreversible: false, architectural: false, safety: false }
+    gate: buildBriefGate()
   };
 }
 
@@ -145,14 +148,14 @@ function buildExternalEffectBrief(summary) {
     id: 'effect',
     kind: EXTERNAL_EFFECT_KIND,
     problem: 'A plan step has an effect outside the repo that cannot be undone. May the run go on to it?',
-    criticality: { level: 'high', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
+    criticality: buildUnshownCriticality('high'),
     options: [
       buildBriefOption('A', 'Go on and let the step make this effect.', 'small', 'high', false),
       buildBriefOption('B', 'Change or drop the step first.', 'small', 'medium')
     ],
     recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide whether this effect outside the repo may happen.' },
     assumptions: buildUnshownAssumptions('assumed'),
-    gate: { irreversible: true, architectural: false, safety: false },
+    gate: buildBriefGate(true),
     verbatim: summary
   };
 }
@@ -187,19 +190,19 @@ function markOutsideLimits(brief, outsidePaths) {
   return Object.assign(brief, { problem: problem.length <= BRIEF_SCHEMA.properties.problem.maxLength ? problem : brief.problem });
 }
 
-function buildTailBrief({ kind, problem, goOn, other, strength, why }) {
+function buildTailBrief({ kind, problem, goOn, other = 'Plan again: this run gives your reply to the planner before anything goes further.', strength, why }) {
   return {
     id: 'tail',
     kind: kind,
     problem: problem,
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
+    criticality: buildUnshownCriticality(),
     options: [
       buildBriefOption('A', goOn),
-      buildBriefOption('B', other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, 'trivial', 'low')
+      buildBriefOption('B', other, 'trivial', 'low')
     ],
     recommendation: { option_id: strength === 'none' ? 'B' : 'A', strength: strength, why: why },
     assumptions: buildUnshownAssumptions(),
-    gate: { irreversible: false, architectural: false, safety: false }
+    gate: buildBriefGate()
   };
 }
 
@@ -235,7 +238,7 @@ function buildApprovalBrief(stepText, change, isReplan) {
 function buildApprovalAsk(hold, isReplan, run) {
   const ask = buildUndecidedAsk(STEP_STOP_KIND, buildApprovalBrief('A step', { category: hold.category, item: unshownBriefText() }, isReplan), run);
   const shown = buildApprovalBrief('Step ' + encodeUntrustedText(hold.stepId), { category: hold.category, item: encodeUntrustedText(hold.item) }, isReplan);
-  return Object.assign({}, ask, { brief: shown, items: [[{ category: hold.category, item: hold.item }], []] });
+  return { ...ask, brief: shown, items: [[{ category: hold.category, item: hold.item }], []] };
 }
 
 function buildApprovalAsks(holds, isReplan, run) {
@@ -246,6 +249,22 @@ function raiseVersion(version, bumpType) {
   const parts = version.split('.').map(Number);
   const raised = { major: [parts[0] + 1, 0, 0], minor: [parts[0], parts[1] + 1, 0], patch: [parts[0], parts[1], parts[2] + 1] };
   return raised[bumpType].join('.');
+}
+
+/**
+ * Returns the criticality of a code-built brief, of level and likelihood,
+ * with unshownBriefText() in its blast_radius and if_ignored.
+ */
+function buildUnshownCriticality(level = 'medium', likelihood = 'certain') {
+  return { level: level, likelihood: likelihood, blast_radius: unshownBriefText(), if_ignored: unshownBriefText() };
+}
+
+/**
+ * Returns the gate of a code-built brief: irreversible as given, never
+ * architectural or safety.
+ */
+function buildBriefGate(irreversible = false) {
+  return { irreversible: irreversible, architectural: false, safety: false };
 }
 
 /**
@@ -281,11 +300,11 @@ function buildVersionQuestionBrief(values) {
     problem: isUnreadable
       ? 'The version check cannot read one version from the version files. It reads the top-level version string of a .json file, the one version = "X.Y.Z" line of a .toml file and any other file whole, each a plain X.Y.Z version, the same at the trunk. Which version should they hold?'
       : 'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
+    criticality: buildUnshownCriticality(),
     options: listVersionOptions(values),
     recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide the version of this delivery.' },
     assumptions: buildUnshownAssumptions(),
-    gate: { irreversible: false, architectural: false, safety: false }
+    gate: buildBriefGate()
   };
 }
 
@@ -309,18 +328,13 @@ function buildFixLimitBrief(head) {
   });
 }
 
-function buildGateRerunBrief(staleIds, head, isLimit) {
+function buildGateRerunBrief(staleIds, head) {
   const names = joinNames(staleIds.map((gateId) => gateNames()[gateId]), 'and');
-  const landed = 'Commit ' + head + ' landed after ' + names + ' held on an earlier commit.';
   return buildTailBrief({
     kind: GATE_RERUN_KIND,
-    problem: isLimit
-      ? landed + ' The checks already ran again ' + maxGateReruns() + ' times after later commits. How should the delivery go on?'
-      : landed + ' Run ' + names + ' again on the new commit?',
-    goOn: isLimit ? 'Say how to go on: this run plans again from your reply.' : 'Run the checks again on the new commit.',
-    strength: isLimit ? 'none' : 'strong',
-    why: isLimit
-      ? 'Commits kept landing after the checks, so only you can decide what comes next.'
-      : 'A check holds only for the commit it ran on, and the pull request needs every check to hold on the commit it pushes.'
+    problem: 'Commit ' + head + ' landed after ' + names + ' held on an earlier commit. Run ' + names + ' again on the new commit?',
+    goOn: 'Run the checks again on the new commit.',
+    strength: 'strong',
+    why: 'A check holds only for the commit it ran on, and the pull request needs every check to hold on the commit it pushes.'
   });
 }

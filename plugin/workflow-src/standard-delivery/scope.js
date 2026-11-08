@@ -43,11 +43,12 @@
  *   an agent failure, stops the run before planning through
  *   describeUnusableResult (lib/stop.js), with the agent-failure sentence
  *   and next action run_again. A non-null result that fails SCOPE_SCHEMA
- *   goes back to the agent with buildCheckFixPrompt (checks.js), label
- *   scopeOptions(...).label plus '-fix-N', up to maxCheckRetries() times; a
+ *   goes back to the agent with buildCheckFixPrompt (lib/retry.js), label
+ *   scopeOptions(...).label plus '-fix-N', up to maxCheckRetries()
+ *   (lib/retry.js) times; a
  *   fitting retry goes on as a fitting first result does, and one still
  *   failing ends the run, terminal with next action report, through
- *   describeCheckLimit. A path, the field
+ *   describeCheckLimit (lib/retry.js). A path, the field
  *   marked with repositoryPathMark(), that starts with the facts root line
  *   and a slash is first cut to the rest after that slash; a root line of
  *   none, or no root line, converts nothing. An entry whose path then fails
@@ -159,7 +160,7 @@ function toRepositoryRelativePath(path, root) {
 }
 
 function relativizeScopeEntry(entry, root) {
-  return Object.assign({}, entry, { path: toRepositoryRelativePath(entry.path, root) });
+  return { ...entry, path: toRepositoryRelativePath(entry.path, root) };
 }
 
 function toLimitEntry(limit, root) {

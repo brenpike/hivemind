@@ -93,7 +93,7 @@ function parseRoutingLines(text, spec) {
   if (typeof text !== 'string') {
     throw new Error('parseRoutingLines: text must be a string');
   }
-  const compiledSpec = compileRoutingSpec(spec, 'spec', true);
+  const compiledSpec = compileRoutingSpec(spec, 'parseRoutingLines: spec', true);
   const lines = splitRoutingText(text);
   const values = {};
   let openBlock = null;
@@ -102,14 +102,14 @@ function parseRoutingLines(text, spec) {
     const line = lines[index];
     const blockMatch = openBlock === null || !/^ {2}\S/.test(line) ? null : matchRoutingLine(line.slice(2), openBlock.entries);
     if (blockMatch !== null) {
-      const blockProblem = Object.prototype.hasOwnProperty.call(openBlock.values, blockMatch.key) ? null : readFirstRoutingLine(blockMatch, openBlock.values);
+      const blockProblem = Object.hasOwn(openBlock.values, blockMatch.key) ? null : readFirstRoutingLine(blockMatch, openBlock.values);
       if (blockProblem !== null) {
         return routingLineProblem(blockProblem, lineNumber);
       }
       continue;
     }
     const topMatch = /^\S/.test(line) ? matchRoutingLine(line, compiledSpec) : null;
-    if (topMatch === null || Object.prototype.hasOwnProperty.call(values, topMatch.key)) {
+    if (topMatch === null || Object.hasOwn(values, topMatch.key)) {
       continue;
     }
     const topProblem = readFirstRoutingLine(topMatch, values);
@@ -169,12 +169,12 @@ function readFirstRoutingLine(match, values) {
 
 function findMissingRoutingKey(compiledSpec, values) {
   for (const [key, entry] of compiledSpec) {
-    if (entry.required && !Object.prototype.hasOwnProperty.call(values, key)) {
+    if (entry.required && !Object.hasOwn(values, key)) {
       return key;
     }
   }
   for (const [key, entry] of compiledSpec) {
-    if (entry.block === null || !Object.prototype.hasOwnProperty.call(values, key)) {
+    if (entry.block === null || !Object.hasOwn(values, key)) {
       continue;
     }
     const missingInBlock = findMissingRoutingKey(entry.block, values[key]);
@@ -193,14 +193,18 @@ function isRoutingRecord(value) {
   return Object.prototype.toString.call(value) === '[object Object]';
 }
 
+/**
+ * Returns spec compiled to a Map of key to entry. where, the prefix of
+ * every error it throws, is 'parseRoutingLines: ' and the path of spec.
+ */
 function compileRoutingSpec(spec, where, allowBlocks) {
   if (!isRoutingRecord(spec)) {
-    throw new Error('parseRoutingLines: ' + where + ' must be a plain object');
+    throw new Error(where + ' must be a plain object');
   }
   const entries = new Map();
   for (const key of Object.keys(spec)) {
     if (!routingKeyPattern().test(key)) {
-      throw new Error('parseRoutingLines: ' + where + ' has a key that is not a routing key: ' + JSON.stringify(key));
+      throw new Error(where + ' has a key that is not a routing key: ' + JSON.stringify(key));
     }
     entries.set(key, compileRoutingEntry(spec[key], where + '.' + key, allowBlocks));
   }
@@ -209,24 +213,24 @@ function compileRoutingSpec(spec, where, allowBlocks) {
 
 function compileRoutingEntry(entry, where, allowBlocks) {
   if (!isRoutingRecord(entry)) {
-    throw new Error('parseRoutingLines: ' + where + ' must be a plain object');
+    throw new Error(where + ' must be a plain object');
   }
   for (const field of Object.keys(entry)) {
     if (field !== 'pattern' && field !== 'block' && field !== 'required') {
-      throw new Error('parseRoutingLines: ' + where + ' has an unknown field ' + JSON.stringify(field));
+      throw new Error(where + ' has an unknown field ' + JSON.stringify(field));
     }
   }
   if (typeof entry.required !== 'boolean') {
-    throw new Error('parseRoutingLines: ' + where + '.required must be a boolean');
+    throw new Error(where + '.required must be a boolean');
   }
-  const hasPattern = Object.prototype.hasOwnProperty.call(entry, 'pattern');
-  const hasBlock = Object.prototype.hasOwnProperty.call(entry, 'block');
+  const hasPattern = Object.hasOwn(entry, 'pattern');
+  const hasBlock = Object.hasOwn(entry, 'block');
   if (hasPattern === hasBlock) {
-    throw new Error('parseRoutingLines: ' + where + ' must have exactly one of pattern and block');
+    throw new Error(where + ' must have exactly one of pattern and block');
   }
   if (hasBlock) {
     if (!allowBlocks) {
-      throw new Error('parseRoutingLines: ' + where + ' is a block inside a block');
+      throw new Error(where + ' is a block inside a block');
     }
     return { required: entry.required, pattern: null, block: compileRoutingSpec(entry.block, where + '.block', false) };
   }
@@ -235,7 +239,7 @@ function compileRoutingEntry(entry, where, allowBlocks) {
 
 function anchorRoutingPattern(pattern, where) {
   if (Object.prototype.toString.call(pattern) !== '[object RegExp]') {
-    throw new Error('parseRoutingLines: ' + where + '.pattern must be a RegExp');
+    throw new Error(where + '.pattern must be a RegExp');
   }
   const keptFlags = pattern.flags.replace(/[gym]/g, '');
   return new RegExp('^(?:' + pattern.source + ')$', keptFlags);

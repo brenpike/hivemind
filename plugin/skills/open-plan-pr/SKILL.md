@@ -25,7 +25,7 @@ The orchestrator resolves and passes these; the skill never resolves them itself
 
 ## Optional Inputs
 
-When one is absent, the script works as it does without it. Step 5 writes each given value verbatim, `body` as the body file and each other value as its inputs-file field.
+Step 5 writes each given value verbatim, `body` as the body file and each other value as its inputs-file field.
 
 - `title`, `body`: the PR title and body.
 - `comment`: text for the open PR the script reuses. The script posts it only on a reused PR; a created PR gets no comment.
@@ -42,7 +42,7 @@ Every push and every PR open runs through `${CLAUDE_PLUGIN_ROOT}/skills/open-pla
 1. Confirm current branch matches `head` and is not `base`. The step 6 script checks this in the same process as the push; no separate Bash call compares them. On mismatch or trunk match, the script exits 1 with `blocker: current branch does not match head or equals base`, which echoes neither value.
 2. Confirm no unexpected unstaged changes; the script refuses a dirty tree before any change.
 3. Confirm validation outcome per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure) is one of: every declared command passed, or `Not run (no validation commands defined)`. Exit 1 with blocker if the procedure returned the Worker Report — Blocked (`stage: validation`) or any declared command failed.
-4. Confirm required version/release metadata is included or not required, and that the local review gate held, or local review did not run, per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements).
+4. Confirm required version/release metadata is included or not required, and that the local review gate held, local review did not run, or the PR is a loop-cap draft, per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements).
 5. Write the PR title and body, or take `title` and `body` when given. The title is one line; the body holds the summary, validation notes, version/release notes and unresolved issues. The title, the body and a given `comment` must not contain a string the `## Do Not` list forbids; that check is this skill's own. A given value is never changed: when one carries such a string, exit 1 with `blocker: PR text carries a string the Do Not list forbids`, which echoes no value.
 
    Then write two files with the Write tool, where `<token>` is new for each invocation, made only of letters, digits and `-`, such as a UTC timestamp plus a random part (`20261020T141500Z-a1b2c3`). First the body file: `file_path` is `.hivemind/pr-inputs-<token>-body.json` and `content` is the body as raw Markdown. Then the inputs file: `file_path` is `.hivemind/pr-inputs-<token>.json` and `content` is one JSON object:
@@ -76,7 +76,7 @@ include a `status:` field in any output.
 - open PR for a partial plan unless the user explicitly requested a draft PR or the planner's `Delivery: Shape` field equals `multi-plan`
 - open PR if the Validation procedure returned the Worker Report — Blocked (`stage: validation`) or any declared validation command failed
 - open PR if required version/release metadata is missing per `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md` (Bump Trigger, Bump Execution)
-- open PR when local review ran on the branch and did not hold the local review gate per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements)
+- open a ready-for-review PR when local review ran on the branch and did not hold the local review gate per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements)
 - continue past step 6 with an unverified push state
 - invent missing validation
 - include any of the following strings (any case) in commit messages or PR content: `Co-Authored-By:`, `Generated with`, `Created with Claude`, `🤖 Generated`, any `Authored-by:` line naming a bot/AI/agent, or any line attributing generated-content authorship

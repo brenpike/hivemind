@@ -76,7 +76,7 @@ function collectRepositoryPaths(schema, value, location, found) {
     found.push({ location: location, value: value });
   }
   if (schema.properties !== undefined && isPlainObject(value)) {
-    const presentNames = Object.keys(schema.properties).filter((name) => Object.prototype.hasOwnProperty.call(value, name));
+    const presentNames = Object.keys(schema.properties).filter((name) => Object.hasOwn(value, name));
     presentNames.forEach((name) => collectRepositoryPaths(schema.properties[name], value[name], location === '' ? name : location + '.' + name, found));
   }
   if (schema.items !== undefined && Array.isArray(value)) {

@@ -82,11 +82,7 @@ function readBlockerAction(blocker, nextAction) {
 }
 
 function isTransientFailure(text) {
-  return typeof text === 'string' && transientFailurePatterns().some((pattern) => pattern.test(text));
-}
-
-function transientFailurePatterns() {
-  return [
+  const patterns = [
     /\bHTTP(?:\/[0-9.]+)?:? (?:error |status )?(?:5[0-9]{2}|429)\b/i,
     /\b(?:5[0-9]{2} (?:Internal Server Error|Bad Gateway|Service Unavailable|Gateway Time-?out)|429 Too Many Requests)\b/i,
     /\b(?:connection (?:reset|refused|aborted)|ECONN(?:RESET|REFUSED|ABORTED))\b/i,
@@ -96,6 +92,7 @@ function transientFailurePatterns() {
     /\b(?:network (?:is )?unreachable|ENETUNREACH)\b/i,
     /\b(?:connection timed out|RPC failed|early EOF|index-pack failed)\b/i
   ];
+  return typeof text === 'string' && patterns.some((pattern) => pattern.test(text));
 }
 
 function stopActions(then) {

@@ -516,12 +516,10 @@ async function runPlanningPass(run, facts, passScope, replan) {
     let { planResult, problem } = checked;
     if (problem !== undefined) {
       if (shownAsks.length > 0) {
-        logPlanningReply(run, shownEntry, shownAsks, undefined);
+        logPlanningReply(run, shownEntry, shownAsks);
       }
-      if (checked.isExhausted) {
-        return stopDelivery([describeCheckLimit(problem)], run, [], true);
-      }
-      return stopDelivery([planResult === null ? describeUnusableResult(problem, null) : { problem: problem }], run, [], true);
+      const unusable = planResult === null ? describeUnusableResult(problem, null) : { problem: problem };
+      return stopDelivery([checked.isExhausted ? describeCheckLimit(problem) : unusable], run, [], true);
     }
     if (shownAsks.length > 0) {
       logPlanningReply(run, shownEntry, shownAsks, planResult);

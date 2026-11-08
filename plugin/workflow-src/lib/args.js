@@ -164,7 +164,7 @@ function requireBuildId(buildId) {
 
 function readLaunchInputs(argsObject, runNoun, buildId) {
   requireBuildId(buildId);
-  if (Object.prototype.hasOwnProperty.call(argsObject, 'resume_args')) {
+  if (Object.hasOwn(argsObject, 'resume_args')) {
     return { problem: 'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so ' + describeRunNoun(runNoun) + ' did not start.' };
   }
   if (isPlainObject(argsObject.answers) && argsObject.build !== buildId) {
