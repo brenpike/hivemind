@@ -368,7 +368,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/444, under epi
 - **The reviewer limit is fixed at 10.** The local reviewer's iteration limit is always the `max_iterations` value of its Input Contract. A delegation that asks for any other limit, under any key name, ends blocked at initialize. Before, a caller could lower the limit with no rule allowing it, so `max-iterations-reached` could follow a single round.
 - **Diminishing returns follows the two-round rule.** The reviewer honors a `diminishing-returns` verdict only when the fix-ledger shows this iteration and the one before it each found only unusual-setup edge cases or wording findings. A finding that needed a real fix resets the count. So the exit never fires at iteration 1, and never right after a real fix made in the same round.
 - **Diminishing returns waits for a decision on the state machine.** `local_review` sends `diminishing-returns` to the overlord decision state `diminishing_returns_decision`, which the `diminishing_returns_exit` row of `plugin/references/decision-autonomy-table.json` resolves. Only its `taken` outcome reaches `open_pr`. `not_taken` and `blocked` end the run at `blocked`, before the pull request, as an ask does on the script (SD-38). The definition moves from version 3 to version 4, so a run resumed from version 3 meets the version-skew doors. Rejected: keeping the direct route and recording the state-machine path as a judgment residual, because a declarative state closes it. Rejected: sending `not_taken` back to `local_review` or to `review_remediation_plan`, because a terminal route cannot reach the pull request or loop, and it matches the script.
-- **Eliminated class.** A pull request opened from commits whose local review did not hold the gate, on any path that reads workflow.md: the workflow script, the state machine, or a step taken by hand. A test fails when the script table, the state machine or the workflow.md statement disagree. The only state-machine transitions into `open_pr` are `local_review` `clean`, `diminishing_returns_decision` `taken` and `local_review_decision` `skipped`, and a test fails on any other. This class does not cover a commit made after an earlier gate on the state machine; see "Recorded residual: state-machine gates" below.
+- **Eliminated class.** A pull request opened from commits whose local review did not hold the gate, on any path that reads workflow.md: the workflow script, the state machine, or a step taken by hand. A test fails when the script table, the state machine or the workflow.md statement disagree. The only state-machine transitions into `open_pr` are `local_review` `clean`, `diminishing_returns_decision` `taken` and `local_review_decision` `skipped`, and a test fails on any other. Amended 2026-11-07 (issue 549, PR 2): the one exception is a draft PR the script opens at a loop cap, with local review not held; it names the reason and lists the open findings (see Amendment 2026-11-07: loop caps open a draft PR and service limits are waited out (issue 549, PR 2)). A ready PR still needs the gate. This class does not cover a commit made after an earlier gate on the state machine; see "Recorded residual: state-machine gates" below.
 - **Text homes.** `plugin/governance/workflow.md` (PR Requirements). `plugin/skills/open-plan-pr/SKILL.md` (the checklist and the stop list). `plugin/agents/local-reviewer.md` (The Loop, steps 1 and 9). `nextActionLine` and `localReviewRoutes` in `plugin/workflow-src/standard-delivery/main.js`, rows SD-23 and SD-35. `plugin/workflows/standard-delivery.json` (`local_review` and `diminishing_returns_decision`). The `diminishing_returns_exit` row of `plugin/references/decision-autonomy-table.json`. The policy fixture `tests/policy/safety-pr-requires-local-review.json` pins the workflow.md statement and its consumers.
 - **Residual: the hand path stays a judgment path.** Root cause: review questions in the delivery tail have no reply path on the script, so a blocked tail can still be finished by hand. That path is gated by workflow.md and the open-plan-pr checklist, which a model reads and follows. They are not a control the script enforces. Bounded impact: every pull request is in front of the user before merge. The residual goes away when https://github.com/brenpike/hivemind/issues/441 gives review questions a reply path on the script. Closed 2026-10-25 by issue 453: a review question no longer ends the run. It pauses, and the reply goes back to the local reviewer in the same run, so no tail ends on a question for a hand path to finish. Blocked stops that are not questions are out of that issue's scope (see Amendment 2026-10-25: open questions pause on both engines, and a run can be stopped (issue 453)).
 - **Recorded residual: state-machine gates.** On the state machine, the gates run in a line: version, validation, local review, then `open_pr`. A commit made after a gate, such as a local review fix or a validation fix, does not send the run back through the earlier gates, so the pull request can open on a commit that some gate did not end on. This is inherited from main, not introduced by issue 444. Root cause: the two engines carry separate copies of one gate contract. The script holds it in `runGates` (invariant 2); the state machine holds its own copy in its transitions. Codex local review findings f08ff051, c5e393e1, a0f4552d, e0b6fa5f and 01131cd5 on this branch are members of this class. Rejected: patching the state-machine copy, because three structural attempts on this branch each surfaced the next missing invariant. Fix: slice 4 runs brood children on the script engine. After that, the state machine runs only on a refused launch, where it must stop before the pull request and ask the user. Tracked on https://github.com/brenpike/hivemind/issues/409. Bounded impact: the state machine runs only in brood children and refused launches, the local reviewer validates its own fixes, and a human reviews every pull request before merge. Closed 2026-10-24 by slice 4: brood children run the script, and the state machine stops at the `pr_confirm` user gate before the pull request (see Amendment 2026-10-24: brood children on the script engine (slice 4)). Amended 2026-11-06 (issue 541): closed in the state machine itself: `gate_check` reruns validation on a later commit, and `pr_confirm` is removed (see Amendment 2026-11-06: no user stop before the pull request (issue 541)).
@@ -2393,7 +2393,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/541. A session
 
 **The stop inventory.** Each engine's stops before the pull request, after this change:
 
-- **Script engine.** It has no pull request confirmation. Its pre-PR stops are the `external_effect`, destructive and injection hard stops; `version_bump_indeterminable`; the fix-limit and gate-rerun-limit asks; `step_stop`; and auto decision kinds at level high.
+- **Script engine.** It has no pull request confirmation. Its pre-PR stops are the `external_effect`, destructive and injection hard stops; `version_bump_indeterminable`; the fix-limit and gate-rerun-limit asks; `step_stop`; and auto decision kinds at level high. Amended 2026-11-07 (issue 549, PR 2): the gate-rerun limit opens a draft PR and asks nothing. The validation fix limit and the version fix limit still ask.
 - **Instinct.** The start-of-run engine-or-Instinct ask (ADR-0039 D6) is not a PR stop.
 - **Reflex.** It takes the same validation path, fixed by decision 2.
 - **State machine.** `pr_confirm` is removed. `question` and `brood_confirm` stay.
@@ -2475,7 +2475,7 @@ The rest of ADR-0037 is unchanged.
 - **The start-branch stop comes before the planner.** A run that started on a non-trunk branch outside the Branch Taxonomy cannot deliver on any plan branch, so it stops before planning with the fix line, and no planner call is spent.
 - **A blocked outcome with no reason is retried.** A planner blocked outcome that fits its schema and gives a reason is the planner's own call and pauses with the fix line, unchanged. With no reason it is a slip, so it is retried.
 - **Unchanged.** A null result, an agent failure, still ends with `run_again`. A blocked outcome with a reason is unchanged.
-- **A new module.** `checks.js` holds the retry code, because `plan.js` would pass the 600-line source limit.
+- **A new module.** `checks.js` holds the retry code, because `plan.js` would pass the 600-line source limit. Amended 2026-11-07 (issue 549, PR 2): the shared retry code moved to `lib/retry.js`, which analysis-only also uses.
 - **A bounded check block.** A schema error names only schema text, except an unexpected key, the one value an agent writes into it. `describeUnexpectedSchemaKey` (`lib/schema.js`) now names that key as is only when it is 1 to 64 letters, digits, `_` and `-`, else its first 64 code units JSON-encoded. So every error in the check block, and every retry prompt, has a bound the schema sets, whatever key the agent writes.
 
 **Options ruled out.**
@@ -2551,7 +2551,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/549. A run ask
 
 - Reverse the 2026-11-04 decision that an option beyond the request is always asked. A strong recommendation of trivial or small effort is taken and listed; any other is a defect the planner fixes.
 - Files outside the limits are taken and listed, not asked. This reverses the Amendment 2026-11-06 (issues 504 and 497) rule that they ask at every level.
-- The loop-cap draft PR is deferred to PR 2. At the loop cap, today's behavior stands.
+- The loop-cap draft PR is deferred to PR 2. At the loop cap, today's behavior stands. Amended 2026-11-07 (issue 549, PR 2): done, with the user's approval of 2026-11-07 in PR 2's amendment.
 - No automatic issue filing.
 - Not changed: the Engine-or-Instinct question (ADR-0039, D6).
 
@@ -2578,11 +2578,14 @@ This amendment covers https://github.com/brenpike/hivemind/issues/549. A run ask
   - **Not covered.** That skill has no planner retry path, so a malformed brief still reaches the user.
   - **Bounded impact.** It is a question, not a change; the run writes nothing before it stops.
   - **Ground.** A retry path there is its own change.
+  - Amended 2026-11-07 (issue 549, PR 2): closed. analysis-only retries a planner result that fails its check or brief (see Amendment 2026-11-07: loop caps open a draft PR and service limits are waited out (issue 549, PR 2)).
 - **State-machine receivers lack `decided_by`.**
   - **Not covered.** The receivers that record an answer do not read `decided_by`, so an answer the run took may be recorded as the user's.
   - **Bounded impact.** The journal and the final report still list the call, and the user can veto it before merge.
   - **Ground.** The state machine is slated for retirement in slice 5 of https://github.com/brenpike/hivemind/issues/409.
+  - Amended 2026-11-07 (issue 549, PR 2): closed. `github-reviewer`, `github-review-loop` and the overlord `cerebrate` clause read `decided_by`, and `buildAnswerEntry` writes it.
 - **The loop cap still asks.** Until PR 2, the loop cap keeps today's behavior.
+  - Amended 2026-11-07 (issue 549, PR 2): closed. The loop caps open a draft PR; the fix limits that stay asks are named in PR 2's amendment.
 
 **Version.** Patch, 7.6.8. It is a fix: it removes user stops the run can take alone.
 
@@ -2644,3 +2647,76 @@ Links: https://github.com/brenpike/hivemind/issues/549, https://github.com/brenp
 **Prose budgets.** No change under `plugin/`.
 
 No earlier text of this ADR changes.
+
+## Amendment 2026-11-07: loop caps open a draft PR and service limits are waited out (issue 549, PR 2)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/549, PR 2. PR 1 closed the Ask Set (see Amendment 2026-11-07: the closed Ask Set (issue 549)) and deferred four items.
+
+**Root cause.**
+
+- **Loop caps asked the user.** Each loop ended in a user ask at its cap: local review at max iterations, the break-fix-break stop, the replan cap, the gate rerun cap. Each ask offered the user nothing the run could not do alone: open the work as a draft and list what is open.
+- **A service outage ended the run.** Local review blocked by an outside service (a usage or rate limit) stopped the run, though the service states when it is back.
+- **analysis-only had no planner retry.** A malformed brief reached the user.
+- **The state machine ignored `decided_by`.** A call the run took could be recorded as the user's.
+
+**Decisions.**
+
+- **A draft PR at the loop caps.** `review.js` returns `{draft: reason}` at `max-iterations-reached`, at break-fix-break, at the replan cap and, from `gates.js`, at the gate rerun cap. `runGates` keeps the first reason as `gates.draft`. The replan cap is checked before `decide()`.
+- **Validation still must pass.** In draft mode the required gates are the configured gates minus review. Validation runs first, review never runs again, then the PR step. The rule "Open PR only when: plan complete, validation passed, version bump included if required, branch pushed" stays byte for byte. Review is waived only in draft mode.
+- **The PR body.** `record.js` puts "This pull request is a draft: <reason>" first. After the gates part comes an external part "Findings local review left open:", one line per open finding (id and encoded title), only when there are any. `REVIEW_SCHEMA` gains `open_findings` (at most 50), kept in `run.open`. A gate with no hold renders "did not hold".
+- **Asks that stay.** The validation fix limit, the version fix limit and the SD-17 worker `needs_replan` cap still ask. A draft must pass validation, and the run has no recommendation there, which is a real Ask Set member (`no_recommendation`).
+- **injection-suspect stays terminal.** No draft.
+- **analysis-only retries.** The planner is asked again, up to 2 retries, for a result that fails its check, fails its schema or holds a defect question (`hasDefectQuestion`). The code is the shared `lib/retry.js`, used by standard-delivery too. This closes the PR 1 residual.
+- **Service limits are waited out.** Local review reports `retry_minutes` (an integer of 1 or more, allowed only under `blocked`). Each wait is capped at 60 minutes (`maxWaitMinutes()`), 6 waits per run (`maxServiceWaits()`). A stated time beyond the waits left, or no room to carry the resume args, opens the draft PR. The run pauses with `pauseForRetry`: `needs_user` false, `retry_minutes`, `resume_args`, a message. The overlord waits with one `sleep <retry_minutes*60>` Bash call run in the background, then resumes the same run with reply `retry` and asks nothing. The resume logs one answer entry for the run's own wait and reruns local review.
+- **`decided_by` on the state machine.** `github-reviewer` and `github-review-loop` accept it in `user_answer`, the overlord `cerebrate` clause reads a `user_answer` marked `decided_by: run` as the run's decision, and `buildAnswerEntry` writes `decided_by`.
+
+**User approvals, 2026-11-07.**
+
+- The loop-cap draft PR, which changes the pinned PR gate: the open-plan-pr Do Not list and `plugin/governance/workflow.md` (PR Requirements) now bar a ready-for-review PR, not any PR, when local review did not hold.
+- Take the recommendations of the plan.
+
+**Options ruled out.**
+
+- **An in-script wait.** The Workflow runtime has no wait primitive.
+- **A sleeping runner agent.** It holds an agent for up to an hour and costs a runner slot.
+- **A fresh relaunch.** It loses the run's state.
+- **The reviewer waiting itself.** The reviewer is a bounded agent, not a scheduler.
+- **Raising the built-size caps.** The user refused a raise. The built script was cut back instead, by merging duplicate code and shared literals, with no visible change.
+
+**Enforcement.**
+
+- **Rows SD-83 and SD-84** in `plugin/workflow-src/standard-delivery/contract.js`, with their tests in `tests/workflow-scripts/standard-delivery.test.mjs`.
+- **analysis-only retry tests** in `tests/workflow-scripts/analysis-only.test.mjs`, and `tests/workflow-scripts/retry.test.mjs` for the shared code.
+- **Re-pinned** `tests/policy/safety-pr-requires-local-review.json` and `tests/policy/safety-review-user-answer.json`, bite-proof per `tests/policy/README.md`.
+
+**Budget.** Figures: see CHANGELOG 7.6.9.
+
+**Recorded residuals.**
+
+- **The state-machine loop cap still stops.**
+  - **Not covered.** The state machine ends blocked at its loop cap and opens no draft.
+  - **Bounded impact.** No change reaches the repo, and the user can resume.
+  - **Ground.** The state machine is slated for retirement in slice 5 of https://github.com/brenpike/hivemind/issues/409.
+- **A reused ready PR stays ready.**
+  - **Not covered.** When a ready PR already exists for the branch, the run reuses it. It is not turned into a draft, and its comment carries the draft part.
+  - **Bounded impact.** The PR is in front of the user before merge, with the reason and open findings in the comment.
+- **Only local review reports a retry time.**
+  - **Not covered.** Runner relays and validation report no `retry_minutes`, so an outage there still stops. The mechanism is generic. Tracked separately.
+  - **Bounded impact.** The run stops with no change to the repo.
+- **The overlord's wait is a model-followed rule.**
+  - **Not covered.** The overlord follows its engine result rule for `retry_minutes` (`plugin/agents/overlord.md`). The script does not run the sleep.
+  - **Bounded impact.** The script holds the bound: 60 minutes a wait, 6 waits a run. A skipped wait leaves the run paused, and the user can resume.
+
+**Version.** Patch, 7.6.9. It is a fix: it removes user stops and an outage stop the run can handle alone.
+
+It updates these places in place, each with a dated note:
+
+- Amendment 2026-11-07: the closed Ask Set (issue 549), its residual bullets and its "User approvals" bullet on the draft PR.
+- Amendment 2026-11-06: no user stop before the pull request (issue 541), the bullet "The stop inventory".
+- Amendment 2026-10-23: local review holds the pull request on every path (issue 444), the bullet "Eliminated class".
+- Amendment 2026-11-07: a planner check slip (the bullet "A new module").
+- ADR-0036, decision 14.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/549.
