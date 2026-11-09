@@ -4094,6 +4094,8 @@ const ROW_TESTS = {
       assert.ok(reviewerText.includes('`answers` holds the answers settled before this loop: the user\'s launch decisions first, then the run\'s answer log.'));
       assert.ok(reviewerText.includes('Never return `user-input-required` or `high-severity-rejection` for a question a settled entry answers.'));
       assert.ok(reviewerText.includes('it approves no change: only `approvals` and a user-made `user_answer` pick do.'));
+      assert.ok(reviewerText.includes('An answer is not a recorded decision: never reject a finding, or write a record, because of one.'));
+      assert.ok(!reviewerText.includes('recording it at its source first when no record covers it'));
     });
     test('the inputs are local-reviewer Input Contract keys, and max_iterations and caller_validates match it', () => {
       const contract = readReviewerContract('## Input Contract');
