@@ -2727,16 +2727,23 @@ This amendment covers https://github.com/brenpike/hivemind/issues/531, a follow-
 
 **Root cause.** `buildReviewPrompt` (`plugin/workflow-src/standard-delivery/review.js`) built its inputs block from the plan, the trunk, `approvals` and its own `user_answer` only. `listAnswerEntries(run)` (`plugin/workflow-src/standard-delivery/main.js`), the launch decisions then the answer log, reached only the scope, plan and revise prompts. So local review never saw what the user had settled.
 
+**Root cause of the local review finding.** The first version of the local-reviewer rule let a settled answer reject a finding, and let the reviewer write a decision record for an answer it never asked. A decision made before the run is not tied to the question it settles: `listAnswerEntries` gives each launch decision only a placeholder question, such as "Q1. A decision you settled before the run started." So the reviewer could reject an unrelated finding as settled and write a lasting record for it. That broke the single key of `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings): the recorded decision, never a finding id or a question.
+
+**The user's choice.** The user chose this approach over two others: leaving such a finding open in the PR, and keeping rejection for answers to questions the run showed.
+
 **The change.**
 
 - **The `answers` input.** The review inputs block carries `listAnswerEntries(run)` as an optional `answers` key, only when that list is not empty. A run with no answers gets a review prompt byte for byte as before.
-- **The local-reviewer rule.** `plugin/agents/local-reviewer.md` declares `answers` in its Input Contract. A question that an entry's settled labels name is never asked again. A finding that contests a settled reply is a repeat: it is rejected and recorded per `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings), as The Loop step 1 handles a keep pick. A finding that the code fails what the reply settled goes through the fix step. Answers approve nothing: only `approvals` and a `user_answer` pick the user made approve a destructive change.
-- **Edge cases.** A service-wait entry (`decided_by` run, settled empty) and a reply in the user's own words settle nothing. The current review's own question appears in both `answers` and `user_answer`, and step 1 still governs it. A review call the run took never enters the answer log.
+- **The local-reviewer rule.** `plugin/agents/local-reviewer.md` declares `answers` in its Input Contract. A question that an entry's settled labels name is never asked again. Settled answers only stop local review from asking their question again: they never reject a finding or produce a record. A finding that contests a settled answer, with no record covering it, goes back to the planner as `planner-escalation`, and the next plan records the decision as a plan step. Later reviews reject a repeat by citing that record. A finding that the code fails what the reply settled goes through the fix step. Answers approve nothing: only `approvals` and a `user_answer` pick the user made approve a destructive change.
+- **The doctrine sentence.** `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings) gains one sentence: a settled answer no reviewer asked, such as a decision the user made before the run or a reply to a planning question, is not a recorded decision. No reviewer rejects a finding or writes a record on its strength. A finding that contests it goes to the next plan, which records the decision at its source as a plan step, and from then on a finding contesting it is a repeat.
+- **Edge cases.** A service-wait entry (`decided_by` run, settled empty) and a reply in the user's own words settle nothing. The current review's own question appears in both `answers` and `user_answer`, and step 1 still governs it. A review call the run took never enters the answer log. Each escalation for a contesting finding spends one of the three replans (`maxReplans()`). After the third, the run opens a draft PR that lists the finding, so a finding is never silently rejected.
 - The JSON state machine is unchanged.
 
 **Enforcement.**
 
 - **Rows SD-32 and SD-80** in `plugin/workflow-src/standard-delivery/contract.js`, with their tests in `tests/workflow-scripts/standard-delivery.test.mjs`.
+- **The fixture pin** for the doctrine sentence in `tests/policy/safety-recorded-decision-repeat.json`.
+- **The SD-32 test assertion** that `plugin/agents/local-reviewer.md` says an answer is not a recorded decision and never rejects a finding or writes a record, and no longer lets the reviewer record a decision itself.
 
 **Recorded residuals.**
 
@@ -2744,10 +2751,6 @@ This amendment covers https://github.com/brenpike/hivemind/issues/531, a follow-
   - **Not covered.** On the JSON state machine, local review gets neither the launch decisions nor the answers settled during the run.
   - **Bounded impact.** Local review there may ask a settled question again. A destructive fix still holds at the gate, and every change is in the PR for the user to veto before merge.
   - **Ground.** The state machine is slated for retirement in slice 5 of https://github.com/brenpike/hivemind/issues/409.
-- **Whether a free-text decision covers a finding is the reviewer's judgment.**
-  - **Not covered.** A launch decision is the user's own words. Whether it settles the question a finding raises is the reviewer's judgment, and no code checks it.
-  - **Bounded impact.** Each finding the reviewer rejects that way is listed in the PR, so the user can veto it before merge.
-  - **Ground.** Only the reviewer reads both the decision and the finding. Code cannot tell that a free-text reply settles a finding.
 
 **Version.** Patch, 7.6.10. It is a fix: local review no longer asks a settled question again.
 
