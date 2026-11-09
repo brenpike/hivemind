@@ -691,7 +691,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'f633ce52d3a7134d';
+const BUILD_ID = '0ceda6ac754d0ac6';
 
 function supportedSchemaKeywords(){
 return[
@@ -4357,6 +4357,10 @@ const inputs={base:plan.base,working_branch:plan.branch,trunk:run.trunk,max_iter
 if(run.approvals.length>0){
 inputs.approvals=run.approvals;
 }
+const answers=listAnswerEntries(run);
+if(answers.length>0){
+inputs.answers=answers;
+}
 if(answer!==undefined){
 inputs.user_answer=answer;
 }
@@ -4484,14 +4488,14 @@ return takeReviewCall(review,run,shown,lead);
 return askShownReviewQuestion(resolution.asks[0],review,run,lead);
 }
 function askShownReviewQuestion(ask,review,run,lead){
-return askTail(Object.assign({},ask,{brief:buildReviewQuestionBrief(review),items:review.user_question.options.map(readOptionChanges)}),run,lead);
+return askTail({...ask,brief:buildReviewQuestionBrief(review),items:review.user_question.options.map(readOptionChanges)},run,lead);
 }
 function askHeldReviewCall(review,run){
 const shown=buildReviewQuestionBrief(review);
 const listed=listReviewCall(review,shown);
 run.taken=run.taken.filter((entry)=>entry.brief.problem!==listed.problem);
 const decided=removeReviewerText(shown);
-const ask=buildUndecidedAsk(shown.kind,Object.assign({},decided,{gate:Object.assign({},decided.gate,{safety:true})}),run);
+const ask=buildUndecidedAsk(shown.kind,{...decided,gate:{...decided.gate,safety:true}},run);
 return askShownReviewQuestion(ask,review,run,'Local review held back the call the run took. '+describeReviewQuestionLead(review,run.head));
 }
 function buildDiminishingReturnsBrief(review,head){
@@ -5115,8 +5119,7 @@ return describeLaunchProblem('The decisions launch arg must be a list of 1 to '+
 }
 function listAnswerEntries(run){
 const label=questionLabel(0);
-const decisionEntries=run.decisions.map((decision)=>buildAnswerEntry({question:label+'. A decision you settled before the run started.',labels:[label],chosen:[{label:label}],reply:decision}));
-return decisionEntries.concat(run.answerLog);
+return run.decisions.map((decision)=>buildAnswerEntry({question:label+'. A decision you settled before the run started.',labels:[label],chosen:[{label:label}],reply:decision})).concat(run.answerLog);
 }
 function createRunState(launch){
 return{
