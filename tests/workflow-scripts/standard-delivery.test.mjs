@@ -4092,7 +4092,13 @@ const ROW_TESTS = {
       assert.equal(unanswered.split('\n')[2], lib.dataBlocksSentence());
       assert.ok(readReviewerContract('## Input Contract').keys.includes('answers'));
       assert.ok(reviewerText.includes('`answers` holds the answers settled before this loop: the user\'s launch decisions first, then the run\'s answer log.'));
-      assert.ok(reviewerText.includes('Never return `user-input-required` or `high-severity-rejection` for a question a settled entry answers.'));
+      assert.ok(reviewerText.includes('A `settled` label names a question only in its own entry\'s `question`, never one in another entry or one this loop would ask.'));
+      assert.ok(reviewerText.includes('A launch decision\'s `question` is a placeholder; its `reply` is the whole decision.'));
+      assert.ok(reviewerText.includes('An entry settles only what its reply decides on those questions; `decided_by: run` marks the run\'s own.'));
+      assert.ok(reviewerText.includes('Never return a question exit (step 5) for what a settled reply decides: match what it decides, never a label.'));
+      assert.ok(reviewerText.includes('else return `planner-escalation` naming what that reply decides, never its label.'));
+      assert.ok(!reviewerText.includes('Only a question an entry\'s `settled` labels name is settled'));
+      assert.ok(!reviewerText.includes('for a question a settled entry answers'));
       assert.ok(reviewerText.includes('it approves no change: only `approvals` and a user-made `user_answer` pick do.'));
       assert.ok(reviewerText.includes('An answer is not a recorded decision: never reject a finding, or write a record, because of one.'));
       assert.ok(!reviewerText.includes('recording it at its source first when no record covers it'));
