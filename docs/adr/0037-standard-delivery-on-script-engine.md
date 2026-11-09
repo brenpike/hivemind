@@ -2021,7 +2021,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/499 and https:
 - **Gate holds list their items.** A worker or fix round blocked at the destructive-fix gate (by its stage or its blocker text, as the typed-stops amendment above defines) lists the items it holds back. The stop asks one approve-or-keep question per held item not yet approved: option A approves that item, option B keeps it as it is and the reply plans again or takes the stopped step again without it, strength none. A hold that lists no item, or only approved items, is a `report` stop, since it holds back no change the run can ask about. This reverses the `approve` typing the typed-stops amendment gave a hold that lists no item.
 - **Review calls.** Review options carry a `destructive` list too. A destructive review call is asked, never taken. When the review run right after a call the run took returns a gate hold, that call leaves `run.taken` and its original question is asked of the user.
 - **Labeled tail and stop replies.** Tail and stop questions show their Q labels. A letter reply settles its label through `buildAnswerEntry` (`round.chosen`). A reply in the user's own words settles none.
-- **The `decisions` launch arg.** It is absent, or a list of 1 to 10 non-blank strings of at most 2000 code points each: the user's replies settled before launch, word for word. Any other value stops the run before any agent call. Each decision becomes one settled answer entry ahead of the answer log in the scope, plan and revise prompts. It never approves a destructive change, and never changes the answer log, its rounds or the resume args. analysis-only does not read it.
+- **The `decisions` launch arg.** It is absent, or a list of 1 to 10 non-blank strings of at most 2000 code points each: the user's replies settled before launch, word for word. Any other value stops the run before any agent call. Each decision becomes one settled answer entry ahead of the answer log in the scope, plan and revise prompts. It never approves a destructive change, and never changes the answer log, its rounds or the resume args. analysis-only does not read it. Amended 2026-11-09 (issue 531): the decisions also reach the local review prompt, in its `answers` input (see Amendment 2026-11-09: local review gets the settled answers (issue 531)).
 - The JSON state machine is unchanged.
 
 **User decisions.**
@@ -2055,7 +2055,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/499 and https:
 
 - **Not covered.** A resume that passes a different `decisions` launch arg changes the scope, plan and revise prompts.
 - **Bounded impact.** Those agent calls miss the cache and run again. The answer log, its rounds and the resume args are unchanged, so the resume stays valid.
-- **Ground.** The decisions are the user's own launch input, and the resume contract replays the reply rounds, which the arg never touches.
+- **Ground.** The decisions are the user's own launch input, and the resume contract replays the reply rounds, which the arg never touches. Amended 2026-11-09 (issue 531): a different `decisions` arg now also changes the local review prompt, so that call misses the cache and local review runs again (see Amendment 2026-11-09: local review gets the settled answers (issue 531)).
 
 **Recorded residual: approvals are not yet listed in the PR body.**
 
@@ -2067,7 +2067,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/499 and https:
 
 - **Not covered.** Local review gets neither the `decisions` launch arg nor the answers settled during the run. It gets only `user_answer` for its own question, and `approvals`.
 - **Bounded impact.** Local review may raise or fix a finding against a decision the user settled. A destructive fix still holds at the gate, and every change is in the PR for the user to veto before merge.
-- **Ground.** Tracked as https://github.com/brenpike/hivemind/issues/531.
+- **Ground.** Tracked as https://github.com/brenpike/hivemind/issues/531. Amended 2026-11-09 (issue 531): closed. Local review gets the launch decisions and the answer log as its `answers` input (see Amendment 2026-11-09: local review gets the settled answers (issue 531)).
 
 The rest of ADR-0037 is unchanged. Status remains accepted.
 
@@ -2720,3 +2720,43 @@ It updates these places in place, each with a dated note:
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/549.
+
+## Amendment 2026-11-09: local review gets the settled answers (issue 531)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/531, a follow-up to https://github.com/brenpike/hivemind/issues/500. Local review could ask the user again a question the user had already settled, before launch or during the run, as `user-input-required`.
+
+**Root cause.** `buildReviewPrompt` (`plugin/workflow-src/standard-delivery/review.js`) built its inputs block from the plan, the trunk, `approvals` and its own `user_answer` only. `listAnswerEntries(run)` (`plugin/workflow-src/standard-delivery/main.js`), the launch decisions then the answer log, reached only the scope, plan and revise prompts. So local review never saw what the user had settled.
+
+**The change.**
+
+- **The `answers` input.** The review inputs block carries `listAnswerEntries(run)` as an optional `answers` key, only when that list is not empty. A run with no answers gets a review prompt byte for byte as before.
+- **The local-reviewer rule.** `plugin/agents/local-reviewer.md` declares `answers` in its Input Contract. A question that an entry's settled labels name is never asked again. A finding that contests a settled reply is a repeat: it is rejected and recorded per `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings), as The Loop step 1 handles a keep pick. A finding that the code fails what the reply settled goes through the fix step. Answers approve nothing: only `approvals` and a `user_answer` pick the user made approve a destructive change.
+- **Edge cases.** A service-wait entry (`decided_by` run, settled empty) and a reply in the user's own words settle nothing. The current review's own question appears in both `answers` and `user_answer`, and step 1 still governs it. A review call the run took never enters the answer log.
+- The JSON state machine is unchanged.
+
+**Enforcement.**
+
+- **Rows SD-32 and SD-80** in `plugin/workflow-src/standard-delivery/contract.js`, with their tests in `tests/workflow-scripts/standard-delivery.test.mjs`.
+
+**Recorded residuals.**
+
+- **Local review on the state machine gets no answers.**
+  - **Not covered.** On the JSON state machine, local review gets neither the launch decisions nor the answers settled during the run.
+  - **Bounded impact.** Local review there may ask a settled question again. A destructive fix still holds at the gate, and every change is in the PR for the user to veto before merge.
+  - **Ground.** The state machine is slated for retirement in slice 5 of https://github.com/brenpike/hivemind/issues/409.
+- **Whether a free-text decision covers a finding is the reviewer's judgment.**
+  - **Not covered.** A launch decision is the user's own words. Whether it settles the question a finding raises is the reviewer's judgment, and no code checks it.
+  - **Bounded impact.** Each finding the reviewer rejects that way is listed in the PR, so the user can veto it before merge.
+  - **Ground.** Only the reviewer reads both the decision and the finding. Code cannot tell that a free-text reply settles a finding.
+
+**Version.** Patch, 7.6.10. It is a fix: local review no longer asks a settled question again.
+
+It updates these places in place, each with a dated note, all in Amendment 2026-11-05: destructive approvals reach the run, and decisions settled before launch (issues 499 and 500):
+
+- The bullet "The `decisions` launch arg".
+- The recorded residual "changed decisions on resume": a different `decisions` arg now also changes the review prompt, so a cache miss reruns local review.
+- The recorded residual "local review does not see settled decisions": closed by issue 531, following the precedent of the issue 506 note.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/531, https://github.com/brenpike/hivemind/issues/500.
