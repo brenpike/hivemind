@@ -139,6 +139,129 @@ No prose budget changed.
 - Scope questions name only limits the user stated, exempt the version and changelog files, and give a reason for each file outside the limits (#504).
 - An option beyond the request is always asked, never auto-taken (#497).
 
+## [7.6.0] - 2026-11-05
+
+### Added
+
+- A decision-brief option can carry a `destructive` list of at most 4 `{category, item}` entries, each a Destructive Fix Gate category and the item it changes. Each option line shows every item whole (#499).
+- A strict letter reply (`A`, `Q1 A` or `Q1 A Q2 B`) approves the chosen option's items and withdraws items only its sibling options list. Approvals are kept on `run.approvals`, keyed by category and item text, and reach workers, fix rounds and local review only when the list is not empty. Free text approves nothing, and a call the run took is never approval (#499).
+- New optional launch arg `decisions`: 1 to 10 strings of at most 2000 code points, each the user's own reply settled before launch. They become settled answers in the scope, plan and revise prompts. They never approve a change, a bad shape stops the launch before any agent runs, and analysis-only does not read them (#500).
+- `security-policy.md` defines explicit approval. New pin fixture `tests/policy/safety-destructive-approval.json`.
+
+### Changed
+
+- `decide()` asks whenever the recommended option lists a destructive item, for every kind, review calls included.
+- `decision-autonomy.md` (Review Calls): a call whose pick applies a fix in a Destructive Fix Gate category is asked, never taken.
+- `local-reviewer.md` takes `approvals`, lists `destructive` on its options, and returns `user-input-required` instead of `blocked` for an uncovered gate fix.
+- Stop and tail questions show their labels, and a letter reply settles its label.
+- `overlord.md` `## Engine` names the `decisions` launch arg.
+- ADR-0037 amendment 2026-11-05 (issues 499 and 500).
+
+### Fixed
+
+- A user who picks a plan option that deletes tests is no longer asked again for it at the destructive-fix gate (#499).
+- A gate hold asks one approve-or-keep question per held item not yet approved. A hold that lists no item, or only approved items, is a `report` stop, so the user is not asked again (#499).
+- A gate hold right after a review call the run took removes that call from the decisions taken and asks its original question (#499).
+- A fix-round stop reply carries into the next fix round.
+
+No prose budget raised. Every `BUILD_ID` changes, so a run paused on the old build cannot resume on this one.
+
+## [7.5.29] - 2026-11-05
+
+### Changed
+
+- Two next actions only code sets join `fix_cause`, `run_again` and `answer`: `approve`, for a stop at the destructive-fix gate, and `report`, for the run's own defect. The agent-facing `next_action` enum stays `[fix_cause, run_again]` (#481, #498).
+- Each stop type gets its own question with a real recommendation, resolved through `decide()`. One table in `lib/stop.js` holds the action phrases for the `Next:` lines and the stop questions.
+- A non-null result that fails its schema is typed `report` on both engines. This reverses the "keeps the fix line" rule of the ADR-0037 amendment of 2026-10-28.
+- A worker report gains an optional `stage`. Stage `destructive-fix-gate`, or a blocker starting `proposed fix requires human confirmation`, makes the stop an approval stop.
+- `decide()` takes a closed caller ask reason, `outside_limits`. The outside-limits plan acceptance asks through it instead of rewriting the planner's strength.
+- The decision record, the PR body and the PR comment drop the routine kinds plan acceptance, remediation-plan acceptance and gate rerun. `run.taken` keeps them.
+- Stop typing, routing specs and path checks move to `lib/stop.js`, `specs.js` and `paths.js`, with no behavior change.
+- ADR-0037 amendment 2026-11-05 (issues 481 and 498).
+
+### Fixed
+
+- A stop no longer ends with one generic "fix what stopped the run" line. It names its cause and the action it needs (#481, #498).
+- A PR-step stop no longer guesses push state. A refusal known to come before the push says the step pushed nothing. Any other says the run did not see whether this step pushed.
+- A cut quote ends with `, shortened` instead of ` (cut)`, and a decision line no longer doubles its full stop.
+- A blocked wave lists its steps in stop order before capping them, so the step that sets the next action stays shown.
+
+Routing is unchanged. No prose budget raised. Every `BUILD_ID` changes, so a run paused on the old build cannot resume on this one.
+
+## [7.5.28] - 2026-11-05
+
+### Changed
+
+- `tools/build_workflows.mjs` carries into each built workflow only the top-level declarations its own entry reaches, found from parsed identifier reads. Reached code that reads `eval`, `globalThis` or `Function`, or uses `this` or `with`, fails the build, and so does an unread non-function top-level `const`. The banner lists only the sources a script carries.
+- `analysis-only.js` no longer carries the plan schema and the functions it never calls. Its prose budget is lowered from 19200 to 16050.
+- ADR-0037 amendment 2026-11-04 records why the build's dynamic-access refusal keeps its names (local review finding 4840d918).
+
+### Fixed
+
+- The planner is told the branch rule SD-08 enforces. `plan-schema.json` `branch` gains the pattern `^(feature|bugfix|hotfix|refactor|chore|docs|test|ci)/[a-z0-9]+(-[a-z0-9]+)*$`, and SD-08 reads its regex from the schema, so the two cannot drift. A run no longer stops at the plan step with nothing the user can fix (#508).
+- A function named only in a default value or computed key of a top-level destructuring binding is no longer pruned from the build.
+
+## [7.5.27] - 2026-11-04
+
+### Changed
+
+- `workflow.md` `## Version Bumps` points to `versioning.md` (SemVer Rules, Bump Trigger) instead of paraphrasing them. `versioning.md` is unchanged (#526).
+
+## [7.5.26] - 2026-11-04
+
+### Changed
+
+- Reference text that only scripts, CI or maintainers read moves out of the installed plugin to `docs/references/`: `brood-ledger-model.md`, `github-subissue-graphql.md` and `workflow-state-machine.md` whole, and all of `github-pr-review-graphql.md` except `## Author Filtering`, which github-review-loop cites (#525).
+- `facts-schema.json` is compacted. Its JSON is unchanged, and every line stays under 1,000 characters.
+- `overlord.md` RUN-OWNERSHIP-01 states the brood reconciliation rule that sat behind the removed pointer. Citations in skills, scripts, `CLAUDE.md` and `README.md` follow the moves.
+
+## [7.5.25] - 2026-11-04
+
+### Changed
+
+- The SKILL.md files ranked 10 to 17 by size (brood-status, refactor-to-depth, adaptation-cycle, decision-report, creep-spread, create-handoff, open-plan-pr and molt) state each rule once, in fewer words. Their Quick Reference checklists and sections that only restated the body are cut. Command lines, inputs-file literals, cited step numbers and frontmatter are unchanged, and create-handoff keeps its slug fallback to the initiative name (#524).
+- Two policy pins moved with the text they guard.
+
+## [7.5.24] - 2026-11-04
+
+### Changed
+
+- The nine largest SKILL.md files (spawn-brood, seed-hive, prd-to-issues, record-state-result, github-review-loop, mark-intent-fallback, detect-remediation-signals, init-run-ledger and triage-backlog) state each rule once, in fewer words. No rule is dropped. Frontmatter and the headings and step numbers that scripts cite are unchanged (#523).
+- spawn-brood drops its Quick Reference. The literals the coordinator reads stay.
+- Three policy pins moved with the text they guard.
+
+## [7.5.23] - 2026-11-04
+
+### Added
+
+- `definitions.md` gains `## Silence Discipline`, the rules shared by every pipeline skill. Twelve skills cite it instead of repeating them (#522).
+
+### Changed
+
+- The seven navigator skills point to `security-policy.md` (Inert Inputs-File Navigator Pattern, Transport Degradation Is a Hard Stop) instead of repeating the transport paragraph.
+- Every skill description is 120 characters or fewer. adaptation-cycle stays local-reviewer only, and github-review-loop stays overlord in main session only.
+- triage-backlog, refactor-to-depth and seed-hive set `disable-model-invocation: true`.
+
+The `definitions.md` prose budget rises from 6,362 to 7,084 bytes, user-approved and recorded in `tests/policy/prose-budget-raises.json`. Every SKILL.md budget is lowered to its new size.
+
+## [7.5.22] - 2026-11-04
+
+### Changed
+
+- The state-machine sections of `overlord.md` (Workflow State Execution, Implement Loop, Resume On Start and Intent-Driven Fallback) state each rule once, in fewer words. No heading is renamed, and cited step numbers stay (#521).
+- The `pr_branch_preflight` rule moves from Safety Rails into the Implement Loop PR identity paragraph. Safety Rails keeps a one-line hard stop.
+- The deferred decision report points to `decision-autonomy.md` (Post-Merge Decision Report Trigger).
+- Three policy pins moved with the text they guard, and `overlord-contract.test.mjs` gains six section tests.
+
+## [7.5.21] - 2026-11-04
+
+### Changed
+
+- `overlord.md` states each rule outside its state-machine sections once, in fewer words. No heading is renamed (#520).
+- The overlord's Skills list keeps only the skills it invokes.
+- `wave_scopes` is defined once, in Delegation Format.
+- Policy pins and goldens moved with the text they guard.
+
 ## [7.5.20] - 2026-11-03
 
 ### Added
