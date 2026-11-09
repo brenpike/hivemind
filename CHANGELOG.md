@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `standard-delivery` local review now receives the user's settled answers: the decisions settled before launch, then the answers settled during the run (#531).
 - Local review never asks a question those answers settle again.
+- Local review matches a settled answer by what its reply decides, never by its label.
 - A local review finding that contests a settled answer goes back to the planner, which records the decision; later reviews reject such a finding by citing that record.
 - `remediation-doctrine` (Recorded Decisions and Repeat Findings): a settled answer no reviewer asked is not a recorded decision, so no reviewer rejects a finding or writes a record on its strength.
 - ADR-0037 amendment 2026-11-09.
