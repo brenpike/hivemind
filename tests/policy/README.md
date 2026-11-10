@@ -170,12 +170,24 @@ adding an unreviewed member (a grant, a denylist token, a marker line), use
   blocks removal and drift in the files it names, and it is blind to newly added
   files. Both halves are true — say both in the fixture `description`; the
   protection is worth having despite the blind half.
+- A `set_check` names exactly one extractor: `extract_regex` or
+  `extract_frontmatter_key`. A spec with both, or with neither, fails.
 - `extract_regex` is LINE-SCOPED, so markers must be single-line by construction.
 - The capture group MUST be a NEGATED-DELIMITER class anchored on a structural
   marker (e.g. `[^:<[:space:]]+`), NEVER a positive charset. A positive charset
   silently narrows what the assertion can EVER see: a real grant authored as
   `COMMIT-GRANT Overmind_2:` was invisible to `[a-z][a-z-]*` and `--strict` exited
   0 on a forged privilege line.
+- `extract_frontmatter_key` names one top-level frontmatter key, such as `tools`,
+  and reads it through CHECK 16's frontmatter reader, `check16_collect_entries`
+  in `tools/policy_check.sh`. Use it for a list that lives under a frontmatter
+  key, such as an agent's tool grants. Any form the reader cannot read fails the
+  check and names the file, line and text: a quoted or indented key, a block
+  scalar, an unclosed flow sequence, or the key's text on any other frontmatter
+  line. So does any entry outside the tool-entry grammar (`<name>` or
+  `<name>(<rule>)`). The reader reads block lists at any indent, compact lists,
+  inline flow lists, comma-separated strings and every repeat of the key. Each
+  entry is a set member compared whole, so `Bash(x)` is not `Bash`.
 
 ## 7. Presence-checks cannot find absence defects
 
@@ -195,10 +207,12 @@ uncovered half in the fixture `description` or add the structural check.
 **Invariant: a missing interpreter must fail the check loudly and name itself,
 never silently degrade to a weaker check or a false pass.**
 
-`set_check` fixtures require `perl` to run them. There is no fallback: each
-fixture's `extract_regex` is compiled and executed by `perl` (`qr//`). If `perl`
-is not available on the runner, the check fails closed and names `perl` in the
-failure message, rather than silently passing.
+`set_check` fixtures that use `extract_regex` require `perl` to run them. There
+is no fallback: each such fixture's `extract_regex` is compiled and executed by
+`perl` (`qr//`). If `perl` is not available on the runner, the check fails closed
+and names `perl` in the failure message, rather than silently passing.
+`extract_frontmatter_key` needs no `perl`: CHECK 16's frontmatter reader is
+plain bash.
 
 Each fixture's `extract_regex` reaches `perl` as data, not as program source: it
 is never interpolated into a shell command line or a Perl program string, so
