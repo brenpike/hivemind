@@ -22,7 +22,6 @@ Load and follow: these governance sections, each ending at the next heading of t
 base: <branch>
 working_branch: <branch>
 trunk: <branch>
-claude_mem: present | absent
 max_iterations: 10
 resume_from_ledger: <path>  # optional, for crash recovery
 caller_validates: true | false  # optional; absent means false

@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.6.11] - 2026-11-10
+
+### Added
+
+- Policy fixture `tests/policy/safety-local-reviewer-no-claude-mem.json` pins that the `local-reviewer` frontmatter grants no claude-mem tool.
+
+### Removed
+
+- `local-reviewer` no longer declares the unused `claude_mem` input. Nothing read it, and neither engine passed it (ADR-0040 D2).
+
+No prose budget raised.
+
+Refs #409 (slice 3, PR 2).
+
 ## [7.6.10] - 2026-11-09
 
 ### Fixed

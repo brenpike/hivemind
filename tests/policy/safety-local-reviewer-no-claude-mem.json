@@ -1,0 +1,11 @@
+{
+  "rule": "Local reviewer frontmatter contains no claude-mem, so its tools: list names no claude-mem tool",
+  "description": "plugin/agents/local-reviewer.md is the local review agent. Its frontmatter tools: list is what grants it tools, and the local reviewer reads no claude-mem memory. The one frontmatter-absent consumer requires that the substring claude-mem appears nowhere in the frontmatter. Every claude-mem MCP tool name has the form mcp__plugin_claude-mem_*, which contains claude-mem, so adding any such tool name to the frontmatter fails. The frontmatter description line holds no claude-mem either. What this fixture does not check: (a) a grant spelled without the claude-mem substring, such as an underscore spelling or a wildcard grant like mcp__*; the pin claims names, never capability or meaning; (b) body prose: absent is scoped to frontmatter, and the body is not read; (c) grants from any other source, such as settings files, hooks, or the prompt that starts the local reviewer; (d) any other agent file; the consumer names only local-reviewer.md.",
+  "consumers": [
+    {
+      "file": "plugin/agents/local-reviewer.md",
+      "pattern": "claude-mem",
+      "absent": true
+    }
+  ]
+}
