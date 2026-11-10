@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `github-reviewer` now runs a read-only `hivemind:bump-type` check before it pushes review fixes, on every watch path. The check runs after the fix commit and only when `CLAUDE.md` names version files. When a required version bump is missing, the reviewer returns `blocked`, naming the expected version, and does not bump. When the check cannot run, it also returns `blocked` (ADR-0040 D3).
+- `github-reviewer` now runs a read-only `hivemind:bump-type` check before it pushes review fixes, on every watch path. The check runs after the fix commit and only when `CLAUDE.md` names version files. Whenever a version file does not hold the expected version (any `version_check: mismatch`, whatever the verdict), the reviewer returns `blocked`, naming the expected version. When the check itself fails (exit 1), it also returns `blocked`. A version the check cannot read (`unreadable`) or a bump it cannot settle (`undetermined`) goes on to the push. The reviewer never edits a version file (ADR-0040 D3).
 
 No prose budget raised.
 
