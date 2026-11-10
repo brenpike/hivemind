@@ -224,6 +224,33 @@ captures as a set member. A regex that fails to compile, or whose extraction
 fails at run time, FAILS the check -- a broken extraction is never silently
 treated as a zero-match (empty set) result.
 
+## 9. Fixture paths are trusted repo content
+
+**Invariant: a fixture is reviewed repo content, as trusted as
+`tools/policy_check.sh` itself; the checker does not confine the paths a
+fixture names.**
+
+This is the recorded threat model for fixture paths. `resolve_repo_path` in
+`tools/policy_check.sh` joins each fixture-named path (set-check `files`,
+source files, consumer files, regex and frontmatter targets) to the repo root
+with no containment check, so a `../` part or a symlink in the checkout could
+make the checker read a file outside it.
+
+That attacker is outside the threat model. Anyone who can commit a fixture can
+also commit an edit to the checker, and CI runs both from the same commit under
+the same review. The read is read-only: the checker never writes or executes a
+fixture-named path, and a bad path can at worst make a pin pass or fail on the
+wrong file's text, which review of the fixture catches. A containment guard
+with its canaries would add checks and remove no risk.
+
+Decision: reject the finding, add no path guard. Taken by the run, not the
+user, under `plugin/governance/decision-autonomy.md` (Review Calls), on local
+review finding `df20462f493dcd788cae1426754d6d077fa22de56112fc4719144f1de54a21d5`
+(fixture paths can escape the repository). A later finding that contests this
+is a repeat and is rejected by citing this section. A finding that shows a
+failure this does not cover, such as the checker writing to or executing a
+fixture-named path, or fixtures arriving from outside reviewed commits, is new.
+
 ## Allowlist matching (`policy-lint-allowlist.json`)
 
 **Invariant: an allowlist entry may excuse only the exact construct it was

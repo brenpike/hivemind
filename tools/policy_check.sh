@@ -36,6 +36,8 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 PLUGIN_ROOT="$REPO_ROOT/plugin"
 ALLOWLIST_PATH="$REPO_ROOT/tests/policy/policy-lint-allowlist.json"
 
+# No containment check by design: fixtures are trusted repo content. Threat
+# model: tests/policy/README.md section 9.
 resolve_repo_path() {
     echo "$REPO_ROOT/$1"
 }
