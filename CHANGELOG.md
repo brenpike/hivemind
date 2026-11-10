@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Policy fixture `tests/policy/safety-local-reviewer-no-claude-mem.json` pins that the `local-reviewer` frontmatter grants no claude-mem tool.
+- Policy fixture `tests/policy/safety-local-reviewer-no-claude-mem.json` pins the `local-reviewer` tool list to exactly its seven tools, so an added claude-mem tool, or any other added grant, fails the policy check.
 
 ### Removed
 
