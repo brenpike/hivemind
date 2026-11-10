@@ -14,7 +14,8 @@
 # LAYERS:
 #   S   static  — closure, exact C1/C3 lines, no legacy idiom, exact C2 lines, C4 pairs + every
 #                 `. <path>` line carries an `||` handler, emitter defined before its C1.
-#   R1  dirname fails / prints nothing        -> exact contracted self-locate line on its channel.
+#   R1  dirname fails / prints nothing / fails yet prints `.`
+#                                             -> exact contracted self-locate line on its channel.
 #   R2  cd refuses any `/../` path            -> exact contracted stage-2 line (C1 unaffected).
 #   R3  a sourced library is missing          -> exact contracted "missing" line / token.
 #   R4  a sourced library is a syntax error   -> contracted "unparseable" line is the LAST stderr
@@ -23,6 +24,8 @@
 #   CDPATH  a decoy CDPATH cannot redirect a relative invocation.
 #   Canaries  a reverted C1 must be classified as a regression by the probe checker, and an
 #             unenrolled self-locating script in a synthetic root must be flagged by the closure.
+#             The reverted-C1 canaries never pass `cd` an empty argument, so they do not depend on
+#             how bash treats `cd ""` (bash 5.3 rejects it with `cd: null directory`).
 #
 # ASSUMPTION: the R1/R2 probes rely on the external `dirname` and the `cd` builtin being
 # overridable via EXPORTED BASH FUNCTIONS (bash imports BASH_FUNC_* from the environment and a
@@ -313,6 +316,10 @@ install_probe_override() {
         none) ;;
         dirname-fail) dirname() { return 1; }; export -f dirname ;;
         dirname-empty) dirname() { return 0; }; export -f dirname ;;
+        # dirname-fail-dot models a dirname that fails yet prints a usable directory: the committed
+        # C1/C3 fail closed on the exit status, while the legacy and interim self-locate ignore it
+        # and change into `.`, so they fail open without ever passing `cd` an empty argument.
+        dirname-fail-dot) dirname() { printf '.\n'; return 1; }; export -f dirname ;;
         dirname-fail-for)
             dirname() { case "${!#}" in *"$PROBE_SUFFIX") return 1 ;; esac; command dirname "$@"; }
             export -f dirname ;;
@@ -619,7 +626,7 @@ test_static_emitter_order() {
     done
 }
 
-# ── R1: dirname fails / prints nothing ──────────────────────────────────────
+# ── R1: dirname fails / prints nothing / fails yet prints `.` ───────────────
 
 test_r1_entrypoints() {
     local row row_path var emitter reason script variant rc
@@ -627,7 +634,7 @@ test_r1_entrypoints() {
         IFS='|' read -r row_path var emitter reason <<<"$row"
         script="$REPO_ROOT/$row_path"
         set_probe_args "$row_path"
-        for variant in dirname-fail dirname-empty; do
+        for variant in dirname-fail dirname-empty dirname-fail-dot; do
             rc=0
             run_probe "$variant" "${script%/*}" "$script" ${PROBE_ARGS[@]+"${PROBE_ARGS[@]}"} || rc=$?
             assert_contract "r1-$variant ${row_path##*/}" "$rc" "$emitter" "$reason" exact
@@ -674,7 +681,7 @@ test_r1_libraries() {
         else
             failed "r1-baseline ${row_path##*/}" "exit $rc; $(describe_probe_output)"
         fi
-        for variant in dirname-fail dirname-empty; do
+        for variant in dirname-fail dirname-empty dirname-fail-dot; do
             rc=0
             run_probe "$variant" "${lib%/*}" "$SOURCE_LIB_HELPER" "$lib" || rc=$?
             assert_silent_return "r1-$variant ${row_path##*/}" "$rc" empty
@@ -792,7 +799,7 @@ test_canary_reverted_c1_loop_state() {
         failed canary-loop-state "could not revert C1 in the canary copy"
         return 0
     fi
-    run_probe dirname-empty "$skeleton" "$skeleton/loop-state.sh" floor || rc=$?
+    run_probe dirname-fail-dot "$skeleton" "$skeleton/loop-state.sh" floor || rc=$?
     if probe_matches_contract "$rc" die "$SELF_LOCATE_REASON" exact; then
         failed canary-loop-state "checker ACCEPTED a reverted (fail-open) C1"
     elif [[ "$rc" -eq 0 ]] && grep -qx '6' "$PROBE_OUT"; then

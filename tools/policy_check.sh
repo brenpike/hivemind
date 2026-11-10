@@ -36,6 +36,8 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 PLUGIN_ROOT="$REPO_ROOT/plugin"
 ALLOWLIST_PATH="$REPO_ROOT/tests/policy/policy-lint-allowlist.json"
 
+# No containment check by design: fixtures are trusted repo content. Threat
+# model: tests/policy/README.md section 9.
 resolve_repo_path() {
     echo "$REPO_ROOT/$1"
 }
@@ -3419,7 +3421,7 @@ check16_append_entry() {
 }
 
 # check16_split_inline_value VALUE LINE
-# Appends each item of an inline allowed-tools VALUE -- the `[...]` flow form or
+# Appends each item of an inline key VALUE -- the `[...]` flow form or
 # a plain string, optionally quoted whole -- to the entry arrays at LINE. Items
 # split on commas and whitespace outside parentheses and quotes. Returns 1 when
 # VALUE opens a flow sequence it does not close, else 0.
@@ -3483,16 +3485,17 @@ check16_add_parse_error() {
     return 0
 }
 
-# check16_collect_entries SKILL_FILE
-# Replaces CHECK16_ENTRY_TEXTS and CHECK16_ENTRY_LINES with every raw
-# allowed-tools entry in SKILL_FILE's YAML frontmatter and its line number, and
-# CHECK16_PARSE_ERROR_LINES and CHECK16_PARSE_ERROR_TEXTS with every form the
-# collector does not read. It reports nothing itself, so the canary can run it.
+# check16_collect_entries SKILL_FILE [KEY]
+# Replaces CHECK16_ENTRY_TEXTS and CHECK16_ENTRY_LINES with every raw entry of
+# the top-level KEY (default allowed-tools) in SKILL_FILE's YAML frontmatter and
+# its line number, and CHECK16_PARSE_ERROR_LINES and CHECK16_PARSE_ERROR_TEXTS
+# with every form the collector does not read. It reports nothing itself, so the
+# canaries and the set_check extract_frontmatter_key extractor can run it.
 # A trailing CR is stripped from each line. Line 1 must be exactly `---`, and
 # the frontmatter closes at the first later line that is exactly `---`; any
 # other frontmatter line holding the text `---` is a parse error.
 check16_collect_entries() {
-    local skill_file="$1"
+    local skill_file="$1" key="${2:-allowed-tools}"
     local textline value line_number=0 frontmatter_open=false frontmatter_closed=false key_mode='' seen_top_key=false
     CHECK16_ENTRY_TEXTS=()
     CHECK16_ENTRY_LINES=()
@@ -3527,7 +3530,7 @@ check16_collect_entries() {
             fi
             if [[ "$textline" == [[:space:]]* ]]; then
                 check16_add_parse_error "$line_number" \
-                    "an indented line under allowed-tools is not a '- <entry>' list item (a continuation of a multi-line value, a nested value or a block scalar body), so its text cannot be classified -- write each entry as its own '- <entry>' item"
+                    "an indented line under ${key} is not a '- <entry>' list item (a continuation of a multi-line value, a nested value or a block scalar body), so its text cannot be classified -- write each entry as its own '- <entry>' item"
                 continue
             fi
             key_mode=''
@@ -3547,7 +3550,7 @@ check16_collect_entries() {
                 continue
             fi
         fi
-        if [[ "$textline" =~ ^allowed-tools[[:space:]]*:(.*)$ ]]; then
+        if [[ "$textline" =~ ^"$key"[[:space:]]*:(.*)$ ]]; then
             value="${BASH_REMATCH[1]}"
             value="${value%%[[:space:]]#*}"
             check16_trim "$value"
@@ -3558,14 +3561,14 @@ check16_collect_entries() {
                 key_mode=inline
                 if ! check16_split_inline_value "$value" "$line_number"; then
                     check16_add_parse_error "$line_number" \
-                        "allowed-tools opens an inline flow sequence it does not close on the same line (\"${value}\"); its entries cannot be read, so write them as a block list or close the sequence"
+                        "${key} opens an inline flow sequence it does not close on the same line (\"${value}\"); its entries cannot be read, so write them as a block list or close the sequence"
                 fi
             fi
             continue
         fi
-        if [[ "$textline" == *allowed-tools* ]]; then
+        if [[ "$textline" == *"$key"* ]]; then
             check16_add_parse_error "$line_number" \
-                "the text allowed-tools appears in a frontmatter line that is not a column-0 'allowed-tools:' key (an indented, quoted or flow-mapping key, or prose in another value), so it cannot be classified -- use a column-0 'allowed-tools:' key and keep the words out of other frontmatter values"
+                "the text ${key} appears in a frontmatter line that is not a column-0 '${key}:' key (an indented, quoted or flow-mapping key, or prose in another value), so it cannot be classified -- use a column-0 '${key}:' key and keep the words out of other frontmatter values"
         fi
     done < "$skill_file"
     if [[ "$frontmatter_open" != true ]]; then
@@ -4713,41 +4716,64 @@ if [[ "$SAFETY_DISCOVERY_FAILED" == true ]]; then
     SAFETY_FAILED=$((SAFETY_FAILED + 1))
 fi
 
-test_set_check() {
-    local rule_name="$1"
-    local set_check_json="$2"
-    local passed=true
+# set_check_read_frontmatter_key RULE_NAME REL_PATH ABS_PATH KEY
+# Reads the top-level frontmatter KEY of ABS_PATH through check16_collect_entries
+# and sets SET_CHECK_KEY_MEMBERS to each entry that passes the tool-entry
+# grammar, normalized by check16_normalize_entry, one per line. Each parse error
+# and each entry outside the grammar is a SAFETY finding naming the file, line
+# and text, and makes it return 1; it returns 0 otherwise.
+SET_CHECK_KEY_MEMBERS=''
+set_check_read_frontmatter_key() {
+    local rule_name="$1" rel_path="$2" abs_path="$3" key="$4"
+    local entry_index read_ok=0
+    SET_CHECK_KEY_MEMBERS=''
+    check16_collect_entries "$abs_path" "$key"
+    for entry_index in "${!CHECK16_PARSE_ERROR_TEXTS[@]}"; do
+        read_ok=1
+        add_finding 'SAFETY' "$rel_path" "${CHECK16_PARSE_ERROR_LINES[$entry_index]}" \
+            "[$rule_name] set_check frontmatter key '${key}' parse error in ${rel_path} line ${CHECK16_PARSE_ERROR_LINES[$entry_index]}: ${CHECK16_PARSE_ERROR_TEXTS[$entry_index]}"
+    done
+    for entry_index in "${!CHECK16_ENTRY_TEXTS[@]}"; do
+        if check16_entry_is_unrecognized "${CHECK16_ENTRY_TEXTS[$entry_index]}"; then
+            read_ok=1
+            add_finding 'SAFETY' "$rel_path" "${CHECK16_ENTRY_LINES[$entry_index]}" \
+                "[$rule_name] set_check frontmatter key '${key}' entry in ${rel_path} line ${CHECK16_ENTRY_LINES[$entry_index]} is not '<name>' or '<name>(<rule>)': \"${CHECK16_ENTRY_TEXTS[$entry_index]}\""
+            continue
+        fi
+        SET_CHECK_KEY_MEMBERS+="${CHECK16_NORMALIZED}"$'\n'
+    done
+    return "$read_ok"
+}
 
+# set_check_validate_regex RULE_NAME REGEX
+# Returns 0 when perl is on PATH and REGEX compiles under perl with at least one
+# capture group, else 1 after a SAFETY finding naming the failure.
+set_check_validate_regex() {
+    local rule_name="$1" regex_text="$2"
     if ! command -v perl > /dev/null 2>&1; then
         add_finding 'SAFETY' '<fixture>' 0 \
             "[$rule_name] set_check requires perl (REQUIRED dependency: it is the only regex engine set_check compiles and extracts with) and perl was not found on PATH"
-        TEST_SET_CHECK_RESULT="false"
-        return
+        return 1
     fi
-
-    local regex_text
-    regex_text="$(echo "$set_check_json" | jq -r '.extract_regex // empty')"
     if [[ -z "$regex_text" ]]; then
         add_finding 'SAFETY' '<fixture>' 0 \
             "[$rule_name] set_check.extract_regex is required"
-        TEST_SET_CHECK_RESULT="false"
-        return
+        return 1
     fi
 
     # The compile oracle is the extraction engine itself: the regex reaches
     # perl as DATA through the environment and is compiled with qr//, exactly
-    # as the extractor below compiles it.
+    # as the extractor in test_set_check compiles it.
     if ! RE="$regex_text" perl -e 'qr/$ENV{RE}/' 2>/dev/null; then
         add_finding 'SAFETY' '<fixture>' 0 \
             "[$rule_name] set_check.extract_regex did not compile"
-        TEST_SET_CHECK_RESULT="false"
-        return
+        return 1
     fi
 
     # Independent capture-group validation: the compile oracle above only
     # proves the regex compiles -- it says nothing about whether the regex
     # captures a group. A capture-free regex that matches ZERO times in the
-    # extraction loop below never runs the `defined($1) or die` guard (the
+    # extraction loop in test_set_check never runs the `defined($1) or die` guard (the
     # while-loop body never executes), so it would otherwise vacuously pass as
     # a legitimate empty-capture zero-match result. Count the regex's own
     # capture groups independently of whether it matches anything: wrap it in
@@ -4763,8 +4789,42 @@ test_set_check() {
     ' 2>/dev/null; then
         add_finding 'SAFETY' '<fixture>' 0 \
             "[$rule_name] set_check.extract_regex has no capture group -- a capture-free regex that matches nothing would vacuously pass as an empty result"
+        return 1
+    fi
+    return 0
+}
+
+test_set_check() {
+    local rule_name="$1"
+    local set_check_json="$2"
+    local passed=true
+
+    local extractor_header has_regex has_key
+    extractor_header="$(jq -r '[(has("extract_regex")|tostring), (has("extract_frontmatter_key")|tostring)] | join(" ")' <<< "$set_check_json")"
+    has_regex="${extractor_header%% *}"
+    has_key="${extractor_header##* }"
+    if [[ "$has_regex" == "$has_key" ]]; then
+        add_finding 'SAFETY' '<fixture>' 0 \
+            "[$rule_name] set_check needs exactly one of extract_regex or extract_frontmatter_key (extract_regex present: ${has_regex}; extract_frontmatter_key present: ${has_key})"
         TEST_SET_CHECK_RESULT="false"
         return
+    fi
+
+    local frontmatter_key='' regex_text=''
+    if [[ "$has_key" == true ]]; then
+        frontmatter_key="$(jq -r '.extract_frontmatter_key | strings' <<< "$set_check_json")"
+        if [[ ! "$frontmatter_key" =~ ^[${CHECK16_ASCII_ALNUM}][${CHECK16_ASCII_ALNUM}_-]*$ ]]; then
+            add_finding 'SAFETY' '<fixture>' 0 \
+                "[$rule_name] set_check.extract_frontmatter_key must be a plain frontmatter key (an ASCII letter or digit, then letters, digits, '_' or '-')"
+            TEST_SET_CHECK_RESULT="false"
+            return
+        fi
+    else
+        regex_text="$(jq -r '.extract_regex // empty' <<< "$set_check_json")"
+        if ! set_check_validate_regex "$rule_name" "$regex_text"; then
+            TEST_SET_CHECK_RESULT="false"
+            return
+        fi
     fi
 
     # Build expected set
@@ -4796,32 +4856,39 @@ test_set_check() {
             continue
         fi
 
-        local content
-        content="$(<"$abs_path")"
-
-        # Extract capture group 1 of every match, line by line. The regex is
-        # passed to perl as DATA (the RE environment variable) and compiled
-        # with qr//, never spliced into program source, so a `/` in the regex
-        # cannot break the program. A match with no group-1 capture dies: a
-        # regex that cannot capture is a broken extraction, not zero matches.
-        # perl prints a trailing \x1f record mark so the command substitution
-        # cannot strip a final empty capture; the mark is removed below.
-        # INVARIANT: the capture must never swallow the extractor's status. It
-        # is read into extract_rc and tested explicitly; the `|| extract_rc=$?`
-        # form also suppresses errexit for this one command only. Rewriting it
-        # as `|| extract_out=''` (or defaulting an empty result to '{}') makes
-        # a failed extraction indistinguishable from a real zero-match result
-        # and lets a zero-count subset fixture pass vacuously.
         local extract_out extract_rc jq_rc captured_json
-        extract_rc=0
-        extract_out="$(RE="$regex_text" perl -ne 'BEGIN { $re = qr/$ENV{RE}/ } while (/$re/g) { defined($1) or die "no capture group\n"; print "$1\n" } END { print "\x1f" }' <<< "$content" 2>/dev/null)" || extract_rc=$?
-        if [[ "$extract_rc" -ne 0 ]]; then
-            passed=false
-            add_finding 'SAFETY' "$rel_path" 0 \
-                "[$rule_name] set_check extraction FAILED for ${rel_path} (perl rc=$extract_rc): the extract_regex did not compile or matched without a group-1 capture -- a broken extraction is not a zero-match result"
-            continue
+        if [[ -n "$frontmatter_key" ]]; then
+            if ! set_check_read_frontmatter_key "$rule_name" "$rel_path" "$abs_path" "$frontmatter_key"; then
+                passed=false
+            fi
+            extract_out="$SET_CHECK_KEY_MEMBERS"
+        else
+            local content
+            content="$(<"$abs_path")"
+
+            # Extract capture group 1 of every match, line by line. The regex is
+            # passed to perl as DATA (the RE environment variable) and compiled
+            # with qr//, never spliced into program source, so a `/` in the regex
+            # cannot break the program. A match with no group-1 capture dies: a
+            # regex that cannot capture is a broken extraction, not zero matches.
+            # perl prints a trailing \x1f record mark so the command substitution
+            # cannot strip a final empty capture; the mark is removed below.
+            # INVARIANT: the capture must never swallow the extractor's status. It
+            # is read into extract_rc and tested explicitly; the `|| extract_rc=$?`
+            # form also suppresses errexit for this one command only. Rewriting it
+            # as `|| extract_out=''` (or defaulting an empty result to '{}') makes
+            # a failed extraction indistinguishable from a real zero-match result
+            # and lets a zero-count subset fixture pass vacuously.
+            extract_rc=0
+            extract_out="$(RE="$regex_text" perl -ne 'BEGIN { $re = qr/$ENV{RE}/ } while (/$re/g) { defined($1) or die "no capture group\n"; print "$1\n" } END { print "\x1f" }' <<< "$content" 2>/dev/null)" || extract_rc=$?
+            if [[ "$extract_rc" -ne 0 ]]; then
+                passed=false
+                add_finding 'SAFETY' "$rel_path" 0 \
+                    "[$rule_name] set_check extraction FAILED for ${rel_path} (perl rc=$extract_rc): the extract_regex did not compile or matched without a group-1 capture -- a broken extraction is not a zero-match result"
+                continue
+            fi
+            extract_out="${extract_out%$'\x1f'}"
         fi
-        extract_out="${extract_out%$'\x1f'}"
 
         jq_rc=0
         captured_json="$(printf '%s' "$extract_out" | jq -R . | jq -s 'group_by(.) | map({key: .[0], value: length}) | from_entries')" || jq_rc=$?
@@ -5276,6 +5343,139 @@ if [[ "$set_check_zero_canary_ok" == true ]]; then
     CHECKS_PASSED=$((CHECKS_PASSED + 1))
 else
     echo '[FAIL] SAFETY-CANARY: set_check zero-match self-test'
+    CHECKS_FAILED=$((CHECKS_FAILED + 1))
+fi
+
+# ── SAFETY-CANARY: set_check frontmatter-key self-test ─────────────────────
+# extract_frontmatter_key reads one top-level frontmatter key through
+# check16_collect_entries, in BOTH directions. First the reader, run with key
+# `tools` over frontmatters built with printf: every YAML spelling of a Write
+# grant it reads must come back as a Write entry with no parse error, and every
+# form it cannot read must be a parse error, so no spelling passes unseen.
+# Second test_set_check over the committed canary target: the exact set passes,
+# a control spec one member short fails, and a spec naming both extractors or
+# neither fails. The test_set_check calls follow the subshell pattern of the
+# zero-match self-test above.
+SET_CHECK_FRONTMATTER_CANARY_REL='tests/policy/fixtures/set-check-frontmatter-canary.md'
+set_check_frontmatter_canary_ok=true
+
+# set_check_frontmatter_canary_finding TEXT
+set_check_frontmatter_canary_finding() {
+    set_check_frontmatter_canary_ok=false
+    add_finding 'SAFETY-CANARY' "$SET_CHECK_FRONTMATTER_CANARY_REL" 0 "$1"
+    return 0
+}
+
+# set_check_frontmatter_expect_write LABEL LINE...
+# Fails the canary unless the reader, with key tools, reads a Write entry from
+# the frontmatter built from the LINE arguments and reports no parse error.
+set_check_frontmatter_expect_write() {
+    local case_label="$1" raw_entry has_write=false
+    shift
+    check16_collect_entries <(printf '%s\n' "$@") tools
+    for raw_entry in "${CHECK16_ENTRY_TEXTS[@]}"; do
+        check16_normalize_entry "$raw_entry"
+        if [[ "$CHECK16_NORMALIZED" == 'Write' ]]; then
+            has_write=true
+        fi
+    done
+    if [[ "$has_write" != true || "${#CHECK16_PARSE_ERROR_TEXTS[@]}" -ne 0 ]]; then
+        set_check_frontmatter_canary_finding "frontmatter case '${case_label}' did not read a Write grant cleanly under key tools (Write read: ${has_write}; parse errors: ${#CHECK16_PARSE_ERROR_TEXTS[@]}) -- the reader misses a supported form"
+    fi
+    return 0
+}
+
+# set_check_frontmatter_expect_parse_error LABEL LINE...
+# Fails the canary unless the reader, with key tools, reports a parse error for
+# the frontmatter built from the LINE arguments.
+set_check_frontmatter_expect_parse_error() {
+    local case_label="$1"
+    shift
+    check16_collect_entries <(printf '%s\n' "$@") tools
+    if [[ "${#CHECK16_PARSE_ERROR_TEXTS[@]}" -eq 0 ]]; then
+        set_check_frontmatter_canary_finding "frontmatter case '${case_label}' produced no parse error under key tools -- the reader skips a form it does not read"
+    fi
+    return 0
+}
+
+# set_check_frontmatter_run_spec RULE_NAME SPEC_JSON
+# Sets SET_CHECK_FRONTMATTER_RESULT to the verdict test_set_check returns for
+# SPEC_JSON in a subshell, or to empty when the call aborted the subshell.
+SET_CHECK_FRONTMATTER_RESULT=''
+set_check_frontmatter_run_spec() {
+    SET_CHECK_FRONTMATTER_RESULT=''
+    set +e
+    SET_CHECK_FRONTMATTER_RESULT="$(
+        set -e
+        TEST_SET_CHECK_RESULT=''
+        test_set_check "$1" "$2" > /dev/null 2>&1
+        echo "$TEST_SET_CHECK_RESULT"
+    )"
+    set -e
+    return 0
+}
+
+set_check_frontmatter_expect_write 'two-space block list' '---' 'name: x' 'tools:' '  - Read' '  - Write' '---'
+set_check_frontmatter_expect_write 'four-space block list' '---' 'name: x' 'tools:' '    - Read' '    - Write' '---'
+set_check_frontmatter_expect_write 'compact block list' '---' 'name: x' 'tools:' '- Read' '- Write' '---'
+set_check_frontmatter_expect_write 'inline flow list' '---' 'name: x' 'tools: [Read, Write]' '---'
+set_check_frontmatter_expect_write 'comma-separated string' '---' 'name: x' 'tools: Read, Write' '---'
+set_check_frontmatter_expect_write 'second tools key' '---' 'name: x' 'tools:' '  - Read' 'model: y' 'tools: [Write]' '---'
+set_check_frontmatter_expect_parse_error 'quoted key' '---' 'name: x' '"tools": [Write]' '---'
+set_check_frontmatter_expect_parse_error 'indented tools key' '---' 'name: x' '  tools: [Write]' '---'
+set_check_frontmatter_expect_parse_error 'block scalar' '---' 'name: x' 'tools: |' '  Write' '---'
+set_check_frontmatter_expect_parse_error 'unclosed flow sequence' '---' 'name: x' 'tools: [Read,' '  Write]' '---'
+
+if [[ ! -f "$(resolve_repo_path "$SET_CHECK_FRONTMATTER_CANARY_REL")" ]]; then
+    set_check_frontmatter_canary_finding 'set_check frontmatter-key canary target missing -- the extract_frontmatter_key self-test cannot run'
+else
+    set_check_frontmatter_exact_spec="$(jq -n --arg path "$SET_CHECK_FRONTMATTER_CANARY_REL" '{
+        extract_frontmatter_key: "tools",
+        expected_set: ["Read", "Bash(git status *)"],
+        expected_counts: {"Read": 1, "Bash(git status *)": 1},
+        files: [{path: $path, mode: "equal"}]
+    }')"
+    set_check_frontmatter_run_spec 'set-check-frontmatter-canary' "$set_check_frontmatter_exact_spec"
+    if [[ "$SET_CHECK_FRONTMATTER_RESULT" != 'true' ]]; then
+        set_check_frontmatter_canary_finding "set_check with extract_frontmatter_key did not pass on the exact tools set of the canary target (result '${SET_CHECK_FRONTMATTER_RESULT}'; empty = the call aborted the run)"
+    fi
+
+    set_check_frontmatter_short_spec="$(jq -n --arg path "$SET_CHECK_FRONTMATTER_CANARY_REL" '{
+        extract_frontmatter_key: "tools",
+        expected_set: ["Read"],
+        expected_counts: {"Read": 1},
+        files: [{path: $path, mode: "equal"}]
+    }')"
+    set_check_frontmatter_run_spec 'set-check-frontmatter-canary-control' "$set_check_frontmatter_short_spec"
+    if [[ "$SET_CHECK_FRONTMATTER_RESULT" != 'false' ]]; then
+        set_check_frontmatter_canary_finding 'set_check with extract_frontmatter_key passed a spec one member short of the tools set -- the extracted set is not compared whole'
+    fi
+
+    set_check_frontmatter_both_spec="$(jq -n --arg path "$SET_CHECK_FRONTMATTER_CANARY_REL" '{
+        extract_regex: "^  - ([^[:space:]]+)",
+        extract_frontmatter_key: "tools",
+        expected_set: ["Read", "Bash(git status *)"],
+        files: [{path: $path, mode: "equal"}]
+    }')"
+    set_check_frontmatter_run_spec 'set-check-frontmatter-canary-both' "$set_check_frontmatter_both_spec"
+    if [[ "$SET_CHECK_FRONTMATTER_RESULT" != 'false' ]]; then
+        set_check_frontmatter_canary_finding 'set_check accepted a spec with both extract_regex and extract_frontmatter_key -- exactly one extractor is required'
+    fi
+
+    set_check_frontmatter_neither_spec="$(jq -n --arg path "$SET_CHECK_FRONTMATTER_CANARY_REL" '{
+        expected_set: [],
+        files: [{path: $path, mode: "subset"}]
+    }')"
+    set_check_frontmatter_run_spec 'set-check-frontmatter-canary-neither' "$set_check_frontmatter_neither_spec"
+    if [[ "$SET_CHECK_FRONTMATTER_RESULT" != 'false' ]]; then
+        set_check_frontmatter_canary_finding 'set_check accepted a spec with neither extract_regex nor extract_frontmatter_key -- exactly one extractor is required'
+    fi
+fi
+if [[ "$set_check_frontmatter_canary_ok" == true ]]; then
+    echo '[PASS] SAFETY-CANARY: set_check extract_frontmatter_key reads every tools form or fails it'
+    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+else
+    echo '[FAIL] SAFETY-CANARY: set_check frontmatter-key self-test'
     CHECKS_FAILED=$((CHECKS_FAILED + 1))
 fi
 

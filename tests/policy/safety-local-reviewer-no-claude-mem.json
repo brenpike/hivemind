@@ -1,0 +1,35 @@
+{
+  "rule": "Local reviewer tools key, read through the frontmatter reader CHECK 16 uses, is exactly its seven named tools, and its frontmatter contains no claude-mem",
+  "description": "plugin/agents/local-reviewer.md is the local review agent. Its frontmatter tools: list is what grants it tools, and the local reviewer reads no claude-mem memory. The set_check reads the top-level tools key with extract_frontmatter_key, which runs check16_collect_entries, the frontmatter reader CHECK 16 uses in tools/policy_check.sh, and requires, in equal mode with expected_counts, exactly these tools, each once: Read, Write, Edit, Bash, Glob, Grep and Skill. A tool added in any form the reader reads fails as an extra: a block list at any indent, a compact list, an inline flow list, a comma-separated string, or a second tools key. Each entry is compared whole, so a wildcard grant such as mcp__*, an underscore spelling, or any other memory tool fails as an extra; a duplicated tool fails its count, and a deleted tool fails as missing. A tools value in a form the reader cannot read fails the check and names the file, line and text: a quoted or indented key, a block scalar, an unclosed flow sequence, the key's text on any other frontmatter line, or an entry outside the tool-entry grammar. set_check is used because an added grant is the threat, and a presence pin can only notice deletion. The frontmatter-absent consumer requires that the substring claude-mem appears nowhere in the frontmatter. What this fixture does not check: (a) what each listed tool can do; the pin claims names, never capability or meaning; (b) grants from any other source, such as settings files, hooks, or the prompt that starts the local reviewer; (c) any other agent file; files is a literal list that names only local-reviewer.md and is blind to newly added files.",
+  "consumers": [
+    {
+      "file": "plugin/agents/local-reviewer.md",
+      "pattern": "claude-mem",
+      "absent": true
+    }
+  ],
+  "set_check": {
+    "extract_frontmatter_key": "tools",
+    "expected_set": [
+      "Read",
+      "Write",
+      "Edit",
+      "Bash",
+      "Glob",
+      "Grep",
+      "Skill"
+    ],
+    "expected_counts": {
+      "Read": 1,
+      "Write": 1,
+      "Edit": 1,
+      "Bash": 1,
+      "Glob": 1,
+      "Grep": 1,
+      "Skill": 1
+    },
+    "files": [
+      { "path": "plugin/agents/local-reviewer.md", "mode": "equal" }
+    ]
+  }
+}

@@ -13,6 +13,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.6.11] - 2026-11-10
+
+### Added
+
+- Policy fixture `tests/policy/safety-local-reviewer-no-claude-mem.json` pins the `local-reviewer` frontmatter `tools` key to exactly its seven tools, read through the policy checker's fail-closed frontmatter reader. An added tool, a claude-mem tool included, fails the policy check, and so does a `tools` value the reader cannot read.
+
+### Changed
+
+- The planner and synapse tool-list pins (`tests/policy/safety-planner-no-write.json`, `tests/policy/safety-synapse-tools.json`) now read their agent's frontmatter `tools` key through the same fail-closed frontmatter reader, instead of matching list lines anywhere in the file.
+
+### Removed
+
+- `local-reviewer` no longer declares the unused `claude_mem` input. Nothing read it, and neither engine passed it (ADR-0040 D2).
+
+No prose budget raised.
+
+Refs #409 (slice 3, PR 2).
+
 ## [7.6.10] - 2026-11-09
 
 ### Fixed

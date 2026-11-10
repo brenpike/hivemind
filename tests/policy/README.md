@@ -170,12 +170,24 @@ adding an unreviewed member (a grant, a denylist token, a marker line), use
   blocks removal and drift in the files it names, and it is blind to newly added
   files. Both halves are true — say both in the fixture `description`; the
   protection is worth having despite the blind half.
+- A `set_check` names exactly one extractor: `extract_regex` or
+  `extract_frontmatter_key`. A spec with both, or with neither, fails.
 - `extract_regex` is LINE-SCOPED, so markers must be single-line by construction.
 - The capture group MUST be a NEGATED-DELIMITER class anchored on a structural
   marker (e.g. `[^:<[:space:]]+`), NEVER a positive charset. A positive charset
   silently narrows what the assertion can EVER see: a real grant authored as
   `COMMIT-GRANT Overmind_2:` was invisible to `[a-z][a-z-]*` and `--strict` exited
   0 on a forged privilege line.
+- `extract_frontmatter_key` names one top-level frontmatter key, such as `tools`,
+  and reads it through CHECK 16's frontmatter reader, `check16_collect_entries`
+  in `tools/policy_check.sh`. Use it for a list that lives under a frontmatter
+  key, such as an agent's tool grants. Any form the reader cannot read fails the
+  check and names the file, line and text: a quoted or indented key, a block
+  scalar, an unclosed flow sequence, or the key's text on any other frontmatter
+  line. So does any entry outside the tool-entry grammar (`<name>` or
+  `<name>(<rule>)`). The reader reads block lists at any indent, compact lists,
+  inline flow lists, comma-separated strings and every repeat of the key. Each
+  entry is a set member compared whole, so `Bash(x)` is not `Bash`.
 
 ## 7. Presence-checks cannot find absence defects
 
@@ -195,10 +207,12 @@ uncovered half in the fixture `description` or add the structural check.
 **Invariant: a missing interpreter must fail the check loudly and name itself,
 never silently degrade to a weaker check or a false pass.**
 
-`set_check` fixtures require `perl` to run them. There is no fallback: each
-fixture's `extract_regex` is compiled and executed by `perl` (`qr//`). If `perl`
-is not available on the runner, the check fails closed and names `perl` in the
-failure message, rather than silently passing.
+`set_check` fixtures that use `extract_regex` require `perl` to run them. There
+is no fallback: each such fixture's `extract_regex` is compiled and executed by
+`perl` (`qr//`). If `perl` is not available on the runner, the check fails closed
+and names `perl` in the failure message, rather than silently passing.
+`extract_frontmatter_key` needs no `perl`: CHECK 16's frontmatter reader is
+plain bash.
 
 Each fixture's `extract_regex` reaches `perl` as data, not as program source: it
 is never interpolated into a shell command line or a Perl program string, so
@@ -209,6 +223,33 @@ The regex MUST contain a capture group; the first group is what `set_check`
 captures as a set member. A regex that fails to compile, or whose extraction
 fails at run time, FAILS the check -- a broken extraction is never silently
 treated as a zero-match (empty set) result.
+
+## 9. Fixture paths are trusted repo content
+
+**Invariant: a fixture is reviewed repo content, as trusted as
+`tools/policy_check.sh` itself; the checker does not confine the paths a
+fixture names.**
+
+This is the recorded threat model for fixture paths. `resolve_repo_path` in
+`tools/policy_check.sh` joins each fixture-named path (set-check `files`,
+source files, consumer files, regex and frontmatter targets) to the repo root
+with no containment check, so a `../` part or a symlink in the checkout could
+make the checker read a file outside it.
+
+That attacker is outside the threat model. Anyone who can commit a fixture can
+also commit an edit to the checker, and CI runs both from the same commit under
+the same review. The read is read-only: the checker never writes or executes a
+fixture-named path, and a bad path can at worst make a pin pass or fail on the
+wrong file's text, which review of the fixture catches. A containment guard
+with its canaries would add checks and remove no risk.
+
+Decision: reject the finding, add no path guard. Taken by the run, not the
+user, under `plugin/governance/decision-autonomy.md` (Review Calls), on local
+review finding `df20462f493dcd788cae1426754d6d077fa22de56112fc4719144f1de54a21d5`
+(fixture paths can escape the repository). A later finding that contests this
+is a repeat and is rejected by citing this section. A finding that shows a
+failure this does not cover, such as the checker writing to or executing a
+fixture-named path, or fixtures arriving from outside reviewed commits, is new.
 
 ## Allowlist matching (`policy-lint-allowlist.json`)
 
