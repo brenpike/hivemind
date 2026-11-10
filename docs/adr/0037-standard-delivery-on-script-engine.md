@@ -2021,7 +2021,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/499 and https:
 - **Gate holds list their items.** A worker or fix round blocked at the destructive-fix gate (by its stage or its blocker text, as the typed-stops amendment above defines) lists the items it holds back. The stop asks one approve-or-keep question per held item not yet approved: option A approves that item, option B keeps it as it is and the reply plans again or takes the stopped step again without it, strength none. A hold that lists no item, or only approved items, is a `report` stop, since it holds back no change the run can ask about. This reverses the `approve` typing the typed-stops amendment gave a hold that lists no item.
 - **Review calls.** Review options carry a `destructive` list too. A destructive review call is asked, never taken. When the review run right after a call the run took returns a gate hold, that call leaves `run.taken` and its original question is asked of the user.
 - **Labeled tail and stop replies.** Tail and stop questions show their Q labels. A letter reply settles its label through `buildAnswerEntry` (`round.chosen`). A reply in the user's own words settles none.
-- **The `decisions` launch arg.** It is absent, or a list of 1 to 10 non-blank strings of at most 2000 code points each: the user's replies settled before launch, word for word. Any other value stops the run before any agent call. Each decision becomes one settled answer entry ahead of the answer log in the scope, plan and revise prompts. It never approves a destructive change, and never changes the answer log, its rounds or the resume args. analysis-only does not read it.
+- **The `decisions` launch arg.** It is absent, or a list of 1 to 10 non-blank strings of at most 2000 code points each: the user's replies settled before launch, word for word. Any other value stops the run before any agent call. Each decision becomes one settled answer entry ahead of the answer log in the scope, plan and revise prompts. It never approves a destructive change, and never changes the answer log, its rounds or the resume args. analysis-only does not read it. Amended 2026-11-09 (issue 531): the decisions also reach the local review prompt, in its `answers` input (see Amendment 2026-11-09: local review gets the settled answers (issue 531)).
 - The JSON state machine is unchanged.
 
 **User decisions.**
@@ -2055,7 +2055,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/499 and https:
 
 - **Not covered.** A resume that passes a different `decisions` launch arg changes the scope, plan and revise prompts.
 - **Bounded impact.** Those agent calls miss the cache and run again. The answer log, its rounds and the resume args are unchanged, so the resume stays valid.
-- **Ground.** The decisions are the user's own launch input, and the resume contract replays the reply rounds, which the arg never touches.
+- **Ground.** The decisions are the user's own launch input, and the resume contract replays the reply rounds, which the arg never touches. Amended 2026-11-09 (issue 531): a different `decisions` arg now also changes the local review prompt, so that call misses the cache and local review runs again (see Amendment 2026-11-09: local review gets the settled answers (issue 531)).
 
 **Recorded residual: approvals are not yet listed in the PR body.**
 
@@ -2067,7 +2067,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/499 and https:
 
 - **Not covered.** Local review gets neither the `decisions` launch arg nor the answers settled during the run. It gets only `user_answer` for its own question, and `approvals`.
 - **Bounded impact.** Local review may raise or fix a finding against a decision the user settled. A destructive fix still holds at the gate, and every change is in the PR for the user to veto before merge.
-- **Ground.** Tracked as https://github.com/brenpike/hivemind/issues/531.
+- **Ground.** Tracked as https://github.com/brenpike/hivemind/issues/531. Amended 2026-11-09 (issue 531): closed. Local review gets the launch decisions and the answer log as its `answers` input (see Amendment 2026-11-09: local review gets the settled answers (issue 531)).
 
 The rest of ADR-0037 is unchanged. Status remains accepted.
 
@@ -2720,3 +2720,51 @@ It updates these places in place, each with a dated note:
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/549.
+
+## Amendment 2026-11-09: local review gets the settled answers (issue 531)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/531, a follow-up to https://github.com/brenpike/hivemind/issues/500. Local review could ask the user again a question the user had already settled, before launch or during the run, as `user-input-required`.
+
+**Root cause.** `buildReviewPrompt` (`plugin/workflow-src/standard-delivery/review.js`) built its inputs block from the plan, the trunk, `approvals` and its own `user_answer` only. `listAnswerEntries(run)` (`plugin/workflow-src/standard-delivery/main.js`), the launch decisions then the answer log, reached only the scope, plan and revise prompts. So local review never saw what the user had settled.
+
+**Root cause of the local review finding.** The first version of the local-reviewer rule let a settled answer reject a finding, and let the reviewer write a decision record for an answer it never asked. A decision made before the run is not tied to the question it settles: `listAnswerEntries` gives each launch decision only a placeholder question, such as "Q1. A decision you settled before the run started." So the reviewer could reject an unrelated finding as settled and write a lasting record for it. That broke the single key of `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings): the recorded decision, never a finding id or a question.
+
+**Root cause of local review finding 09268ddc.** The rule then keyed what is settled on an entry's `settled` labels, as if a label named a question for the whole review. A label is a per-round display label: it means something only inside its own entry's `question` text. `listAnswerEntries` gives every launch decision the same label and the same placeholder question, and each review question the user answers is labelled by its own round. So a label match across entries could hide an unrelated question, and a launch decision never settled the question it actually decides. This is the same root as the first finding: the rule read the placeholder, not the decision.
+
+**The user's choice.** The user chose this approach over two others: leaving such a finding open in the PR, and keeping rejection for answers to questions the run showed.
+
+**The change.**
+
+- **The `answers` input.** The review inputs block carries `listAnswerEntries(run)` as an optional `answers` key, only when that list is not empty. A run with no answers gets a review prompt byte for byte as before.
+- **The local-reviewer rule.** `plugin/agents/local-reviewer.md` declares `answers` in its Input Contract. A `settled` label names a question only inside its own entry's `question`. A launch decision's `question` is a placeholder, and its `reply` is the whole decision. Local review matches a question it would ask against what a settled reply decides, never against a label, and never asks such a question again. Settled answers only stop local review from asking their question again: they never reject a finding or produce a record. A finding that contests a settled answer, with no record covering it, goes back to the planner as `planner-escalation`, naming the answer by what its reply decides, never by its label, and the next plan records the decision as a plan step. Later reviews reject a repeat by citing that record. A finding that the code fails what the reply settled goes through the fix step. Answers approve nothing: only `approvals` and a `user_answer` pick the user made approve a destructive change.
+- **The doctrine sentence.** `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings) gains one sentence: a settled answer no reviewer asked, such as a decision the user made before the run or a reply to a planning question, is not a recorded decision. No reviewer rejects a finding or writes a record on its strength. A finding that contests it goes to the next plan, which records the decision at its source as a plan step, and from then on a finding contesting it is a repeat.
+- **Edge cases.** A service-wait entry (`decided_by` run, settled empty) and a reply in the user's own words settle nothing. The current review's own question appears in both `answers` and `user_answer`, and step 1 still governs it. A review call the run took never enters the answer log. Each escalation for a contesting finding spends one of the three replans (`maxReplans()`). After the third, the run opens a draft PR that lists the finding, so a finding is never silently rejected.
+- The JSON state machine is unchanged.
+
+**Matching stays a judgment.** This is a bounded-impact note, not a recorded residual: no defect is left unfixed. Whether a fresh review question matches what a settled reply decides is the reviewer's judgment, because no code key exists for a question the reviewer composes (see Amendment 2026-10-25: a review answer needs no fingerprint of its question (local review finding abe9ef8c)). A missed match costs one extra question, the worst case of issue 531 before this fix. A mistaken match never rejects a finding: the finding is either fixed to the user's own reply or escalated to the planner, and every change stays in the PR for the user to veto.
+
+**Enforcement.**
+
+- **Rows SD-32 and SD-80** in `plugin/workflow-src/standard-delivery/contract.js`, with their tests in `tests/workflow-scripts/standard-delivery.test.mjs`.
+- **The fixture pin** for the doctrine sentence in `tests/policy/safety-recorded-decision-repeat.json`.
+- **The SD-32 test assertion** that `plugin/agents/local-reviewer.md` says an answer is not a recorded decision and never rejects a finding or writes a record, and no longer lets the reviewer record a decision itself.
+- **The SD-32 test assertions** that `plugin/agents/local-reviewer.md` reads a `settled` label only in its own entry's `question`, calls a launch decision's `question` a placeholder and its `reply` the whole decision, matches what a settled reply decides and never a label, and names that decision, never its label, in a `planner-escalation`; and that the label-keyed sentences are gone.
+
+**Recorded residuals.**
+
+- **Local review on the state machine gets no answers.**
+  - **Not covered.** On the JSON state machine, local review gets neither the launch decisions nor the answers settled during the run.
+  - **Bounded impact.** Local review there may ask a settled question again. A destructive fix still holds at the gate, and every change is in the PR for the user to veto before merge.
+  - **Ground.** The state machine is slated for retirement in slice 5 of https://github.com/brenpike/hivemind/issues/409.
+
+**Version.** Patch, 7.6.10. It is a fix: local review no longer asks a settled question again.
+
+It updates these places in place, each with a dated note, all in Amendment 2026-11-05: destructive approvals reach the run, and decisions settled before launch (issues 499 and 500):
+
+- The bullet "The `decisions` launch arg".
+- The recorded residual "changed decisions on resume": a different `decisions` arg now also changes the review prompt, so a cache miss reruns local review.
+- The recorded residual "local review does not see settled decisions": closed by issue 531, following the precedent of the issue 506 note.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/531, https://github.com/brenpike/hivemind/issues/500.

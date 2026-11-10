@@ -134,7 +134,8 @@
  *   planning reply.
  *   run.decisions holds the decisions launch arg, [] when absent.
  *   listAnswerEntries(run) puts one settled entry per decision ahead of
- *   run.answerLog, and only the scope, plan and revise prompts read it;
+ *   run.answerLog, and only the scope, plan, revise and review prompts
+ *   read it;
  *   run.answerLog, its rounds and resume_args never hold a decision.
  *   run.open, the open findings of the last usable review, and run.waits,
  *   the waits for an outside service the run made, start [] and 0
@@ -442,8 +443,7 @@ function readDecisions(argsObject) {
  */
 function listAnswerEntries(run) {
   const label = questionLabel(0);
-  const decisionEntries = run.decisions.map((decision) => buildAnswerEntry({ question: label + '. A decision you settled before the run started.', labels: [label], chosen: [{ label: label }], reply: decision }));
-  return decisionEntries.concat(run.answerLog);
+  return run.decisions.map((decision) => buildAnswerEntry({ question: label + '. A decision you settled before the run started.', labels: [label], chosen: [{ label: label }], reply: decision })).concat(run.answerLog);
 }
 
 function createRunState(launch) {

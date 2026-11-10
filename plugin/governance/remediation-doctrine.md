@@ -88,6 +88,8 @@ A later finding that contests a recorded decision is a repeat: the reviewer reje
 
 A user's rejection is recorded before the next review reads it: by the reviewer that asked, when the answer reaches it in the same run (the local reviewer in a delivery run, the GitHub reviewer in a PR watch), otherwise by the next plan as a plan step. A call the run took under `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls) is recorded the same way by the reviewer that asked, naming the run as decider.
 
+A settled answer no reviewer asked, such as a decision the user made before the run or a reply to a planning question, is not a recorded decision: no reviewer rejects a finding or writes a record on its strength, and a finding that contests it goes to the next plan, which records the decision at its source as a plan step; from then on, a finding contesting it is a repeat.
+
 ## Stop-and-Merge
 
 Stop the loop and advise merge only when all of these hold:
@@ -97,7 +99,7 @@ Stop the loop and advise merge only when all of these hold:
 - the tail has a structural home per **Defer-with-Scope**
 - every push spawns only a fresh bounded tail, never a new defect class
 
-Round count is never the stop signal; chasing zero findings per push on a complex security surface is the anti-pattern. Agents never merge; humans merge. The loop surfaces this as the `merge_advised` advisory terminal, whose payload shape `hivemind:detect-remediation-signals` owns.
+Round count is never the stop signal. Agents never merge; humans merge. The loop surfaces this as the `merge_advised` advisory terminal, whose payload shape `hivemind:detect-remediation-signals` owns.
 
 ## Severity as Sensitivity Modifier
 
@@ -108,7 +110,7 @@ Severity only tunes the **Root-Cluster** threshold N:
 - **N=2** when a high-severity finding lands on a just-touched or same-framing surface
 - **N=3** otherwise
 
-"Just-touched or same-framing surface" is a within-pass modifier: it tunes N for one classification pass. It is distinct from the across-iteration axis of **Cross-Iteration Same-Surface Recurrence**.
+"Just-touched or same-framing surface" is a within-pass modifier: it tunes N for one classification pass.
 
 ## Cross-Iteration Same-Surface Recurrence
 
@@ -169,7 +171,7 @@ The overlord reconstructs the per-surface counter behind **Cross-Iteration Same-
 
 Because the counter persists across structural fixes, a surface that already yielded one root keeps the same trip point: the first non-closing fix after any accepted structural fix.
 
-The user-only architecture zoom-out skill carries `disable-model-invocation: true`, so the overlord cannot invoke it. The overlord routes an architectural zoom-out through the cerebrate via the `review_remediation_plan` / `review_remediation_plan_postpr` remediation state, the path a `root-cluster-suspected` exit_reason already takes. This is the intended route, not a workaround.
+The user-only architecture zoom-out skill carries `disable-model-invocation: true`, so the overlord cannot invoke it. The overlord routes an architectural zoom-out through the cerebrate via the `review_remediation_plan` / `review_remediation_plan_postpr` remediation state, the path a `root-cluster-suspected` exit_reason already takes.
 
 ### Proactive Zoom-Out Ledger Marker
 
@@ -182,7 +184,7 @@ The marker is one key in the transition's `event.outputs` object:
 - A reviewer-returned cluster omits the key or carries `"reviewer"`.
 - An absent key means non-proactive. Consumers infer proactive origin only from an explicit `"proactive"` value.
 
-The marker records judgment; the trip call stays judgment per ADR-0025. It is written through the normal `hivemind:record-state-result` `outputs` path on the existing `root-cluster-suspected` transition: no new workflow state, no workflow-graph change, and not via `hivemind:mark-intent-fallback` or any fallback path. It rides whichever producer state carries that exit_reason (`github_review_loop`, `github_reviewer_fix`, or the post-PR mirror that targets `review_remediation_plan_postpr`), lives only in `event.outputs`, and never collides with `plan_steps` or any `plan.*` field.
+The marker records judgment; the trip call stays judgment per ADR-0025. It is written through the normal `hivemind:record-state-result` `outputs` path on the existing `root-cluster-suspected` transition, never via `hivemind:mark-intent-fallback` or any fallback path. It rides whichever producer state carries that exit_reason (`github_review_loop`, `github_reviewer_fix`, or the post-PR mirror that targets `review_remediation_plan_postpr`), lives only in `event.outputs`, and never collides with `plan_steps` or any `plan.*` field.
 
 ## Skeleton-Enrichment Judgment Criteria
 
@@ -205,4 +207,4 @@ It emits no `cycling` or `regressed` label, no iteration grouping and no `root_c
 - **Mutation Decay** (break-fix-break cycle): a fix reintroduces a previously fixed finding. A mandatory stop, on instability.
 - **Creep Stagnation** (diminishing-returns exit): the loop spreads across iterations but gains no new ground. An advisory early exit: the reviewer recommends stopping and returns the decision to the overlord/Overmind.
 
-**Stop-and-Merge** is also a stop, but on a hardened surface with a structural home and a bounded tail. The operational detail of Mutation Decay, Creep Stagnation and Root-Cluster lives in `hivemind:detect-remediation-signals`.
+**Stop-and-Merge** is also a stop, but on a hardened surface with a structural home and a bounded tail.

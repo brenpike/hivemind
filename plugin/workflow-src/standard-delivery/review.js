@@ -5,8 +5,9 @@
  * review gate step. Its result schema lives in review-schema.js.
  *
  * Inputs
- *   run    the run state of main.js createRunState: pass, answerLog, head,
- *          trunk, approvals, taken, rejected, undone, open and waits.
+ *   run    the run state of main.js createRunState: pass, decisions,
+ *          answerLog, head, trunk, approvals, taken, rejected, undone, open
+ *          and waits.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   gates  the gate loop state of runGates (gates.js): runs.review, answer
  *          and takenReview, which only this module sets and reads: the review
@@ -55,7 +56,10 @@
  *           its question of the user, through buildUndecidedAsk with
  *           gate.safety true, its lead saying local review held back the call
  *           the run took. The inputs block carries run.approvals as approvals
- *           only when it is not empty. A take never pauses and never touches
+ *           only when it is not empty, and listAnswerEntries(run) (main.js),
+ *           each launch decision then run.answerLog, as answers only when it
+ *           is not empty, so a run with no answers gets the same prompt as
+ *           before. A take never pauses and never touches
  *           run.answerLog: takeReviewCall
  *           lists the call in run.taken, named by the short finding id with the
  *           encoded ask, and reruns the review gate with the next gateLabel
@@ -120,7 +124,9 @@
  *   Trust boundary: the overlord is a trusted relay, as in analysis-only
  *   (ADR-0036 decision 13). The local review result carries Codex-derived text:
  *   REVIEW_SCHEMA labels each such field, it reaches the planner only in a data
- *   block under the boundary sentence, it reaches the user only encoded by
+ *   block under the boundary sentence, it reaches local review, encoded in a
+ *   logged review round, only inside the inputs data block as answers, it
+ *   reaches the user only encoded by
  *   encodeUntrustedText, and it reaches the pull request texts only through
  *   neutralizePullRequestText (pr.js): a routing decision taken on a review
  *   result is shown there with a fixed problem text, a taken review call as
@@ -190,6 +196,10 @@ function buildReviewPrompt(plan, run, answer) {
   const inputs = { base: plan.base, working_branch: plan.branch, trunk: run.trunk, max_iterations: maxReviewIterations(), caller_validates: true };
   if (run.approvals.length > 0) {
     inputs.approvals = run.approvals;
+  }
+  const answers = listAnswerEntries(run);
+  if (answers.length > 0) {
+    inputs.answers = answers;
   }
   if (answer !== undefined) {
     inputs.user_answer = answer;
@@ -398,7 +408,7 @@ function askReviewQuestion(review, run) {
  * chosen option's changes (applyApprovalChoices, approvals.js).
  */
 function askShownReviewQuestion(ask, review, run, lead) {
-  return askTail(Object.assign({}, ask, { brief: buildReviewQuestionBrief(review), items: review.user_question.options.map(readOptionChanges) }), run, lead);
+  return askTail({ ...ask, brief: buildReviewQuestionBrief(review), items: review.user_question.options.map(readOptionChanges) }, run, lead);
 }
 
 /**
@@ -412,7 +422,7 @@ function askHeldReviewCall(review, run) {
   const listed = listReviewCall(review, shown);
   run.taken = run.taken.filter((entry) => entry.brief.problem !== listed.problem);
   const decided = removeReviewerText(shown);
-  const ask = buildUndecidedAsk(shown.kind, Object.assign({}, decided, { gate: Object.assign({}, decided.gate, { safety: true }) }), run);
+  const ask = buildUndecidedAsk(shown.kind, { ...decided, gate: { ...decided.gate, safety: true } }, run);
   return askShownReviewQuestion(ask, review, run, 'Local review held back the call the run took. ' + describeReviewQuestionLead(review, run.head));
 }
 

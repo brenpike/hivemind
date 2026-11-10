@@ -3392,7 +3392,7 @@ const ROW_TESTS = {
       assert.ok(moduleSource.includes('replanFromTailAsk(buildUndecidedAsk(VALIDATION_REMEDIATION_KIND, buildFixLimitBrief(run.head), run), run)'));
       assert.ok(!moduleSource.includes('buildUndecidedAsk(GATE_RERUN_KIND'), 'the gate rerun limit opens a draft, never asks');
       assert.ok(moduleSource.includes('return askShownReviewQuestion(resolution.asks[0], review, run, lead);'));
-      assert.ok(moduleSource.includes('return askTail(Object.assign({}, ask, { brief: buildReviewQuestionBrief(review), items: review.user_question.options.map(readOptionChanges) }), run, lead);'));
+      assert.ok(moduleSource.includes('return askTail({ ...ask, brief: buildReviewQuestionBrief(review), items: review.user_question.options.map(readOptionChanges) }, run, lead);'));
     });
     test('askTail logs a reply with settled [] and the lead plus questions, and returns the answer as {question, reply}', () => {
       const state = main.createRunState({ argsObject: { answers: {}, reply: TAIL_REPLY }, request: REQUEST, trunk: 'main', references: [], localReview: true });
@@ -3942,7 +3942,7 @@ const ROW_TESTS = {
       const sites = [...moduleSource.matchAll(/buildUndecidedAsk\(([A-Za-z_]+), (build[A-Za-z]+)\(/g)].map((match) => match[1] + ' ' + match[2]).sort();
       assert.deepEqual(sites, ['STEP_STOP_KIND buildApprovalBrief', 'STEP_STOP_KIND buildStepStopBrief', 'VALIDATION_REMEDIATION_KIND buildFixLimitBrief', 'VERSION_BUMP_INDETERMINABLE_KIND buildVersionQuestionBrief']);
       assert.equal((moduleSource.match(/buildUndecidedAsk\(/g) || []).length, 6);
-      assert.ok(moduleSource.includes('const ask = buildUndecidedAsk(shown.kind, Object.assign({}, decided, { gate: Object.assign({}, decided.gate, { safety: true }) }), run);'));
+      assert.ok(moduleSource.includes('const ask = buildUndecidedAsk(shown.kind, { ...decided, gate: { ...decided.gate, safety: true } }, run);'));
       const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
       const reasonOf = (kind, brief) => main.buildUndecidedAsk(kind, brief, run).reason;
       assert.equal(reasonOf('version_bump_indeterminable', main.buildVersionQuestionBrief({ version_check: 'undetermined' })), 'table_surface');
@@ -4049,7 +4049,7 @@ const ROW_TESTS = {
     });
     test('a review run after a reply to its question also gets user_answer in its inputs block', () => {
       const answer = { question: 'QUESTION_ZQ', reply: 'REPLY_ZQ' };
-      const state = { trunk: 'main', approvals: [] };
+      const state = { trunk: 'main', approvals: [], decisions: [], answerLog: [] };
       const prompt = main.buildReviewPrompt(makePlan(), state, answer);
       assert.deepEqual(readDataBlock(prompt, 'inputs'), { base: 'main', working_branch: 'feature/cache', trunk: 'main', max_iterations: 10, caller_validates: true, user_answer: answer });
       assert.ok(prompt.includes(lib.dataBlocksSentence('The reply in user_answer')), prompt);
@@ -4059,8 +4059,8 @@ const ROW_TESTS = {
     });
     test('a review prompt carries run.approvals in its inputs block only when it is not empty, so with none it is byte for byte as before', () => {
       const answer = { question: 'QUESTION_ZQ', reply: 'A' };
-      const plain = main.buildReviewPrompt(makePlan(), { trunk: 'main', approvals: [] }, answer);
-      const approved = main.buildReviewPrompt(makePlan(), { trunk: 'main', approvals: [TEST_X, TEST_Y] }, answer);
+      const plain = main.buildReviewPrompt(makePlan(), { trunk: 'main', approvals: [], decisions: [], answerLog: [] }, answer);
+      const approved = main.buildReviewPrompt(makePlan(), { trunk: 'main', approvals: [TEST_X, TEST_Y], decisions: [], answerLog: [] }, answer);
       assert.ok(!plain.includes('approvals'), plain);
       assert.deepEqual(Object.keys(readDataBlock(approved, 'inputs')), ['base', 'working_branch', 'trunk', 'max_iterations', 'caller_validates', 'approvals', 'user_answer']);
       assert.deepEqual(readDataBlock(approved, 'inputs').approvals, [TEST_X, TEST_Y]);
@@ -4069,9 +4069,43 @@ const ROW_TESTS = {
       assert.ok(readReviewerContract('## Input Contract').keys.includes('approvals'));
       assert.ok(reviewerText.includes('`approvals` holds the changes the user approved per'));
     });
+    test('a review prompt carries listAnswerEntries(run) in its inputs block as answers only when it is not empty, so with none it is byte for byte as before', () => {
+      const answer = { question: 'QUESTION_ZQ', reply: 'A' };
+      const logged = { question: 'LOGGED_QUESTION_ZQ', settled: ['Q1'], reply: 'LOGGED_REPLY_ZQ' };
+      const plain = main.buildReviewPrompt(makePlan(), { trunk: 'main', approvals: [], decisions: [], answerLog: [] }, answer);
+      const state = { trunk: 'main', approvals: [TEST_X], decisions: ['DECISION_ZQ'], answerLog: [logged] };
+      const answered = main.buildReviewPrompt(makePlan(), state, answer);
+      const approvedOnly = main.buildReviewPrompt(makePlan(), { ...state, decisions: [], answerLog: [] }, answer);
+      assert.ok(!plain.includes('answers'), plain);
+      assert.ok(!approvedOnly.includes('answers'), approvedOnly);
+      assert.deepEqual(Object.keys(readDataBlock(answered, 'inputs')), ['base', 'working_branch', 'trunk', 'max_iterations', 'caller_validates', 'approvals', 'answers', 'user_answer']);
+      assert.deepEqual(readDataBlock(answered, 'inputs').answers, structuredClone(main.listAnswerEntries(state)));
+      assert.deepEqual(readDataBlock(answered, 'inputs').answers.map((entry) => entry.reply), ['DECISION_ZQ', 'LOGGED_REPLY_ZQ']);
+      assert.equal(withoutDataBlock(answered, 'inputs'), withoutDataBlock(plain, 'inputs'));
+      assert.equal(answered.split('\n')[2], lib.dataBlocksSentence('The reply in user_answer'));
+      for (const text of ['DECISION_ZQ', 'LOGGED_QUESTION_ZQ', 'LOGGED_REPLY_ZQ']) {
+        assert.ok(answered.includes(text), text);
+        assert.ok(!withoutDataBlock(answered, 'inputs').includes(text), text);
+      }
+      const unanswered = main.buildReviewPrompt(makePlan(), state);
+      assert.deepEqual(Object.keys(readDataBlock(unanswered, 'inputs')), ['base', 'working_branch', 'trunk', 'max_iterations', 'caller_validates', 'approvals', 'answers']);
+      assert.equal(unanswered.split('\n')[2], lib.dataBlocksSentence());
+      assert.ok(readReviewerContract('## Input Contract').keys.includes('answers'));
+      assert.ok(reviewerText.includes('`answers` holds the answers settled before this loop: the user\'s launch decisions first, then the run\'s answer log.'));
+      assert.ok(reviewerText.includes('A `settled` label names a question only in its own entry\'s `question`, never one in another entry or one this loop would ask.'));
+      assert.ok(reviewerText.includes('A launch decision\'s `question` is a placeholder; its `reply` is the whole decision.'));
+      assert.ok(reviewerText.includes('An entry settles only what its reply decides on those questions; `decided_by: run` marks the run\'s own.'));
+      assert.ok(reviewerText.includes('Never return a question exit (step 5) for what a settled reply decides: match what it decides, never a label.'));
+      assert.ok(reviewerText.includes('else return `planner-escalation` naming what that reply decides, never its label.'));
+      assert.ok(!reviewerText.includes('Only a question an entry\'s `settled` labels name is settled'));
+      assert.ok(!reviewerText.includes('for a question a settled entry answers'));
+      assert.ok(reviewerText.includes('it approves no change: only `approvals` and a user-made `user_answer` pick do.'));
+      assert.ok(reviewerText.includes('An answer is not a recorded decision: never reject a finding, or write a record, because of one.'));
+      assert.ok(!reviewerText.includes('recording it at its source first when no record covers it'));
+    });
     test('the inputs are local-reviewer Input Contract keys, and max_iterations and caller_validates match it', () => {
       const contract = readReviewerContract('## Input Contract');
-      for (const key of ['base', 'working_branch', 'trunk', 'max_iterations', 'caller_validates', 'user_answer']) {
+      for (const key of ['base', 'working_branch', 'trunk', 'max_iterations', 'caller_validates', 'approvals', 'answers', 'user_answer']) {
         assert.ok(contract.keys.includes(key), key);
       }
       assert.equal(contract.values.max_iterations, String(main.maxReviewIterations()));
@@ -5793,7 +5827,11 @@ const ROW_TESTS = {
         if (hasNote) {
           assert.equal(call.prompt.split('\n')[1], main.resumedReplySentence(), call.opts.label);
         }
-        assert.equal(call.prompt.includes(reply), call.opts.label === 'revise-1' || isLaterAnswerPrompt, call.opts.label + ' carries the reply only in revise-1 and a later scope or plan prompt');
+        const isLaterReviewPrompt = index > reviseIndex && /^review-\d/.test(call.opts.label);
+        assert.equal(call.prompt.includes(reply), call.opts.label === 'revise-1' || isLaterAnswerPrompt || isLaterReviewPrompt, call.opts.label + ' carries the reply only in revise-1, a later scope or plan prompt and a later review prompt');
+        if (isLaterReviewPrompt) {
+          assert.ok(!withoutDataBlock(call.prompt, 'inputs').includes(reply), call.opts.label + ' carries the reply only in its inputs block');
+        }
       });
     }
     test('a resume whose reply revise-1 settles runs branch-1 through pr-1, each later prompt with the sentence and only revise-1 with the reply', async () => {
@@ -5845,8 +5883,10 @@ const ROW_TESTS = {
       const askIndex = labelsOf(run).indexOf('fix-commit-1-3');
       run.calls.forEach((call, index) => {
         const isAnswerPrompt = ['scope-2', 'plan-2'].includes(call.opts.label);
+        const isLaterReviewPrompt = index > askIndex && /^review-\d/.test(call.opts.label);
         assert.equal(call.prompt.includes(main.resumedReplySentence()), index > askIndex && !isAnswerPrompt, call.opts.label);
-        assert.equal(call.prompt.includes(TAIL_REPLY), isAnswerPrompt, call.opts.label);
+        assert.equal(call.prompt.includes(TAIL_REPLY), isAnswerPrompt || isLaterReviewPrompt, call.opts.label);
+        assert.ok(!isLaterReviewPrompt || !withoutDataBlock(call.prompt, 'inputs').includes(TAIL_REPLY), call.opts.label);
       });
     });
     test('a run that never paused sends no prompt with the sentence', async () => {
@@ -9139,6 +9179,31 @@ const ROW_TESTS = {
       assert.equal(callOf(run, 'plan-1').prompt.split('\n')[2], lib.dataBlocksSentence(undefined));
       const state = main.createRunState(main.readDeliveryLaunch({ request: REQUEST }));
       assert.deepEqual(structuredClone([state.decisions, main.listAnswerEntries(state)]), [[], []]);
+      const reviews = run.calls.filter((call) => call.opts.agentType === 'hivemind:local-reviewer');
+      assert.ok(reviews.length > 0);
+      assert.ok(reviews.every((call) => !Object.hasOwn(readDataBlock(call.prompt, 'inputs'), 'answers')), JSON.stringify(labelsOf(run)));
+    });
+    test('a launch decision reaches the review-1-1 inputs as its settled entry, inside the inputs block alone', async () => {
+      const run = await runWorkflow(DECIDED, happyResults());
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const prompt = callOf(run, 'review-1-1').prompt;
+      assert.deepEqual(readDataBlock(prompt, 'inputs').answers, [decisionEntry(DECISION)]);
+      assert.ok(!withoutDataBlock(prompt, 'inputs').includes('DECISION_MARKER_ZQ'), prompt);
+      assert.equal(withoutDataBlock(prompt, 'inputs'), withoutDataBlock(callOf(await runWorkflow(LAUNCH, happyResults()), 'review-1-1').prompt, 'inputs'));
+    });
+    test('a rerun after a review question reply carries the logged round in answers, after each decision', async () => {
+      const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'f4f4f4f4', user_question: USER_QUESTION };
+      const results = happyResults({ 'review-1-1': userInput, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
+      const questionText = main.describeReviewQuestionLead(userInput, OTHER) + '\n\n' + lib.renderQuestions([surfacedAsk(main.buildReviewQuestionBrief(userInput))]);
+      for (const [launch, before] of [[LAUNCH, []], [DECIDED, [decisionEntry(DECISION)]]]) {
+        const paused = await runWorkflow(launch, results);
+        assert.equal(paused.result.needs_user, true, paused.result.message);
+        const run = await runWorkflow(resumeWith(launch, paused.result, 'A'), results);
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        const inputs = readDataBlock(callOf(run, 'review-1-2').prompt, 'inputs');
+        assert.deepEqual(inputs.answers, [...before, { question: questionText, settled: ['Q1'], reply: 'A' }]);
+        assert.deepEqual(inputs.user_answer, { question: questionText, reply: 'A' });
+      }
     });
     test('each decision reaches the scope, plan and revise prompts as a settled entry ahead of the answer log, and a resume replays the earlier prompts', async () => {
       const paused = await runWorkflow(DECIDED, { 'facts-1': factsRelay(), 'plan-1': gated });
