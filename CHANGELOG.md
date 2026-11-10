@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `github-reviewer` steps 3, 6, 8 and 9 are reworded more tightly to fit its prose budget. No rule changes.
+- `github-reviewer` Fix Mode Input notes and steps 3, 4, 6, 8 and 9 are reworded more tightly to fit its prose budget, dropping only text that repeats a rule stated elsewhere in the file. No rule changes.
 
 ### Fixed
 
