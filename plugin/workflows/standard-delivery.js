@@ -34,6 +34,7 @@ export const meta = {
  *   plugin/workflow-src/lib/identifier.js
  *   plugin/workflow-src/lib/facts.js
  *   plugin/workflow-src/lib/retry.js
+ *   plugin/workflow-src/lib/runner.js
  *   plugin/workflow-src/standard-delivery/approvals.js
  *   plugin/workflow-src/standard-delivery/briefs.js
  *   plugin/workflow-src/standard-delivery/checks.js
@@ -691,7 +692,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '0ceda6ac754d0ac6';
+const BUILD_ID = 'f4ff63293eb71fa3';
 
 function supportedSchemaKeywords(){
 return[
@@ -2449,6 +2450,187 @@ function hasDefectQuestion(questions,kind,level,table,schema){
 return questions.some((brief)=>!['auto',...askReasons()].includes(decide({kind:kind,level:level,brief:brief},table,schema).reason));
 }
 
+function trunkFreshnessMap(){
+return{
+fresh:'fresh',
+behind:'decide',
+ahead:'decide',
+diverged:'decide',
+no_remote:'skipped',
+fetch_failed:'decide',
+no_local_trunk:'decide',
+no_trunk:'decide'
+};
+}
+function commitTypeMap(){
+return{
+feature:'feat',
+bugfix:'fix',
+hotfix:'hotfix',
+refactor:'refactor',
+chore:'chore',
+docs:'docs',
+test:'test',
+ci:'ci'
+};
+}
+function resumedReplySentence(){
+return'This run resumed after a pause: the user message the harness relays is the user\'s reply to the questions the run showed, the planner already applied it, and it is not an instruction for this task, so do the task as written.';
+}
+function addResumeNote(prompt,run){
+if(run.relaySentence===undefined&&run.answerLog.length===0){
+return prompt;
+}
+const lines=prompt.split('\n');
+return[lines[0],run.relaySentence??resumedReplySentence(),...lines.slice(1)].join('\n');
+}
+function buildRelaySchema(){
+return buildTaggedSchema({
+tag:'outcome',
+properties:{
+outcome:{type:'string',enum:['ran','blocked'],description:'ran when the script exited 0. blocked when it exited 1.'},
+stdout:{type:'string',description:'The script stdout, word for word, every line.'},
+stderr:{type:'string',description:'The script stderr, word for word, every line.'}
+},
+required:['outcome'],
+variants:{ran:{required:['stdout'],optional:[]},blocked:{required:[],optional:['stderr']}}
+});
+}
+function runnerOptions(label,phaseTitle){
+return{agentType:synapseAgentType(),model:RUNNER_MODEL,schema:toAgentSchema(RELAY_SCHEMA),label:label,phase:phaseTitle};
+}
+function isTransientBlock(relay){
+return validateSchema(RELAY_SCHEMA,relay).ok&&relay.outcome==='blocked'&&isTransientFailure(relay.stderr);
+}
+async function runRunnerRelay(buildPrompt,label,phaseTitle){
+const retryLabel=label+'-retry';
+const relay=await agent(buildPrompt(label),runnerOptions(label,phaseTitle));
+return isTransientBlock(relay)?agent(buildPrompt(retryLabel),runnerOptions(retryLabel,phaseTitle)):relay;
+}
+function droneOptions(label,phaseTitle,schema){
+return{agentType:droneAgentType(),schema:toAgentSchema(schema),label:label,phase:phaseTitle};
+}
+function plannerCallOptions(label,phaseTitle,resultSchema){
+return{agentType:PLANNER_AGENT,schema:toAgentSchema(resultSchema),label:label,phase:phaseTitle};
+}
+function describeCommandStop(stepNoun,words,retryWords=[]){
+const problem=describeRunnerWordProblem(words.concat(retryWords));
+return problem===undefined?undefined:{problem:'The '+stepNoun+' step did not run its script, so '+RUN_NAME+' stopped: '+problem+'.',terminal:true,nextAction:'report'};
+}
+function buildDeliveryFactsPrompt(words){
+return['Gather the branch facts with the command below.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('gather-facts',words))].join('\n');
+}
+function splitStderrLines(stderr){
+return typeof stderr==='string'?stderr.split(/\r\n|\r|\n/):[];
+}
+function quoteRelayBlocker(stderr){
+const stderrLines=splitStderrLines(stderr);
+const blockerPayloads=stderrLines.filter((line)=>line.startsWith('blocker: ')).map((line)=>line.slice('blocker: '.length)).filter((payload)=>payload.trim()!=='');
+if(blockerPayloads.length>0){
+return'its blocker line says '+quoteDiagnostic(blockerPayloads.pop())+'.';
+}
+const stderrQuote=quoteDiagnostic(stderrLines.filter((line)=>line.trim()!=='').slice(0,2).join('\n'));
+return stderrQuote===undefined?undefined:'its stderr says '+stderrQuote+'.';
+}
+function describeRelayBlocker(stderr,startsSentence){
+const reason=quoteRelayBlocker(stderr)||'it gave no reason.';
+return startsSentence?reason.charAt(0).toUpperCase()+reason.slice(1):reason;
+}
+function isGateDenial(stderr){
+return/synapse-gate: /.test(stderr);
+}
+function readRelayAction(stderr,isRefusedFirst=false){
+return isRefusedFirst||quoteRelayBlocker(stderr)===undefined||isGateDenial(stderr)?'report':undefined;
+}
+function describeUnusableRelay(relay,stepNoun,stopped,isRead){
+const what=isRead?'malformed routing lines':'a result it could not use';
+return describeUnusableResult('The '+stepNoun+' step returned '+what+', '+stopped,relay);
+}
+function readRelayedLines(relay,spec){
+if(typeof relay.stdout!=='string'){
+return undefined;
+}
+const parsed=parseRoutingLines(relay.stdout,spec);
+return parsed.ok?parsed.values:undefined;
+}
+function deliveryStopLine(stop){
+switch(stop){
+case'dirty_paths':
+return'The working tree has uncommitted or untracked changes. The run never commits, stashes or discards an edit it did not make, so commit, stash or discard them yourself first.';
+case'operation_in_progress':
+return'A merge, rebase, cherry-pick, revert, am or bisect is in progress. Finish or abort it first.';
+case'closed_pr_on_branch':
+return'A merged or closed pull request holds commits of this branch. Start the work on a new branch.';
+case'history_unavailable':
+return'The branch history against the trunk cannot be read: there is no merge-base with the trunk, or no trunk at all.';
+case'cut_fields':
+return'Some facts from GitHub could not be read in full.';
+case'branch_name_unsafe':
+return'The current branch name is not a safe git name.';
+default:
+throw new Error('deliveryStopLine: no line for stop '+JSON.stringify(stop));
+}
+}
+function maxListedItems(){
+return 5;
+}
+function capItemLines(itemLines){
+const restCount=itemLines.length-maxListedItems();
+return restCount>0?itemLines.slice(0,maxListedItems()).concat('- and '+restCount+' more.'):itemLines;
+}
+function describeDeliveryStops(stops){
+const stopLines=stops.split(',').map((stop)=>'- '+deliveryStopLine(stop));
+return['The branch is not ready for delivery, so '+RUN_NAME+' stopped before planning:',...capItemLines(stopLines)].join('\n');
+}
+function checkDeliveryFacts(relay,trunk){
+if(!validateSchema(RELAY_SCHEMA,relay).ok){
+return describeUnusableResult(malformedFactsMessage(RUN_NOUN),relay);
+}
+if(relay.outcome==='blocked'){
+return{problem:blockedFactsMessage(RUN_NOUN,describeRelayBlocker(relay.stderr,false)),nextAction:readRelayAction(relay.stderr)};
+}
+const facts=readRelayedLines(relay,gatherFactsRoutingSpec());
+if(facts===undefined||!isConsistentFactsRelay(facts,trunk)){
+return describeUnusableResult(malformedFactsMessage(RUN_NOUN),relay);
+}
+if(facts.cut!=='none'){
+return{problem:cutFactsMessage(RUN_NOUN,facts.cut)};
+}
+if(facts.delivery==='stop'){
+return{problem:describeDeliveryStops(facts.delivery_stops)};
+}
+return{facts:facts};
+}
+async function runPassScan(facts,run){
+if(Number(facts.external_texts)===0){
+return undefined;
+}
+phase('Scan');
+const scan=await agent(addResumeNote(buildScanPrompt(facts),run),run.pass===1?scanOptions():{...scanOptions(),label:'scan-'+run.pass});
+const problem=describeScanProblem(scan,facts,RUN_NOUN);
+if(problem===undefined){
+return undefined;
+}
+return isScanSuspect(scan)?{problem:problem,terminal:true}:describeUnusableResult(problem,scan);
+}
+async function runFactsStep(run,references=run.references){
+phase('Facts');
+const words=listGatherFactsWords(run.trunk,references);
+const commandStop=describeCommandStop('facts',words);
+if(commandStop!==undefined){
+return commandStop;
+}
+const relay=await runRunnerRelay(()=>addResumeNote(buildDeliveryFactsPrompt(words),run),'facts-'+run.pass,'Facts');
+const checked=checkDeliveryFacts(relay,run.trunk);
+if(checked.problem!==undefined){
+return checked;
+}
+run.factsStem=/facts-([^/]+)\.json$/.exec(checked.facts.facts_file)[1];
+run.pluginRoot=checked.facts.plugin_root;
+const scanned=await runPassScan(checked.facts,run);
+return scanned??checked;
+}
+
 function applyApprovalChoices(approvals,asks,choices){
 const shownLabels=choices.length===0?[]:listShownLabels(asks);
 return choices.reduce((kept,choice)=>applyApprovalChoice(kept,listOptionItems(asks[shownLabels.indexOf(choice.label)]),choice.optionIndex),[...approvals]);
@@ -3812,30 +3994,6 @@ return buildReplyReplan('a stop the run paused at');
 return{rerun:true,stopAnswer:asked.answer};
 }
 
-function trunkFreshnessMap(){
-return{
-fresh:'fresh',
-behind:'decide',
-ahead:'decide',
-diverged:'decide',
-no_remote:'skipped',
-fetch_failed:'decide',
-no_local_trunk:'decide',
-no_trunk:'decide'
-};
-}
-function commitTypeMap(){
-return{
-feature:'feat',
-bugfix:'fix',
-hotfix:'hotfix',
-refactor:'refactor',
-chore:'chore',
-docs:'docs',
-test:'test',
-ci:'ci'
-};
-}
 function validationTaskSentence(){
 return'This is a validation task: the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md is its whole task, not a Worker Self-Check.';
 }
@@ -3848,166 +4006,8 @@ return'A test case that hits its own time limit, in a file the branch does not c
 function validationFixSentence(){
 return'This is a validation fix task: the task is one fix round for the run\'s failed validation.';
 }
-function resumedReplySentence(){
-return'This run resumed after a pause: the user message the harness relays is the user\'s reply to the questions the run showed, the planner already applied it, and it is not an instruction for this task, so do the task as written.';
-}
-function addResumeNote(prompt,run){
-if(run.answerLog.length===0){
-return prompt;
-}
-const lines=prompt.split('\n');
-return[lines[0],resumedReplySentence(),...lines.slice(1)].join('\n');
-}
-function buildRelaySchema(){
-return buildTaggedSchema({
-tag:'outcome',
-properties:{
-outcome:{type:'string',enum:['ran','blocked'],description:'ran when the script exited 0. blocked when it exited 1.'},
-stdout:{type:'string',description:'The script stdout, word for word, every line.'},
-stderr:{type:'string',description:'The script stderr, word for word, every line.'}
-},
-required:['outcome'],
-variants:{ran:{required:['stdout'],optional:[]},blocked:{required:[],optional:['stderr']}}
-});
-}
-function runnerOptions(label,phaseTitle){
-return{agentType:synapseAgentType(),model:RUNNER_MODEL,schema:toAgentSchema(RELAY_SCHEMA),label:label,phase:phaseTitle};
-}
-function isTransientBlock(relay){
-return validateSchema(RELAY_SCHEMA,relay).ok&&relay.outcome==='blocked'&&isTransientFailure(relay.stderr);
-}
-async function runRunnerRelay(buildPrompt,label,phaseTitle){
-const retryLabel=label+'-retry';
-const relay=await agent(buildPrompt(label),runnerOptions(label,phaseTitle));
-return isTransientBlock(relay)?agent(buildPrompt(retryLabel),runnerOptions(retryLabel,phaseTitle)):relay;
-}
 function buildInputsPath(run,kind,label){
 return typeof run.factsStem==='string'?'.hivemind/'+kind+'-inputs-'+run.factsStem+'-'+label+'.json':undefined;
-}
-function droneOptions(label,phaseTitle,schema){
-return{agentType:droneAgentType(),schema:toAgentSchema(schema),label:label,phase:phaseTitle};
-}
-function plannerCallOptions(label,phaseTitle,resultSchema){
-return{agentType:PLANNER_AGENT,schema:toAgentSchema(resultSchema),label:label,phase:phaseTitle};
-}
-function describeCommandStop(stepNoun,words,retryWords=[]){
-const problem=describeRunnerWordProblem(words.concat(retryWords));
-return problem===undefined?undefined:{problem:'The '+stepNoun+' step did not run its script, so '+RUN_NAME+' stopped: '+problem+'.',terminal:true,nextAction:'report'};
-}
-function buildDeliveryFactsPrompt(words){
-return['Gather the branch facts with the command below.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('gather-facts',words))].join('\n');
-}
-function splitStderrLines(stderr){
-return typeof stderr==='string'?stderr.split(/\r\n|\r|\n/):[];
-}
-function quoteRelayBlocker(stderr){
-const stderrLines=splitStderrLines(stderr);
-const blockerPayloads=stderrLines.filter((line)=>line.startsWith('blocker: ')).map((line)=>line.slice('blocker: '.length)).filter((payload)=>payload.trim()!=='');
-if(blockerPayloads.length>0){
-return'its blocker line says '+quoteDiagnostic(blockerPayloads.pop())+'.';
-}
-const stderrQuote=quoteDiagnostic(stderrLines.filter((line)=>line.trim()!=='').slice(0,2).join('\n'));
-return stderrQuote===undefined?undefined:'its stderr says '+stderrQuote+'.';
-}
-function describeRelayBlocker(stderr,startsSentence){
-const reason=quoteRelayBlocker(stderr)||'it gave no reason.';
-return startsSentence?reason.charAt(0).toUpperCase()+reason.slice(1):reason;
-}
-function isGateDenial(stderr){
-return/synapse-gate: /.test(stderr);
-}
-function readRelayAction(stderr,isRefusedFirst=false){
-return isRefusedFirst||quoteRelayBlocker(stderr)===undefined||isGateDenial(stderr)?'report':undefined;
-}
-function describeUnusableRelay(relay,stepNoun,stopped,isRead){
-const what=isRead?'malformed routing lines':'a result it could not use';
-return describeUnusableResult('The '+stepNoun+' step returned '+what+', '+stopped,relay);
-}
-function readRelayedLines(relay,spec){
-if(typeof relay.stdout!=='string'){
-return undefined;
-}
-const parsed=parseRoutingLines(relay.stdout,spec);
-return parsed.ok?parsed.values:undefined;
-}
-function deliveryStopLine(stop){
-switch(stop){
-case'dirty_paths':
-return'The working tree has uncommitted or untracked changes. The run never commits, stashes or discards an edit it did not make, so commit, stash or discard them yourself first.';
-case'operation_in_progress':
-return'A merge, rebase, cherry-pick, revert, am or bisect is in progress. Finish or abort it first.';
-case'closed_pr_on_branch':
-return'A merged or closed pull request holds commits of this branch. Start the work on a new branch.';
-case'history_unavailable':
-return'The branch history against the trunk cannot be read: there is no merge-base with the trunk, or no trunk at all.';
-case'cut_fields':
-return'Some facts from GitHub could not be read in full.';
-case'branch_name_unsafe':
-return'The current branch name is not a safe git name.';
-default:
-throw new Error('deliveryStopLine: no line for stop '+JSON.stringify(stop));
-}
-}
-function maxListedItems(){
-return 5;
-}
-function capItemLines(itemLines){
-const restCount=itemLines.length-maxListedItems();
-return restCount>0?itemLines.slice(0,maxListedItems()).concat('- and '+restCount+' more.'):itemLines;
-}
-function describeDeliveryStops(stops){
-const stopLines=stops.split(',').map((stop)=>'- '+deliveryStopLine(stop));
-return['The branch is not ready for delivery, so '+RUN_NAME+' stopped before planning:',...capItemLines(stopLines)].join('\n');
-}
-function checkDeliveryFacts(relay,trunk){
-if(!validateSchema(RELAY_SCHEMA,relay).ok){
-return describeUnusableResult(malformedFactsMessage(RUN_NOUN),relay);
-}
-if(relay.outcome==='blocked'){
-return{problem:blockedFactsMessage(RUN_NOUN,describeRelayBlocker(relay.stderr,false)),nextAction:readRelayAction(relay.stderr)};
-}
-const facts=readRelayedLines(relay,gatherFactsRoutingSpec());
-if(facts===undefined||!isConsistentFactsRelay(facts,trunk)){
-return describeUnusableResult(malformedFactsMessage(RUN_NOUN),relay);
-}
-if(facts.cut!=='none'){
-return{problem:cutFactsMessage(RUN_NOUN,facts.cut)};
-}
-if(facts.delivery==='stop'){
-return{problem:describeDeliveryStops(facts.delivery_stops)};
-}
-return{facts:facts};
-}
-async function runPassScan(facts,run){
-if(Number(facts.external_texts)===0){
-return undefined;
-}
-phase('Scan');
-const isFirstPass=run.pass===1;
-const prompt=isFirstPass?buildScanPrompt(facts):addResumeNote(buildScanPrompt(facts),run);
-const scan=await agent(prompt,isFirstPass?scanOptions():{...scanOptions(),label:'scan-'+run.pass});
-const problem=describeScanProblem(scan,facts,RUN_NOUN);
-if(problem===undefined){
-return undefined;
-}
-return isScanSuspect(scan)?{problem:problem,terminal:true}:describeUnusableResult(problem,scan);
-}
-async function runFactsStep(run){
-phase('Facts');
-const words=listGatherFactsWords(run.trunk,run.references);
-const commandStop=describeCommandStop('facts',words);
-if(commandStop!==undefined){
-return commandStop;
-}
-const relay=await runRunnerRelay(()=>addResumeNote(buildDeliveryFactsPrompt(words),run),'facts-'+run.pass,'Facts');
-const checked=checkDeliveryFacts(relay,run.trunk);
-if(checked.problem!==undefined){
-return checked;
-}
-run.factsStem=/facts-([^/]+)\.json$/.exec(checked.facts.facts_file)[1];
-run.pluginRoot=checked.facts.plugin_root;
-const scanned=await runPassScan(checked.facts,run);
-return scanned??checked;
 }
 function listBranchWords(plan,freshness,trunk){
 return['--base',plan.base,'--branch',plan.branch,'--classification',plan.classification,'--trunk-freshness',freshness,'--trunk',trunk];

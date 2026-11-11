@@ -1377,7 +1377,7 @@ const ROW_TESTS = {
       });
     }
     test('the check is lib/facts.js isConsistentFactsRelay against the launch trunk', async () => {
-      assert.ok(/isConsistentFactsRelay\(facts, trunk\)/.test(moduleSource));
+      assert.ok(/isConsistentFactsRelay\(facts, trunk\)/.test(readText(join(repoRoot, 'plugin/workflow-src/lib/runner.js'))));
       const results = happyResults({ 'facts-1': factsRelay({ trunk: 'develop', branch: 'develop' }), 'plan-1': planResult(makePlan({ base: 'develop' })) });
       const run = await runWorkflow({ request: REQUEST, trunk: 'develop' }, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
@@ -1420,9 +1420,10 @@ const ROW_TESTS = {
       assert.ok(main.deliveryStopLine('dirty_paths').includes('The run never commits, stashes or discards an edit it did not make'));
     });
     test('every facts delivery stop has a fixed line, and an unknown stop throws', () => {
+      const runnerSource = readText(join(repoRoot, 'plugin/workflow-src/lib/runner.js'));
       for (const stop of lib.factsDeliveryStops()) {
         assert.ok(main.deliveryStopLine(stop).length > 0, stop);
-        assert.ok(moduleSource.includes('case \'' + stop + '\':'), stop);
+        assert.ok(runnerSource.includes('case \'' + stop + '\':'), stop);
       }
       assert.throws(() => main.deliveryStopLine('dirty'), /no line for stop/);
     });
