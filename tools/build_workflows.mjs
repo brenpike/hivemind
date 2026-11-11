@@ -210,7 +210,7 @@ const BANNER_ROOTS = Object.freeze([SOURCE_DIR, REFERENCES_DIR]);
 const OUTPUT_DIR = 'plugin/workflows';
 const DRAFT_MARKER = 'DRAFT';
 const NON_MODULE_FILES = Object.freeze(['meta.js', 'main.js', 'contract.js']);
-export const LIB_FILES = Object.freeze(['schema.js', 'decide.js', 'brief.js', 'result.js', 'stop.js', 'waves.js', 'routing.js', 'args.js', 'identifier.js', 'facts.js', 'retry.js', 'runner.js', 'paths.js', 'title.js', 'plan.js', 'checks.js', 'scope.js', 'briefs.js', 'approvals.js', 'tails.js', 'record.js', 'specs.js', 'commit.js', 'workers.js', 'gates.js']);
+export const LIB_FILES = Object.freeze(['schema.js', 'decide.js', 'brief.js', 'result.js', 'stop.js', 'waves.js', 'routing.js', 'args.js', 'identifier.js', 'facts.js', 'retry.js', 'runner.js', 'paths.js', 'title.js', 'plan.js', 'checks.js', 'scope.js', 'briefs.js', 'approvals.js', 'tails.js', 'record.js', 'specs.js', 'commit.js', 'workers.js', 'gates.js', 'pr.js']);
 const DATA_CONSTANTS = [
   { name: 'AUTONOMY_TABLE', path: REFERENCES_DIR + '/decision-autonomy-table.json', project: projectAutonomyTable },
   { name: 'BRIEF_SCHEMA', path: REFERENCES_DIR + '/decision-brief-schema.json', project: projectSchema },

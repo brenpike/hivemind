@@ -12,7 +12,7 @@ import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, isDraf
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const WORKFLOW_ID = 'standard-delivery';
 const sourceDir = join(repoRoot, 'plugin/workflow-src', WORKFLOW_ID);
-const MOVED_LIB_PATHS = ['plan.js', 'checks.js', 'scope.js', 'briefs.js', 'approvals.js', 'tails.js', 'record.js', 'gates.js'].map((file) => 'plugin/workflow-src/lib/' + file);
+const MOVED_LIB_PATHS = ['plan.js', 'checks.js', 'scope.js', 'briefs.js', 'approvals.js', 'tails.js', 'record.js', 'gates.js', 'pr.js'].map((file) => 'plugin/workflow-src/lib/' + file);
 const moduleSource = readModuleSet();
 const metaSource = readText(join(sourceDir, 'meta.js'));
 const contractPath = join(sourceDir, 'contract.js');
@@ -5659,7 +5659,7 @@ const ROW_TESTS = {
       const scriptWarnings = [...openPlanPrText.matchAll(/^ *[a-z_]*warning='([^']+)'$/gm)].map((match) => match[1]);
       assert.deepEqual([...scriptWarnings].sort(), [...main.pullRequestWarningTexts()].sort());
       const spec = main.openPlanPrRoutingSpec();
-      assert.deepEqual(Object.entries(spec).filter(([, entry]) => entry.required).map(([key]) => key), ['url', 'head_ref_oid', 'created', 'commented']);
+      assert.deepEqual(Object.entries(spec).filter(([, entry]) => entry.required).map(([key]) => key), ['url', 'head_ref_oid', 'created']);
       main.pullRequestWarningTexts().forEach((text) => assert.ok(spec.warning.pattern.test(text), text));
     });
     test('canned reuse-and-comment stdout parses with the spec, and the run finishes with the reused PR', async () => {
@@ -5669,6 +5669,47 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: false });
       assert.equal(run.result.message, 'Pushed commit ' + OTHER + ' to the open pull request ' + PR_URL + ' and commented on it.\n\n' + HELD_ALL + OTHER + '.');
+    });
+    test('with a comment hook that returns undefined, the texts and the inputs file carry no comment', () => {
+      const hook = main.buildPullRequestComment;
+      main.buildPullRequestComment = () => undefined;
+      try {
+        const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+        state.head = OTHER;
+        const texts = main.buildPullRequestTexts(state, makePlan(), { held: { validate: OTHER }, notes: { validate: 'passed' }, slow: [] });
+        assert.deepEqual(Object.keys(texts), ['title', 'body']);
+        const words = ['--head', 'feature/cache', '--base', 'main', '--expect-commit', OTHER, '--inputs', '.hivemind/pr-inputs-x-pr-1.json', '--body-file', '.hivemind/pr-inputs-x-pr-1-body.json'];
+        const prompt = main.buildPullRequestPrompt(words, texts, false, pluginRoot);
+        assert.deepEqual(JSON.parse(readDataBlock(prompt, 'inputs_file').content), { title: texts.title, draft: false });
+      } finally {
+        main.buildPullRequestComment = hook;
+      }
+      assert.equal(main.buildPullRequestComment, hook);
+    });
+    test('the relay check requires commented exactly when a comment was sent, and then unequal to created', () => {
+      for (const [changes, hasComment, isUsable] of [
+        [{ commented: undefined }, false, true],
+        [{ created: 'false', commented: undefined }, false, true],
+        [{ commented: 'false' }, false, false],
+        [{ created: 'false', commented: 'true' }, false, false],
+        [{ commented: 'false' }, true, true],
+        [{ created: 'false', commented: 'true' }, true, true],
+        [{ commented: undefined }, true, false],
+        [{ commented: 'true' }, true, false]
+      ]) {
+        const checked = main.checkPullRequestRelay(prRelay({ head_ref_oid: OTHER, ...changes }), OTHER, hasComment);
+        const label = JSON.stringify([changes, hasComment]);
+        assert.equal(checked.values !== undefined, isUsable, label);
+        assert.equal(checked.problem === undefined || checked.problem.startsWith('The pull request step returned malformed routing lines, '), true, label);
+      }
+    });
+    test('the complete message says the run commented on the open pull request only when the relay says commented true', () => {
+      const reused = { url: PR_URL, head_ref_oid: OTHER, created: 'false' };
+      const pushed = 'Pushed commit ' + OTHER + ' to the open pull request ' + PR_URL;
+      assert.equal(main.describePullRequest({ ...reused, commented: 'true' }), pushed + ' and commented on it.');
+      assert.equal(main.describePullRequest(reused), pushed + '.');
+      assert.equal(main.describePullRequest({ ...reused, commented: 'false' }), pushed + '.');
+      assert.equal(main.describePullRequest({ ...reused, created: 'true' }), openedLine(OTHER));
     });
     for (const warning of ['push was rejected; the branch is not on its remote', 'no upstream and no origin remote; push deferred', 'gh cannot read the push remote as a GitHub repository; the PR head repository was not checked']) {
       test(`the warning ${JSON.stringify(warning)} is named in the final message`, async () => {
@@ -5761,7 +5802,7 @@ const ROW_TESTS = {
       assert.deepEqual(scriptLines, ['pushed: no', 'pushed: yes']);
       assert.ok(openPlanPrText.includes('printf \'%s\\n\' "$pushed_line" >&2'), 'the script prints the pushed line as one stderr line');
       assert.ok(/^blocker\(\) \{ relay_child_stderr; write_pushed_line; printf 'blocker: %s\\n' "\$1" >&2; exit 1; \}$/m.test(openPlanPrText), 'the pushed line comes right before the blocker line');
-      const prSource = readText(join(sourceDir, 'pr.js'));
+      const prSource = readText(join(repoRoot, 'plugin/workflow-src/lib/pr.js'));
       const workflowLines = [...prSource.matchAll(/\/\^(pushed: [a-z]+)\$\/m/g)].map((match) => match[1]).sort();
       assert.deepEqual(workflowLines, scriptLines);
       for (const line of scriptLines) {
@@ -5770,8 +5811,8 @@ const ROW_TESTS = {
       assert.equal(main.describeBlockedPush('blocker: the PR could not be created\n', OTHER, false, 'UNSEEN_ZQ'), 'UNSEEN_ZQ');
     });
     test('no pull request stop guesses with may be: the run says what it saw of the push', () => {
-      const prSource = readText(join(sourceDir, 'pr.js'));
-      assert.ok(!/\bmay be\b/i.test(prSource), 'pr.js holds may be');
+      const prSource = readText(join(repoRoot, 'plugin/workflow-src/lib/pr.js'));
+      assert.ok(!/\bmay be\b/i.test(prSource), 'lib/pr.js holds may be');
       assert.ok(!builtSource.includes('The branch may be on its remote'));
     });
   },

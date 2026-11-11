@@ -14,6 +14,10 @@
  *   bumpTypeRoutingSpec() and openPlanPrRoutingSpec()  the routing spec of
  *           create-working-branch.sh, molt.sh, bump-type.sh and
  *           open-plan-pr.sh, for parseRoutingLines (lib/routing.js).
+ *           open-plan-pr.sh prints commented only when its inputs carry a
+ *           comment, so openPlanPrRoutingSpec() makes it optional and the
+ *           pull request step (checkPullRequestRelay, lib/pr.js) requires
+ *           it exactly when it sent a comment.
  *   branchWarningTexts() and pullRequestWarningTexts()  the fixed warning
  *           texts of create-working-branch.sh and open-plan-pr.sh.
  *   versionCheckRoutingSpec()  bumpTypeRoutingSpec() plus the bump-type.sh
@@ -92,7 +96,7 @@ function openPlanPrRoutingSpec() {
     url: { pattern: /^https:\/\/[A-Za-z0-9._/-]+\/pull\/[0-9]+$/, required: true },
     head_ref_oid: { pattern: commitShaPattern(), required: true },
     created: { pattern: /^(?:true|false)$/, required: true },
-    commented: { pattern: /^(?:true|false)$/, required: true },
+    commented: { pattern: /^(?:true|false)$/, required: false },
     warning: { pattern: new RegExp('^(?:' + pullRequestWarningTexts().join('|') + ')$'), required: false }
   };
 }

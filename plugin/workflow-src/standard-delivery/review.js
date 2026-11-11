@@ -90,7 +90,7 @@
  *           reply, logged with settled [] and decided_by run, runs local
  *           review again; past the waits it returns {draft}. blocked with no
  *           retry_minutes asks one fix_cause step_stop question through
- *           stopDelivery (record.js), and the reply runs local review again;
+ *           stopDelivery (lib/record.js), and the reply runs local review again;
  *           injection-suspect is terminal. Either rerun of a blocked
  *           review passes its ledger_path as resume_from_ledger, once, so
  *           the next loop keeps its iteration count and its break-fix and
@@ -128,12 +128,12 @@
  *   logged review round, only inside the inputs data block as answers, it
  *   reaches the user only encoded by
  *   encodeUntrustedText, and it reaches the pull request texts only through
- *   neutralizePullRequestText (pr.js): a routing decision taken on a review
+ *   neutralizePullRequestText (lib/pr.js): a routing decision taken on a review
  *   result is shown there with a fixed problem text, a taken review call as
  *   its compact decision line, the short finding id, the encoded ask and the
  *   encoded chosen summary with no why, and the rejected findings and
  *   undone fixes as their short ids in the block of
- *   buildRejectedFindingsBlock. A review question shows reviewer text,
+ *   buildRejectedFindingsBlock (lib/record.js). A review question shows reviewer text,
  *   encoded, so its shown brief can exceed a BRIEF_SCHEMA bound
  *   once encoded, but decide() reads only the code-built brief of
  *   removeReviewerText, which always fits it, so a valid review never asks as
@@ -285,33 +285,6 @@ function describeReviewStop(review, head) {
  */
 function describeReviewOpen(review, head, after) {
   return reviewStopTexts(review).lead + ' on commit ' + head + after + ', with ' + describeCount(review.findings_open, 'finding') + ' still open';
-}
-
-function quoteShortFindingId(findingId) {
-  return encodeUntrustedText(Array.from(findingId).slice(0, 8).join(''));
-}
-
-function pushShortIdLines(lines, findings) {
-  findings.forEach((finding) => lines.push('- ' + quoteShortFindingId(finding.finding_id)));
-}
-
-/**
- * Returns the block of the held local review gate: its note, then the
- * short id of each rejected finding under the rejected heading, shown
- * unless only undone fixes are listed, then, when any fix was undone, the
- * undone heading and the short id of each undone fix.
- */
-function buildRejectedFindingsBlock(note, rejectedFindings, undoneFixes = []) {
-  const lines = ['Local review: ' + note + '.'];
-  if (rejectedFindings.length > 0 || undoneFixes.length === 0) {
-    lines[0] += ' The findings it rejected:';
-    pushShortIdLines(lines, rejectedFindings);
-  }
-  if (undoneFixes.length > 0) {
-    lines.push('The findings whose fix it undid:');
-    pushShortIdLines(lines, undoneFixes);
-  }
-  return { text: lines.join('\n') };
 }
 
 function buildReviewOption(option, question) {

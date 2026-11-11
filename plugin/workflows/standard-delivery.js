@@ -48,6 +48,7 @@ export const meta = {
  *   lib/commit.js
  *   lib/workers.js
  *   lib/gates.js
+ *   lib/pr.js
  *   standard-delivery/gates.js
  *   standard-delivery/pr.js
  *   standard-delivery/relay.js
@@ -695,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '3a2548f7a62ce619';
+const BUILD_ID = '5416e2acb9b2cbcd';
 
 function supportedSchemaKeywords(){
 return[
@@ -3523,6 +3524,24 @@ function quoteOpenTitle(title){
 const kept=title.slice(0,findLongestCut(title,maxExcerptLength(),encodeUntrustedText));
 return encodeUntrustedText(kept)+(kept===title?'':', shortened');
 }
+function quoteShortFindingId(findingId){
+return encodeUntrustedText(Array.from(findingId).slice(0,8).join(''));
+}
+function pushShortIdLines(lines,findings){
+findings.forEach((finding)=>lines.push('- '+quoteShortFindingId(finding.finding_id)));
+}
+function buildRejectedFindingsBlock(note,rejectedFindings,undoneFixes=[]){
+const lines=['Local review: '+note+'.'];
+if(rejectedFindings.length>0||undoneFixes.length===0){
+lines[0]+=' The findings it rejected:';
+pushShortIdLines(lines,rejectedFindings);
+}
+if(undoneFixes.length>0){
+lines.push('The findings whose fix it undid:');
+pushShortIdLines(lines,undoneFixes);
+}
+return{text:lines.join('\n')};
+}
 function hasListedFindings(run){
 return run.rejected.length>0||run.undone.length>0;
 }
@@ -3585,7 +3604,7 @@ return finish({outcome:'blocked',causes:causes,blocks:blocks});
 function describePullRequest(values){
 return values.created==='true'
 ?'Opened pull request '+values.url+' on commit '+values.head_ref_oid+'.'
-:'Pushed commit '+values.head_ref_oid+' to the open pull request '+values.url+' and commented on it.';
+:'Pushed commit '+values.head_ref_oid+' to the open pull request '+values.url+(values.commented==='true'?' and commented on it.':'.');
 }
 function describeHeldGates(run){
 const held=configuredGateIds(run).map((gateId)=>gateNames()[gateId]);
@@ -3711,7 +3730,7 @@ return{
 url:{pattern:/^https:\/\/[A-Za-z0-9._/-]+\/pull\/[0-9]+$/,required:true},
 head_ref_oid:{pattern:commitShaPattern(),required:true},
 created:{pattern:/^(?:true|false)$/,required:true},
-commented:{pattern:/^(?:true|false)$/,required:true},
+commented:{pattern:/^(?:true|false)$/,required:false},
 warning:{pattern:new RegExp('^(?:'+pullRequestWarningTexts().join('|')+')$'),required:false}
 };
 }
@@ -4339,39 +4358,6 @@ gates.answer=ended.answer;
 }
 }
 
-function gateIds(){
-return['validate','review'];
-}
-function configuredGateIds(run){
-return run.localReview?gateIds():gateIds().filter((gateId)=>gateId!=='review');
-}
-function gateNames(){
-return{validate:'validation',review:'local review'};
-}
-function runGateStep(stepId,run,plan,facts,gates){
-if(stepId==='pr'){
-return runPullRequestStep(run,plan,gates);
-}
-if(stepId==='review'){
-return runReviewGate(run,plan,gates);
-}
-return runValidateGate(run,plan,facts,gates);
-}
-function listNotConfiguredGateLines(run){
-return run.localReview?[]:[notConfiguredReviewLine()];
-}
-
-function reviewDecisionProblems(){
-return{
-[DIMINISHING_RETURNS_EXIT_KIND]:'Local review saw diminishing returns with findings still open. Stop fixing and hold the local review gate on that commit?',
-[PLANNER_ESCALATION_ROUTING_KIND]:'Local review escalated a finding to the planner. Go back to planning, from fresh facts, for its remediation?',
-[ROOT_CLUSTER_ROUTING_KIND]:'Local review found findings with one suspected root. Go back to planning, from fresh facts, for a remediation that closes the class?'
-};
-}
-function toPullRequestDecision(entry){
-const problem=reviewDecisionProblems()[entry.kind];
-return problem===undefined?entry:{brief:{...entry.brief,problem:problem},kind:entry.kind,listed:entry.listed};
-}
 function neutralizePullRequestText(text){
 return text.split(/((?:https?:\/\/|www\.)[^\s`]+|(?<![\w.-])[\w.-]+\/[\w.-]+#\d+|#\d+|GH-\d+|@[\w-]+(?:\/[\w-]+)?)/i)
 .map((piece,index)=>(index%2===1?'`'+piece+'`':piece.replace(/[\\`[\]<>&]/g,'\\$&')))
@@ -4419,16 +4405,13 @@ parts.push(neutralizePullRequestText(digest));
 parts.push(neutralizePullRequestText(renderStepLines(plan)),...renderPullRequestRecord(run,gates));
 return cleanPullRequestText(parts.join('\n\n'),true);
 }
-function buildPullRequestComment(run,gates){
-const parts=['The delivery pushed commit '+run.head+' to this pull request.',...renderPullRequestRecord(run,gates)];
-return cleanPullRequestText(parts.join('\n\n'),true);
-}
 function describePullRequestTextSize(noun,size){
 return'The pull request '+noun+' would be '+size+' characters, more than the limit of '+maxPullRequestTextLength()+', so '+RUN_NAME+' stopped before the pull request and pushed nothing.';
 }
 function buildPullRequestTexts(run,plan,gates){
-const texts={title:buildPullRequestTitle(plan),body:buildPullRequestBody(run,plan,gates),comment:buildPullRequestComment(run,gates)};
-const longNoun=['body','comment'].find((noun)=>texts[noun].length>maxPullRequestTextLength());
+const comment=buildPullRequestComment(run,gates);
+const texts={title:buildPullRequestTitle(plan),body:buildPullRequestBody(run,plan,gates),...(comment===undefined?{}:{comment:comment})};
+const longNoun=['body','comment'].find((noun)=>texts[noun]?.length>maxPullRequestTextLength());
 if(longNoun!==undefined){
 return{problem:describePullRequestTextSize(longNoun,texts[longNoun].length)};
 }
@@ -4466,7 +4449,7 @@ const isUnpushed=isGateDenial(stderr)||isInputsRefusal(stderr);
 const lead='The pull request step was blocked, so '+RUN_NAME+describeBlockedPush(stderr,head,isUnpushed,unseenPush);
 return{problem:lead+' '+describeRelayBlocker(stderr,true),nextAction:readRelayAction(stderr,isUnpushed)};
 }
-function checkPullRequestRelay(relay,head){
+function checkPullRequestRelay(relay,head,hasComment){
 const unseenPush=' stopped and did not see whether this step pushed. Taking it again pushes the same commit and reuses a pull request open on it.';
 const stopped='so '+RUN_NAME+unseenPush;
 if(!validateSchema(RELAY_SCHEMA,relay).ok){
@@ -4476,7 +4459,7 @@ if(relay.outcome==='blocked'){
 return describePullRequestBlocker(relay.stderr,head,unseenPush);
 }
 const values=readRelayedLines(relay,openPlanPrRoutingSpec());
-if(values===undefined||values.commented===values.created){
+if(values===undefined||(values.commented!==undefined)!==hasComment||values.commented===values.created){
 return describeUnusableRelay(relay,'pull request',stopped,true);
 }
 if(values.head_ref_oid!==head){
@@ -4500,11 +4483,49 @@ return stopDelivery([commandStop],run);
 }
 const buildPrompt=(callLabel)=>addResumeNote(buildPullRequestPrompt(listPullRequestWords(plan,run,callLabel),texts,run.draft||gates.draft!==undefined,run.pluginRoot),run);
 const relay=await runRunnerRelay(buildPrompt,label,'PR');
-const checked=checkPullRequestRelay(relay,run.head);
+const checked=checkPullRequestRelay(relay,run.head,texts.comment!==undefined);
 if(checked.problem===undefined){
 return{result:finishDeliveryComplete(run,plan,checked.values,gates)};
 }
 return stopDelivery([checked],run);
+}
+
+function gateIds(){
+return['validate','review'];
+}
+function configuredGateIds(run){
+return run.localReview?gateIds():gateIds().filter((gateId)=>gateId!=='review');
+}
+function gateNames(){
+return{validate:'validation',review:'local review'};
+}
+function runGateStep(stepId,run,plan,facts,gates){
+if(stepId==='pr'){
+return runPullRequestStep(run,plan,gates);
+}
+if(stepId==='review'){
+return runReviewGate(run,plan,gates);
+}
+return runValidateGate(run,plan,facts,gates);
+}
+function listNotConfiguredGateLines(run){
+return run.localReview?[]:[notConfiguredReviewLine()];
+}
+
+function reviewDecisionProblems(){
+return{
+[DIMINISHING_RETURNS_EXIT_KIND]:'Local review saw diminishing returns with findings still open. Stop fixing and hold the local review gate on that commit?',
+[PLANNER_ESCALATION_ROUTING_KIND]:'Local review escalated a finding to the planner. Go back to planning, from fresh facts, for its remediation?',
+[ROOT_CLUSTER_ROUTING_KIND]:'Local review found findings with one suspected root. Go back to planning, from fresh facts, for a remediation that closes the class?'
+};
+}
+function toPullRequestDecision(entry){
+const problem=reviewDecisionProblems()[entry.kind];
+return problem===undefined?entry:{brief:{...entry.brief,problem:problem},kind:entry.kind,listed:entry.listed};
+}
+function buildPullRequestComment(run,gates){
+const parts=['The delivery pushed commit '+run.head+' to this pull request.',...renderPullRequestRecord(run,gates)];
+return cleanPullRequestText(parts.join('\n\n'),true);
 }
 
 function listBranchWords(plan,freshness,trunk){
@@ -4810,24 +4831,6 @@ return detail===undefined?line:line+'\n'+detail;
 }
 function describeReviewOpen(review,head,after){
 return reviewStopTexts(review).lead+' on commit '+head+after+', with '+describeCount(review.findings_open,'finding')+' still open';
-}
-function quoteShortFindingId(findingId){
-return encodeUntrustedText(Array.from(findingId).slice(0,8).join(''));
-}
-function pushShortIdLines(lines,findings){
-findings.forEach((finding)=>lines.push('- '+quoteShortFindingId(finding.finding_id)));
-}
-function buildRejectedFindingsBlock(note,rejectedFindings,undoneFixes=[]){
-const lines=['Local review: '+note+'.'];
-if(rejectedFindings.length>0||undoneFixes.length===0){
-lines[0]+=' The findings it rejected:';
-pushShortIdLines(lines,rejectedFindings);
-}
-if(undoneFixes.length>0){
-lines.push('The findings whose fix it undid:');
-pushShortIdLines(lines,undoneFixes);
-}
-return{text:lines.join('\n')};
 }
 function buildReviewOption(option,question){
 const isRecommended=option.id===question.recommendation.option_id;
