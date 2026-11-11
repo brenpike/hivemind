@@ -693,7 +693,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '87067858b6a78d75';
+const BUILD_ID = 'a50b4a3704e8cd4f';
 
 function supportedSchemaKeywords(){
 return[
@@ -3024,7 +3024,7 @@ const settledKinds=new Set();
 if(facts.head_state==='branch'&&facts.branch!==run.trunk&&!new RegExp(PLAN_SCHEMA.properties.branch.pattern,'u').test(facts.branch)){
 return stopDelivery([{problem:describeStartBranch(facts)+describeTaxonomyMiss()+'.'}],run,[],true);
 }
-let checked=await callCheckedPlanner(run,facts,{prompt:addRelaySentence(buildPlanPrompt(run.request,facts,scope,replan,listAnswerEntries(run)),run),label:'plan-'+run.pass,phaseTitle:'Plan',schema:resultSchema});
+let checked=await callCheckedPlanner(run,facts,{prompt:buildPlanPrompt(run.request,facts,scope,replan,listAnswerEntries(run)),label:'plan-'+run.pass,phaseTitle:'Plan',schema:resultSchema});
 for(;;){
 let{planResult,problem}=checked;
 if(problem!==undefined){
@@ -3068,7 +3068,7 @@ shownAsks=resolution.asks;
 shownResult=planResult;
 shownEntry={question:questions,labels:listShownLabels(shownAsks),reply:reply};
 resultSchema=buildReviseResultSchema(shownAsks);
-const revisePrompt=addRelaySentence(buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:listAnswerEntries(run),plan:planResult.plan,questions:questions,reply:reply}),run);
+const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:listAnswerEntries(run),plan:planResult.plan,questions:questions,reply:reply});
 checked=await callCheckedPlanner(run,facts,{prompt:revisePrompt,label:'revise-'+round,phaseTitle:'Revise',schema:resultSchema});
 }
 }
@@ -3077,17 +3077,17 @@ function describeQuestionProblem(planResult,run){
 return hasDefectQuestion(planResult.questions,PLANNER_QUESTION_KIND,run.level,AUTONOMY_TABLE,BRIEF_SCHEMA)?'A planner question fails the decision check, so '+RUN_NAME+' stopped.':undefined;
 }
 async function callCheckedPlanner(run,facts,call){
-let prompt=call.prompt;
+let attempt=call.prompt;
 for(let retry=0;;retry+=1){
 const label=retry===0?call.label:call.label+'-fix-'+retry;
-const result=normalizePlanTitle(await agent(prompt,plannerCallOptions(label,call.phaseTitle,call.schema)),call.schema);
+const result=normalizePlanTitle(await agent(addRelaySentence(attempt,run),plannerCallOptions(label,call.phaseTitle,call.schema)),call.schema);
 const planProblem=describePlanProblem(result,call.schema,facts,run.trunk,run.references);
 const problem=planProblem===undefined?describeQuestionProblem(result,run):planProblem;
 const isFixable=problem!==undefined&&isFixableResult(result,call.schema);
 if(!isFixable||retry===maxCheckRetries()){
 return{planResult:result,problem:problem,isExhausted:isFixable};
 }
-prompt=buildCheckFixPrompt(call.prompt,problem,validateSchema(call.schema,result).errors);
+attempt=buildCheckFixPrompt(call.prompt,problem,validateSchema(call.schema,result).errors);
 }
 }
 
@@ -3164,11 +3164,11 @@ limits:scope.limits.map((limit)=>toLimitEntry(limit,root))
 }
 async function runScopeStep(run,facts,round){
 phase('Scope');
-const prompt=addRelaySentence(buildScopePrompt(run.request,facts,listAnswerEntries(run)),run);
+const prompt=buildScopePrompt(run.request,facts,listAnswerEntries(run));
 const options=scopeOptions(run.pass,round);
-let scope=await agent(prompt,options);
+let scope=await agent(addRelaySentence(prompt,run),options);
 for(let retry=1;retry<=maxCheckRetries()&&scope!==null&&describeScopeProblem(scope)!==undefined;retry+=1){
-scope=await agent(buildCheckFixPrompt(prompt,describeScopeProblem(scope).problem,validateSchema(SCOPE_SCHEMA,scope).errors),{...options,label:options.label+'-fix-'+retry});
+scope=await agent(addRelaySentence(buildCheckFixPrompt(prompt,describeScopeProblem(scope).problem,validateSchema(SCOPE_SCHEMA,scope).errors),run),{...options,label:options.label+'-fix-'+retry});
 }
 const unusable=describeScopeProblem(scope);
 if(unusable!==undefined&&scope!==null){

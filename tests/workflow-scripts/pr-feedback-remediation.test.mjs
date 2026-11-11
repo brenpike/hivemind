@@ -96,8 +96,13 @@ function factsRelay(changes = {}) {
   return { outcome: 'ran', stdout: FACTS_KEYS.filter((key) => values[key] !== undefined).map((key) => key + ': ' + values[key]).join('\n') + '\n' };
 }
 
+/**
+ * Runs the built script and asserts that every agent call of the run carries
+ * RELAY_SENTENCE as the second line of its prompt (PFR-02).
+ */
 async function runWorkflow(args, results) {
   const run = await workflow.run({ args: args, results: results });
+  run.calls.forEach((call) => assert.equal(call.prompt.split('\n')[1], RELAY_SENTENCE, call.opts.label + ' carries the relay sentence as its second line'));
   return structuredClone({ result: run.result, calls: run.calls, phases: run.phases });
 }
 
@@ -266,6 +271,18 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, { 'facts-1': transient, 'facts-1-retry': factsRelay(), 'fix-1': CLEAN });
       assert.deepEqual(labelsOf(run), ['facts-1', 'facts-1-retry', 'fix-1']);
       assert.equal(callOf(run, 'facts-1-retry').prompt.split('\n')[1], RELAY_SENTENCE);
+    });
+    test('a scope, plan and revise check retry keeps the sentence as its second line, with the fix line third', async () => {
+      const failed = { 'scope-2': {}, 'scope-2-fix-1': SCOPE, 'plan-2': { outcome: 'complete' }, 'plan-2-fix-1': flaggedPlanResult() };
+      const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', failed));
+      assert.equal(first.result.needs_user, true);
+      const results = escalationResults('planner-escalation', { ...failed, 'revise-1': { outcome: 'complete' }, 'revise-1-fix-1': { ...flaggedPlanResult(), settled: ['Q1'] } });
+      const resumed = await runWorkflow(resumeArgs(first, 'A'), results);
+      assert.deepEqual(labelsOf(resumed), ['facts-1', 'fix-1', 'facts-2', 'scope-2', 'scope-2-fix-1', 'plan-2', 'plan-2-fix-1', 'revise-1', 'revise-1-fix-1']);
+      for (const label of ['scope-2-fix-1', 'plan-2-fix-1', 'revise-1-fix-1']) {
+        const lines = callOf(resumed, label).prompt.split('\n');
+        assert.deepEqual(lines.slice(1, 3), [RELAY_SENTENCE, 'Fix your result per the check block.'], label);
+      }
     });
   },
   'PFR-03': () => {

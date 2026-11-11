@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The GENERATED banner of each built script names each carried source by its path under `plugin/workflow-src/` or `plugin/references/` instead of its full repository path.
 - A workflow that sets `run.relaySentence` also gets it as the second line of its scope, plan, revise and check-retry prompts. A workflow that leaves it unset sees no change.
 
-The built `standard-delivery` length is 189390 of 190000 and its prose 43396 of 43800. The built `analysis-only` length is 64509 of 190000 and its prose 15722 of 16050. No budget raised. Every `BUILD_ID` changes, so a run paused on the old build cannot resume on this one.
+The built `standard-delivery` length is 189393 of 190000 and its prose 43396 of 43800. The built `analysis-only` length is 64509 of 190000 and its prose 15722 of 16050. No budget raised. Every `BUILD_ID` changes, so a run paused on the old build cannot resume on this one.
 
 Refs #409 (slice 3, PR 4).
 

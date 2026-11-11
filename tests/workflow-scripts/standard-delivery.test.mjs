@@ -5935,11 +5935,11 @@ const ROW_TESTS = {
       const plain = await runRelayRounds(undefined);
       assert.deepEqual(Object.keys(relayed), ['scope-1', 'scope-1-fix-1', 'plan-1', 'plan-1-fix-1', 'revise-1', 'scope-1-1']);
       assert.deepEqual(Object.keys(plain), Object.keys(relayed));
-      for (const label of ['scope-1', 'plan-1', 'revise-1', 'scope-1-1']) {
+      for (const label of Object.keys(relayed)) {
         assert.equal(relayed[label].split('\n')[1], relaySentence, label);
       }
       for (const label of ['scope-1-fix-1', 'plan-1-fix-1']) {
-        assert.equal(relayed[label].split('\n')[2], relaySentence, label);
+        assert.equal(relayed[label].split('\n')[2], 'Fix your result per the check block.', label);
       }
       for (const label of Object.keys(plain)) {
         assert.ok(!plain[label].includes(relaySentence), label);
