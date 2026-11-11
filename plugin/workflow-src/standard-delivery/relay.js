@@ -1,9 +1,9 @@
 /*
  * standard-delivery relay.js: the branch runner step of the
- * standard-delivery workflow and the validation prompt sentences. The
- * runner options, relay helpers and the facts step live in lib/runner.js,
- * the commit step and the inputs file paths in lib/commit.js, and the
- * routing specs in lib/specs.js.
+ * standard-delivery workflow. The runner options, relay helpers and the
+ * facts step live in lib/runner.js, the commit step and the inputs file
+ * paths in lib/commit.js, the routing specs in lib/specs.js, and the
+ * validation prompt sentences in lib/gates.js.
  *
  * Inputs
  *   run    the run state of main.js createRunState. The branch step reads
@@ -21,9 +21,7 @@
  *           switched onto a branch or commit other than the facts' one.
  *   requestBranchReplan(run)  {replan} the first time, else the stop of a
  *           second branch switch.
- *   slowCaseSentence()  the validate prompt's line for the slow case rule
- *           of the Validation Procedure (gates.js), with the other
- *           validation sentences. The step, as meta.js names it:
+ *   The step, as meta.js names it:
  *   Branch  a runner runs the create-working-branch command. Its checked
  *           commit goes to observeHead (lib/record.js) at each pass start
  *           (main.js).
@@ -32,7 +30,7 @@
  *   A contractRows() check is a function of the built script, not of
  *   main.js: the build bundles this module into it, so a row can name a
  *   function of this module.
- *   Validation edits nothing (gates.js).
+ *   Validation edits nothing (lib/gates.js).
  *   Only a branch script refusal, a branch other than the plan branch, a
  *   runner command value outside its class (describeCommandStop) and a
  *   second branch switch (requestBranchReplan) are terminal. stopDelivery
@@ -46,22 +44,6 @@
  *   The branch step is standard-delivery's alone; the relay helpers it
  *   shares with every runner step live in lib/runner.js.
  */
-
-function validationTaskSentence() {
-  return 'This is a validation task: the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md is its whole task, not a Worker Self-Check.';
-}
-
-function validationCommandsSentence() {
-  return 'This is a validation task: running each command of the inputs block once, in order and in the foreground, is its whole task, not a Worker Self-Check.';
-}
-
-function slowCaseSentence() {
-  return 'A test case that hits its own time limit, in a file the branch does not change from the base in the git block, runs once more alone: if it passes, it counts as passed and goes in slow.';
-}
-
-function validationFixSentence() {
-  return 'This is a validation fix task: the task is one fix round for the run\'s failed validation.';
-}
 
 function listBranchWords(plan, freshness, trunk) {
   return ['--base', plan.base, '--branch', plan.branch, '--classification', plan.classification, '--trunk-freshness', freshness, '--trunk', trunk];

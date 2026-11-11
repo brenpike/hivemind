@@ -9,7 +9,7 @@
  *          answerLog, head, trunk, approvals, taken, rejected, undone, open
  *          and waits.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
- *   gates  the gate loop state of runGates (gates.js): runs.review, answer
+ *   gates  the gate loop state of runGates (lib/gates.js): runs.review, answer
  *          and takenReview, which only this module sets and reads: the review
  *          whose call the run took, kept for the next review run alone.
  *   review the local reviewer result, under REVIEW_SCHEMA.
@@ -285,14 +285,6 @@ function describeReviewStop(review, head) {
  */
 function describeReviewOpen(review, head, after) {
   return reviewStopTexts(review).lead + ' on commit ' + head + after + ', with ' + describeCount(review.findings_open, 'finding') + ' still open';
-}
-
-/**
- * Returns the tail of a stop before the pull request, also read by
- * gates.js.
- */
-function describePullRequestStop() {
-  return ', so ' + RUN_NAME + ' stopped before the pull request.';
 }
 
 function quoteShortFindingId(findingId) {

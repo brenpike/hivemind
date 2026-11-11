@@ -12,7 +12,7 @@ import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, isDraf
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const WORKFLOW_ID = 'standard-delivery';
 const sourceDir = join(repoRoot, 'plugin/workflow-src', WORKFLOW_ID);
-const MOVED_LIB_PATHS = ['plan.js', 'checks.js', 'scope.js', 'briefs.js', 'approvals.js', 'tails.js', 'record.js'].map((file) => 'plugin/workflow-src/lib/' + file);
+const MOVED_LIB_PATHS = ['plan.js', 'checks.js', 'scope.js', 'briefs.js', 'approvals.js', 'tails.js', 'record.js', 'gates.js'].map((file) => 'plugin/workflow-src/lib/' + file);
 const moduleSource = readModuleSet();
 const metaSource = readText(join(sourceDir, 'meta.js'));
 const contractPath = join(sourceDir, 'contract.js');
@@ -5948,6 +5948,35 @@ const ROW_TESTS = {
       assert.equal('relaySentence' in main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] }), false);
       assert.equal(main.addRelaySentence('a\nb', { answerLog: [{ question: 'q', reply: 'r' }] }), 'a\nb');
       assert.equal(main.addRelaySentence('a\nb', { answerLog: [], relaySentence: relaySentence }), 'a\n' + relaySentence + '\nb');
+    });
+    test('a validation fix round that carries user_answer takes run.relaySentence as its second line, and unset its prompt is the fix prompt as built', async () => {
+      const relaySentence = 'RELAY_SENTENCE_ZQ.';
+      const fix = { failures: 'F.', userAnswer: { question: 'Q.', reply: 'R.' } };
+      const prompts = [];
+      main.phase = () => undefined;
+      main.agent = async (prompt) => {
+        prompts.push(prompt);
+        throw new Error('fix prompt captured');
+      };
+      try {
+        for (const sentence of [relaySentence, undefined]) {
+          const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+          run.pass = 1;
+          run.answerLog.push({ question: 'Q.', reply: 'R.' });
+          if (sentence !== undefined) {
+            run.relaySentence = sentence;
+          }
+          await assert.rejects(main.runFixRound(run, makePlan(), fix, { runs: { fix: 0 }, fixAnswer: undefined }), /fix prompt captured/);
+        }
+      } finally {
+        delete main.phase;
+        delete main.agent;
+      }
+      const built = main.buildFixPrompt(fix, makePlan(), main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] }));
+      assert.equal(prompts[0].split('\n')[1], relaySentence);
+      assert.equal(prompts[0].replace('\n' + relaySentence, ''), built);
+      assert.equal(prompts[1], built);
+      assert.ok(prompts.every((prompt) => !prompt.includes(main.resumedReplySentence())));
     });
   },
   'SD-50': () => {

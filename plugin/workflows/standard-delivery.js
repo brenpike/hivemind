@@ -47,6 +47,7 @@ export const meta = {
  *   lib/specs.js
  *   lib/commit.js
  *   lib/workers.js
+ *   lib/gates.js
  *   standard-delivery/gates.js
  *   standard-delivery/pr.js
  *   standard-delivery/relay.js
@@ -694,7 +695,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '5862ee6a73dbbcee';
+const BUILD_ID = '3a2548f7a62ce619';
 
 function supportedSchemaKeywords(){
 return[
@@ -4007,15 +4008,6 @@ wave.wave.forEach((stepId)=>doneIds.push(stepId));
 }
 }
 
-function gateIds(){
-return['validate','review'];
-}
-function configuredGateIds(run){
-return run.localReview?gateIds():gateIds().filter((gateId)=>gateId!=='review');
-}
-function gateNames(){
-return{validate:'validation',review:'local review'};
-}
 function gateLabel(stepName,run,count){
 return stepName+'-'+run.pass+'-'+count;
 }
@@ -4084,6 +4076,21 @@ if(result.outcome==='blocked'){
 return{status:'blocked',reason:describeReason(result.blocker),files:result.files,...readGateHold(result,approvals)};
 }
 return{status:'complete',files:result.files};
+}
+function validationTaskSentence(){
+return'This is a validation task: the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md is its whole task, not a Worker Self-Check.';
+}
+function validationCommandsSentence(){
+return'This is a validation task: running each command of the inputs block once, in order and in the foreground, is its whole task, not a Worker Self-Check.';
+}
+function slowCaseSentence(){
+return'A test case that hits its own time limit, in a file the branch does not change from the base in the git block, runs once more alone: if it passes, it counts as passed and goes in slow.';
+}
+function validationFixSentence(){
+return'This is a validation fix task: the task is one fix round for the run\'s failed validation.';
+}
+function describePullRequestStop(){
+return', so '+RUN_NAME+' stopped before the pull request.';
 }
 function versionCheckSentence(){
 return'The hivemind:bump-type run is part of this validation task: invoke the hivemind:bump-type skill once, with each value of the version block below as the input of the same name, and relay that run in the version field.';
@@ -4194,7 +4201,7 @@ gates.runs.fix+=1;
 const count=gates.runs.fix;
 const round=fix.userAnswer===undefined&&gates.fixAnswer!==undefined?{...fix,userAnswer:gates.fixAnswer}:fix;
 gates.fixAnswer=undefined;
-const prompt=round.userAnswer===undefined?addResumeNote(buildFixPrompt(round,plan,run),run):buildFixPrompt(round,plan,run);
+const prompt=round.userAnswer===undefined?addResumeNote(buildFixPrompt(round,plan,run),run):addRelaySentence(buildFixPrompt(round,plan,run),run);
 const result=await agent(prompt,droneOptions(gateLabel('fix',run,count),'Fix',FIX_SCHEMA));
 const edit=readGateEditOutcome(result,FIX_SCHEMA,run.approvals);
 const stepCauses=edit.status==='blocked'?[describeFixCause(edit)]:[];
@@ -4281,15 +4288,6 @@ return{draft:'Commits kept landing after the gates held: they ran again '+maxGat
 gates.reruns+=1;
 return resolveTailDecision(GATE_RERUN_KIND,buildGateRerunBrief(staleIds,run.head),run);
 }
-function runGateStep(stepId,run,plan,facts,gates){
-if(stepId==='pr'){
-return runPullRequestStep(run,plan,gates);
-}
-if(stepId==='review'){
-return runReviewGate(run,plan,gates);
-}
-return runValidateGate(run,plan,facts,gates);
-}
 async function runHeadCheck(run,plan,gates){
 gates.runs.headCheck+=1;
 gates.failures={};
@@ -4297,9 +4295,7 @@ return runCommitStep(run,plan,{files:[],label:gateLabel('head',run,gates.runs.he
 }
 async function runGates(run,plan,facts){
 const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0,headCheck:0,pr:0},failures:{},fixRounds:0,reruns:0,answer:undefined,fixAnswer:undefined,slow:[]};
-if(!run.localReview){
-listNotRunGate(run,notConfiguredReviewLine());
-}
+listNotConfiguredGateLines(run).forEach((line)=>listNotRunGate(run,line));
 let checkedHead=run.head;
 let index=0;
 for(;;){
@@ -4341,6 +4337,28 @@ if(ended.answer!==undefined){
 gates.answer=ended.answer;
 }
 }
+}
+
+function gateIds(){
+return['validate','review'];
+}
+function configuredGateIds(run){
+return run.localReview?gateIds():gateIds().filter((gateId)=>gateId!=='review');
+}
+function gateNames(){
+return{validate:'validation',review:'local review'};
+}
+function runGateStep(stepId,run,plan,facts,gates){
+if(stepId==='pr'){
+return runPullRequestStep(run,plan,gates);
+}
+if(stepId==='review'){
+return runReviewGate(run,plan,gates);
+}
+return runValidateGate(run,plan,facts,gates);
+}
+function listNotConfiguredGateLines(run){
+return run.localReview?[]:[notConfiguredReviewLine()];
 }
 
 function reviewDecisionProblems(){
@@ -4489,18 +4507,6 @@ return{result:finishDeliveryComplete(run,plan,checked.values,gates)};
 return stopDelivery([checked],run);
 }
 
-function validationTaskSentence(){
-return'This is a validation task: the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md is its whole task, not a Worker Self-Check.';
-}
-function validationCommandsSentence(){
-return'This is a validation task: running each command of the inputs block once, in order and in the foreground, is its whole task, not a Worker Self-Check.';
-}
-function slowCaseSentence(){
-return'A test case that hits its own time limit, in a file the branch does not change from the base in the git block, runs once more alone: if it passes, it counts as passed and goes in slow.';
-}
-function validationFixSentence(){
-return'This is a validation fix task: the task is one fix round for the run\'s failed validation.';
-}
 function listBranchWords(plan,freshness,trunk){
 return['--base',plan.base,'--branch',plan.branch,'--classification',plan.classification,'--trunk-freshness',freshness,'--trunk',trunk];
 }
@@ -4804,9 +4810,6 @@ return detail===undefined?line:line+'\n'+detail;
 }
 function describeReviewOpen(review,head,after){
 return reviewStopTexts(review).lead+' on commit '+head+after+', with '+describeCount(review.findings_open,'finding')+' still open';
-}
-function describePullRequestStop(){
-return', so '+RUN_NAME+' stopped before the pull request.';
 }
 function quoteShortFindingId(findingId){
 return encodeUntrustedText(Array.from(findingId).slice(0,8).join(''));
