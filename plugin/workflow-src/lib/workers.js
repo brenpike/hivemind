@@ -1,20 +1,29 @@
 /*
- * standard-delivery waves.js: the wave loop of the standard-delivery
- * workflow. It holds the worker schema and prompt, the worker outcomes
- * and the loop that runs each wave and its commit.
+ * workers.js: the wave loop a workflow shares. It holds the worker schema
+ * and prompt, the worker outcomes and the loop that runs each wave and its
+ * commit.
  *
  * Inputs
- *   run    the run state of main.js createRunState. The loop reads pass,
+ *   run    the run state of the workflow's main.js. The loop reads pass,
  *          replies, trunk and approvals, and updates waveCount and replans.
- *   plan   the accepted plan, from runPlanningPass (plan.js).
+ *   plan   the accepted plan, from runPlanningPass (lib/plan.js).
  *   facts  the checked facts of the pass, passed on to runGates.
  *   Each worker result: an object under WORKER_SCHEMA, or null.
+ *   The constants of the workflow's main.js this file reads: RUN_NAME and
+ *   WORKER_SCHEMA. The workflow functions it reads: runGates(run, plan,
+ *   facts), the gates that follow the last wave, and maxReplans(), the
+ *   replan limit. Every workflow whose code calls runPlanWaves declares
+ *   all four. Every other function it reads is a library's, among them
+ *   computeWave (lib/waves.js), runCommitStep (lib/commit.js) and
+ *   stopDelivery (lib/record.js).
  *
  * Outputs
- *   runPlanWaves(run, plan, facts)  what runGates (gates.js) returns once
- *          every step is done, else a run end as is: {result}, a blocked
- *          finish or a pause, or {replan}, the reasons of a needs_replan
- *          wave or the reply to a stop.
+ *   runPlanWaves(run, plan, facts)  what runGates returns once every step
+ *          is done, else a run end as is: {result}, a blocked finish or a
+ *          pause, or {replan}, the reasons of a needs_replan wave or the
+ *          reply to a stop.
+ *   buildWorkerSchema()  the worker schema, for the WORKER_SCHEMA constant
+ *          of the workflow's main.js.
  *   buildNextActionProperty()  the next_action property the worker, gate
  *          edit and validate schemas share.
  *   buildStageProperty() and describeHeldChanges()  the stage property
@@ -24,24 +33,24 @@
  *          edit result, through describeUnusableResult (lib/stop.js).
  *   buildWaveSubject(waveSteps, waveNumber)  the commit subject of a wave:
  *          the outcome of its one step, or the ids of its steps then the
- *          first outcome, through toCommitSubject (relay.js), whose
+ *          first outcome, through toCommitSubject (lib/commit.js), whose
  *          fallback names the wave.
- *   The step, as meta.js names it:
+ *   The step, as the workflow's meta.js names it:
  *   Waves   workers run each computeWave() wave in parallel().
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
- *   main.js: the build bundles this module into it, so a row can name a
- *   function of this module.
+ *   main.js: the build bundles this library into it, so a row can name a
+ *   function of this library.
  *   Every wave ends with the commit runner, whatever its workers returned.
  *   The loop reads every worker outcome before the commit, and a null
  *   worker result counts as blocked: its reason names the agent failure
  *   through describeUnusableResult (lib/stop.js), with next action
  *   run_again, and readWorkerOutcome passes its agentFailure mark on.
  *   readWorkerOutcome types a blocked worker through readGateHold
- *   (approvals.js) with run.approvals. describeBlockedWave makes the one
- *   cause of a blocked wave: a lead line naming the stop, then one line per
- *   blocked step in orderStopCauses order (lib/stop.js) through
+ *   (lib/approvals.js) with run.approvals. describeBlockedWave makes the
+ *   one cause of a blocked wave: a lead line naming the stop, then one line
+ *   per blocked step in orderStopCauses order (lib/stop.js) through
  *   capItemLines, an approve step waiting for approval and a report hold
  *   stopped at the gate without a change the run can approve, the first
  *   giving the next action, so run_again only when every blocked worker
@@ -50,20 +59,23 @@
  *   The worker prompt carries the approvals block only when run.approvals
  *   is not empty. A plan that cannot be
  *   scheduled mid-run is a report stop. runCommitStep
- *   (relay.js) takes that cause as its step cause and stops with it through
- *   stopDelivery (record.js) as a replan, so a commit stop never hides it,
- *   and the loop returns that run end as is. Stops (issue 457): a wave with
- *   an agent failure ends the run, and so does a blocked wave or a plan that
- *   cannot be scheduled mid-run whose lead is report or run_again. A blocked
- *   wave led by approve or fix_cause and a needs_replan at maxReplans() ask
- *   one step_stop question, and the reply starts a new pass that does
- *   not count against maxReplans(), the needs_replan one with the worker
- *   reasons. needs_replan is handled only after a successful commit.
+ *   (lib/commit.js) takes that cause as its step cause and stops with it
+ *   through stopDelivery (lib/record.js) as a replan, so a commit stop never
+ *   hides it, and the loop returns that run end as is. Stops (issue 457): a
+ *   wave with an agent failure ends the run, and so does a blocked wave or a
+ *   plan that cannot be scheduled mid-run whose lead is report or
+ *   run_again. A blocked wave led by approve or fix_cause and a
+ *   needs_replan at maxReplans() ask one step_stop question, and the reply
+ *   starts a new pass that does not count against maxReplans(), the
+ *   needs_replan one with the worker reasons. needs_replan is handled only
+ *   after a successful commit.
  *
  * Why
  *   A worker edits files and never commits, so the loop owns the commit
  *   of each wave. It reads the outcomes first so the commit runner gets the
- *   wave's cause, and it still commits whatever the workers left.
+ *   wave's cause, and it still commits whatever the workers left. Every
+ *   workflow that runs plan steps in waves runs the same loop, so it lives
+ *   in one place.
  */
 
 function buildNextActionProperty() {

@@ -46,12 +46,12 @@ export const meta = {
  *   lib/record.js
  *   lib/specs.js
  *   lib/commit.js
+ *   lib/workers.js
  *   standard-delivery/gates.js
  *   standard-delivery/pr.js
  *   standard-delivery/relay.js
  *   standard-delivery/review-schema.js
  *   standard-delivery/review.js
- *   standard-delivery/waves.js
  *   standard-delivery/main.js
  * Do not edit by hand. Rebuild with `node tools/build_workflows.mjs`.
  */
@@ -694,7 +694,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '8b1f7bbc97e5db42';
+const BUILD_ID = '5862ee6a73dbbcee';
 
 function supportedSchemaKeywords(){
 return[
@@ -3852,6 +3852,161 @@ const endLines=checked.values.committed==='true'?[describeCommitEnd(checked.valu
 return stopDelivery(stepCauses,run,endLines,isReplan);
 }
 
+function buildNextActionProperty(){
+return{
+type:'string',
+enum:['fix_cause','run_again'],
+description:'run_again when the cause is outside the repo and passes with no change, such as machine load, a timeout or a network failure. fix_cause otherwise.'
+};
+}
+function buildStageProperty(){
+return{type:'string',maxLength:40,description:'Worker Report stage.'};
+}
+function describeHeldChanges(){
+return'With stage destructive-fix-gate: each change held back for approval, by gate category number and the one item it changes, named exactly.';
+}
+function describeUnusableEdit(result){
+return describeUnusableResult('it returned no usable result.',result);
+}
+function buildWorkerSchema(){
+return buildTaggedSchema({
+tag:'outcome',
+properties:{
+outcome:{
+type:'string',
+enum:['complete','blocked','needs_replan'],
+description:'complete when the step outcome holds. blocked when the step cannot be done. needs_replan when the plan must change first.'
+},
+summary:{type:'string',description:'What you changed, in one or two sentences.'},
+blocker:{type:'string',maxLength:400,description:'Why the step is blocked or needs a new plan, in one or two short sentences written for the user.'},
+next_action:buildNextActionProperty(),
+stage:buildStageProperty(),
+destructive:buildDestructiveListSchema(describeHeldChanges())
+},
+required:['outcome','summary'],
+variants:{
+complete:{required:[],optional:[]},
+blocked:{required:[],optional:['blocker','next_action','stage','destructive']},
+needs_replan:{required:[],optional:['blocker']}
+}
+});
+}
+function buildWorkerPrompt(step,waveScopes,plan,run){
+return[
+'Do one step of the approved delivery plan: the step in the step block below.',
+boundarySentence(),
+dataBlocksSentence(describeApprovalsHome(run.approvals)),
+'',
+formatDataBlock('step',step),
+formatDataBlock('wave_scopes',waveScopes),
+formatDataBlock('plan_summary',plan.summary),
+formatDataBlock('git',{branch:plan.branch,base:plan.base,trunk:run.trunk}),
+...listApprovalsBlock(run.approvals)
+].join('\n');
+}
+function listStepFiles(steps){
+const files=[];
+for(const step of steps){
+for(const file of step.files){
+if(!files.includes(file)){
+files.push(file);
+}
+}
+}
+return files;
+}
+function buildWaveSubject(waveSteps,waveNumber){
+const firstOutcome=waveSteps[0].outcome;
+const text=waveSteps.length===1?firstOutcome:waveSteps.map((step)=>step.id).join(', ')+': '+firstOutcome;
+return toCommitSubject(text,'complete wave '+waveNumber+' of the delivery plan');
+}
+function findPlanStep(plan,stepId){
+return plan.steps.find((step)=>step.id===stepId);
+}
+function createWorkerTask(step,waveSteps,plan,run){
+const waveScopes=listStepFiles(waveSteps.filter((other)=>other.id!==step.id));
+const prompt=addResumeNote(buildWorkerPrompt(step,waveScopes,plan,run),run);
+const options={agentType:step.owner,schema:toAgentSchema(WORKER_SCHEMA),label:'work-'+run.pass+'-'+step.id,phase:'Waves'};
+return()=>agent(prompt,options);
+}
+function readWorkerOutcome(step,result,approvals){
+if(!validateSchema(WORKER_SCHEMA,result).ok){
+const unusable=describeUnusableEdit(result);
+return{stepId:step.id,status:'blocked',reason:unusable.problem,nextAction:unusable.nextAction,agentFailure:unusable.agentFailure};
+}
+if(result.outcome==='complete'){
+return{stepId:step.id,status:'complete'};
+}
+return{stepId:step.id,status:result.outcome,reason:describeReason(result.blocker),...readGateHold(result,approvals)};
+}
+function describeBlockedVerb(outcome){
+if(outcome.holds===undefined){
+return' was blocked: ';
+}
+return outcome.nextAction==='approve'?describeGateWait()+': ':' stopped at the destructive-fix gate without a change the run can approve: ';
+}
+function describeBlockedStep(outcome){
+return'- Step '+encodeUntrustedText(outcome.stepId)+describeBlockedVerb(outcome)+outcome.reason;
+}
+function listStepHolds(outcomes){
+return outcomes.flatMap((outcome)=>(outcome.nextAction==='approve'?outcome.holds.map((hold)=>({stepId:outcome.stepId,...hold})):[]));
+}
+function describeBlockedWave(blockedOutcomes){
+const lead='A worker did not finish its step, so '+RUN_NAME+' stopped after its wave:';
+const orderedOutcomes=orderStopCauses(blockedOutcomes);
+const stepLines=orderedOutcomes.map(describeBlockedStep);
+const cause={problem:[lead,...capItemLines(stepLines)].join('\n'),nextAction:orderedOutcomes[0].nextAction};
+if(blockedOutcomes.some((outcome)=>outcome.agentFailure===true)){
+cause.agentFailure=true;
+}
+if(cause.nextAction==='approve'){
+cause.holds=listStepHolds(orderedOutcomes);
+}
+return cause;
+}
+function describeReplanReasons(replanOutcomes){
+return replanOutcomes.map((outcome)=>'Step '+encodeUntrustedText(outcome.stepId)+' needs a new plan: '+outcome.reason).join('\n');
+}
+function requestStepReplan(run,replanOutcomes){
+const reasons=describeReplanReasons(replanOutcomes);
+if(run.replans>=maxReplans()){
+const cause={problem:'A worker asked for a new plan after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.\n'+reasons};
+const stopped=stopDelivery([cause],run,[],true);
+return stopped.replan===undefined?stopped:{replan:{reason:reasons}};
+}
+run.replans+=1;
+return{replan:{reason:reasons}};
+}
+async function runPlanWaves(run,plan,facts){
+const doneIds=[];
+for(let waveNumber=1;;waveNumber+=1){
+const wave=computeWave(plan.steps,doneIds);
+if(!wave.ok){
+return stopDelivery([{problem:'The plan steps cannot be scheduled, so '+RUN_NAME+' stopped: '+toPrintableAscii(wave.problem),nextAction:'report'}],run,[],true);
+}
+if(wave.all_done){
+return runGates(run,plan,facts);
+}
+const waveSteps=wave.wave.map((stepId)=>findPlanStep(plan,stepId));
+phase('Waves');
+const workerResults=await parallel(waveSteps.map((step)=>createWorkerTask(step,waveSteps,plan,run)));
+run.waveCount+=1;
+const outcomes=waveSteps.map((step,index)=>readWorkerOutcome(step,workerResults[index],run.approvals));
+const blockedOutcomes=outcomes.filter((outcome)=>outcome.status==='blocked');
+const stepCauses=blockedOutcomes.length>0?[describeBlockedWave(blockedOutcomes)]:[];
+const commit={files:listStepFiles(waveSteps),label:'commit-'+run.pass+'-'+waveNumber,stepName:'wave',subject:buildWaveSubject(waveSteps,waveNumber)};
+const committed=await runCommitStep(run,plan,commit,stepCauses);
+if(committed.values===undefined){
+return committed;
+}
+const replanOutcomes=outcomes.filter((outcome)=>outcome.status==='needs_replan');
+if(replanOutcomes.length>0){
+return requestStepReplan(run,replanOutcomes);
+}
+wave.wave.forEach((stepId)=>doneIds.push(stepId));
+}
+}
+
 function gateIds(){
 return['validate','review'];
 }
@@ -4862,161 +5017,6 @@ return routed;
 }
 function notConfiguredReviewLine(){
 return'local review: the run was launched with local_review false, so the gate is not configured and does not count as held.';
-}
-
-function buildNextActionProperty(){
-return{
-type:'string',
-enum:['fix_cause','run_again'],
-description:'run_again when the cause is outside the repo and passes with no change, such as machine load, a timeout or a network failure. fix_cause otherwise.'
-};
-}
-function buildStageProperty(){
-return{type:'string',maxLength:40,description:'Worker Report stage.'};
-}
-function describeHeldChanges(){
-return'With stage destructive-fix-gate: each change held back for approval, by gate category number and the one item it changes, named exactly.';
-}
-function describeUnusableEdit(result){
-return describeUnusableResult('it returned no usable result.',result);
-}
-function buildWorkerSchema(){
-return buildTaggedSchema({
-tag:'outcome',
-properties:{
-outcome:{
-type:'string',
-enum:['complete','blocked','needs_replan'],
-description:'complete when the step outcome holds. blocked when the step cannot be done. needs_replan when the plan must change first.'
-},
-summary:{type:'string',description:'What you changed, in one or two sentences.'},
-blocker:{type:'string',maxLength:400,description:'Why the step is blocked or needs a new plan, in one or two short sentences written for the user.'},
-next_action:buildNextActionProperty(),
-stage:buildStageProperty(),
-destructive:buildDestructiveListSchema(describeHeldChanges())
-},
-required:['outcome','summary'],
-variants:{
-complete:{required:[],optional:[]},
-blocked:{required:[],optional:['blocker','next_action','stage','destructive']},
-needs_replan:{required:[],optional:['blocker']}
-}
-});
-}
-function buildWorkerPrompt(step,waveScopes,plan,run){
-return[
-'Do one step of the approved delivery plan: the step in the step block below.',
-boundarySentence(),
-dataBlocksSentence(describeApprovalsHome(run.approvals)),
-'',
-formatDataBlock('step',step),
-formatDataBlock('wave_scopes',waveScopes),
-formatDataBlock('plan_summary',plan.summary),
-formatDataBlock('git',{branch:plan.branch,base:plan.base,trunk:run.trunk}),
-...listApprovalsBlock(run.approvals)
-].join('\n');
-}
-function listStepFiles(steps){
-const files=[];
-for(const step of steps){
-for(const file of step.files){
-if(!files.includes(file)){
-files.push(file);
-}
-}
-}
-return files;
-}
-function buildWaveSubject(waveSteps,waveNumber){
-const firstOutcome=waveSteps[0].outcome;
-const text=waveSteps.length===1?firstOutcome:waveSteps.map((step)=>step.id).join(', ')+': '+firstOutcome;
-return toCommitSubject(text,'complete wave '+waveNumber+' of the delivery plan');
-}
-function findPlanStep(plan,stepId){
-return plan.steps.find((step)=>step.id===stepId);
-}
-function createWorkerTask(step,waveSteps,plan,run){
-const waveScopes=listStepFiles(waveSteps.filter((other)=>other.id!==step.id));
-const prompt=addResumeNote(buildWorkerPrompt(step,waveScopes,plan,run),run);
-const options={agentType:step.owner,schema:toAgentSchema(WORKER_SCHEMA),label:'work-'+run.pass+'-'+step.id,phase:'Waves'};
-return()=>agent(prompt,options);
-}
-function readWorkerOutcome(step,result,approvals){
-if(!validateSchema(WORKER_SCHEMA,result).ok){
-const unusable=describeUnusableEdit(result);
-return{stepId:step.id,status:'blocked',reason:unusable.problem,nextAction:unusable.nextAction,agentFailure:unusable.agentFailure};
-}
-if(result.outcome==='complete'){
-return{stepId:step.id,status:'complete'};
-}
-return{stepId:step.id,status:result.outcome,reason:describeReason(result.blocker),...readGateHold(result,approvals)};
-}
-function describeBlockedVerb(outcome){
-if(outcome.holds===undefined){
-return' was blocked: ';
-}
-return outcome.nextAction==='approve'?describeGateWait()+': ':' stopped at the destructive-fix gate without a change the run can approve: ';
-}
-function describeBlockedStep(outcome){
-return'- Step '+encodeUntrustedText(outcome.stepId)+describeBlockedVerb(outcome)+outcome.reason;
-}
-function listStepHolds(outcomes){
-return outcomes.flatMap((outcome)=>(outcome.nextAction==='approve'?outcome.holds.map((hold)=>({stepId:outcome.stepId,...hold})):[]));
-}
-function describeBlockedWave(blockedOutcomes){
-const lead='A worker did not finish its step, so '+RUN_NAME+' stopped after its wave:';
-const orderedOutcomes=orderStopCauses(blockedOutcomes);
-const stepLines=orderedOutcomes.map(describeBlockedStep);
-const cause={problem:[lead,...capItemLines(stepLines)].join('\n'),nextAction:orderedOutcomes[0].nextAction};
-if(blockedOutcomes.some((outcome)=>outcome.agentFailure===true)){
-cause.agentFailure=true;
-}
-if(cause.nextAction==='approve'){
-cause.holds=listStepHolds(orderedOutcomes);
-}
-return cause;
-}
-function describeReplanReasons(replanOutcomes){
-return replanOutcomes.map((outcome)=>'Step '+encodeUntrustedText(outcome.stepId)+' needs a new plan: '+outcome.reason).join('\n');
-}
-function requestStepReplan(run,replanOutcomes){
-const reasons=describeReplanReasons(replanOutcomes);
-if(run.replans>=maxReplans()){
-const cause={problem:'A worker asked for a new plan after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.\n'+reasons};
-const stopped=stopDelivery([cause],run,[],true);
-return stopped.replan===undefined?stopped:{replan:{reason:reasons}};
-}
-run.replans+=1;
-return{replan:{reason:reasons}};
-}
-async function runPlanWaves(run,plan,facts){
-const doneIds=[];
-for(let waveNumber=1;;waveNumber+=1){
-const wave=computeWave(plan.steps,doneIds);
-if(!wave.ok){
-return stopDelivery([{problem:'The plan steps cannot be scheduled, so '+RUN_NAME+' stopped: '+toPrintableAscii(wave.problem),nextAction:'report'}],run,[],true);
-}
-if(wave.all_done){
-return runGates(run,plan,facts);
-}
-const waveSteps=wave.wave.map((stepId)=>findPlanStep(plan,stepId));
-phase('Waves');
-const workerResults=await parallel(waveSteps.map((step)=>createWorkerTask(step,waveSteps,plan,run)));
-run.waveCount+=1;
-const outcomes=waveSteps.map((step,index)=>readWorkerOutcome(step,workerResults[index],run.approvals));
-const blockedOutcomes=outcomes.filter((outcome)=>outcome.status==='blocked');
-const stepCauses=blockedOutcomes.length>0?[describeBlockedWave(blockedOutcomes)]:[];
-const commit={files:listStepFiles(waveSteps),label:'commit-'+run.pass+'-'+waveNumber,stepName:'wave',subject:buildWaveSubject(waveSteps,waveNumber)};
-const committed=await runCommitStep(run,plan,commit,stepCauses);
-if(committed.values===undefined){
-return committed;
-}
-const replanOutcomes=outcomes.filter((outcome)=>outcome.status==='needs_replan');
-if(replanOutcomes.length>0){
-return requestStepReplan(run,replanOutcomes);
-}
-wave.wave.forEach((stepId)=>doneIds.push(stepId));
-}
 }
 
 const RUN_NOUN='delivery';
