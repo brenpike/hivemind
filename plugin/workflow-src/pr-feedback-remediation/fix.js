@@ -29,8 +29,12 @@
  *          else undefined.
  *   buildFixPrompt(fixInputs)  the fix pass prompt before addResumeNote.
  *   fixOptions(run)  the reviewer call options, label fix-<pass>.
+ *   hasDeferredItemsMismatch(fix)  true when deferred_escalation_items is
+ *          present on a result that is not an escalation with
+ *          findings_resolved above 0, or absent on one that is.
  *   describeFixResultProblem(fix)  describeUnusableResult of a result that
- *          fails FIX_RESULT_SCHEMA, null included, else undefined.
+ *          fails FIX_RESULT_SCHEMA, null included, or has a deferred items
+ *          mismatch, else undefined.
  *   describeFixExit(fix, run)  {blocks} of a complete end, or {cause} of a
  *          blocked one.
  *   runFixPass(run, facts)  the fix pass: {blocks} or {cause}.
@@ -48,9 +52,12 @@
  *   escalationExits(). Every string, list entries included, has a
  *   maxLength, and every list a maxItems. Each field that can carry text
  *   from GitHub starts its description with externalLabel() (paths.js).
- *   A result is read only after it passes FIX_RESULT_SCHEMA. A null
- *   result or one off the schema ends blocked through
- *   describeUnusableResult (lib/stop.js).
+ *   A result is read only after it passes FIX_RESULT_SCHEMA and the
+ *   deferred items check: the Output Contract gives
+ *   deferred_escalation_items exactly when the exit is an escalation and
+ *   findings_resolved is above 0, a condition on a count the tagged schema
+ *   cannot state. A null result, one off the schema or one that fails that
+ *   check ends blocked through describeUnusableResult (lib/stop.js).
  *   clean and merge-advised end complete with no pr. injection-suspect
  *   ends blocked and terminal. blocked, user-input-required and
  *   high-severity-rejection end blocked naming the exit and each candidate
@@ -162,8 +169,13 @@ function fixOptions(run) {
   return { agentType: REVIEWER_AGENT, schema: toAgentSchema(FIX_RESULT_SCHEMA), label: 'fix-' + run.pass, phase: 'Fix' };
 }
 
+function hasDeferredItemsMismatch(fix) {
+  const expected = escalationExits().includes(fix.exit_reason) && fix.findings_resolved > 0;
+  return expected !== (fix.deferred_escalation_items !== undefined);
+}
+
 function describeFixResultProblem(fix) {
-  if (validateSchema(FIX_RESULT_SCHEMA, fix).ok) {
+  if (validateSchema(FIX_RESULT_SCHEMA, fix).ok && !hasDeferredItemsMismatch(fix)) {
     return undefined;
   }
   return describeUnusableResult('The review fix pass returned a result that does not fit its schema, so ' + RUN_NAME + ' stopped.', fix);

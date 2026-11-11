@@ -33,14 +33,15 @@ const REPORT_NEXT = 'Next: nothing in your repo needs a fix, so report this stop
 const URL_A = 'https://github.com/o/r/pull/12#discussion_r1';
 const URL_B = 'https://github.com/o/r/pull/12#discussion_r2';
 const COUNTS = { mode: 'fix', findings_resolved: 1, findings_open: 0 };
+const ESCALATION_COUNTS = { mode: 'fix', findings_resolved: 0, findings_open: 1 };
 const CLEAN = { exit_reason: 'clean', ...COUNTS };
 const EXIT_RESULTS = {
   clean: CLEAN,
   'injection-suspect': { exit_reason: 'injection-suspect', ...COUNTS, candidate_url: URL_A, pattern_category: 'P2' },
   'user-input-required': { exit_reason: 'user-input-required', ...COUNTS, escalation_target: 'user', candidate_url: URL_A },
-  'planner-escalation': { exit_reason: 'planner-escalation', ...COUNTS, escalation_target: 'planner', candidate_url: URL_A },
+  'planner-escalation': { exit_reason: 'planner-escalation', ...ESCALATION_COUNTS, escalation_target: 'planner', candidate_url: URL_A },
   'high-severity-rejection': { exit_reason: 'high-severity-rejection', ...COUNTS, candidate_url: URL_A, rationale_text: 'The finding misreads the guard.' },
-  'root-cluster-suspected': { exit_reason: 'root-cluster-suspected', ...COUNTS, cluster_files: ['src/a.js'], cluster_thread_urls: [URL_A, URL_B], hypothesized_root: 'One unchecked path.', same_framing_rationale: 'Both name the same path.', member_count: 2 },
+  'root-cluster-suspected': { exit_reason: 'root-cluster-suspected', ...ESCALATION_COUNTS, cluster_files: ['src/a.js'], cluster_thread_urls: [URL_A, URL_B], hypothesized_root: 'One unchecked path.', same_framing_rationale: 'Both name the same path.', member_count: 2 },
   'merge-advised': { exit_reason: 'merge-advised', ...COUNTS, advisory_reason: 'bounded-tail', structural_home: 'Issue 9', recommendation_text: 'Merge now.' },
   blocked: { exit_reason: 'blocked', ...COUNTS, blocker_reason: 'preflight failed', blocked_candidates: [URL_B] }
 };
@@ -348,7 +349,7 @@ const ROW_TESTS = {
       }
       assert.equal(lib.validateSchema(main.buildFixResultSchema(), { ...CLEAN, candidate_url: URL_A }).ok, false);
       assert.equal(lib.validateSchema(main.buildFixResultSchema(), { ...CLEAN, mode: 'review' }).ok, false);
-      assert.equal(lib.validateSchema(main.buildFixResultSchema(), { ...EXIT_RESULTS['planner-escalation'], deferred_escalation_items: [URL_B] }).ok, true);
+      assert.equal(lib.validateSchema(main.buildFixResultSchema(), { ...EXIT_RESULTS['planner-escalation'], ...COUNTS, deferred_escalation_items: [URL_B] }).ok, true);
     });
   },
   'PFR-07': () => {
@@ -362,6 +363,16 @@ const ROW_TESTS = {
       const long = await runFix({ ...EXIT_RESULTS.blocked, blocker_reason: 'x'.repeat(601) });
       assert.equal(long.result.outcome, 'blocked');
       assert.ok(long.result.message.startsWith('The review fix pass returned a result that does not fit its schema'), long.result.message);
+    });
+    test('deferred_escalation_items must be present exactly on an escalation with findings resolved', () => {
+      for (const exitReason of ['planner-escalation', 'root-cluster-suspected']) {
+        const result = EXIT_RESULTS[exitReason];
+        assert.equal(main.describeFixResultProblem(result), undefined, exitReason);
+        assert.equal(main.describeFixResultProblem({ ...result, ...COUNTS, deferred_escalation_items: [] }), undefined, exitReason);
+        assert.equal(main.describeFixResultProblem({ ...result, ...COUNTS, deferred_escalation_items: [URL_B] }), undefined, exitReason);
+        assert.equal(main.describeFixResultProblem({ ...result, ...COUNTS }).problem, 'The review fix pass returned a result that does not fit its schema, so the remediation stopped.', exitReason);
+        assert.equal(main.describeFixResultProblem({ ...result, deferred_escalation_items: [URL_B] }).problem, 'The review fix pass returned a result that does not fit its schema, so the remediation stopped.', exitReason);
+      }
     });
   },
   'PFR-08': () => {
@@ -467,9 +478,9 @@ const ROW_TESTS = {
     test('the review block holds only the exit fields, with deferred_escalation_items when present', () => {
       const cluster = EXIT_RESULTS['root-cluster-suspected'];
       const { mode, findings_resolved, findings_open, ...clusterFields } = cluster;
-      assert.deepEqual([mode, findings_resolved, findings_open], ['fix', 1, 0]);
+      assert.deepEqual([mode, findings_resolved, findings_open], ['fix', 0, 1]);
       assert.deepEqual(structuredClone(main.projectEscalationReview(cluster)), clusterFields);
-      const deferred = { ...EXIT_RESULTS['planner-escalation'], deferred_escalation_items: [URL_B] };
+      const deferred = { ...EXIT_RESULTS['planner-escalation'], ...COUNTS, deferred_escalation_items: [URL_B] };
       assert.deepEqual(structuredClone(main.projectEscalationReview(deferred)), { ...ESCALATION_REVIEW, deferred_escalation_items: [URL_B] });
     });
   },
