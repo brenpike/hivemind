@@ -12,7 +12,7 @@ import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, isDraf
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const WORKFLOW_ID = 'standard-delivery';
 const sourceDir = join(repoRoot, 'plugin/workflow-src', WORKFLOW_ID);
-const MOVED_LIB_PATHS = ['plan.js', 'checks.js', 'scope.js', 'briefs.js', 'approvals.js'].map((file) => 'plugin/workflow-src/lib/' + file);
+const MOVED_LIB_PATHS = ['plan.js', 'checks.js', 'scope.js', 'briefs.js', 'approvals.js', 'tails.js', 'record.js'].map((file) => 'plugin/workflow-src/lib/' + file);
 const moduleSource = readModuleSet();
 const metaSource = readText(join(sourceDir, 'meta.js'));
 const contractPath = join(sourceDir, 'contract.js');
@@ -8983,8 +8983,8 @@ const ROW_TESTS = {
       const code = stripCommentsAndStrings(moduleSource);
       assert.deepEqual(code.match(/\bapprovals: \[\]|\b\w+\.approvals = [^;]+;/g), [
         'run.approvals = applyApprovalChoices(run.approvals, shownAsks, readReplyChoices(shownEntry.reply, shownAsks));',
-        'inputs.approvals = run.approvals;',
         'run.approvals = applyApprovalChoices(run.approvals, asks, choices);',
+        'inputs.approvals = run.approvals;',
         'approvals: []'
       ]);
       assert.ok(code.includes('const choices = readReplyChoices(reply, asks);'));

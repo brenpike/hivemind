@@ -1,14 +1,14 @@
 /*
- * standard-delivery record.js: the run record and the run ends of the
- * standard-delivery workflow. It holds the run record parts and the
- * finish and pause functions.
+ * record.js: the run record and the run ends a workflow shares. It holds
+ * the run record parts and the finish and pause functions.
  *
  * Inputs
- *   run     the run state of main.js createRunState, or undefined when the
+ *   run     the run state of the workflow's main.js, or undefined when the
  *           launch check failed: reversibleEffects, notRunGates, taken,
  *           approvals, branch, head, headRound, waveCount, answerLog and
  *           open, the findings local review left open.
- *   gates   the gate loop state of runGates (gates.js), once the gates ran:
+ *   gates   the gate loop state of runGates (standard-delivery gates.js),
+ *           once the gates ran:
  *           notes, slow and draft.
  *   lead    the what-happened line of a pause, built by its call site.
  *   causes  the causes of a stop, {problem, nextAction?, terminal?,
@@ -23,20 +23,34 @@
  *           a molt relay or of a branch relay, and the plan branch.
  *   isReplan  true when a reply to a stop plans again from fresh facts,
  *           false when left out.
- *   result.js finish, which builds a blocked message from the causes,
- *   pauseForUser and the fit helpers, and brief.js renderQuestions,
+ *   lib/result.js finish, which builds a blocked message from the causes,
+ *   pauseForUser and the fit helpers, and lib/brief.js renderQuestions,
  *   renderOpenQuestions, renderDecisionsCompact and
  *   renderDestructiveChange.
+ *   The constants of the workflow's main.js this file reads:
+ *   PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND, GATE_RERUN_KIND
+ *   and STEP_STOP_KIND. pauseDelivery also reads BUILD_ID, the line the
+ *   build injects. The workflow functions it reads: the gate and review
+ *   helpers of finishDeliveryComplete, gateNames, gateIds,
+ *   configuredGateIds and joinNames (standard-delivery gates.js) and
+ *   buildRejectedFindingsBlock (standard-delivery review.js), which
+ *   buildRunRecordParts also reads with renderPullRequestGates
+ *   (standard-delivery pr.js) and quoteShortFindingId (standard-delivery
+ *   review.js). Every workflow whose code calls finishDeliveryComplete or
+ *   buildRunRecordParts declares them, and every workflow whose code calls
+ *   a function of this file declares the constants it reads.
  *
  * Outputs
  *   finishDeliveryBlocked, finishDeliveryComplete, finishOpenQuestions and
- *   pauseDelivery  the only run results; see the Outputs of main.js.
+ *   pauseDelivery  the only run results; see the Outputs of the
+ *           workflow's main.js.
  *   stopDelivery(causes, run, endLines, isReplan)  {result}, the blocked end
  *           or the pause, or on a reply {replan: {reason}} when isReplan,
  *           a new pass outside maxReplans(), else {rerun: true,
  *           stopAnswer}, stopAnswer the {question, reply} of askTails: the
  *           gate loop takes the stopped step again, reading the head first
- *           when that step does not read it itself (gates.js).
+ *           when that step does not read it itself (standard-delivery
+ *           gates.js).
  *   observeHead(run, commit, branch)  sets run.head to commit, run.branch
  *           to branch and run.headRound to the run.answerLog length.
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
@@ -48,7 +62,8 @@
  *           quoteOpenTitle, cut to a hard bound, under one label, external,
  *           the slow test cases
  *           of gates.slow when it is not empty, the rejected findings
- *           block of buildRejectedFindingsBlock (review.js) when run.rejected
+ *           block of buildRejectedFindingsBlock (standard-delivery
+ *           review.js) when run.rejected
  *           or run.undone is not empty, its note did not hold when the
  *           review gate never held, the approvals of run.approvals one
  *           line each through renderDestructiveChange under one label, then
@@ -62,7 +77,7 @@
  *           buildRecordTailBlocks and so every final message,
  *           finishOpenQuestions included, list only shown decisions, and a
  *           run with none shows no decisions block or part. run.taken itself
- *           keeps every entry: resolvePlanAcceptance (plan.js) reads the
+ *           keeps every entry: resolvePlanAcceptance (lib/plan.js) reads the
  *           routing kinds from it.
  *
  * Message shape (issue 460)
@@ -70,7 +85,7 @@
  *   pauseDelivery(resolution, run, lead)  the lead, then
  *           renderQuestions(resolution.asks), a whole block when an ask is
  *           exact or has a destructive option (hasDestructiveOption,
- *           approvals.js), so no destructive item is ever cut: a block
+ *           lib/approvals.js), so no destructive item is ever cut: a block
  *           that cannot show whole ends through finishOpenQuestions,
  *           exact_text_size. The reply line is the last line. No commit, gate line,
  *           taken decision or detail block. A lead longer than
@@ -84,11 +99,11 @@
  *           cause in orderStopCauses order is not in stopAskActions():
  *           approve and fix_cause, no value read as fix_cause. A report,
  *           run_again or answer stop never asks. When the lead is approve,
- *           it asks buildApprovalAsks (briefs.js) of that cause's holds
- *           through askTails (tails.js), one question per held item, each
+ *           it asks buildApprovalAsks (lib/briefs.js) of that cause's holds
+ *           through askTails (lib/tails.js), one question per held item, each
  *           with stop approve. Otherwise it asks one undecided step_stop
  *           question, stop fix_cause, (buildStepStopBrief(isReplan),
- *           briefs.js) through buildUndecidedAsk and askTails: decide()
+ *           lib/briefs.js) through buildUndecidedAsk and askTails: decide()
  *           asks it table_surface at every level, so its strong
  *           recommendation is never taken. The askTail lead is
  *           the cause problems in buildStopBlocks order, then the end
@@ -121,13 +136,14 @@
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
- *   main.js: the build bundles this module into it, so a row can name a
- *   function of this module.
+ *   main.js: the build bundles this library into it, so a row can name a
+ *   function of this library.
  *   One head writer (issue 457): observeHead is the only code that writes
  *   run.head, run.branch or run.headRound, and its callers feed it only a
- *   commit read from a checked relay: runCommitStep (relay.js) the molt
- *   commit, the head check of the gate loop (gates.js) included, and
- *   runDeliveryPass (main.js) the branch commit of each new pass before
+ *   commit read from a checked relay: runCommitStep (standard-delivery
+ *   relay.js) the molt commit, the head check of the gate loop
+ *   (standard-delivery gates.js) included, and runDeliveryPass
+ *   (standard-delivery main.js) the branch commit of each new pass before
  *   any wave. One head read per reply: every reply adds one entry to
  *   run.answerLog, its round, so the head is unread exactly when
  *   run.headRound is behind run.answerLog.length, whatever route the reply
@@ -139,7 +155,7 @@
  *   check. Every other stop pauses through stopDelivery, and a reply
  *   when the cause is still not fixed pauses again, with no cap. So
  *   finishDeliveryBlocked has no caller but stopDelivery,
- *   finishOpenQuestions and the launch end of runDelivery (main.js).
+ *   finishOpenQuestions and the launch end of runDelivery (standard-delivery main.js).
  *   Whether the run pauses or ends depends only on whether a question is
  *   open, never on where it came up or how many rounds ran (issue 453):
  *   every open question pauses through pauseDelivery while a pause can be

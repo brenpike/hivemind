@@ -1,17 +1,19 @@
 /*
- * standard-delivery tails.js: the tail asks of the standard-delivery
- * workflow, the questions a run asks after the last wave. Their briefs
- * live in briefs.js.
+ * tails.js: the tail asks a workflow shares, the questions a run asks
+ * after the last wave. Their briefs live in lib/briefs.js.
  *
  * Inputs
- *   run    the run state of main.js createRunState. The tail asks read
+ *   run    the run state of the workflow's main.js. The tail asks read
  *          branch and head, and update answerLog and approvals;
- *          resolveDecision (plan.js)
+ *          resolveDecision (lib/plan.js)
  *          reads level, and a take updates taken through acceptResolution.
- *   ask    one ask, as resolveDecision (plan.js) builds it.
+ *   ask    one ask, as resolveDecision (lib/plan.js) builds it.
  *   asks   the asks one pause shows, in shown order.
  *   kind, brief  a decide() kind and its code-built brief.
  *   lead   the lead string of the pause, or undefined.
+ *   It reads no constant of the workflow's main.js and no workflow
+ *   function: pauseDelivery is lib/record.js, takeNextReply,
+ *   resolveDecision and acceptResolution lib/plan.js.
  *
  * Outputs
  *   askTails(asks, run, lead)  {result}, the pause, or {answer: {question,
@@ -20,7 +22,7 @@
  *   replanFromTailAsk(ask, run)  the pause, or {replan} once the user
  *          replied.
  *   buildReplyReplan(asked)  the {replan} of a reply to what asked names,
- *          also returned by stopDelivery (record.js).
+ *          also returned by stopDelivery (lib/record.js).
  *   buildUndecidedAsk  the ask, for kind, brief and run, of a question
  *          decide() must never take.
  *   resolveTailDecision(kind, brief, run)  {} when decide() takes it, else
@@ -28,8 +30,8 @@
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
- *   main.js: the build bundles this module into it, so a row can name a
- *   function of this module.
+ *   main.js: the build bundles this library into it, so a row can name a
+ *   function of this library.
  *   Tail asks: a question after the last wave pauses through pauseDelivery
  *   with a lead and its questions: askTails(asks, run, lead) leads with the
  *   given lead string, as a local review question passes, else with
@@ -46,7 +48,7 @@
  *   user's own words settles none and stays the user's own words in every
  *   later answers block, review questions included: a review decision lives
  *   in the reviewer's record. The same choices update run.approvals through
- *   applyApprovalChoices (approvals.js). A tail question has no question
+ *   applyApprovalChoices (lib/approvals.js). A tail question has no question
  *   key, so a settled label never keys it: a step_stop asked again is asked,
  *   never skipped. A reply to a local review question reruns the review
  *   gate on the current head, after any stale gate, with the next gateLabel
@@ -93,7 +95,7 @@ function buildReplyReplan(asked) {
 }
 
 /**
- * Returns the ask resolveDecision (plan.js) builds for a question decide()
+ * Returns the ask resolveDecision (lib/plan.js) builds for a question decide()
  * must never take: its brief, kind and the reason decide() gives at
  * run.level. Throws when decide() takes it, so no undecided question is
  * ever auto-taken.

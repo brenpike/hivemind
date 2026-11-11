@@ -42,14 +42,14 @@ export const meta = {
  *   lib/scope.js
  *   lib/briefs.js
  *   lib/approvals.js
+ *   lib/tails.js
+ *   lib/record.js
  *   standard-delivery/gates.js
  *   standard-delivery/pr.js
- *   standard-delivery/record.js
  *   standard-delivery/relay.js
  *   standard-delivery/review-schema.js
  *   standard-delivery/review.js
  *   standard-delivery/specs.js
- *   standard-delivery/tails.js
  *   standard-delivery/waves.js
  *   standard-delivery/main.js
  * Do not edit by hand. Rebuild with `node tools/build_workflows.mjs`.
@@ -693,7 +693,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '584b67f6461af2a4';
+const BUILD_ID = '9d26434a723721d9';
 
 function supportedSchemaKeywords(){
 return[
@@ -3438,6 +3438,219 @@ function listApprovalsBlock(approvals){
 return approvals.length===0?[]:[formatDataBlock('approvals',approvals)];
 }
 
+function describeTailLead(run){
+return'Every plan step is committed on branch '+encodeUntrustedText(run.branch)+', with head '+run.head+'.';
+}
+function askTails(asks,run,lead){
+const leadText=lead===undefined?describeTailLead(run):lead;
+const reply=takeNextReply(run,run.answerLog.length+1);
+if(reply===undefined){
+return{result:pauseDelivery({asks:asks,taken:[]},run,leadText)};
+}
+const question=leadText+'\n\n'+renderQuestions(asks);
+const choices=readReplyChoices(reply,asks);
+run.answerLog.push(buildAnswerEntry({question:question,labels:listShownLabels(asks),reply:reply,chosen:choices}));
+run.approvals=applyApprovalChoices(run.approvals,asks,choices);
+return{answer:{question:question,reply:reply}};
+}
+function askTail(ask,run,lead){
+return askTails([ask],run,lead);
+}
+function replanFromTailAsk(ask,run){
+const asked=askTail(ask,run);
+if(asked.answer===undefined){
+return asked;
+}
+return buildReplyReplan('a question the run asked after the last wave');
+}
+function buildReplyReplan(asked){
+return{replan:{reason:'The user replied to '+asked+', so plan again from the fresh facts with the answers block.'}};
+}
+function buildUndecidedAsk(kind,brief,run){
+const resolution={asks:[],taken:[]};
+if(resolveDecision(kind,brief,undefined,run,resolution)==='take'){
+throw new Error('buildUndecidedAsk: decide() took '+kind);
+}
+return resolution.asks[0];
+}
+function resolveTailDecision(kind,brief,run){
+const resolution={asks:[],taken:[],reversibleEffects:[]};
+if(resolveDecision(kind,brief,undefined,run,resolution)==='take'){
+acceptResolution(resolution,run);
+return{};
+}
+return replanFromTailAsk(resolution.asks[0],run);
+}
+
+function renderReversibleEffects(effects){
+const lines=['Effects outside the repo that the plan declares as reversible:'];
+effects.forEach((effect)=>lines.push('- step '+encodeUntrustedText(effect.stepId)+': '+encodeUntrustedText(effect.summary)));
+return lines.join('\n');
+}
+function renderNotRunGates(lines){
+return['Gates that did not run:',...lines.map((line)=>'- '+line)].join('\n');
+}
+function observeHead(run,commit,branch){
+run.head=commit;
+run.branch=branch;
+run.headRound=run.answerLog.length;
+}
+function routineDecisionKinds(){
+return[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND,GATE_RERUN_KIND];
+}
+function isShownDecision(entry){
+const isListed=entry.listed!==undefined&&entry.listed.length>0;
+return isListed||!routineDecisionKinds().includes(entry.kind);
+}
+function renderApprovals(approvals){
+return['Destructive changes you approved:',...approvals.map((change)=>'- '+renderDestructiveChange(change))].join('\n');
+}
+function renderSlowTests(cases){
+return['Slow test cases that passed only when run alone:',...cases.map((name)=>'- '+encodeUntrustedText(name))].join('\n');
+}
+function quoteOpenTitle(title){
+const kept=title.slice(0,findLongestCut(title,maxExcerptLength(),encodeUntrustedText));
+return encodeUntrustedText(kept)+(kept===title?'':', shortened');
+}
+function hasListedFindings(run){
+return run.rejected.length>0||run.undone.length>0;
+}
+function buildRunRecordParts(run,taken,gates){
+const shown=taken.filter(isShownDecision);
+const isDraft=gates!==undefined&&gates.draft!==undefined;
+const parts=isDraft?[{id:'draft',text:'This pull request is a draft: '+gates.draft,external:false}]:[];
+if(run.reversibleEffects.length>0){
+parts.push({id:'reversible_effects',text:renderReversibleEffects(run.reversibleEffects),external:true});
+}
+if(gates===undefined){
+if(run.notRunGates.length>0){
+parts.push({id:'gates',text:renderNotRunGates(run.notRunGates),external:false});
+}
+}else{
+parts.push({id:'gates',text:renderPullRequestGates(run,gates),external:false});
+const openLines=(isDraft?run.open??[]:[]).map((finding)=>'- '+quoteShortFindingId(finding.finding_id)+': '+quoteOpenTitle(finding.title));
+if(openLines.length>0){
+parts.push({id:'open_findings',text:['Findings local review left open:',...openLines].join('\n'),external:true});
+}
+if(gates.slow.length>0){
+parts.push({id:'slow_tests',text:renderSlowTests(gates.slow),external:true});
+}
+if(hasListedFindings(run)){
+parts.push({id:'rejected_findings',text:buildRejectedFindingsBlock(gates.notes.review??'did not hold',run.rejected,run.undone).text,external:true});
+}
+}
+if(run.approvals.length>0){
+parts.push({id:'approvals',text:renderApprovals(run.approvals),external:true});
+}
+if(shown.length>0){
+parts.push({id:'decisions',text:renderDecisionsCompact(shown),external:true});
+}
+return parts;
+}
+function describeBranchLine(run){
+return'Branch '+encodeUntrustedText(run.branch)+' is at commit '+run.head+'.';
+}
+function buildRecordTailBlocks(run,taken){
+const blocks=[];
+const shown=taken.filter(isShownDecision);
+if(run.reversibleEffects.length>0){
+blocks.push({text:renderReversibleEffects(run.reversibleEffects)});
+}
+if(shown.length>0){
+blocks.push({text:renderDecisionsCompact(shown)});
+}
+return blocks;
+}
+function finishDeliveryBlocked(causes,run,endLines=[]){
+const blocks=endLines.map((line)=>({text:line}));
+if(run!==undefined&&run.waveCount>0){
+blocks.push({text:describeBranchLine(run)});
+}
+if(run!==undefined){
+blocks.push(...buildRecordTailBlocks(run,run.taken));
+}
+return finish({outcome:'blocked',causes:causes,blocks:blocks});
+}
+function describePullRequest(values){
+return values.created==='true'
+?'Opened pull request '+values.url+' on commit '+values.head_ref_oid+'.'
+:'Pushed commit '+values.head_ref_oid+' to the open pull request '+values.url+' and commented on it.';
+}
+function describeHeldGates(run){
+const held=configuredGateIds(run).map((gateId)=>gateNames()[gateId]);
+const notConfigured=gateIds().filter((gateId)=>!configuredGateIds(run).includes(gateId)).map((gateId)=>gateNames()[gateId]);
+const heldLine=joinNames(held,'and')+' held on commit '+run.head+'.';
+const line=heldLine.charAt(0).toUpperCase()+heldLine.slice(1);
+return notConfigured.length===0?line:line+' Not configured for this run: '+joinNames(notConfigured,'and')+'.';
+}
+function finishDeliveryComplete(run,plan,prValues,gates){
+const pr={url:prValues.url,head_ref_oid:prValues.head_ref_oid,created:prValues.created==='true'};
+const blocks=[{text:describePullRequest(prValues)},{text:gates.draft===undefined?describeHeldGates(run):'The pull request is a draft: '+gates.draft}];
+if(prValues.warning!==undefined){
+blocks.push({text:'The pull request step warned: '+prValues.warning+'.'});
+}
+if(hasListedFindings(run)){
+blocks.push(buildRejectedFindingsBlock(gates.notes.review??'did not hold',run.rejected,run.undone));
+}
+blocks.push(...buildRecordTailBlocks(run,run.taken));
+return finish({outcome:'complete',blocks:blocks,pr:pr});
+}
+function finishOpenQuestions(resolution,stopReason,run){
+const cause={problem:'The delivery ran no further step, because questions are still open.',nextAction:'answer'};
+return finishDeliveryBlocked([cause],{...run,taken:run.taken.concat(resolution.taken)},[renderOpenQuestions(resolution.asks,stopReason)]);
+}
+function checkPauseAsk(ask){
+const isBadStop=ask.kind===STEP_STOP_KIND&&!stopAskActions().includes(ask.stop);
+if(isBadStop||!askReasons().includes(ask.reason)){
+throw new Error('pauseDelivery: ask '+ask.kind+' '+ask.reason);
+}
+}
+function pauseDelivery(resolution,run,lead){
+resolution.asks.forEach(checkPauseAsk);
+const resumeArgs=buildResumeArgs(run.answerLog.map((entry)=>entry.reply),BUILD_ID);
+if(!canCarry(resumeArgs)){
+return finishOpenQuestions(resolution,'reply_size',run);
+}
+const questionsBlock={text:renderQuestions(resolution.asks)};
+if(resolution.asks.some((ask)=>ask.exact===true||hasDestructiveOption(ask))){
+questionsBlock.whole=true;
+}
+const compactLead=cutAtBoundary(lead,maxBlockedLeadLength());
+const blocks=[compactLead===lead?{text:lead}:{text:lead,compact:compactLead},questionsBlock];
+if(!canShowWhole({resumeArgs:resumeArgs,blocks:blocks})){
+return finishOpenQuestions(resolution,'exact_text_size',run);
+}
+return pauseForUser({resumeArgs:resumeArgs,blocks:blocks});
+}
+function describeStopLead(causes,endLines){
+const causeTexts=buildStopBlocks(causes).filter((block)=>block.whole!==true).map((block)=>block.text);
+return causeTexts.concat(endLines).join('\n');
+}
+function stopAskActions(){
+return['approve','fix_cause'];
+}
+function listStopAsks(leadCause,run,isReplan){
+if(leadCause.nextAction==='approve'){
+return buildApprovalAsks(leadCause.holds,isReplan,run).map((ask)=>({...ask,stop:'approve'}));
+}
+return[{...buildUndecidedAsk(STEP_STOP_KIND,buildStepStopBrief(isReplan),run),stop:'fix_cause'}];
+}
+function stopDelivery(causes,run,endLines=[],isReplan=false){
+const leadCause=orderStopCauses(causes)[0];
+const isAsked=stopAskActions().includes(readStopAction(leadCause.nextAction));
+if(!isAsked||causes.some((cause)=>cause.terminal===true||cause.agentFailure===true)){
+return{result:finishDeliveryBlocked(causes,run,endLines)};
+}
+const asked=askTails(listStopAsks(leadCause,run,isReplan),run,describeStopLead(causes,endLines));
+if(asked.answer===undefined){
+return asked;
+}
+if(isReplan){
+return buildReplyReplan('a stop the run paused at');
+}
+return{rerun:true,stopAnswer:asked.answer};
+}
+
 function gateIds(){
 return['validate','review'];
 }
@@ -3924,175 +4137,6 @@ if(checked.problem===undefined){
 return{result:finishDeliveryComplete(run,plan,checked.values,gates)};
 }
 return stopDelivery([checked],run);
-}
-
-function renderReversibleEffects(effects){
-const lines=['Effects outside the repo that the plan declares as reversible:'];
-effects.forEach((effect)=>lines.push('- step '+encodeUntrustedText(effect.stepId)+': '+encodeUntrustedText(effect.summary)));
-return lines.join('\n');
-}
-function renderNotRunGates(lines){
-return['Gates that did not run:',...lines.map((line)=>'- '+line)].join('\n');
-}
-function observeHead(run,commit,branch){
-run.head=commit;
-run.branch=branch;
-run.headRound=run.answerLog.length;
-}
-function routineDecisionKinds(){
-return[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND,GATE_RERUN_KIND];
-}
-function isShownDecision(entry){
-const isListed=entry.listed!==undefined&&entry.listed.length>0;
-return isListed||!routineDecisionKinds().includes(entry.kind);
-}
-function renderApprovals(approvals){
-return['Destructive changes you approved:',...approvals.map((change)=>'- '+renderDestructiveChange(change))].join('\n');
-}
-function renderSlowTests(cases){
-return['Slow test cases that passed only when run alone:',...cases.map((name)=>'- '+encodeUntrustedText(name))].join('\n');
-}
-function quoteOpenTitle(title){
-const kept=title.slice(0,findLongestCut(title,maxExcerptLength(),encodeUntrustedText));
-return encodeUntrustedText(kept)+(kept===title?'':', shortened');
-}
-function hasListedFindings(run){
-return run.rejected.length>0||run.undone.length>0;
-}
-function buildRunRecordParts(run,taken,gates){
-const shown=taken.filter(isShownDecision);
-const isDraft=gates!==undefined&&gates.draft!==undefined;
-const parts=isDraft?[{id:'draft',text:'This pull request is a draft: '+gates.draft,external:false}]:[];
-if(run.reversibleEffects.length>0){
-parts.push({id:'reversible_effects',text:renderReversibleEffects(run.reversibleEffects),external:true});
-}
-if(gates===undefined){
-if(run.notRunGates.length>0){
-parts.push({id:'gates',text:renderNotRunGates(run.notRunGates),external:false});
-}
-}else{
-parts.push({id:'gates',text:renderPullRequestGates(run,gates),external:false});
-const openLines=(isDraft?run.open??[]:[]).map((finding)=>'- '+quoteShortFindingId(finding.finding_id)+': '+quoteOpenTitle(finding.title));
-if(openLines.length>0){
-parts.push({id:'open_findings',text:['Findings local review left open:',...openLines].join('\n'),external:true});
-}
-if(gates.slow.length>0){
-parts.push({id:'slow_tests',text:renderSlowTests(gates.slow),external:true});
-}
-if(hasListedFindings(run)){
-parts.push({id:'rejected_findings',text:buildRejectedFindingsBlock(gates.notes.review??'did not hold',run.rejected,run.undone).text,external:true});
-}
-}
-if(run.approvals.length>0){
-parts.push({id:'approvals',text:renderApprovals(run.approvals),external:true});
-}
-if(shown.length>0){
-parts.push({id:'decisions',text:renderDecisionsCompact(shown),external:true});
-}
-return parts;
-}
-function describeBranchLine(run){
-return'Branch '+encodeUntrustedText(run.branch)+' is at commit '+run.head+'.';
-}
-function buildRecordTailBlocks(run,taken){
-const blocks=[];
-const shown=taken.filter(isShownDecision);
-if(run.reversibleEffects.length>0){
-blocks.push({text:renderReversibleEffects(run.reversibleEffects)});
-}
-if(shown.length>0){
-blocks.push({text:renderDecisionsCompact(shown)});
-}
-return blocks;
-}
-function finishDeliveryBlocked(causes,run,endLines=[]){
-const blocks=endLines.map((line)=>({text:line}));
-if(run!==undefined&&run.waveCount>0){
-blocks.push({text:describeBranchLine(run)});
-}
-if(run!==undefined){
-blocks.push(...buildRecordTailBlocks(run,run.taken));
-}
-return finish({outcome:'blocked',causes:causes,blocks:blocks});
-}
-function describePullRequest(values){
-return values.created==='true'
-?'Opened pull request '+values.url+' on commit '+values.head_ref_oid+'.'
-:'Pushed commit '+values.head_ref_oid+' to the open pull request '+values.url+' and commented on it.';
-}
-function describeHeldGates(run){
-const held=configuredGateIds(run).map((gateId)=>gateNames()[gateId]);
-const notConfigured=gateIds().filter((gateId)=>!configuredGateIds(run).includes(gateId)).map((gateId)=>gateNames()[gateId]);
-const heldLine=joinNames(held,'and')+' held on commit '+run.head+'.';
-const line=heldLine.charAt(0).toUpperCase()+heldLine.slice(1);
-return notConfigured.length===0?line:line+' Not configured for this run: '+joinNames(notConfigured,'and')+'.';
-}
-function finishDeliveryComplete(run,plan,prValues,gates){
-const pr={url:prValues.url,head_ref_oid:prValues.head_ref_oid,created:prValues.created==='true'};
-const blocks=[{text:describePullRequest(prValues)},{text:gates.draft===undefined?describeHeldGates(run):'The pull request is a draft: '+gates.draft}];
-if(prValues.warning!==undefined){
-blocks.push({text:'The pull request step warned: '+prValues.warning+'.'});
-}
-if(hasListedFindings(run)){
-blocks.push(buildRejectedFindingsBlock(gates.notes.review??'did not hold',run.rejected,run.undone));
-}
-blocks.push(...buildRecordTailBlocks(run,run.taken));
-return finish({outcome:'complete',blocks:blocks,pr:pr});
-}
-function finishOpenQuestions(resolution,stopReason,run){
-const cause={problem:'The delivery ran no further step, because questions are still open.',nextAction:'answer'};
-return finishDeliveryBlocked([cause],{...run,taken:run.taken.concat(resolution.taken)},[renderOpenQuestions(resolution.asks,stopReason)]);
-}
-function checkPauseAsk(ask){
-const isBadStop=ask.kind===STEP_STOP_KIND&&!stopAskActions().includes(ask.stop);
-if(isBadStop||!askReasons().includes(ask.reason)){
-throw new Error('pauseDelivery: ask '+ask.kind+' '+ask.reason);
-}
-}
-function pauseDelivery(resolution,run,lead){
-resolution.asks.forEach(checkPauseAsk);
-const resumeArgs=buildResumeArgs(run.answerLog.map((entry)=>entry.reply),BUILD_ID);
-if(!canCarry(resumeArgs)){
-return finishOpenQuestions(resolution,'reply_size',run);
-}
-const questionsBlock={text:renderQuestions(resolution.asks)};
-if(resolution.asks.some((ask)=>ask.exact===true||hasDestructiveOption(ask))){
-questionsBlock.whole=true;
-}
-const compactLead=cutAtBoundary(lead,maxBlockedLeadLength());
-const blocks=[compactLead===lead?{text:lead}:{text:lead,compact:compactLead},questionsBlock];
-if(!canShowWhole({resumeArgs:resumeArgs,blocks:blocks})){
-return finishOpenQuestions(resolution,'exact_text_size',run);
-}
-return pauseForUser({resumeArgs:resumeArgs,blocks:blocks});
-}
-function describeStopLead(causes,endLines){
-const causeTexts=buildStopBlocks(causes).filter((block)=>block.whole!==true).map((block)=>block.text);
-return causeTexts.concat(endLines).join('\n');
-}
-function stopAskActions(){
-return['approve','fix_cause'];
-}
-function listStopAsks(leadCause,run,isReplan){
-if(leadCause.nextAction==='approve'){
-return buildApprovalAsks(leadCause.holds,isReplan,run).map((ask)=>({...ask,stop:'approve'}));
-}
-return[{...buildUndecidedAsk(STEP_STOP_KIND,buildStepStopBrief(isReplan),run),stop:'fix_cause'}];
-}
-function stopDelivery(causes,run,endLines=[],isReplan=false){
-const leadCause=orderStopCauses(causes)[0];
-const isAsked=stopAskActions().includes(readStopAction(leadCause.nextAction));
-if(!isAsked||causes.some((cause)=>cause.terminal===true||cause.agentFailure===true)){
-return{result:finishDeliveryBlocked(causes,run,endLines)};
-}
-const asked=askTails(listStopAsks(leadCause,run,isReplan),run,describeStopLead(causes,endLines));
-if(asked.answer===undefined){
-return asked;
-}
-if(isReplan){
-return buildReplyReplan('a stop the run paused at');
-}
-return{rerun:true,stopAnswer:asked.answer};
 }
 
 function validationTaskSentence(){
@@ -4813,50 +4857,6 @@ if(values.version_check==='match'||values.version_check==='mismatch'){
 return hasExpected&&values.verdict!=='ask_user';
 }
 return values.version_check==='unreadable'||(values.verdict==='ask_user'&&!hasExpected);
-}
-
-function describeTailLead(run){
-return'Every plan step is committed on branch '+encodeUntrustedText(run.branch)+', with head '+run.head+'.';
-}
-function askTails(asks,run,lead){
-const leadText=lead===undefined?describeTailLead(run):lead;
-const reply=takeNextReply(run,run.answerLog.length+1);
-if(reply===undefined){
-return{result:pauseDelivery({asks:asks,taken:[]},run,leadText)};
-}
-const question=leadText+'\n\n'+renderQuestions(asks);
-const choices=readReplyChoices(reply,asks);
-run.answerLog.push(buildAnswerEntry({question:question,labels:listShownLabels(asks),reply:reply,chosen:choices}));
-run.approvals=applyApprovalChoices(run.approvals,asks,choices);
-return{answer:{question:question,reply:reply}};
-}
-function askTail(ask,run,lead){
-return askTails([ask],run,lead);
-}
-function replanFromTailAsk(ask,run){
-const asked=askTail(ask,run);
-if(asked.answer===undefined){
-return asked;
-}
-return buildReplyReplan('a question the run asked after the last wave');
-}
-function buildReplyReplan(asked){
-return{replan:{reason:'The user replied to '+asked+', so plan again from the fresh facts with the answers block.'}};
-}
-function buildUndecidedAsk(kind,brief,run){
-const resolution={asks:[],taken:[]};
-if(resolveDecision(kind,brief,undefined,run,resolution)==='take'){
-throw new Error('buildUndecidedAsk: decide() took '+kind);
-}
-return resolution.asks[0];
-}
-function resolveTailDecision(kind,brief,run){
-const resolution={asks:[],taken:[],reversibleEffects:[]};
-if(resolveDecision(kind,brief,undefined,run,resolution)==='take'){
-acceptResolution(resolution,run);
-return{};
-}
-return replanFromTailAsk(resolution.asks[0],run);
 }
 
 function buildNextActionProperty(){

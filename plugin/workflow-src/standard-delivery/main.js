@@ -12,10 +12,11 @@
  *
  * The phase modules of this directory hold every other function, and the
  * build bundles them, in name order, ahead of this file: gates.js, pr.js,
- * record.js, relay.js, review-schema.js, review.js, specs.js, tails.js and
- * waves.js. The planning pass and its check retries are lib/plan.js and
- * lib/checks.js, the scope step lib/scope.js, the code-built briefs
- * lib/briefs.js and the approval rules lib/approvals.js.
+ * relay.js, review-schema.js, review.js, specs.js and waves.js. The
+ * planning pass and its check retries are lib/plan.js and lib/checks.js,
+ * the scope step lib/scope.js, the code-built briefs lib/briefs.js, the
+ * approval rules lib/approvals.js, the tail asks lib/tails.js and the run
+ * record and run ends lib/record.js.
  * Each opens with the contract of its steps. This file holds the launch reading, the
  * run state, the pass loop and every top-level constant and limit other
  * than maxTitleLength(), which lib/title.js holds.
@@ -56,15 +57,15 @@
  *   resume_args is {answers, build} alone: no run record (ADR-0037
  *   decision 2). build is BUILD_ID, the build id the build injects, and a
  *   resume whose build differs stops at the launch check (issue 472).
- *   Every chat message has one shape (issue 460), built in record.js. A
+ *   Every chat message has one shape (issue 460), built in lib/record.js. A
  *   pause is a lead of what happened, then the questions renderQuestions
  *   shows, with the reply line last: a planning pause leads with
  *   describePlanLine(plan) (lib/plan.js), one line, a tail ask with its own
  *   one-line lead (askTail,
- *   tails.js). A run end is its lead, then, when blocked, the Next line, any
+ *   lib/tails.js). A run end is its lead, then, when blocked, the Next line, any
  *   later causes and the commit end line, then only the records ADR-0037
  *   decision 3 needs in chat: the branch and its head once a wave ran, the
- *   reversible effects and the taken decisions isShownDecision (record.js)
+ *   reversible effects and the taken decisions isShownDecision (lib/record.js)
  *   shows: listed ones and those of no routine kind, one line each. A complete run
  *   names the pull request and its commit, the gates that held and any gate
  *   not configured, the warning when there is one, the run.rejected and
@@ -114,7 +115,7 @@
  *   action other than approve or fix_cause, so every report, run_again and
  *   answer stop, a size limit (finishOpenQuestions) or the launch check
  *   (issues 457, 549). Every other stop pauses through stopDelivery
- *   (record.js) with step_stop questions, and the reply takes the stopped
+ *   (lib/record.js) with step_stop questions, and the reply takes the stopped
  *   step again or plans again. pauseDelivery throws on an ask whose reason
  *   is outside askReasons() (lib/decide.js), so only the Ask Set pauses.
  *   A non-null scope, plan or revise result that fails its check, other
@@ -126,11 +127,11 @@
  *   slip never asks the user.
  *   Every undecided question, a step_stop, a version question, the fix
  *   limit and the gate rerun limit, resolves through decide() in
- *   buildUndecidedAsk (tails.js), which throws on a take: step_stop and
+ *   buildUndecidedAsk (lib/tails.js), which throws on a take: step_stop and
  *   version_bump_indeterminable surface at every level, and both limit
  *   briefs have strength none.
  *   Each new pass reads the head from its branch step through observeHead
- *   (record.js), the one writer of run.head, before any wave: that commit
+ *   (lib/record.js), the one writer of run.head, before any wave: that commit
  *   equals the facts head by needsBranchReplan, so the pass starts from a
  *   commit made during a pause, or by a commit runner whose relay could
  *   not be read. That read also stamps run.headRound after the last
