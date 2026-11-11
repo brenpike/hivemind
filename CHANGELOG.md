@@ -13,6 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.7.0] - 2026-11-11
+
+### Added
+
+- Draft `hivemind:pr-feedback-remediation` workflow in `plugin/workflow-src/pr-feedback-remediation/`. It is not live: its `DRAFT` marker means the build checks it in memory and never writes `plugin/workflows/pr-feedback-remediation.js`. Its launch args are only `references` (one pull request) and `trunk`. A facts step and its scan run before one schema-checked `hivemind:github-reviewer` fix pass, and a run on the trunk or a detached head stops before the fix pass. Every agent prompt carries the ADR-0037 decision 24 sentence from the first agent on. On `planner-escalation` or `root-cluster-suspected`, the run makes a routing decision, then runs fresh facts and scan, scope, the shared planning pass with the review block, and the Promotion Gate (`remediation_plan_acceptance`) with pause and resume. The draft builds no waves yet.
+- Contract rows PFR-01 to PFR-19 for the draft, each with one test in `tests/workflow-scripts/pr-feedback-remediation.test.mjs`, and the draft's prose budget key in `tests/policy/prose-byte-budget.json`.
+
+### Changed
+
+- The shared workflow code moves, with function bodies unchanged, from `plugin/workflow-src/standard-delivery/` into `plugin/workflow-src/lib/`: the runner helpers (`runner.js`), the paths and title helpers (`paths.js`, `title.js`), and the planning, check, scope, brief, approval, tail and record modules (`plan.js`, `checks.js`, `scope.js`, `briefs.js`, `approvals.js`, `tails.js`, `record.js`). `omitSchemaDialect` is declared once, in `lib/schema.js`. `standard-delivery` behavior does not change.
+- The GENERATED banner of each built script names each carried source by its path under `plugin/workflow-src/` or `plugin/references/` instead of its full repository path.
+- A workflow that sets `run.relaySentence` also gets it as the second line of its scope, plan, revise and check-retry prompts. A workflow that leaves it unset sees no change.
+
+The built `standard-delivery` length is 189393 of 190000 and its prose 43396 of 43800. The built `analysis-only` length is 64509 of 190000 and its prose 15722 of 16050. No budget raised. Every `BUILD_ID` changes, so a run paused on the old build cannot resume on this one.
+
+Refs #409 (slice 3, PR 4).
+
 ## [7.6.12] - 2026-11-10
 
 ### Added

@@ -12,6 +12,7 @@ import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, isDraf
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const WORKFLOW_ID = 'standard-delivery';
 const sourceDir = join(repoRoot, 'plugin/workflow-src', WORKFLOW_ID);
+const MOVED_LIB_PATHS = ['plan.js', 'checks.js', 'scope.js', 'briefs.js', 'approvals.js', 'tails.js', 'record.js'].map((file) => 'plugin/workflow-src/lib/' + file);
 const moduleSource = readModuleSet();
 const metaSource = readText(join(sourceDir, 'meta.js'));
 const contractPath = join(sourceDir, 'contract.js');
@@ -110,11 +111,12 @@ function readJson(relativePath) {
 }
 
 /**
- * Returns the text of every workflow module and of main.js, in build order,
- * so a source-text check reads the whole module set.
+ * Returns the text of every workflow module, of the lib files moved from
+ * them (MOVED_LIB_PATHS) and of main.js, in build order, so a source-text
+ * check reads the whole module set.
  */
 function readModuleSet() {
-  const modulePaths = listSourcePaths(repoRoot, WORKFLOW_ID).filter((path) => path.startsWith('plugin/workflow-src/' + WORKFLOW_ID + '/') && !path.endsWith('/meta.js'));
+  const modulePaths = listSourcePaths(repoRoot, WORKFLOW_ID).filter((path) => MOVED_LIB_PATHS.includes(path) || (path.startsWith('plugin/workflow-src/' + WORKFLOW_ID + '/') && !path.endsWith('/meta.js')));
   return modulePaths.map((path) => readText(join(repoRoot, path))).join('\n');
 }
 
@@ -569,9 +571,10 @@ function assertCheckLimitEnd(run, problem, label) {
 /**
  * Builds the workflow from a scratch copy, the prose budget file included,
  * whose autonomy table rows for the given kinds are surface at every level,
- * with editSource applied to the copy of the workflow module moduleFile.
+ * with editSource applied to the copy of the source moduleFile, a path
+ * under plugin/workflow-src.
  */
-function buildWithSurfaceKinds(kinds, editSource = (source) => source, moduleFile = 'main.js') {
+function buildWithSurfaceKinds(kinds, editSource = (source) => source, moduleFile = WORKFLOW_ID + '/main.js') {
   const scratchRoot = realpathSync(mkdtempSync(join(tmpdir(), 'hivemind-delivery-table-')));
   scratchRoots.push(scratchRoot);
   for (const dir of ['plugin/workflow-src', 'plugin/references']) {
@@ -583,7 +586,7 @@ function buildWithSurfaceKinds(kinds, editSource = (source) => source, moduleFil
   const table = JSON.parse(readFileSync(tablePath, 'utf8'));
   table.rows.filter((row) => kinds.includes(row.kind)).forEach((row) => Object.assign(row, { high: 'surface', balanced: 'surface', low: 'surface' }));
   writeFileSync(tablePath, JSON.stringify(table));
-  const modulePath = join(scratchRoot, 'plugin/workflow-src', WORKFLOW_ID, moduleFile);
+  const modulePath = join(scratchRoot, 'plugin/workflow-src', moduleFile);
   writeFileSync(modulePath, editSource(readFileSync(modulePath, 'utf8')));
   const source = buildWorkflow(scratchRoot, WORKFLOW_ID);
   return { ...loadWorkflowSource(source, WORKFLOW_ID + ' (surface table)'), buildId: readBuildId(source) };
@@ -1059,6 +1062,36 @@ async function runPlanningRounds(results, answers) {
   }
 }
 
+/**
+ * Runs runScopeStep, then runPlanningPass, of the built script on a fresh
+ * pass 1 run state, with run.relaySentence set to relaySentence unless it is
+ * undefined. scope-1 and plan-1 fail their checks once, plan-1-fix-1 asks a
+ * gated question and revise-1, on stored reply A, settles it. Returns each
+ * prompt by label, in call order.
+ */
+async function runRelayRounds(relaySentence) {
+  const results = { 'scope-1': {}, 'scope-1-fix-1': EMPTY_SCOPE, 'scope-1-1': EMPTY_SCOPE, 'plan-1': { outcome: 'complete' }, 'plan-1-fix-1': planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]), 'revise-1': reviseResult(planResult(), ['Q1']) };
+  const prompts = {};
+  main.phase = () => undefined;
+  main.agent = async (prompt, opts) => {
+    prompts[opts.label] = prompt;
+    return structuredClone(results[opts.label] ?? null);
+  };
+  try {
+    const run = main.createRunState({ argsObject: { answers: { 'round-1': 'A' } }, request: REQUEST, trunk: 'main', references: [] });
+    run.pass = 1;
+    if (relaySentence !== undefined) {
+      run.relaySentence = relaySentence;
+    }
+    const scoped = await main.runScopeStep(run, parsedFacts());
+    await main.runPlanningPass(run, parsedFacts(), scoped.scope, undefined);
+    return prompts;
+  } finally {
+    delete main.phase;
+    delete main.agent;
+  }
+}
+
 const FOURTH = '5'.repeat(40);
 const ESCALATION = { ...REVIEW_CLEAN, exit_reason: 'planner-escalation', findings_open: 1, finding_id: 'f5f5f5f5', classification: 'architecture', file: 'src/cache.js', title: 'The cache layer skips the "auth" check.' };
 const CLUSTER = { ...REVIEW_CLEAN, exit_reason: 'root-cluster-suspected', findings_open: 2, cluster_files: ['src/cache.js'], cluster_ids: ['F1', 'F2'], hypothesized_root: 'The cache key is built from raw input.', root_class: 'input-keying', same_framing_rationale: 'Both findings patch the key builder.' };
@@ -1377,7 +1410,7 @@ const ROW_TESTS = {
       });
     }
     test('the check is lib/facts.js isConsistentFactsRelay against the launch trunk', async () => {
-      assert.ok(/isConsistentFactsRelay\(facts, trunk\)/.test(moduleSource));
+      assert.ok(/isConsistentFactsRelay\(facts, trunk\)/.test(readText(join(repoRoot, 'plugin/workflow-src/lib/runner.js'))));
       const results = happyResults({ 'facts-1': factsRelay({ trunk: 'develop', branch: 'develop' }), 'plan-1': planResult(makePlan({ base: 'develop' })) });
       const run = await runWorkflow({ request: REQUEST, trunk: 'develop' }, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
@@ -1420,9 +1453,10 @@ const ROW_TESTS = {
       assert.ok(main.deliveryStopLine('dirty_paths').includes('The run never commits, stashes or discards an edit it did not make'));
     });
     test('every facts delivery stop has a fixed line, and an unknown stop throws', () => {
+      const runnerSource = readText(join(repoRoot, 'plugin/workflow-src/lib/runner.js'));
       for (const stop of lib.factsDeliveryStops()) {
         assert.ok(main.deliveryStopLine(stop).length > 0, stop);
-        assert.ok(moduleSource.includes('case \'' + stop + '\':'), stop);
+        assert.ok(runnerSource.includes('case \'' + stop + '\':'), stop);
       }
       assert.throws(() => main.deliveryStopLine('dirty'), /no line for stop/);
     });
@@ -2101,7 +2135,7 @@ const ROW_TESTS = {
           assert.equal(source.split(call).length - 1, 1, call);
           return source.replace(call, driftingCall);
         };
-        const surfaced = buildWithSurfaceKinds([kind], driftKey, 'plan.js');
+        const surfaced = buildWithSurfaceKinds([kind], driftKey, 'lib/plan.js');
         const shownPlan = planResult(makePlan({ trunk_freshness: freshness }));
         const results = happyResults({ 'facts-1': factsRelay({ trunk_freshness: freshness, trunk_behind: freshness === 'behind' ? '4' : '0' }), 'plan-1': shownPlan, 'revise-1': reviseResult(shownPlan, ['Q1']) });
         const paused = await runWorkflow(LAUNCH, results, surfaced);
@@ -5895,6 +5929,26 @@ const ROW_TESTS = {
       assert.equal(main.addResumeNote('a\nb', { answerLog: [] }), 'a\nb');
       assert.equal(main.addResumeNote('a\nb', { answerLog: [{ question: 'q', reply: 'r' }] }), 'a\n' + main.resumedReplySentence() + '\nb');
     });
+    test('a workflow that sets run.relaySentence gets it as the second line of its scope, plan and revise prompts, their check retries keep it, and unset it changes no prompt', async () => {
+      const relaySentence = 'RELAY_SENTENCE_ZQ.';
+      const relayed = await runRelayRounds(relaySentence);
+      const plain = await runRelayRounds(undefined);
+      assert.deepEqual(Object.keys(relayed), ['scope-1', 'scope-1-fix-1', 'plan-1', 'plan-1-fix-1', 'revise-1', 'scope-1-1']);
+      assert.deepEqual(Object.keys(plain), Object.keys(relayed));
+      for (const label of Object.keys(relayed)) {
+        assert.equal(relayed[label].split('\n')[1], relaySentence, label);
+      }
+      for (const label of ['scope-1-fix-1', 'plan-1-fix-1']) {
+        assert.equal(relayed[label].split('\n')[2], 'Fix your result per the check block.', label);
+      }
+      for (const label of Object.keys(plain)) {
+        assert.ok(!plain[label].includes(relaySentence), label);
+        assert.equal(plain[label], relayed[label].replace('\n' + relaySentence, ''), label);
+      }
+      assert.equal('relaySentence' in main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] }), false);
+      assert.equal(main.addRelaySentence('a\nb', { answerLog: [{ question: 'q', reply: 'r' }] }), 'a\nb');
+      assert.equal(main.addRelaySentence('a\nb', { answerLog: [], relaySentence: relaySentence }), 'a\n' + relaySentence + '\nb');
+    });
   },
   'SD-50': () => {
     const stderr = '\nfatal: not a git repository "x"\n  hint: run git init  \nthird line\n';
@@ -8979,8 +9033,8 @@ const ROW_TESTS = {
       const code = stripCommentsAndStrings(moduleSource);
       assert.deepEqual(code.match(/\bapprovals: \[\]|\b\w+\.approvals = [^;]+;/g), [
         'run.approvals = applyApprovalChoices(run.approvals, shownAsks, readReplyChoices(shownEntry.reply, shownAsks));',
-        'inputs.approvals = run.approvals;',
         'run.approvals = applyApprovalChoices(run.approvals, asks, choices);',
+        'inputs.approvals = run.approvals;',
         'approvals: []'
       ]);
       assert.ok(code.includes('const choices = readReplyChoices(reply, asks);'));

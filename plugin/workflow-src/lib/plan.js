@@ -1,18 +1,18 @@
 /*
- * standard-delivery plan.js: the planning pass of the standard-delivery
- * workflow. It holds the plan result and revise schemas, the plan and
- * revise prompts, the plan check, the planning pause lead and the
- * resolution of every decision of a planning pass. Its code-built briefs
- * and the outside-limit check live in briefs.js, and the path checks of
- * plan values in paths.js.
+ * plan.js: the planning pass a workflow shares: the plan result and revise
+ * schemas, the plan and revise prompts, the plan check, the planning pause
+ * lead, the answer entries of the prompts and the resolution of every
+ * decision of a planning pass. Its code-built briefs and the outside-limit
+ * check live in standard-delivery briefs.js, and the path checks of plan
+ * values in lib/paths.js.
  *
  * Inputs
- *   run     the run state of main.js createRunState. The pass reads
+ *   run     the run state of the workflow's main.js. The pass reads
  *           request, trunk, references, level, pass, decisions,
  *           storedAnswers and pendingReply, and updates answerLog, answeredKeys, taken,
  *           approvals and reversibleEffects. references reach
- *           describeClosesProblem (pr.js).
- *   facts   the checked facts of the pass, from runFactsStep (relay.js).
+ *           describeClosesProblem (lib/title.js).
+ *   facts   the checked facts of the pass, from runFactsStep (lib/runner.js).
  *   scope   the checked scope of the pass, from runScopeStep (scope.js).
  *           Once the revise result of a reply round passes the plan check,
  *           the pass logs the reply, then, unless the reply settled the shown
@@ -24,8 +24,17 @@
  *   replan  undefined at launch, else the replan data of the step that
  *           sent the run back to planning: its reason, and the review when
  *           it carries one.
- *   PLAN_SCHEMA, BRIEF_SCHEMA, AUTONOMY_TABLE and the kind constants of
- *   main.js.
+ *   The constants of the workflow's main.js this file reads: RUN_NAME,
+ *   PLAN_RESULT_SCHEMA, PLANNER_QUESTION_KIND, PLAN_ACCEPTANCE_KIND,
+ *   TRUNK_STALE_KIND, EXTERNAL_EFFECT_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND,
+ *   PLANNER_ESCALATION_ROUTING_KIND and ROOT_CLUSTER_ROUTING_KIND, and the
+ *   data constants PLAN_SCHEMA, BRIEF_SCHEMA and AUTONOMY_TABLE. The
+ *   workflow functions it reads: buildPlanAcceptanceBrief,
+ *   buildRemediationPlanBrief, buildTrunkStaleBrief, buildExternalEffectBrief,
+ *   listOutsidePaths and markOutsideLimits (briefs.js), applyApprovalChoices
+ *   (approvals.js), stopDelivery and pauseDelivery (record.js) and
+ *   runScopeStep (scope.js). Every workflow whose code calls these
+ *   functions declares them.
  *
  * Outputs
  *   runPlanningPass(run, facts, scope, replan)  {plan, freshness} once every
@@ -33,6 +42,11 @@
  *           returns or {result}, the pause of an open question.
  *   takeNextReply(run, round)  the reply to a round, also read by the
  *           tail asks of tails.js.
+ *   listAnswerEntries(run)  one settled entry per launch decision, then
+ *           run.answerLog: the answers of the scope, plan, revise and
+ *           review prompts.
+ *   keepReplanReview(passEnd, replan)  passEnd, with the review of replan
+ *           kept in the replan data a stop before any wave returns.
  *   The steps it runs, as meta.js names them:
  *   Plan    hivemind:cerebrate returns a plan result: PLAN_SCHEMA under
  *           plan, with outcome, questions and blocker.
@@ -41,8 +55,8 @@
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
- *   main.js: the build bundles this module into it, so a row can name a
- *   function of this module.
+ *   main.js: the build bundles this library into it, so a row can name a
+ *   function of this library.
  *   Once local review sent the run back to planning, every later plan
  *   acceptance resolves through decide() kind
  *   remediation_plan_acceptance, with the brief of
@@ -78,14 +92,14 @@
  *   question is open. Rejected: a free-text reply has no code parse, and a
  *   pause per effect adds stops (review finding d5619285, option C).
  *   Every plan value at a field whose PLAN_SCHEMA description starts with
- *   repositoryPathMark() must pass isRepositoryPath (paths.js holds the
+ *   repositoryPathMark() must pass isRepositoryPath (lib/paths.js holds the
  *   rule). describePlanProblem runs findRepositoryPathProblem after the
  *   schema check and before computeWave, so a bad path stops the run
  *   before the branch step and any later agent call.
  *   Stops (issue 457): a plan, revise or rescope problem goes through
  *   stopDelivery (record.js) with isReplan true, so the reply starts a new
  *   pass outside maxReplans(). Each plan and revise call goes through
- *   callCheckedPlanner (checks.js), which asks a result that fails the
+ *   callCheckedPlanner (lib/checks.js), which asks a result that fails the
  *   plan check again, a planner question decide() refuses as a defect
  *   among them, and one still failing ends the run, terminal with next
  *   action report. A null result, an agent failure, adds the
@@ -106,13 +120,13 @@
  *   tests first, describePlanProblem refuses a plan.branch outside the
  *   Branch Taxonomy and Branch Naming of ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md,
  *   so a runner with no skill body never creates one (issue 467).
- *   Title type: normalizePlanTitle (checks.js) first cuts the plan's own
+ *   Title type: normalizePlanTitle (lib/title.js) first cuts the plan's own
  *   commit type from plan.title. Then describePlanProblem refuses a plan whose cleaned
  *   plan.title starts with a commitTypeMap() value in any letter case, an optional
  *   parenthesized scope, an optional '!' and ':', with a fixed message that
  *   names no title text, since the pull request step writes the type
  *   before the title (issue 469). It refuses an empty buildTitleText(plan)
- *   (pr.js) the same way, so the pull request title is never only its type.
+ *   (lib/title.js) the same way, so the pull request title is never only its type.
  *   Settled question guard: within one pass, a trunk_stale question a
  *   reply settled renders the same text for the whole run, and a settled
  *   plan_acceptance or remediation_plan_acceptance restores the plan result
@@ -149,7 +163,7 @@
  *   what the settled labels of an entry name, never the reply of the round
  *   being revised, so a replan never asks or reverses a settled answer and
  *   never takes an open question as settled (issue 472). Each prompt
- *   takes the log through listAnswerEntries (main.js), which puts one
+ *   takes the log through listAnswerEntries, which puts one
  *   settled entry per launch decision ahead of it (issue 500). With no
  *   decision and an empty log, the plan and first revise prompts are the
  *   prompts of a run with no answers, so a resume replays them from cache.
@@ -179,10 +193,6 @@
  *   Every plan a wave runs is checked and accepted in this one place, so
  *   no later step reads a plan field the plan check did not pass.
  */
-
-function omitSchemaDialect(schema) {
-  return Object.fromEntries(Object.entries(schema).filter(([key]) => key !== '$schema'));
-}
 
 function buildPlanResultSpec(planSchema, briefSchema) {
   return {
@@ -498,6 +508,27 @@ function takeNextReply(run, round) {
   const pendingReply = run.pendingReply;
   run.pendingReply = undefined;
   return pendingReply;
+}
+
+/**
+ * Returns one settled answer entry per launch decision, the decision word
+ * for word as its reply, followed by run.answerLog.
+ */
+function listAnswerEntries(run) {
+  const label = questionLabel(0);
+  return run.decisions.map((decision) => buildAnswerEntry({ question: label + '. A decision you settled before the run started.', labels: [label], chosen: [{ label: label }], reply: decision })).concat(run.answerLog);
+}
+
+/**
+ * Returns passEnd, or, when it is a reply to a stop before any wave of a
+ * pass whose replan data carries a review, the same replan with that
+ * review, so the next plan still sees the findings.
+ */
+function keepReplanReview(passEnd, replan) {
+  if (passEnd.replan === undefined || replan === undefined || replan.review === undefined) {
+    return passEnd;
+  }
+  return { replan: { reason: passEnd.replan.reason, review: replan.review } };
 }
 
 async function runPlanningPass(run, facts, passScope, replan) {

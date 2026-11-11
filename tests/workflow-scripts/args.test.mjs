@@ -246,7 +246,7 @@ describe('the new libs are plain workflow libs', () => {
   test('the workflow modules checked include analysis-only main.js and every standard-delivery module', () => {
     const modules = listWorkflowModules();
     assert.ok(modules.includes(sourceRoot + 'analysis-only/main.js'));
-    for (const name of ['main.js', 'relay.js', 'plan.js', 'waves.js', 'gates.js', 'review.js', 'pr.js', 'record.js']) {
+    for (const name of ['main.js', 'relay.js', 'waves.js', 'gates.js', 'review.js', 'pr.js']) {
       assert.ok(modules.includes(sourceRoot + 'standard-delivery/' + name), name);
     }
   });

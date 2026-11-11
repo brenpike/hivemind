@@ -13,7 +13,8 @@
  *          the body. plan.summary reaches no pull request text.
  *   gates  the gate loop state of runGates (gates.js): held, notes, draft
  *          and runs.pr, the count of this step's runs in the pass.
- *   maxTitleLength() and maxPullRequestTextLength() from main.js.
+ *   maxPullRequestTextLength() from main.js; the title helpers and
+ *   listCloses of lib/title.js.
  *
  * Outputs
  *   runPullRequestStep(run, plan, gates)  {result}: finishDeliveryComplete
@@ -22,10 +23,6 @@
  *   neutralizePullRequestText(text)  text in which nothing mentions, closes
  *          or links an issue; other Markdown still renders: the one renderer
  *          of every external part of the pull request texts.
- *   describeClosesProblem(plan, references)  the last check of
- *          describePlanProblem (plan.js): the problem of a plan.closes
- *          number that is not the number of one of references, the launch
- *          references of run.references, naming its index, else undefined.
  *   The step, as meta.js names it:
  *   PR      once every required gate held on one commit H, a haiku
  *           synapse runner runs the open-plan-pr command once. The
@@ -54,7 +51,7 @@
  *           of the plan classification, the breaking marker, a colon and plan.title,
  *           never the summary, cut at a word only when longer than maxTitleLength()
  *           code points, never inside a bracket the cut text opened (issue 469).
- *           buildTitleText(plan) gives the text after the prefix; the plan check
+ *           buildTitleText(plan) (lib/title.js) gives the text after the prefix; the plan check
  *           refuses a plan whose text is empty, so the title is never only its type
  *           (issue 469). The body is the closing lines of renderClosingLines(plan), one
  *           Closes line per plan.closes number, then the digest paragraph,
@@ -132,17 +129,6 @@ function toPullRequestDecision(entry) {
   return problem === undefined ? entry : { brief: { ...entry.brief, problem: problem }, kind: entry.kind, listed: entry.listed };
 }
 
-function isPullRequestCharacter(codePoint, keepsLines) {
-  if (keepsLines && (codePoint === 9 || codePoint === 10)) {
-    return true;
-  }
-  return codePoint >= 32 && (codePoint < 127 || codePoint > 159);
-}
-
-function cleanPullRequestText(text, keepsLines) {
-  return Array.from(text).map((character) => (isPullRequestCharacter(character.codePointAt(0), keepsLines) ? character : ' ')).join('');
-}
-
 /**
  * Returns text with each URL, owner/repo reference, issue reference, GH-N
  * reference and at-mention in a single-backtick code span, and every
@@ -155,70 +141,6 @@ function neutralizePullRequestText(text) {
   return text.split(/((?:https?:\/\/|www\.)[^\s`]+|(?<![\w.-])[\w.-]+\/[\w.-]+#\d+|#\d+|GH-\d+|@[\w-]+(?:\/[\w-]+)?)/i)
     .map((piece, index) => (index % 2 === 1 ? '`' + piece + '`' : piece.replace(/[\\`[\]<>&]/g, '\\$&')))
     .join('');
-}
-
-function cleanTitleText(text) {
-  return cleanPullRequestText(text, false).replace(/\s+/gu, ' ').trim();
-}
-
-function trimTitleEnd(text) {
-  return text.replace(/[\s,;:-]+$/u, '');
-}
-
-/**
- * Returns the indexes, in order, of each (, [ or { in characters that no
- * matching closer after it closes. A closer pops only the opener on top of
- * the stack it matches, so every opener before the first returned index
- * is closed before that index.
- */
-function findUnclosedOpeners(characters) {
-  const closers = { '(': ')', '[': ']', '{': '}' };
-  const openIndexes = [];
-  characters.forEach((character, index) => {
-    if (closers[character] !== undefined) {
-      openIndexes.push(index);
-    } else if (openIndexes.length > 0 && closers[characters[openIndexes[openIndexes.length - 1]]] === character) {
-      openIndexes.pop();
-    }
-  });
-  return openIndexes;
-}
-
-function closeTitleBrackets(text) {
-  const characters = Array.from(text);
-  const openIndexes = findUnclosedOpeners(characters);
-  if (openIndexes.length === 0) {
-    return text;
-  }
-  const beforeOpener = trimTitleEnd(characters.slice(0, openIndexes[0]).join(''));
-  if (beforeOpener !== '') {
-    return beforeOpener;
-  }
-  return trimTitleEnd(characters.filter((character, index) => !openIndexes.includes(index)).join('').trim());
-}
-
-function cutTitleText(text, room) {
-  const characters = Array.from(text);
-  if (characters.length <= room) {
-    return text;
-  }
-  const lastSpace = characters.slice(0, room + 1).lastIndexOf(' ');
-  const kept = characters.slice(0, lastSpace > 0 ? lastSpace : room).join('');
-  return closeTitleBrackets(trimTitleEnd(kept));
-}
-
-function buildTitlePrefix(plan) {
-  return commitTypeMap()[plan.classification] + (plan.breaking ? '!' : '') + ':';
-}
-
-/**
- * Returns the pull request title text after its prefix: plan.title cleaned
- * as pull request text and cut to the room maxTitleLength() leaves after
- * the prefix and one space. describePlanProblem (plan.js) refuses a plan
- * whose text is empty, so a checked plan never gets a type-only title.
- */
-function buildTitleText(plan) {
-  return cutTitleText(cleanTitleText(plan.title), maxTitleLength() - buildTitlePrefix(plan).length - 1);
 }
 
 function buildPullRequestTitle(plan) {
@@ -251,24 +173,6 @@ function renderPullRequestPart(part) {
 
 function renderPullRequestRecord(run, gates) {
   return buildRunRecordParts(run, run.taken.map(toPullRequestDecision), gates).map(renderPullRequestPart);
-}
-
-function listCloses(plan) {
-  return plan.closes ?? [];
-}
-
-/**
- * Returns the plan problem of the first plan.closes number that is not the
- * number of one of references, the launch digit strings, naming its index,
- * or undefined when every number is one of them. describePlanProblem
- * (plan.js) returns it as its last check. It compares decimal text, never
- * a Number of a reference: the number's String against each reference with
- * its leading zeros cut, so a reference past the safe integer range matches
- * only its own digits, and a reference of zeros alone matches no number.
- */
-function describeClosesProblem(plan, references) {
-  const index = listCloses(plan).findIndex((number) => !references.some((reference) => reference.replace(/^0+/, '') === String(number)));
-  return index === -1 ? undefined : 'The plan names an issue at closes[' + index + '] that is not one of the references the run started with, so ' + RUN_NAME + ' stopped.';
 }
 
 /**

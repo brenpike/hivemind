@@ -1,27 +1,35 @@
 /*
- * standard-delivery briefs.js: the code-built decision briefs of the
- * standard-delivery workflow. It holds the plan acceptance, remediation
- * plan acceptance, trunk and effect briefs of a planning pass, the
- * outside-limit check of a plan acceptance, and the tail briefs of the
- * gates.
+ * briefs.js: the code-built decision briefs a workflow shares. It holds the
+ * plan acceptance, remediation plan acceptance, trunk and effect briefs of
+ * a planning pass, the outside-limit check of a plan acceptance, and the
+ * tail briefs of the gates. It builds briefs; lib/brief.js renders them
+ * as the text the user reads and reads the replies.
  *
  * Inputs
  *   plan     the plan of the plan result the pass checked, from
- *            runPlanningPass (plan.js).
- *   facts    the checked facts of the pass, from runFactsStep (relay.js).
- *   scope    the checked scope of the pass, from runScopeStep (scope.js).
+ *            runPlanningPass (lib/plan.js).
+ *   facts    the checked facts of the pass, from runFactsStep
+ *            (lib/runner.js).
+ *   scope    the checked scope of the pass, from runScopeStep (lib/scope.js).
  *   head, round and staleIds  the commit, fix round and stale gate ids
- *            of a gate decision (gates.js).
+ *            of a gate decision (standard-delivery gates.js).
  *   values   the routing values of a version check whose version_check is
- *            undetermined or unreadable (gates.js).
- *   The kind constants of main.js, unshownBriefText and describeCount
- *   (plan.js), isRepositoryPath and listPlanPaths (paths.js), and
- *   gateNames, joinNames and maxFixRounds.
+ *            undetermined or unreadable (standard-delivery gates.js).
+ *   unshownBriefText and describeCount (lib/plan.js), isRepositoryPath and
+ *   listPlanPaths (lib/paths.js), and the workflow functions gateNames and
+ *   joinNames (standard-delivery gates.js), maxFixRounds (standard-delivery
+ *   main.js) and buildUndecidedAsk (standard-delivery tails.js).
+ *   The constants of the workflow's main.js this file reads:
+ *   PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND, TRUNK_STALE_KIND,
+ *   EXTERNAL_EFFECT_KIND, STEP_STOP_KIND, VERSION_BUMP_INDETERMINABLE_KIND,
+ *   VALIDATION_REMEDIATION_KIND and GATE_RERUN_KIND, and the data constant
+ *   BRIEF_SCHEMA. Every workflow whose code calls a function of this file
+ *   declares those it reads.
  *
  * Outputs
  *   buildPlanAcceptanceBrief(plan), buildRemediationPlanBrief(plan),
  *   buildTrunkStaleBrief(facts) and buildExternalEffectBrief(summary)
- *            the briefs plan.js resolves through decide(). The effect brief
+ *            the briefs lib/plan.js resolves through decide(). The effect brief
  *            names no step: the step id lives only in the question key.
  *   listOutsidePaths(plan, scope)  the plan paths outside every limit of
  *            the scope, [] when it sets none. A version or changelog file
@@ -30,19 +38,22 @@
  *            outside count added to its problem when a plan path is outside
  *            the limits and the problem still fits. It never changes the
  *            recommendation: its strength and why stay as built, and
- *            plan.js passes listed outside_limits to decide().
+ *            lib/plan.js passes listed outside_limits to decide().
  *   buildTailBrief({kind, problem, goOn, other, strength, why})  the
- *            shared shape of a tail brief, also used by review.js.
+ *            shared shape of a tail brief, also used by standard-delivery
+ *            review.js.
  *   buildBriefOption(id, summary, effort, value, reversible),
  *   buildUnshownCriticality(level, likelihood) and
  *   buildUnshownAssumptions(origin)  the option, criticality and
- *            assumptions of a code-built brief, also used by review.js.
+ *            assumptions of a code-built brief, also used by
+ *            standard-delivery review.js.
  *   buildBriefGate(irreversible)  the gate of a code-built brief, never
  *            architectural or safety.
  *   buildValidationRemediationBrief, buildFixLimitBrief and
- *   buildGateRerunBrief  the tail briefs gates.js resolves.
+ *   buildGateRerunBrief  the tail briefs standard-delivery gates.js
+ *            resolves.
  *   buildStepStopBrief(isReplan)  the fix_cause step_stop brief
- *            stopDelivery (record.js) asks. It has one option, strength
+ *            stopDelivery (standard-delivery record.js) asks. It has one option, strength
  *            strong, and its problem says to clear the cause named above
  *            and commit any change, then reply, and whether the reply takes
  *            the stopped step again or plans again from fresh facts. It is
@@ -59,7 +70,7 @@
  *            the user's own reply choosing A approves the item as given.
  *   buildVersionQuestionBrief(values)  the version_bump_indeterminable
  *            brief the validate gate asks through buildUndecidedAsk
- *            (tails.js), strength none. For undetermined its options are a major, minor and
+ *            (standard-delivery tails.js), strength none. For undetermined its options are a major, minor and
  *            patch bump and no bump, each naming the version it gives
  *            (raiseVersion) when trunk_version is known; for unreadable its
  *            problem names the formats the check reads, and its options
@@ -67,17 +78,17 @@
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
- *   main.js: the build bundles this module into it, so a row can name a
- *   function of this module.
+ *   main.js: the build bundles this library into it, so a row can name a
+ *   function of this library.
  *   The brief gate of a remediation plan acceptance is
  *   plan.remediation_gate.promotion_gate copied whole, with architectural
  *   also true when grows_surface is, and its problem names each flag that
  *   holds, so it asks then and is taken otherwise at the default level
  *   (decision-autonomy.md, Promotion Gate). repeats_surface only lists a
- *   taken acceptance: plan.js passes it to decide() in listed.
+ *   taken acceptance: lib/plan.js passes it to decide() in listed.
  *   Every brief here puts unshownBriefText() in each field no message
- *   shows and fits BRIEF_SCHEMA with worst-case inputs (main.js, bounded
- *   fields).
+ *   shows and fits BRIEF_SCHEMA with worst-case inputs (the workflow's
+ *   main.js, bounded fields).
  *
  * Why
  *   Each code-built brief is a fixed shape with a few computed fields, so

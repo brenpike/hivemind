@@ -1,32 +1,37 @@
 /*
- * standard-delivery checks.js: the check retries of the standard-delivery
- * workflow. A scope, plan or revise result that fails its check goes back
- * to its agent with the check, and one still failing ends the run.
+ * checks.js: the check retries of the planning pass a workflow shares. A
+ * plan or revise result that fails its check goes back to its agent with
+ * the check, and one still failing ends the run.
  *
  * Inputs
- *   run     the run state of main.js createRunState. callCheckedPlanner
- *           reads trunk, references and level.
- *   facts   the checked facts of the pass, from runFactsStep (relay.js).
+ *   run     the run state of the workflow's main.js. callCheckedPlanner
+ *           reads trunk, references, level and relaySentence.
+ *   facts   the checked facts of the pass, from runFactsStep (lib/runner.js).
  *   call    {prompt, label, phaseTitle, schema} of one plan or revise call.
+ *           call.prompt is the prompt before run.relaySentence is added.
  *   maxCheckRetries(), isFixableResult, buildCheckFixPrompt and
- *   hasDefectQuestion of lib/retry.js; AUTONOMY_TABLE, BRIEF_SCHEMA and
- *   PLANNER_QUESTION_KIND of main.js.
+ *   hasDefectQuestion of lib/retry.js, plannerCallOptions and
+ *   addRelaySentence of lib/runner.js and describePlanProblem of
+ *   lib/plan.js.
+ *   The constants of the workflow's main.js this file reads: RUN_NAME and
+ *   PLANNER_QUESTION_KIND, and the data constants AUTONOMY_TABLE and
+ *   BRIEF_SCHEMA. It reads no workflow function. Every workflow whose code
+ *   calls callCheckedPlanner declares them.
  *
  * Outputs
  *   callCheckedPlanner(run, facts, call)  {planResult, problem,
  *           isExhausted} of the last planner call.
  *   The retry prompt (buildCheckFixPrompt) and the terminal report cause of
  *   a result still failing its check (describeCheckLimit) are in
- *   lib/retry.js, which runScopeStep (scope.js) also reads.
- *   normalizePlanTitle(result, schema)  result, or a copy with its own
- *           commit type cut from plan.title.
- *   typedTitlePattern()  the commit type title prefix, also read by
- *           describePlanProblem (plan.js).
+ *   lib/retry.js, which runScopeStep (standard-delivery scope.js) also
+ *   reads.
+ *   callCheckedPlanner normalizes each result with normalizePlanTitle
+ *   (lib/title.js) before the plan check.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
- *   main.js: the build bundles this module into it, so a row can name a
- *   function of this module.
+ *   main.js: the build bundles this library into it, so a row can name a
+ *   function of this library.
  *   Each plan and revise call goes through callCheckedPlanner: a result
  *   isFixableResult (lib/retry.js) accepts that fails the plan check is
  *   asked again with buildCheckFixPrompt, label plan-P-fix-N or revise-R-fix-N, up to
@@ -38,16 +43,15 @@
  *   (kind planner_question, the run level) gives one of its questions a
  *   reason in neither askReasons() nor auto: a defect in the brief, which
  *   the planner fixes, so the user is never asked a defect.
- *   Title type: normalizePlanTitle returns a copy of a complete result
- *   that fits its schema whose cleaned plan.title starts with the plan's
- *   own commitTypeMap() value in any letter case, an optional
- *   parenthesized scope, '!' only when plan.breaking, and ':', with
- *   plan.title the trimmed rest when it is not blank; it never changes the
- *   agent result. Every other result is returned as is, so
- *   describePlanProblem (plan.js) still refuses any other typed title.
+ *   Title type: normalizePlanTitle (lib/title.js) never changes the agent
+ *   result, so describePlanProblem (lib/plan.js) still refuses any typed title
+ *   it returns as is.
  *   The retry prompt is the first prompt with one fix line after its first
  *   line and a check data block at its end, so it holds every block the
- *   first prompt holds.
+ *   first prompt holds. run.relaySentence is added last, with
+ *   addRelaySentence (lib/runner.js) at each send, to the first prompt and
+ *   to each retry prompt, so it stays on line two and the fix line of a
+ *   retry is line three.
  *
  * Why
  *   A check slip is fixed by the agent that made it, never asked of the
@@ -55,29 +59,11 @@
  *   looping.
  */
 
-function typedTitlePattern() {
-  return new RegExp('^(' + Object.values(commitTypeMap()).join('|') + ')(\\([^()]*\\))?(!?):', 'i');
-}
-
 /**
- * Returns result, or, for a complete result that fits schema, a copy whose
- * plan.title drops a leading commit type that equals the plan's own type,
- * with '!' only when the plan is breaking, when text is left after it. A
- * result that fits schema holds plan only when its outcome is complete.
- */
-function normalizePlanTitle(result, schema) {
-  const plan = validateSchema(schema, result).ok ? result.plan : undefined;
-  const match = plan === undefined ? null : typedTitlePattern().exec(cleanTitleText(plan.title));
-  const rest = match === null ? '' : match.input.slice(match[0].length).trim();
-  if (rest === '' || match[1].toLowerCase() !== commitTypeMap()[plan.classification] || (match[3] && !plan.breaking)) {
-    return result;
-  }
-  return { ...result, plan: { ...plan, title: rest } };
-}
-
-/**
- * Calls the planner with call.prompt, normalizes its title and checks it.
- * A fixable problem calls it again with buildCheckFixPrompt, label
+ * Calls the planner with call.prompt plus run.relaySentence
+ * (addRelaySentence), normalizes its title and checks it.
+ * A fixable problem calls it again with buildCheckFixPrompt plus
+ * run.relaySentence, label
  * call.label plus '-fix-N', up to maxCheckRetries() times. Returns
  * {planResult, problem, isExhausted}: isExhausted when the last result
  * still has a fixable problem.
@@ -92,16 +78,16 @@ function describeQuestionProblem(planResult, run) {
 }
 
 async function callCheckedPlanner(run, facts, call) {
-  let prompt = call.prompt;
+  let attempt = call.prompt;
   for (let retry = 0; ; retry += 1) {
     const label = retry === 0 ? call.label : call.label + '-fix-' + retry;
-    const result = normalizePlanTitle(await agent(prompt, plannerCallOptions(label, call.phaseTitle, call.schema)), call.schema);
+    const result = normalizePlanTitle(await agent(addRelaySentence(attempt, run), plannerCallOptions(label, call.phaseTitle, call.schema)), call.schema);
     const planProblem = describePlanProblem(result, call.schema, facts, run.trunk, run.references);
     const problem = planProblem === undefined ? describeQuestionProblem(result, run) : planProblem;
     const isFixable = problem !== undefined && isFixableResult(result, call.schema);
     if (!isFixable || retry === maxCheckRetries()) {
       return { planResult: result, problem: problem, isExhausted: isFixable };
     }
-    prompt = buildCheckFixPrompt(call.prompt, problem, validateSchema(call.schema, result).errors);
+    attempt = buildCheckFixPrompt(call.prompt, problem, validateSchema(call.schema, result).errors);
   }
 }

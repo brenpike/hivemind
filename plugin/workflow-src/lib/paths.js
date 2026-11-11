@@ -1,14 +1,17 @@
 /*
- * standard-delivery paths.js: the path checks of plan and scope values of
- * the standard-delivery workflow: the external content label, the
- * repository path mark, the path rule and the walk of a schema for the
- * mark.
+ * paths.js: the path checks of plan and scope values a workflow shares:
+ * the external content label, the repository path mark, the path rule and
+ * the walk of a schema for the mark.
  *
  * Inputs
  *   schema  a step schema whose path fields carry repositoryPathMark() in
- *           their description: PLAN_SCHEMA in plan.js. The scope schema
- *           (scope.js) marks its path fields the same way.
+ *           their description: the workflow's PLAN_SCHEMA. The
+ *           standard-delivery scope schema (scope.js) marks its path fields
+ *           the same way.
  *   value   the step value checked against it, such as a plan.
+ *   The constant of the workflow's main.js this file reads: PLAN_SCHEMA,
+ *   read by listPlanPaths. Every workflow whose code calls listPlanPaths
+ *   declares it. isPlainObject is lib/result.js.
  *
  * Outputs
  *   externalLabel()  the label that starts every description of a field
@@ -24,8 +27,8 @@
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
- *   main.js: the build bundles this module into it, so a row can name a
- *   function of this module.
+ *   main.js: the build bundles this library into it, so a row can name a
+ *   function of this library.
  *   Every plan value at a field whose PLAN_SCHEMA description starts with
  *   repositoryPathMark() must pass isRepositoryPath (review finding
  *   461fe942). collectRepositoryPaths walks the schema for the mark, so a
@@ -39,8 +42,9 @@
  *   rejected local review finding c2e0ada3, which asked for a check of fix
  *   round files members in the workflow, on this basis (ADR-0037,
  *   Amendment 2026-10-25). isGitIdentifier stays on artifact_files for the
- *   bump-type --version-file argument of the validate step (gates.js),
- *   since the path rule allows spaces, shell characters and a leading '-'.
+ *   bump-type --version-file argument of the standard-delivery validate
+ *   step (gates.js), since the path rule allows spaces, shell characters
+ *   and a leading '-'.
  *
  * Why
  *   A path a step writes reaches the commit script, so one rule, read from

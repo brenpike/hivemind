@@ -234,10 +234,6 @@ const FACTS_STEP_SCHEMA = buildTaggedSchema({
   }
 });
 
-function omitSchemaDialect(schema) {
-  return Object.fromEntries(Object.entries(schema).filter(([key]) => key !== '$schema'));
-}
-
 function buildAnalysisSpec(questionSchema) {
   return {
     tag: 'outcome',

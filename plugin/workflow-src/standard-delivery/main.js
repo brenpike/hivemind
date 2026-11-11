@@ -11,11 +11,15 @@
  * the overlord's, not this script's (ADR-0037 decision 4).
  *
  * The phase modules of this directory hold every other function, and the
- * build bundles them, in name order, ahead of this file: briefs.js,
- * gates.js, paths.js, plan.js, pr.js, record.js, relay.js,
- * review-schema.js, review.js, scope.js, specs.js, tails.js and waves.js.
+ * build bundles them, in name order, ahead of this file: gates.js, pr.js,
+ * relay.js, review-schema.js, review.js, specs.js and waves.js. The
+ * planning pass and its check retries are lib/plan.js and lib/checks.js,
+ * the scope step lib/scope.js, the code-built briefs lib/briefs.js, the
+ * approval rules lib/approvals.js, the tail asks lib/tails.js and the run
+ * record and run ends lib/record.js.
  * Each opens with the contract of its steps. This file holds the launch reading, the
- * run state, the pass loop and every top-level constant and limit.
+ * run state, the pass loop and every top-level constant and limit other
+ * than maxTitleLength(), which lib/title.js holds.
  *
  * Inputs
  *   args   the Workflow args global, read with lib/args.js as analysis-only
@@ -43,7 +47,7 @@
  *          (ADR-0037 decision 23).
  *   AUTONOMY_TABLE, BRIEF_SCHEMA, PLAN_SCHEMA  data constants copied in by
  *          the build. SCOPE_SCHEMA, built here by buildScopeSchema
- *          (scope.js), is the scope step result schema.
+ *          (lib/scope.js), is the scope step result schema.
  *
  * Outputs
  *   pauseForUser({resumeArgs, blocks}) when a question needs the user,
@@ -53,15 +57,15 @@
  *   resume_args is {answers, build} alone: no run record (ADR-0037
  *   decision 2). build is BUILD_ID, the build id the build injects, and a
  *   resume whose build differs stops at the launch check (issue 472).
- *   Every chat message has one shape (issue 460), built in record.js. A
+ *   Every chat message has one shape (issue 460), built in lib/record.js. A
  *   pause is a lead of what happened, then the questions renderQuestions
  *   shows, with the reply line last: a planning pause leads with
- *   describePlanLine(plan) (plan.js), one line, a tail ask with its own
+ *   describePlanLine(plan) (lib/plan.js), one line, a tail ask with its own
  *   one-line lead (askTail,
- *   tails.js). A run end is its lead, then, when blocked, the Next line, any
+ *   lib/tails.js). A run end is its lead, then, when blocked, the Next line, any
  *   later causes and the commit end line, then only the records ADR-0037
  *   decision 3 needs in chat: the branch and its head once a wave ran, the
- *   reversible effects and the taken decisions isShownDecision (record.js)
+ *   reversible effects and the taken decisions isShownDecision (lib/record.js)
  *   shows: listed ones and those of no routine kind, one line each. A complete run
  *   names the pull request and its commit, the gates that held and any gate
  *   not configured, the warning when there is one, the run.rejected and
@@ -79,7 +83,7 @@
  *   changelog file of versioning, lies outside them, the acceptance is
  *   decided with listed outside_limits: taken, journaled and listed for
  *   veto, never asked for that alone (issue 549). No message names those
- *   paths (plan.js listPlanPaths). Only an irreversible effect, an exact
+ *   paths (lib/paths.js listPlanPaths). Only an irreversible effect, an exact
  *   ask, shows its
  *   text word for word.
  *   Bounded fields (issue 445): every planner, worker and validation
@@ -94,7 +98,7 @@
  *   validate failures only the fix prompt. The code-built brief of every
  *   plan, trunk, effect, validation, gate rerun, version and review routing
  *   decision fits BRIEF_SCHEMA with worst-case inputs, holds
- *   unshownBriefText() (plan.js) in each field no message shows, so the
+ *   unshownBriefText() (lib/plan.js) in each field no message shows, so the
  *   bundle carries no text the user never reads, and the diminishing
  *   returns, escalation and root cluster problems embed no reviewer free
  *   text, only a short finding id and counts.
@@ -111,7 +115,7 @@
  *   action other than approve or fix_cause, so every report, run_again and
  *   answer stop, a size limit (finishOpenQuestions) or the launch check
  *   (issues 457, 549). Every other stop pauses through stopDelivery
- *   (record.js) with step_stop questions, and the reply takes the stopped
+ *   (lib/record.js) with step_stop questions, and the reply takes the stopped
  *   step again or plans again. pauseDelivery throws on an ask whose reason
  *   is outside askReasons() (lib/decide.js), so only the Ask Set pauses.
  *   A non-null scope, plan or revise result that fails its check, other
@@ -123,25 +127,25 @@
  *   slip never asks the user.
  *   Every undecided question, a step_stop, a version question, the fix
  *   limit and the gate rerun limit, resolves through decide() in
- *   buildUndecidedAsk (tails.js), which throws on a take: step_stop and
+ *   buildUndecidedAsk (lib/tails.js), which throws on a take: step_stop and
  *   version_bump_indeterminable surface at every level, and both limit
  *   briefs have strength none.
  *   Each new pass reads the head from its branch step through observeHead
- *   (record.js), the one writer of run.head, before any wave: that commit
+ *   (lib/record.js), the one writer of run.head, before any wave: that commit
  *   equals the facts head by needsBranchReplan, so the pass starts from a
  *   commit made during a pause, or by a commit runner whose relay could
  *   not be read. That read also stamps run.headRound after the last
  *   planning reply.
  *   run.decisions holds the decisions launch arg, [] when absent.
- *   listAnswerEntries(run) puts one settled entry per decision ahead of
- *   run.answerLog, and only the scope, plan, revise and review prompts
- *   read it;
+ *   listAnswerEntries(run) (lib/plan.js) puts one settled entry per
+ *   decision ahead of run.answerLog, and only the scope, plan, revise and
+ *   review prompts read it;
  *   run.answerLog, its rounds and resume_args never hold a decision.
  *   run.open, the open findings of the last usable review, and run.waits,
  *   the waits for an outside service the run made, start [] and 0
  *   (review.js waitForService).
  *   run.approvals starts [] and changes only through applyApprovalChoices
- *   (approvals.js) at each reply round, so it holds only the destructive
+ *   (lib/approvals.js) at each reply round, so it holds only the destructive
  *   changes the user's own replies approved, never a decision the run took.
  *   No version question plans again: its reply becomes run.versionAnswer
  *   and runs one fix round, and no later version check of the run fails
@@ -253,14 +257,14 @@
  *   escalation or root cluster, after a reply to a tail ask other than a
  *   local review question or a version question, or after a reply to a
  *   stop with isReplan true. A reply to a facts, scan, scope, plan or
- *   branch stop keeps the review its pass planned from (keepReplanReview),
- *   and a reply to a local review stop that plans again carries that
+ *   branch stop keeps the review its pass planned from
+ *   (keepReplanReview, lib/plan.js), and a reply to a local review stop that plans again carries that
  *   review (review.js). Every pass starts with the facts step,
  *   so every planner call follows the facts of its own pass (ADR-0037
- *   invariant 3). Then the scope step (scope.js) runs once, after the facts
+ *   invariant 3). Then the scope step (lib/scope.js) runs once, after the facts
  *   step and the scan and before planning, and again after each reply round
  *   of the pass unless the reply settled the shown plan acceptance
- *   (plan.js). Its checked scope reaches only the plan and revise prompts
+ *   (lib/plan.js). Its checked scope reaches only the plan and revise prompts
  *   and the plan acceptance check of its pass.
  *   Every step result schema whose fields depend on its outcome, or on
  *   exit_reason for the review, is built by buildTaggedSchema (lib/schema.js)
@@ -351,10 +355,6 @@ function maxWaitMinutes() {
   return 60;
 }
 
-function maxTitleLength() {
-  return 256;
-}
-
 function maxPullRequestTextLength() {
   return 60000;
 }
@@ -437,15 +437,6 @@ function readDecisions(argsObject) {
   return describeLaunchProblem('The decisions launch arg must be a list of 1 to ' + maxDecisions() + ' non-blank strings of at most ' + maxDecisionLength() + ' characters each');
 }
 
-/**
- * Returns one settled answer entry per launch decision, the decision word
- * for word as its reply, followed by run.answerLog.
- */
-function listAnswerEntries(run) {
-  const label = questionLabel(0);
-  return run.decisions.map((decision) => buildAnswerEntry({ question: label + '. A decision you settled before the run started.', labels: [label], chosen: [{ label: label }], reply: decision })).concat(run.answerLog);
-}
-
 function createRunState(launch) {
   return {
     request: launch.request,
@@ -478,18 +469,6 @@ function createRunState(launch) {
     factsStem: undefined,
     pluginRoot: undefined
   };
-}
-
-/**
- * Returns passEnd, or, when it is a reply to a stop before any wave of a
- * pass whose replan data carries a review, the same replan with that
- * review, so the next plan still sees the findings.
- */
-function keepReplanReview(passEnd, replan) {
-  if (passEnd.replan === undefined || replan === undefined || replan.review === undefined) {
-    return passEnd;
-  }
-  return { replan: { reason: passEnd.replan.reason, review: replan.review } };
 }
 
 async function runDeliveryPass(run, replan) {
