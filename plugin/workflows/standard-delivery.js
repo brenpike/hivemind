@@ -693,7 +693,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '629a997338540619';
+const BUILD_ID = '26408c345e2b4d66';
 
 function supportedSchemaKeywords(){
 return[
@@ -1024,6 +1024,9 @@ if(schema.items!==undefined){
 removeSchemaAnyOf(schema.items);
 }
 return schema;
+}
+function omitSchemaDialect(schema){
+return Object.fromEntries(Object.entries(schema).filter(([key])=>key!=='$schema'));
 }
 
 function askReasons(){
@@ -3370,9 +3373,6 @@ gates.answer=ended.answer;
 }
 }
 
-function omitSchemaDialect(schema){
-return Object.fromEntries(Object.entries(schema).filter(([key])=>key!=='$schema'));
-}
 function buildPlanResultSpec(planSchema,briefSchema){
 return{
 tag:'outcome',

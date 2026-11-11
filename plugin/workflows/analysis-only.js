@@ -412,7 +412,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = '59335aec8d0035b9';
+const BUILD_ID = '827b280951d4183b';
 
 function supportedSchemaKeywords(){
 return[
@@ -743,6 +743,9 @@ if(schema.items!==undefined){
 removeSchemaAnyOf(schema.items);
 }
 return schema;
+}
+function omitSchemaDialect(schema){
+return Object.fromEntries(Object.entries(schema).filter(([key])=>key!=='$schema'));
 }
 
 function askReasons(){
@@ -1796,9 +1799,6 @@ ran:{required:['facts_file','facts_lines','cut','external_texts'],optional:[]},
 blocked:{required:[],optional:['blocker']}
 }
 });
-function omitSchemaDialect(schema){
-return Object.fromEntries(Object.entries(schema).filter(([key])=>key!=='$schema'));
-}
 function buildAnalysisSpec(questionSchema){
 return{
 tag:'outcome',

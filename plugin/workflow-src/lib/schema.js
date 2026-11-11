@@ -22,6 +22,8 @@
  *                   the fields only that value carries.
  *   toAgentSchema(schema)
  *     schema  a schema, such as one buildTaggedSchema built.
+ *   omitSchemaDialect(schema)
+ *     schema  a schema object, such as BRIEF_SCHEMA or PLAN_SCHEMA.
  *
  * Outputs
  *   validateSchema  {ok, errors}. errors lists one string per violation,
@@ -53,6 +55,8 @@
  *   toAgentSchema   a deep copy of schema with every anyOf removed, at any
  *                   depth, and nothing else changed. schema is never
  *                   changed.
+ *   omitSchemaDialect  a shallow copy of schema without its top-level
+ *                   $schema key. schema is never changed.
  *
  * Invariants
  *   Pure: no clock, no randomness, no I/O. The schema is a parameter.
@@ -482,4 +486,8 @@ function removeSchemaAnyOf(schema) {
     removeSchemaAnyOf(schema.items);
   }
   return schema;
+}
+
+function omitSchemaDialect(schema) {
+  return Object.fromEntries(Object.entries(schema).filter(([key]) => key !== '$schema'));
 }

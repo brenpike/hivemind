@@ -180,10 +180,6 @@
  *   no later step reads a plan field the plan check did not pass.
  */
 
-function omitSchemaDialect(schema) {
-  return Object.fromEntries(Object.entries(schema).filter(([key]) => key !== '$schema'));
-}
-
 function buildPlanResultSpec(planSchema, briefSchema) {
   return {
     tag: 'outcome',
