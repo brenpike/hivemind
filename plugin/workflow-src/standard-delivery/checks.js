@@ -18,10 +18,8 @@
  *   The retry prompt (buildCheckFixPrompt) and the terminal report cause of
  *   a result still failing its check (describeCheckLimit) are in
  *   lib/retry.js, which runScopeStep (scope.js) also reads.
- *   normalizePlanTitle(result, schema)  result, or a copy with its own
- *           commit type cut from plan.title.
- *   typedTitlePattern()  the commit type title prefix, also read by
- *           describePlanProblem (plan.js).
+ *   callCheckedPlanner normalizes each result with normalizePlanTitle
+ *   (lib/title.js) before the plan check.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -38,13 +36,9 @@
  *   (kind planner_question, the run level) gives one of its questions a
  *   reason in neither askReasons() nor auto: a defect in the brief, which
  *   the planner fixes, so the user is never asked a defect.
- *   Title type: normalizePlanTitle returns a copy of a complete result
- *   that fits its schema whose cleaned plan.title starts with the plan's
- *   own commitTypeMap() value in any letter case, an optional
- *   parenthesized scope, '!' only when plan.breaking, and ':', with
- *   plan.title the trimmed rest when it is not blank; it never changes the
- *   agent result. Every other result is returned as is, so
- *   describePlanProblem (plan.js) still refuses any other typed title.
+ *   Title type: normalizePlanTitle (lib/title.js) never changes the agent
+ *   result, so describePlanProblem (plan.js) still refuses any typed title
+ *   it returns as is.
  *   The retry prompt is the first prompt with one fix line after its first
  *   line and a check data block at its end, so it holds every block the
  *   first prompt holds.
@@ -54,26 +48,6 @@
  *   user, and a bounded retry count keeps a result that never fits from
  *   looping.
  */
-
-function typedTitlePattern() {
-  return new RegExp('^(' + Object.values(commitTypeMap()).join('|') + ')(\\([^()]*\\))?(!?):', 'i');
-}
-
-/**
- * Returns result, or, for a complete result that fits schema, a copy whose
- * plan.title drops a leading commit type that equals the plan's own type,
- * with '!' only when the plan is breaking, when text is left after it. A
- * result that fits schema holds plan only when its outcome is complete.
- */
-function normalizePlanTitle(result, schema) {
-  const plan = validateSchema(schema, result).ok ? result.plan : undefined;
-  const match = plan === undefined ? null : typedTitlePattern().exec(cleanTitleText(plan.title));
-  const rest = match === null ? '' : match.input.slice(match[0].length).trim();
-  if (rest === '' || match[1].toLowerCase() !== commitTypeMap()[plan.classification] || (match[3] && !plan.breaking)) {
-    return result;
-  }
-  return { ...result, plan: { ...plan, title: rest } };
-}
 
 /**
  * Calls the planner with call.prompt, normalizes its title and checks it.

@@ -35,11 +35,12 @@ export const meta = {
  *   plugin/workflow-src/lib/facts.js
  *   plugin/workflow-src/lib/retry.js
  *   plugin/workflow-src/lib/runner.js
+ *   plugin/workflow-src/lib/paths.js
+ *   plugin/workflow-src/lib/title.js
  *   plugin/workflow-src/standard-delivery/approvals.js
  *   plugin/workflow-src/standard-delivery/briefs.js
  *   plugin/workflow-src/standard-delivery/checks.js
  *   plugin/workflow-src/standard-delivery/gates.js
- *   plugin/workflow-src/standard-delivery/paths.js
  *   plugin/workflow-src/standard-delivery/plan.js
  *   plugin/workflow-src/standard-delivery/pr.js
  *   plugin/workflow-src/standard-delivery/record.js
@@ -692,7 +693,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'f4ff63293eb71fa3';
+const BUILD_ID = '5ac3a2151743a61d';
 
 function supportedSchemaKeywords(){
 return[
@@ -2631,6 +2632,120 @@ const scanned=await runPassScan(checked.facts,run);
 return scanned??checked;
 }
 
+function externalLabel(){
+return'Can carry external content.';
+}
+function repositoryPathMark(){
+return externalLabel()+' Repository path.';
+}
+function toAsciiLowerCase(text){
+return text.replace(/[A-Z]/g,(letter)=>String.fromCharCode(letter.charCodeAt(0)+32));
+}
+function isRepositoryPath(value){
+if(typeof value!=='string'||value.length===0||value.startsWith('/')){
+return false;
+}
+const isOneLine=Array.from(value).every((character)=>character.codePointAt(0)>=32&&character.codePointAt(0)!==127);
+return isOneLine&&value.split('/').every((part)=>!['','.','..','.git'].includes(toAsciiLowerCase(part)));
+}
+function collectRepositoryPaths(schema,value,location,found){
+if(typeof schema.description==='string'&&schema.description.startsWith(repositoryPathMark())){
+found.push({location:location,value:value});
+}
+if(schema.properties!==undefined&&isPlainObject(value)){
+const presentNames=Object.keys(schema.properties).filter((name)=>Object.hasOwn(value,name));
+presentNames.forEach((name)=>collectRepositoryPaths(schema.properties[name],value[name],location===''?name:location+'.'+name,found));
+}
+if(schema.items!==undefined&&Array.isArray(value)){
+value.forEach((item,index)=>collectRepositoryPaths(schema.items,item,location+'['+index+']',found));
+}
+return found;
+}
+function findRepositoryPathProblem(schema,value,location){
+const problem=collectRepositoryPaths(schema,value,location,[]).find((entry)=>!isRepositoryPath(entry.value));
+return problem===undefined?'':problem.location;
+}
+function listPlanPaths(plan){
+return[...new Set(collectRepositoryPaths(PLAN_SCHEMA,plan,'',[]).map((entry)=>entry.value))];
+}
+
+function maxTitleLength(){
+return 256;
+}
+function isPullRequestCharacter(codePoint,keepsLines){
+if(keepsLines&&(codePoint===9||codePoint===10)){
+return true;
+}
+return codePoint>=32&&(codePoint<127||codePoint>159);
+}
+function cleanPullRequestText(text,keepsLines){
+return Array.from(text).map((character)=>(isPullRequestCharacter(character.codePointAt(0),keepsLines)?character:' ')).join('');
+}
+function cleanTitleText(text){
+return cleanPullRequestText(text,false).replace(/\s+/gu,' ').trim();
+}
+function trimTitleEnd(text){
+return text.replace(/[\s,;:-]+$/u,'');
+}
+function findUnclosedOpeners(characters){
+const closers={'(':')','[':']','{':'}'};
+const openIndexes=[];
+characters.forEach((character,index)=>{
+if(closers[character]!==undefined){
+openIndexes.push(index);
+}else if(openIndexes.length>0&&closers[characters[openIndexes[openIndexes.length-1]]]===character){
+openIndexes.pop();
+}
+});
+return openIndexes;
+}
+function closeTitleBrackets(text){
+const characters=Array.from(text);
+const openIndexes=findUnclosedOpeners(characters);
+if(openIndexes.length===0){
+return text;
+}
+const beforeOpener=trimTitleEnd(characters.slice(0,openIndexes[0]).join(''));
+if(beforeOpener!==''){
+return beforeOpener;
+}
+return trimTitleEnd(characters.filter((character,index)=>!openIndexes.includes(index)).join('').trim());
+}
+function cutTitleText(text,room){
+const characters=Array.from(text);
+if(characters.length<=room){
+return text;
+}
+const lastSpace=characters.slice(0,room+1).lastIndexOf(' ');
+const kept=characters.slice(0,lastSpace>0?lastSpace:room).join('');
+return closeTitleBrackets(trimTitleEnd(kept));
+}
+function buildTitlePrefix(plan){
+return commitTypeMap()[plan.classification]+(plan.breaking?'!':'')+':';
+}
+function buildTitleText(plan){
+return cutTitleText(cleanTitleText(plan.title),maxTitleLength()-buildTitlePrefix(plan).length-1);
+}
+function typedTitlePattern(){
+return new RegExp('^('+Object.values(commitTypeMap()).join('|')+')(\\([^()]*\\))?(!?):','i');
+}
+function normalizePlanTitle(result,schema){
+const plan=validateSchema(schema,result).ok?result.plan:undefined;
+const match=plan===undefined?null:typedTitlePattern().exec(cleanTitleText(plan.title));
+const rest=match===null?'':match.input.slice(match[0].length).trim();
+if(rest===''||match[1].toLowerCase()!==commitTypeMap()[plan.classification]||(match[3]&&!plan.breaking)){
+return result;
+}
+return{...result,plan:{...plan,title:rest}};
+}
+function listCloses(plan){
+return plan.closes??[];
+}
+function describeClosesProblem(plan,references){
+const index=listCloses(plan).findIndex((number)=>!references.some((reference)=>reference.replace(/^0+/,'')===String(number)));
+return index===-1?undefined:'The plan names an issue at closes['+index+'] that is not one of the references the run started with, so '+RUN_NAME+' stopped.';
+}
+
 function applyApprovalChoices(approvals,asks,choices){
 const shownLabels=choices.length===0?[]:listShownLabels(asks);
 return choices.reduce((kept,choice)=>applyApprovalChoice(kept,listOptionItems(asks[shownLabels.indexOf(choice.label)]),choice.optionIndex),[...approvals]);
@@ -2895,18 +3010,6 @@ why:'A check holds only for the commit it ran on, and the pull request needs eve
 });
 }
 
-function typedTitlePattern(){
-return new RegExp('^('+Object.values(commitTypeMap()).join('|')+')(\\([^()]*\\))?(!?):','i');
-}
-function normalizePlanTitle(result,schema){
-const plan=validateSchema(schema,result).ok?result.plan:undefined;
-const match=plan===undefined?null:typedTitlePattern().exec(cleanTitleText(plan.title));
-const rest=match===null?'':match.input.slice(match[0].length).trim();
-if(rest===''||match[1].toLowerCase()!==commitTypeMap()[plan.classification]||(match[3]&&!plan.breaking)){
-return result;
-}
-return{...result,plan:{...plan,title:rest}};
-}
 function describeQuestionProblem(planResult,run){
 return hasDefectQuestion(planResult.questions,PLANNER_QUESTION_KIND,run.level,AUTONOMY_TABLE,BRIEF_SCHEMA)?'A planner question fails the decision check, so '+RUN_NAME+' stopped.':undefined;
 }
@@ -3267,43 +3370,6 @@ gates.answer=ended.answer;
 }
 }
 
-function externalLabel(){
-return'Can carry external content.';
-}
-function repositoryPathMark(){
-return externalLabel()+' Repository path.';
-}
-function toAsciiLowerCase(text){
-return text.replace(/[A-Z]/g,(letter)=>String.fromCharCode(letter.charCodeAt(0)+32));
-}
-function isRepositoryPath(value){
-if(typeof value!=='string'||value.length===0||value.startsWith('/')){
-return false;
-}
-const isOneLine=Array.from(value).every((character)=>character.codePointAt(0)>=32&&character.codePointAt(0)!==127);
-return isOneLine&&value.split('/').every((part)=>!['','.','..','.git'].includes(toAsciiLowerCase(part)));
-}
-function collectRepositoryPaths(schema,value,location,found){
-if(typeof schema.description==='string'&&schema.description.startsWith(repositoryPathMark())){
-found.push({location:location,value:value});
-}
-if(schema.properties!==undefined&&isPlainObject(value)){
-const presentNames=Object.keys(schema.properties).filter((name)=>Object.hasOwn(value,name));
-presentNames.forEach((name)=>collectRepositoryPaths(schema.properties[name],value[name],location===''?name:location+'.'+name,found));
-}
-if(schema.items!==undefined&&Array.isArray(value)){
-value.forEach((item,index)=>collectRepositoryPaths(schema.items,item,location+'['+index+']',found));
-}
-return found;
-}
-function findRepositoryPathProblem(schema,value,location){
-const problem=collectRepositoryPaths(schema,value,location,[]).find((entry)=>!isRepositoryPath(entry.value));
-return problem===undefined?'':problem.location;
-}
-function listPlanPaths(plan){
-return[...new Set(collectRepositoryPaths(PLAN_SCHEMA,plan,'',[]).map((entry)=>entry.value))];
-}
-
 function omitSchemaDialect(schema){
 return Object.fromEntries(Object.entries(schema).filter(([key])=>key!=='$schema'));
 }
@@ -3629,64 +3695,10 @@ function toPullRequestDecision(entry){
 const problem=reviewDecisionProblems()[entry.kind];
 return problem===undefined?entry:{brief:{...entry.brief,problem:problem},kind:entry.kind,listed:entry.listed};
 }
-function isPullRequestCharacter(codePoint,keepsLines){
-if(keepsLines&&(codePoint===9||codePoint===10)){
-return true;
-}
-return codePoint>=32&&(codePoint<127||codePoint>159);
-}
-function cleanPullRequestText(text,keepsLines){
-return Array.from(text).map((character)=>(isPullRequestCharacter(character.codePointAt(0),keepsLines)?character:' ')).join('');
-}
 function neutralizePullRequestText(text){
 return text.split(/((?:https?:\/\/|www\.)[^\s`]+|(?<![\w.-])[\w.-]+\/[\w.-]+#\d+|#\d+|GH-\d+|@[\w-]+(?:\/[\w-]+)?)/i)
 .map((piece,index)=>(index%2===1?'`'+piece+'`':piece.replace(/[\\`[\]<>&]/g,'\\$&')))
 .join('');
-}
-function cleanTitleText(text){
-return cleanPullRequestText(text,false).replace(/\s+/gu,' ').trim();
-}
-function trimTitleEnd(text){
-return text.replace(/[\s,;:-]+$/u,'');
-}
-function findUnclosedOpeners(characters){
-const closers={'(':')','[':']','{':'}'};
-const openIndexes=[];
-characters.forEach((character,index)=>{
-if(closers[character]!==undefined){
-openIndexes.push(index);
-}else if(openIndexes.length>0&&closers[characters[openIndexes[openIndexes.length-1]]]===character){
-openIndexes.pop();
-}
-});
-return openIndexes;
-}
-function closeTitleBrackets(text){
-const characters=Array.from(text);
-const openIndexes=findUnclosedOpeners(characters);
-if(openIndexes.length===0){
-return text;
-}
-const beforeOpener=trimTitleEnd(characters.slice(0,openIndexes[0]).join(''));
-if(beforeOpener!==''){
-return beforeOpener;
-}
-return trimTitleEnd(characters.filter((character,index)=>!openIndexes.includes(index)).join('').trim());
-}
-function cutTitleText(text,room){
-const characters=Array.from(text);
-if(characters.length<=room){
-return text;
-}
-const lastSpace=characters.slice(0,room+1).lastIndexOf(' ');
-const kept=characters.slice(0,lastSpace>0?lastSpace:room).join('');
-return closeTitleBrackets(trimTitleEnd(kept));
-}
-function buildTitlePrefix(plan){
-return commitTypeMap()[plan.classification]+(plan.breaking?'!':'')+':';
-}
-function buildTitleText(plan){
-return cutTitleText(cleanTitleText(plan.title),maxTitleLength()-buildTitlePrefix(plan).length-1);
 }
 function buildPullRequestTitle(plan){
 const prefix=buildTitlePrefix(plan);
@@ -3710,13 +3722,6 @@ return part.external?neutralizePullRequestText(part.text):part.text;
 }
 function renderPullRequestRecord(run,gates){
 return buildRunRecordParts(run,run.taken.map(toPullRequestDecision),gates).map(renderPullRequestPart);
-}
-function listCloses(plan){
-return plan.closes??[];
-}
-function describeClosesProblem(plan,references){
-const index=listCloses(plan).findIndex((number)=>!references.some((reference)=>reference.replace(/^0+/,'')===String(number)));
-return index===-1?undefined:'The plan names an issue at closes['+index+'] that is not one of the references the run started with, so '+RUN_NAME+' stopped.';
 }
 function renderClosingLines(plan){
 return[...new Set(listCloses(plan))].map((number)=>'Closes #'+number);
@@ -5044,9 +5049,6 @@ return 6;
 }
 function maxWaitMinutes(){
 return 60;
-}
-function maxTitleLength(){
-return 256;
 }
 function maxPullRequestTextLength(){
 return 60000;

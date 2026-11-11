@@ -12,10 +12,11 @@
  *
  * The phase modules of this directory hold every other function, and the
  * build bundles them, in name order, ahead of this file: briefs.js,
- * gates.js, paths.js, plan.js, pr.js, record.js, relay.js,
+ * gates.js, plan.js, pr.js, record.js, relay.js,
  * review-schema.js, review.js, scope.js, specs.js, tails.js and waves.js.
  * Each opens with the contract of its steps. This file holds the launch reading, the
- * run state, the pass loop and every top-level constant and limit.
+ * run state, the pass loop and every top-level constant and limit other
+ * than maxTitleLength(), which lib/title.js holds.
  *
  * Inputs
  *   args   the Workflow args global, read with lib/args.js as analysis-only
@@ -349,10 +350,6 @@ function maxServiceWaits() {
 
 function maxWaitMinutes() {
   return 60;
-}
-
-function maxTitleLength() {
-  return 256;
 }
 
 function maxPullRequestTextLength() {
