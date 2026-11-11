@@ -1,12 +1,13 @@
 /*
- * standard-delivery approvals.js: the approval rules of the
- * standard-delivery workflow, the destructive changes the user's own
- * replies approved.
+ * approvals.js: the approval rules a workflow shares, the destructive
+ * changes the user's own replies approved. It keeps the approval list a
+ * reply builds; lib/brief.js renders briefs and reads the reply choices
+ * this file applies.
  *
  * Inputs
- *   approvals  run.approvals of main.js createRunState: a list of
+ *   approvals  run.approvals of the workflow's main.js: a list of
  *              {category, item}, one per key.
- *   ask        one ask, as resolveDecision (plan.js) builds it. Its items
+ *   ask        one ask, as resolveDecision (lib/plan.js) builds it. Its items
  *              are ask.items when set, one list per option in option order,
  *              else the destructive list of each brief option, [] when an
  *              option lists none. An item is read as {category, item}.
@@ -14,6 +15,8 @@
  *   choices    readReplyChoices (lib/brief.js) of the reply to that pause.
  *   result     a blocked worker or gate edit result that passed its schema.
  *   description  the description of a destructive list schema.
+ *   It reads no constant of the workflow's main.js and no workflow
+ *   function.
  *
  * Outputs
  *   applyApprovalChoices(approvals, asks, choices)  a new list: for each
@@ -45,8 +48,8 @@
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
- *   main.js: the build bundles this module into it, so a row can name a
- *   function of this module.
+ *   main.js: the build bundles this library into it, so a row can name a
+ *   function of this library.
  *   Only a choice code read from the user's own reply changes the list: a
  *   decision the run took never reaches it, and a reply in the user's own
  *   words gives no choice, so it approves nothing. The list is a function

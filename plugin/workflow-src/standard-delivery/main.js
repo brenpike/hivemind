@@ -11,11 +11,11 @@
  * the overlord's, not this script's (ADR-0037 decision 4).
  *
  * The phase modules of this directory hold every other function, and the
- * build bundles them, in name order, ahead of this file: approvals.js,
- * briefs.js, gates.js, pr.js, record.js, relay.js, review-schema.js,
- * review.js, specs.js, tails.js and waves.js. The planning pass and its
- * check retries are lib/plan.js and lib/checks.js, and the scope step
- * lib/scope.js.
+ * build bundles them, in name order, ahead of this file: gates.js, pr.js,
+ * record.js, relay.js, review-schema.js, review.js, specs.js, tails.js and
+ * waves.js. The planning pass and its check retries are lib/plan.js and
+ * lib/checks.js, the scope step lib/scope.js, the code-built briefs
+ * lib/briefs.js and the approval rules lib/approvals.js.
  * Each opens with the contract of its steps. This file holds the launch reading, the
  * run state, the pass loop and every top-level constant and limit other
  * than maxTitleLength(), which lib/title.js holds.
@@ -144,7 +144,7 @@
  *   the waits for an outside service the run made, start [] and 0
  *   (review.js waitForService).
  *   run.approvals starts [] and changes only through applyApprovalChoices
- *   (approvals.js) at each reply round, so it holds only the destructive
+ *   (lib/approvals.js) at each reply round, so it holds only the destructive
  *   changes the user's own replies approved, never a decision the run took.
  *   No version question plans again: its reply becomes run.versionAnswer
  *   and runs one fix round, and no later version check of the run fails

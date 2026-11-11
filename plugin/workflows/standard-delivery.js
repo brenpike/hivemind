@@ -40,8 +40,8 @@ export const meta = {
  *   lib/plan.js
  *   lib/checks.js
  *   lib/scope.js
- *   standard-delivery/approvals.js
- *   standard-delivery/briefs.js
+ *   lib/briefs.js
+ *   lib/approvals.js
  *   standard-delivery/gates.js
  *   standard-delivery/pr.js
  *   standard-delivery/record.js
@@ -693,7 +693,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '8d02731ed4eb9d58';
+const BUILD_ID = '584b67f6461af2a4';
 
 function supportedSchemaKeywords(){
 return[
@@ -3174,66 +3174,6 @@ return describeCheckLimit(unusable.problem);
 return unusable===undefined?{scope:keepRepositoryPathEntries(scope,facts.root)}:unusable;
 }
 
-function applyApprovalChoices(approvals,asks,choices){
-const shownLabels=choices.length===0?[]:listShownLabels(asks);
-return choices.reduce((kept,choice)=>applyApprovalChoice(kept,listOptionItems(asks[shownLabels.indexOf(choice.label)]),choice.optionIndex),[...approvals]);
-}
-function applyApprovalChoice(approvals,optionItems,optionIndex){
-const chosen=optionItems[optionIndex]??[];
-const withdrawn=optionItems.flat().filter((entry)=>!hasItem(chosen,entry));
-const kept=approvals.filter((entry)=>!hasItem(withdrawn,entry));
-return chosen.reduce((list,entry)=>(hasItem(list,entry)?list:list.concat([entry])),kept);
-}
-function hasDestructiveOption(ask){
-return listOptionItems(ask).some((items)=>items.length>0);
-}
-function listOptionItems(ask){
-const options=Array.isArray(ask.brief.options)?ask.brief.options:[];
-const lists=Array.isArray(ask.items)?ask.items:options.map((option)=>option.destructive);
-return lists.map((items)=>(Array.isArray(items)?items.map(readItem):[]));
-}
-function readItem(entry){
-return{category:entry.category,item:entry.item};
-}
-function hasItem(items,entry){
-return items.some((other)=>other.category===entry.category&&other.item===entry.item);
-}
-function buildDestructiveListSchema(description){
-const entry={
-type:'object',
-additionalProperties:false,
-required:['category','item'],
-properties:{category:{type:'integer',enum:[1,2,3,4,5,6,7,8,9,10]},item:{type:'string',maxLength:160}}
-};
-return{type:'array',maxItems:4,description:description,items:entry};
-}
-function readGateHold(result,approvals){
-if(quoteDiagnostic(result.blocker)===undefined){
-return{nextAction:'report'};
-}
-if(result.stage!=='destructive-fix-gate'&&!isDestructiveGateBlocker(result.blocker)){
-return{nextAction:result.next_action};
-}
-const listed=Array.isArray(result.destructive)?result.destructive.map(readItem):[];
-const holds=listed.filter((entry)=>!hasItem(approvals,entry));
-return{nextAction:holds.length===0?'report':'approve',holds:holds};
-}
-function isDestructiveGateBlocker(text){
-return text.trimStart().toLowerCase().startsWith('proposed fix requires human confirmation');
-}
-function describeGateWait(){
-return' waits for your approval at the destructive-fix gate';
-}
-function describeApprovalsHome(approvals,replyHome){
-if(approvals.length===0){
-return replyHome;
-}
-return replyHome===undefined?'The approvals block':replyHome+', like the approvals block,';
-}
-function listApprovalsBlock(approvals){
-return approvals.length===0?[]:[formatDataBlock('approvals',approvals)];
-}
-
 function remediationGateTexts(){
 return{
 irreversible:'cannot be undone',
@@ -3436,6 +3376,66 @@ goOn:'Run the checks again on the new commit.',
 strength:'strong',
 why:'A check holds only for the commit it ran on, and the pull request needs every check to hold on the commit it pushes.'
 });
+}
+
+function applyApprovalChoices(approvals,asks,choices){
+const shownLabels=choices.length===0?[]:listShownLabels(asks);
+return choices.reduce((kept,choice)=>applyApprovalChoice(kept,listOptionItems(asks[shownLabels.indexOf(choice.label)]),choice.optionIndex),[...approvals]);
+}
+function applyApprovalChoice(approvals,optionItems,optionIndex){
+const chosen=optionItems[optionIndex]??[];
+const withdrawn=optionItems.flat().filter((entry)=>!hasItem(chosen,entry));
+const kept=approvals.filter((entry)=>!hasItem(withdrawn,entry));
+return chosen.reduce((list,entry)=>(hasItem(list,entry)?list:list.concat([entry])),kept);
+}
+function hasDestructiveOption(ask){
+return listOptionItems(ask).some((items)=>items.length>0);
+}
+function listOptionItems(ask){
+const options=Array.isArray(ask.brief.options)?ask.brief.options:[];
+const lists=Array.isArray(ask.items)?ask.items:options.map((option)=>option.destructive);
+return lists.map((items)=>(Array.isArray(items)?items.map(readItem):[]));
+}
+function readItem(entry){
+return{category:entry.category,item:entry.item};
+}
+function hasItem(items,entry){
+return items.some((other)=>other.category===entry.category&&other.item===entry.item);
+}
+function buildDestructiveListSchema(description){
+const entry={
+type:'object',
+additionalProperties:false,
+required:['category','item'],
+properties:{category:{type:'integer',enum:[1,2,3,4,5,6,7,8,9,10]},item:{type:'string',maxLength:160}}
+};
+return{type:'array',maxItems:4,description:description,items:entry};
+}
+function readGateHold(result,approvals){
+if(quoteDiagnostic(result.blocker)===undefined){
+return{nextAction:'report'};
+}
+if(result.stage!=='destructive-fix-gate'&&!isDestructiveGateBlocker(result.blocker)){
+return{nextAction:result.next_action};
+}
+const listed=Array.isArray(result.destructive)?result.destructive.map(readItem):[];
+const holds=listed.filter((entry)=>!hasItem(approvals,entry));
+return{nextAction:holds.length===0?'report':'approve',holds:holds};
+}
+function isDestructiveGateBlocker(text){
+return text.trimStart().toLowerCase().startsWith('proposed fix requires human confirmation');
+}
+function describeGateWait(){
+return' waits for your approval at the destructive-fix gate';
+}
+function describeApprovalsHome(approvals,replyHome){
+if(approvals.length===0){
+return replyHome;
+}
+return replyHome===undefined?'The approvals block':replyHome+', like the approvals block,';
+}
+function listApprovalsBlock(approvals){
+return approvals.length===0?[]:[formatDataBlock('approvals',approvals)];
 }
 
 function gateIds(){
