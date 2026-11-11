@@ -693,7 +693,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '9d26434a723721d9';
+const BUILD_ID = '87067858b6a78d75';
 
 function supportedSchemaKeywords(){
 return[
@@ -2488,6 +2488,9 @@ return prompt;
 const lines=prompt.split('\n');
 return[lines[0],run.relaySentence??resumedReplySentence(),...lines.slice(1)].join('\n');
 }
+function addRelaySentence(prompt,run){
+return run.relaySentence===undefined?prompt:addResumeNote(prompt,run);
+}
 function buildRelaySchema(){
 return buildTaggedSchema({
 tag:'outcome',
@@ -3021,7 +3024,7 @@ const settledKinds=new Set();
 if(facts.head_state==='branch'&&facts.branch!==run.trunk&&!new RegExp(PLAN_SCHEMA.properties.branch.pattern,'u').test(facts.branch)){
 return stopDelivery([{problem:describeStartBranch(facts)+describeTaxonomyMiss()+'.'}],run,[],true);
 }
-let checked=await callCheckedPlanner(run,facts,{prompt:buildPlanPrompt(run.request,facts,scope,replan,listAnswerEntries(run)),label:'plan-'+run.pass,phaseTitle:'Plan',schema:resultSchema});
+let checked=await callCheckedPlanner(run,facts,{prompt:addRelaySentence(buildPlanPrompt(run.request,facts,scope,replan,listAnswerEntries(run)),run),label:'plan-'+run.pass,phaseTitle:'Plan',schema:resultSchema});
 for(;;){
 let{planResult,problem}=checked;
 if(problem!==undefined){
@@ -3065,7 +3068,7 @@ shownAsks=resolution.asks;
 shownResult=planResult;
 shownEntry={question:questions,labels:listShownLabels(shownAsks),reply:reply};
 resultSchema=buildReviseResultSchema(shownAsks);
-const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:listAnswerEntries(run),plan:planResult.plan,questions:questions,reply:reply});
+const revisePrompt=addRelaySentence(buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:listAnswerEntries(run),plan:planResult.plan,questions:questions,reply:reply}),run);
 checked=await callCheckedPlanner(run,facts,{prompt:revisePrompt,label:'revise-'+round,phaseTitle:'Revise',schema:resultSchema});
 }
 }
@@ -3161,7 +3164,7 @@ limits:scope.limits.map((limit)=>toLimitEntry(limit,root))
 }
 async function runScopeStep(run,facts,round){
 phase('Scope');
-const prompt=buildScopePrompt(run.request,facts,listAnswerEntries(run));
+const prompt=addRelaySentence(buildScopePrompt(run.request,facts,listAnswerEntries(run)),run);
 const options=scopeOptions(run.pass,round);
 let scope=await agent(prompt,options);
 for(let retry=1;retry<=maxCheckRetries()&&scope!==null&&describeScopeProblem(scope)!==undefined;retry+=1){

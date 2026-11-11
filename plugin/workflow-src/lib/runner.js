@@ -7,8 +7,8 @@
  *   run    the run state of the workflow's main.js. The steps read trunk,
  *          references, pass, answerLog and relaySentence, and runFactsStep
  *          sets factsStem and pluginRoot. relaySentence is optional: a
- *          workflow that sets it gets it on every prompt below;
- *          standard-delivery sets none.
+ *          workflow that sets it gets it on every prompt below and on its
+ *          scope, plan and revise prompts; standard-delivery sets none.
  *   relay  each runner result: {outcome, stdout, stderr} under
  *          RELAY_SCHEMA, its stdout read with lib/routing.js.
  *   The constants of the workflow's main.js this file reads: RUN_NOUN,
@@ -27,6 +27,8 @@
  *   addResumeNote(prompt, run)  prompt with run.relaySentence as its
  *           second line when that is set, else with resumedReplySentence()
  *           there once run.answerLog is not empty, else prompt.
+ *   addRelaySentence(prompt, run)  prompt with run.relaySentence as its
+ *           second line when that is set, else prompt.
  *   capItemLines(itemLines)  the first maxListedItems() lines, then a count
  *           of the rest.
  *   readRelayAction(stderr, isRefusedFirst)  the next action of a blocked
@@ -92,10 +94,14 @@
  *   exceptions. No prompt sent before the first reply carries it, so
  *   cached prompts replay byte for byte. A workflow whose launch message is
  *   relayed too sets run.relaySentence, and that sentence takes the second
- *   line of every prompt from the first agent on. The sentence lowers the
- *   risk and does not close it: an agent that still obeys the relayed
- *   message returns a blocked or refused result, which every check above
- *   still reads. ADR-0037 records the residual.
+ *   line of every prompt from the first agent on. The scope, plan and
+ *   revise prompts carry the replies in data blocks and not
+ *   resumedReplySentence(), so they take run.relaySentence through
+ *   addRelaySentence, which leaves a prompt unchanged when it is unset, and
+ *   a check retry of one keeps it. The sentence lowers the risk and does
+ *   not close it: an agent that still obeys the relayed message returns a
+ *   blocked or refused result, which every check above still reads.
+ *   ADR-0037 records the residual.
  *
  * Why
  *   Every runner step is one committed script relayed word for word, so
@@ -139,6 +145,10 @@ function addResumeNote(prompt, run) {
   }
   const lines = prompt.split('\n');
   return [lines[0], run.relaySentence ?? resumedReplySentence(), ...lines.slice(1)].join('\n');
+}
+
+function addRelaySentence(prompt, run) {
+  return run.relaySentence === undefined ? prompt : addResumeNote(prompt, run);
 }
 
 function buildRelaySchema() {

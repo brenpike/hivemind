@@ -8,7 +8,7 @@
  *
  * Inputs
  *   run     the run state of the workflow's main.js. The pass reads
- *           request, trunk, references, level, pass, decisions,
+ *           request, trunk, references, level, pass, decisions, relaySentence,
  *           storedAnswers and pendingReply, and updates answerLog, answeredKeys, taken,
  *           approvals and reversibleEffects. references reach
  *           describeClosesProblem (lib/title.js).
@@ -542,7 +542,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
   if (facts.head_state === 'branch' && facts.branch !== run.trunk && !new RegExp(PLAN_SCHEMA.properties.branch.pattern, 'u').test(facts.branch)) {
     return stopDelivery([{ problem: describeStartBranch(facts) + describeTaxonomyMiss() + '.' }], run, [], true);
   }
-  let checked = await callCheckedPlanner(run, facts, { prompt: buildPlanPrompt(run.request, facts, scope, replan, listAnswerEntries(run)), label: 'plan-' + run.pass, phaseTitle: 'Plan', schema: resultSchema });
+  let checked = await callCheckedPlanner(run, facts, { prompt: addRelaySentence(buildPlanPrompt(run.request, facts, scope, replan, listAnswerEntries(run)), run), label: 'plan-' + run.pass, phaseTitle: 'Plan', schema: resultSchema });
   for (;;) {
     let { planResult, problem } = checked;
     if (problem !== undefined) {
@@ -593,7 +593,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
     shownResult = planResult;
     shownEntry = { question: questions, labels: listShownLabels(shownAsks), reply: reply };
     resultSchema = buildReviseResultSchema(shownAsks);
-    const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, answers: listAnswerEntries(run), plan: planResult.plan, questions: questions, reply: reply });
+    const revisePrompt = addRelaySentence(buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, answers: listAnswerEntries(run), plan: planResult.plan, questions: questions, reply: reply }), run);
     checked = await callCheckedPlanner(run, facts, { prompt: revisePrompt, label: 'revise-' + round, phaseTitle: 'Revise', schema: resultSchema });
   }
 }

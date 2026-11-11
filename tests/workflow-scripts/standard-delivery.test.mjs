@@ -1062,6 +1062,36 @@ async function runPlanningRounds(results, answers) {
   }
 }
 
+/**
+ * Runs runScopeStep, then runPlanningPass, of the built script on a fresh
+ * pass 1 run state, with run.relaySentence set to relaySentence unless it is
+ * undefined. scope-1 and plan-1 fail their checks once, plan-1-fix-1 asks a
+ * gated question and revise-1, on stored reply A, settles it. Returns each
+ * prompt by label, in call order.
+ */
+async function runRelayRounds(relaySentence) {
+  const results = { 'scope-1': {}, 'scope-1-fix-1': EMPTY_SCOPE, 'scope-1-1': EMPTY_SCOPE, 'plan-1': { outcome: 'complete' }, 'plan-1-fix-1': planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]), 'revise-1': reviseResult(planResult(), ['Q1']) };
+  const prompts = {};
+  main.phase = () => undefined;
+  main.agent = async (prompt, opts) => {
+    prompts[opts.label] = prompt;
+    return structuredClone(results[opts.label] ?? null);
+  };
+  try {
+    const run = main.createRunState({ argsObject: { answers: { 'round-1': 'A' } }, request: REQUEST, trunk: 'main', references: [] });
+    run.pass = 1;
+    if (relaySentence !== undefined) {
+      run.relaySentence = relaySentence;
+    }
+    const scoped = await main.runScopeStep(run, parsedFacts());
+    await main.runPlanningPass(run, parsedFacts(), scoped.scope, undefined);
+    return prompts;
+  } finally {
+    delete main.phase;
+    delete main.agent;
+  }
+}
+
 const FOURTH = '5'.repeat(40);
 const ESCALATION = { ...REVIEW_CLEAN, exit_reason: 'planner-escalation', findings_open: 1, finding_id: 'f5f5f5f5', classification: 'architecture', file: 'src/cache.js', title: 'The cache layer skips the "auth" check.' };
 const CLUSTER = { ...REVIEW_CLEAN, exit_reason: 'root-cluster-suspected', findings_open: 2, cluster_files: ['src/cache.js'], cluster_ids: ['F1', 'F2'], hypothesized_root: 'The cache key is built from raw input.', root_class: 'input-keying', same_framing_rationale: 'Both findings patch the key builder.' };
@@ -5898,6 +5928,26 @@ const ROW_TESTS = {
       assert.ok(run.calls.every((call) => !call.prompt.includes(main.resumedReplySentence())));
       assert.equal(main.addResumeNote('a\nb', { answerLog: [] }), 'a\nb');
       assert.equal(main.addResumeNote('a\nb', { answerLog: [{ question: 'q', reply: 'r' }] }), 'a\n' + main.resumedReplySentence() + '\nb');
+    });
+    test('a workflow that sets run.relaySentence gets it as the second line of its scope, plan and revise prompts, their check retries keep it, and unset it changes no prompt', async () => {
+      const relaySentence = 'RELAY_SENTENCE_ZQ.';
+      const relayed = await runRelayRounds(relaySentence);
+      const plain = await runRelayRounds(undefined);
+      assert.deepEqual(Object.keys(relayed), ['scope-1', 'scope-1-fix-1', 'plan-1', 'plan-1-fix-1', 'revise-1', 'scope-1-1']);
+      assert.deepEqual(Object.keys(plain), Object.keys(relayed));
+      for (const label of ['scope-1', 'plan-1', 'revise-1', 'scope-1-1']) {
+        assert.equal(relayed[label].split('\n')[1], relaySentence, label);
+      }
+      for (const label of ['scope-1-fix-1', 'plan-1-fix-1']) {
+        assert.equal(relayed[label].split('\n')[2], relaySentence, label);
+      }
+      for (const label of Object.keys(plain)) {
+        assert.ok(!plain[label].includes(relaySentence), label);
+        assert.equal(plain[label], relayed[label].replace('\n' + relaySentence, ''), label);
+      }
+      assert.equal('relaySentence' in main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] }), false);
+      assert.equal(main.addRelaySentence('a\nb', { answerLog: [{ question: 'q', reply: 'r' }] }), 'a\nb');
+      assert.equal(main.addRelaySentence('a\nb', { answerLog: [], relaySentence: relaySentence }), 'a\n' + relaySentence + '\nb');
     });
   },
   'SD-50': () => {
