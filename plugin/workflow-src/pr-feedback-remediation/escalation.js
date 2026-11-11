@@ -2,7 +2,8 @@
  * pr-feedback-remediation escalation.js: the remediation planning of the
  * pr-feedback-remediation workflow, run when the fix pass ends
  * planner-escalation or root-cluster-suspected: the routing decision, the
- * review block, the planning passes and the draft end.
+ * review block and the planning passes, each of which hands its settled or
+ * taken plan to the tail (tail.js).
  *
  * Inputs
  *   fix    a fix pass result that fits FIX_RESULT_SCHEMA, whose exit_reason
@@ -10,11 +11,9 @@
  *   run    the run state of main.js. The passes read and update every field
  *          lib/plan.js, lib/scope.js, lib/tails.js and lib/record.js name.
  *   replan the replan data the next pass plans from: {reason, review?}.
- *   plan   the plan runPlanningPass (lib/plan.js) returns once every
- *          question of its pass is settled or taken.
  *   describeFixLead(run) (fix.js) leads the routing brief and the replan
  *   reason.
- *   The constants of main.js this file reads: RUN_NAME,
+ *   The constants of main.js this file reads:
  *   PLANNER_ESCALATION_ROUTING_KIND and ROOT_CLUSTER_ROUTING_KIND.
  *
  * Outputs
@@ -29,10 +28,9 @@
  *   routeEscalation(fix, run)  the routing pause {result}, else {replan}
  *          with the review block, once decide() took the routing or the
  *          user replied to it.
- *   describeUnbuiltWaves(plan)  the terminal cause the draft ends on once
- *          the plan is settled or taken, naming describePlanLine(plan).
  *   runRemediationPass(run, replan)  one planning pass: {result} or
- *          {replan}.
+ *          {replan}. A settled or taken plan runs runRemediationTail
+ *          (tail.js) on the facts of its pass.
  *   runEscalation(fix, run)  the run result after the escalation.
  *
  * Invariants
@@ -50,9 +48,8 @@
  *   A facts, scan or scope stop goes through stopDelivery (lib/record.js)
  *   with isReplan true, and the reply to it plans again with the review
  *   block kept (keepReplanReview, lib/plan.js). A planning stop or pause
- *   comes back from runPlanningPass the same way.
- *   This draft builds no wave, so a settled or taken plan ends the run
- *   blocked with one terminal cause through finishDeliveryBlocked.
+ *   comes back from runPlanningPass the same way, and so does every
+ *   {replan} of the tail.
  *
  * Why
  *   The fix pass stops at a finding a review fix cannot close, so the
@@ -98,10 +95,6 @@ function routeEscalation(fix, run) {
   return { replan: { reason: reason, review: projectEscalationReview(fix) } };
 }
 
-function describeUnbuiltWaves(plan) {
-  return { problem: 'The remediation is planned, but this draft builds no waves yet, so ' + RUN_NAME + ' stopped. ' + describePlanLine(plan), terminal: true };
-}
-
 async function runRemediationPass(run, replan) {
   const stopPass = (cause) => keepReplanReview(stopDelivery([cause], run, [], true), replan);
   const checked = await runFactsStep(run);
@@ -116,7 +109,7 @@ async function runRemediationPass(run, replan) {
   if (planned.plan === undefined) {
     return keepReplanReview(planned, replan);
   }
-  return { result: finishDeliveryBlocked([describeUnbuiltWaves(planned.plan)], run) };
+  return keepReplanReview(await runRemediationTail(run, planned.plan, checked.facts), replan);
 }
 
 async function runEscalation(fix, run) {
