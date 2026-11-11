@@ -12,6 +12,7 @@ import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, isDraf
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const WORKFLOW_ID = 'standard-delivery';
 const sourceDir = join(repoRoot, 'plugin/workflow-src', WORKFLOW_ID);
+const MOVED_LIB_PATHS = ['plan.js', 'checks.js'].map((file) => 'plugin/workflow-src/lib/' + file);
 const moduleSource = readModuleSet();
 const metaSource = readText(join(sourceDir, 'meta.js'));
 const contractPath = join(sourceDir, 'contract.js');
@@ -110,11 +111,12 @@ function readJson(relativePath) {
 }
 
 /**
- * Returns the text of every workflow module and of main.js, in build order,
- * so a source-text check reads the whole module set.
+ * Returns the text of every workflow module, of the lib files moved from
+ * them (MOVED_LIB_PATHS) and of main.js, in build order, so a source-text
+ * check reads the whole module set.
  */
 function readModuleSet() {
-  const modulePaths = listSourcePaths(repoRoot, WORKFLOW_ID).filter((path) => path.startsWith('plugin/workflow-src/' + WORKFLOW_ID + '/') && !path.endsWith('/meta.js'));
+  const modulePaths = listSourcePaths(repoRoot, WORKFLOW_ID).filter((path) => MOVED_LIB_PATHS.includes(path) || (path.startsWith('plugin/workflow-src/' + WORKFLOW_ID + '/') && !path.endsWith('/meta.js')));
   return modulePaths.map((path) => readText(join(repoRoot, path))).join('\n');
 }
 
@@ -569,9 +571,10 @@ function assertCheckLimitEnd(run, problem, label) {
 /**
  * Builds the workflow from a scratch copy, the prose budget file included,
  * whose autonomy table rows for the given kinds are surface at every level,
- * with editSource applied to the copy of the workflow module moduleFile.
+ * with editSource applied to the copy of the source moduleFile, a path
+ * under plugin/workflow-src.
  */
-function buildWithSurfaceKinds(kinds, editSource = (source) => source, moduleFile = 'main.js') {
+function buildWithSurfaceKinds(kinds, editSource = (source) => source, moduleFile = WORKFLOW_ID + '/main.js') {
   const scratchRoot = realpathSync(mkdtempSync(join(tmpdir(), 'hivemind-delivery-table-')));
   scratchRoots.push(scratchRoot);
   for (const dir of ['plugin/workflow-src', 'plugin/references']) {
@@ -583,7 +586,7 @@ function buildWithSurfaceKinds(kinds, editSource = (source) => source, moduleFil
   const table = JSON.parse(readFileSync(tablePath, 'utf8'));
   table.rows.filter((row) => kinds.includes(row.kind)).forEach((row) => Object.assign(row, { high: 'surface', balanced: 'surface', low: 'surface' }));
   writeFileSync(tablePath, JSON.stringify(table));
-  const modulePath = join(scratchRoot, 'plugin/workflow-src', WORKFLOW_ID, moduleFile);
+  const modulePath = join(scratchRoot, 'plugin/workflow-src', moduleFile);
   writeFileSync(modulePath, editSource(readFileSync(modulePath, 'utf8')));
   const source = buildWorkflow(scratchRoot, WORKFLOW_ID);
   return { ...loadWorkflowSource(source, WORKFLOW_ID + ' (surface table)'), buildId: readBuildId(source) };
@@ -2102,7 +2105,7 @@ const ROW_TESTS = {
           assert.equal(source.split(call).length - 1, 1, call);
           return source.replace(call, driftingCall);
         };
-        const surfaced = buildWithSurfaceKinds([kind], driftKey, 'plan.js');
+        const surfaced = buildWithSurfaceKinds([kind], driftKey, 'lib/plan.js');
         const shownPlan = planResult(makePlan({ trunk_freshness: freshness }));
         const results = happyResults({ 'facts-1': factsRelay({ trunk_freshness: freshness, trunk_behind: freshness === 'behind' ? '4' : '0' }), 'plan-1': shownPlan, 'revise-1': reviseResult(shownPlan, ['Q1']) });
         const paused = await runWorkflow(LAUNCH, results, surfaced);

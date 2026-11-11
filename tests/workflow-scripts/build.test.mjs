@@ -55,7 +55,7 @@ const liveIds = listLiveWorkflowIds(repoRoot);
 const draftIds = listDraftWorkflowIds(repoRoot);
 const DRAFT_ID = 'draft-check';
 const MAX_SOURCE_LINES = 600;
-const DELIVERY_MODULES = ['approvals.js', 'briefs.js', 'checks.js', 'gates.js', 'plan.js', 'pr.js', 'record.js', 'relay.js', 'review-schema.js', 'review.js', 'scope.js', 'specs.js', 'tails.js', 'waves.js'];
+const DELIVERY_MODULES = ['approvals.js', 'briefs.js', 'gates.js', 'pr.js', 'record.js', 'relay.js', 'review-schema.js', 'review.js', 'scope.js', 'specs.js', 'tails.js', 'waves.js'];
 const proseBudgets = readProseBudgets(repoRoot);
 const MAX_PROSE_MARGIN = 1000;
 const CEREBRATE_SENTENCE = 'You do not write or edit code.';
@@ -173,7 +173,7 @@ function writeDraftBudget(scratchRoot) {
  * prompt of a scratch copy.
  */
 function seedPlanPromptSentence(scratchRoot, sentence) {
-  const planPath = join(scratchRoot, 'plugin/workflow-src/standard-delivery/plan.js');
+  const planPath = join(scratchRoot, 'plugin/workflow-src/lib/plan.js');
   const planSource = readFileSync(planPath, 'utf8');
   assert.ok(planSource.includes(PLAN_PROMPT_OPENING), 'the plan prompt opening moved');
   writeFileSync(planPath, planSource.replace(PLAN_PROMPT_OPENING, PLAN_PROMPT_OPENING + ' ' + sentence));

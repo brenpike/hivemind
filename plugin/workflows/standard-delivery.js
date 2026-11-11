@@ -37,11 +37,11 @@ export const meta = {
  *   lib/runner.js
  *   lib/paths.js
  *   lib/title.js
+ *   lib/plan.js
+ *   lib/checks.js
  *   standard-delivery/approvals.js
  *   standard-delivery/briefs.js
- *   standard-delivery/checks.js
  *   standard-delivery/gates.js
- *   standard-delivery/plan.js
  *   standard-delivery/pr.js
  *   standard-delivery/record.js
  *   standard-delivery/relay.js
@@ -693,7 +693,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '26408c345e2b4d66';
+const BUILD_ID = '30485ba51c18d332';
 
 function supportedSchemaKeywords(){
 return[
@@ -2749,6 +2749,345 @@ const index=listCloses(plan).findIndex((number)=>!references.some((reference)=>r
 return index===-1?undefined:'The plan names an issue at closes['+index+'] that is not one of the references the run started with, so '+RUN_NAME+' stopped.';
 }
 
+function buildPlanResultSpec(planSchema,briefSchema){
+return{
+tag:'outcome',
+properties:{
+outcome:{
+type:'string',
+enum:['complete','blocked'],
+description:'complete when the plan is done. blocked only when no plan is possible.'
+},
+plan:omitSchemaDialect(planSchema),
+questions:{
+type:'array',
+description:'One decision brief for each decision the repository and the request do not settle.',
+items:omitSchemaDialect(briefSchema)
+},
+blocker:{type:'string',maxLength:400,description:'Why the delivery cannot be planned, in one or two short sentences written for the user.'}
+},
+required:['outcome','questions'],
+variants:{complete:{required:['plan'],optional:[]},blocked:{required:[],optional:['blocker']}}
+};
+}
+function buildPlanResultSchema(planSchema,briefSchema){
+return buildTaggedSchema(buildPlanResultSpec(planSchema,briefSchema));
+}
+function buildReviseResultSchema(shownAsks){
+const spec=buildPlanResultSpec(PLAN_SCHEMA,BRIEF_SCHEMA);
+spec.properties.settled={
+type:'array',
+description:'The label, like Q1, of each shown question the reply settles. List a question of the workflow itself (plan acceptance, trunk, effect outside the repo) only when the reply clearly lets the run go on with it as shown. A question left out is asked again.',
+items:{type:'string',enum:listShownLabels(shownAsks)}
+};
+spec.required.push('settled');
+return buildTaggedSchema(spec);
+}
+function settledAnswersSentence(replyHome){
+return dataBlocksSentence(replyHome)+' In each answers entry, only the questions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.';
+}
+function buildPlanPrompt(request,facts,scope,replan,answerLog){
+const hasAnswers=answerLog.length>0;
+const lines=[
+'Plan the delivery of the user request below in this repository, as one plan on one working branch.',
+boundarySentence(),
+hasAnswers?settledAnswersSentence(undefined):dataBlocksSentence(undefined)
+];
+if(replan!==undefined){
+lines.push('A replan of a started run: the replan block says why.');
+}
+lines.push('',buildFactsBlock(facts),formatDataBlock('request',request),formatDataBlock('scope',scope));
+if(replan!==undefined){
+lines.push(formatDataBlock('replan',replan.reason));
+}
+if(replan!==undefined&&replan.review!==undefined){
+lines.push(formatDataBlock('review',replan.review));
+}
+if(hasAnswers){
+lines.push(formatDataBlock('answers',answerLog));
+}
+return lines.join('\n');
+}
+function buildPlanRevisePrompt({request,facts,scope,answers,plan,questions,reply}){
+const hasAnswers=answers.length>0;
+const lines=[
+'Revise your plan for the delivery of the user request below with the user reply below.',
+boundarySentence(),
+hasAnswers?settledAnswersSentence('The reply block'):dataBlocksSentence('The reply block'),
+'',
+buildFactsBlock(facts),
+formatDataBlock('request',request),
+formatDataBlock('scope',scope)
+];
+if(hasAnswers){
+lines.push(formatDataBlock('answers',answers));
+}
+lines.push(formatDataBlock('earlier_plan',plan),formatDataBlock('questions',questions),formatDataBlock('reply',reply));
+return lines.join('\n');
+}
+function describeValidationCommandProblem(command){
+if(command.trim()===''){
+return'is blank';
+}
+const codePoints=Array.from(command).map((character)=>character.codePointAt(0));
+if(codePoints.some((codePoint)=>[10,13,0x85,0x2028,0x2029].includes(codePoint))){
+return'holds a line break';
+}
+if(codePoints.some((codePoint)=>codePoint<32||(codePoint>=127&&codePoint<=0x9f))){
+return'holds a control character';
+}
+return'';
+}
+function describePlanProblem(planResult,resultSchema,facts,trunk,references){
+const stopped=', so '+RUN_NAME+' stopped.';
+if(!isPlainObject(planResult)){
+return'The planner returned no result'+stopped;
+}
+if(!validateSchema(resultSchema,planResult).ok){
+return'The planner returned a plan that does not fit the plan schema'+stopped;
+}
+if(planResult.outcome==='blocked'){
+return'The planner could not plan the delivery: '+describeReason(planResult.blocker);
+}
+const plan=planResult.plan;
+const pathLocation=findRepositoryPathProblem(PLAN_SCHEMA,plan,'');
+if(pathLocation!==''){
+return'The plan names a path at '+pathLocation+' that is not a plain path inside the repository'+stopped;
+}
+const wave=computeWave(plan.steps,[]);
+if(!wave.ok){
+return'The plan steps cannot be scheduled, so '+RUN_NAME+' stopped: '+toPrintableAscii(wave.problem);
+}
+if(plan.trunk_freshness!==facts.trunk_freshness){
+return'The plan copies a trunk freshness other than the facts'+stopped;
+}
+if(!isGitIdentifier(plan.branch)||!isGitIdentifier(plan.base)){
+return'The plan names a branch or base that is not a safe git name'+stopped;
+}
+if(!plan.versioning.artifact_files.every((artifactPath)=>isGitIdentifier(artifactPath))){
+return'The plan names a version file path that is not a safe git path'+stopped;
+}
+for(let index=0;index<plan.validation_commands.length;index+=1){
+const commandProblem=describeValidationCommandProblem(plan.validation_commands[index]);
+if(commandProblem!==''){
+return'The plan names a validation command at validation_commands['+index+'] that '+commandProblem+stopped;
+}
+}
+if(typedTitlePattern().test(cleanTitleText(plan.title))){
+return'The plan title starts with a commit type, which the workflow writes before it'+stopped;
+}
+if(buildTitleText(plan)===''){
+return'The plan title leaves no text once it is cleaned and cut to fit the pull request title'+stopped;
+}
+const isOnOtherBranch=facts.head_state==='branch'&&facts.branch!==trunk;
+if(isOnOtherBranch&&plan.branch!==facts.branch){
+return describeStartBranch(facts)+' and delivers on it, but the plan names branch '+encodeUntrustedText(plan.branch)+stopped;
+}
+if(!new RegExp(PLAN_SCHEMA.properties.branch.pattern,'u').test(plan.branch)){
+return'The plan names branch '+encodeUntrustedText(plan.branch)+describeTaxonomyMiss()+stopped;
+}
+return describeClosesProblem(plan,references);
+}
+function describeStartBranch(facts){
+return'The run started on branch '+encodeUntrustedText(facts.branch);
+}
+function describeTaxonomyMiss(){
+return', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens';
+}
+function questionKey(kind,scope,ask){
+return JSON.stringify([kind,scope,renderQuestions([ask])]);
+}
+function describeCount(count,noun){
+return count+' '+noun+(count===1?'':'s');
+}
+function describePlanLine(plan){
+return'The plan for branch '+encodeUntrustedText(plan.branch)+' has '+describeCount(plan.steps.length,'step')+' over '+describeCount(listPlanPaths(plan).length,'file')+': '+renderText(plan.digest.change);
+}
+function unshownBriefText(){
+return'Not shown.';
+}
+function resolveDecision(kind,brief,scope,run,resolution,listed){
+const decision=decide({kind:kind,level:run.level,brief:brief,listed:listed},AUTONOMY_TABLE,BRIEF_SCHEMA);
+if(decision.action==='take'){
+resolution.taken.push({brief:brief,kind:kind,listed:decision.listed});
+return'take';
+}
+const ask={brief:brief,reason:decision.reason,kind:kind};
+if(kind===EXTERNAL_EFFECT_KIND){
+ask.exact=true;
+}
+if(scope!==undefined){
+ask.key=questionKey(kind,scope,ask);
+if(run.answeredKeys.has(ask.key)){
+return'answered';
+}
+}
+resolution.asks.push(ask);
+return'ask';
+}
+function resolveTrunkFreshness(facts,run,resolution){
+const mapped=trunkFreshnessMap()[facts.trunk_freshness];
+if(mapped!=='decide'){
+return mapped;
+}
+const status=resolveDecision(TRUNK_STALE_KIND,buildTrunkStaleBrief(facts),'run',run,resolution);
+return status==='ask'?undefined:'stale';
+}
+function resolveExternalEffects(plan,run,resolution){
+for(const step of plan.steps){
+for(const effect of step.external_effects){
+if(effect.reversible){
+resolution.reversibleEffects.push({stepId:step.id,summary:effect.summary});
+continue;
+}
+resolveDecision(EXTERNAL_EFFECT_KIND,buildExternalEffectBrief(effect.summary),['run',step.id],run,resolution);
+}
+}
+}
+function resolvePlanAcceptance(plan,run,resolution,scope){
+const isRemediation=run.taken.some((entry)=>entry.kind===PLANNER_ESCALATION_ROUTING_KIND||entry.kind===ROOT_CLUSTER_ROUTING_KIND);
+const outsidePaths=listOutsidePaths(plan,scope);
+const holds={outside_limits:outsidePaths.length>0,repeats_surface:plan.remediation_gate.repeats_surface};
+const listed=Object.keys(holds).filter((name)=>holds[name]);
+const brief=isRemediation?buildRemediationPlanBrief(plan):buildPlanAcceptanceBrief(plan);
+return resolveDecision(isRemediation?REMEDIATION_PLAN_ACCEPTANCE_KIND:PLAN_ACCEPTANCE_KIND,markOutsideLimits(brief,outsidePaths),[run.pass,plan],run,resolution,listed);
+}
+function resolvePlanAsks(planResult,facts,run,scope){
+const resolution={asks:[],taken:[],freshness:undefined,reversibleEffects:[]};
+const plan=planResult.plan;
+planResult.questions.forEach((brief)=>resolveDecision(PLANNER_QUESTION_KIND,brief,run.pass,run,resolution));
+const acceptance=resolvePlanAcceptance(plan,run,resolution,scope);
+const acceptanceAsk=resolution.asks[resolution.asks.length-1];
+resolution.freshness=resolveTrunkFreshness(facts,run,resolution);
+resolveExternalEffects(plan,run,resolution);
+if(acceptance==='ask'&&resolution.asks.length>1){
+resolution.asks=resolution.asks.filter((ask)=>ask!==acceptanceAsk);
+}
+return resolution;
+}
+function acceptResolution(resolution,run){
+for(const entry of resolution.taken){
+const isListed=run.taken.some((listed)=>JSON.stringify(listed.brief)===JSON.stringify(entry.brief));
+if(!isListed){
+run.taken.push(entry);
+}
+}
+for(const effect of resolution.reversibleEffects){
+const isListed=run.reversibleEffects.some((listed)=>listed.stepId===effect.stepId&&listed.summary===effect.summary);
+if(!isListed){
+run.reversibleEffects.push(effect);
+}
+}
+}
+function markSettledAsks(settledLabels,shownAsks,run,settledKinds){
+shownAsks.forEach((ask,index)=>{
+if(ask.key!==undefined&&settledLabels.includes(questionLabel(index))){
+run.answeredKeys.add(ask.key);
+settledKinds.add(ask.kind);
+}
+});
+}
+function logPlanningReply(run,shownEntry,shownAsks,revise){
+run.answerLog.push(buildAnswerEntry(shownEntry,revise));
+run.approvals=applyApprovalChoices(run.approvals,shownAsks,readReplyChoices(shownEntry.reply,shownAsks));
+}
+function takeNextReply(run,round){
+const storedReply=readStoredReply(run.storedAnswers,round);
+if(storedReply!==undefined){
+return storedReply;
+}
+const pendingReply=run.pendingReply;
+run.pendingReply=undefined;
+return pendingReply;
+}
+function listAnswerEntries(run){
+const label=questionLabel(0);
+return run.decisions.map((decision)=>buildAnswerEntry({question:label+'. A decision you settled before the run started.',labels:[label],chosen:[{label:label}],reply:decision})).concat(run.answerLog);
+}
+function keepReplanReview(passEnd,replan){
+if(passEnd.replan===undefined||replan===undefined||replan.review===undefined){
+return passEnd;
+}
+return{replan:{reason:passEnd.replan.reason,review:replan.review}};
+}
+async function runPlanningPass(run,facts,passScope,replan){
+phase('Plan');
+let scope=passScope;
+let resultSchema=PLAN_RESULT_SCHEMA;
+let shownAsks=[];
+let shownResult;
+let shownEntry;
+const settledKinds=new Set();
+if(facts.head_state==='branch'&&facts.branch!==run.trunk&&!new RegExp(PLAN_SCHEMA.properties.branch.pattern,'u').test(facts.branch)){
+return stopDelivery([{problem:describeStartBranch(facts)+describeTaxonomyMiss()+'.'}],run,[],true);
+}
+let checked=await callCheckedPlanner(run,facts,{prompt:buildPlanPrompt(run.request,facts,scope,replan,listAnswerEntries(run)),label:'plan-'+run.pass,phaseTitle:'Plan',schema:resultSchema});
+for(;;){
+let{planResult,problem}=checked;
+if(problem!==undefined){
+if(shownAsks.length>0){
+logPlanningReply(run,shownEntry,shownAsks);
+}
+const unusable=planResult===null?describeUnusableResult(problem,null):{problem:problem};
+return stopDelivery([checked.isExhausted?describeCheckLimit(problem):unusable],run,[],true);
+}
+if(shownAsks.length>0){
+logPlanningReply(run,shownEntry,shownAsks,planResult);
+markSettledAsks(run.answerLog[run.answerLog.length-1].settled,shownAsks,run,settledKinds);
+if(shownAsks.some((ask)=>[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind)&&run.answeredKeys.has(ask.key))){
+planResult=shownResult;
+}else{
+const rescoped=await runScopeStep(run,facts,run.answerLog.length);
+if(rescoped.problem!==undefined){
+return stopDelivery([rescoped],run,[],true);
+}
+scope=rescoped.scope;
+}
+}
+const resolution=resolvePlanAsks(planResult,facts,run,scope);
+if(resolution.asks.length===0){
+acceptResolution(resolution,run);
+return{plan:planResult.plan,freshness:resolution.freshness};
+}
+const resettled=resolution.asks.find((ask)=>settledKinds.has(ask.kind)&&[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND,TRUNK_STALE_KIND].includes(ask.kind));
+if(resettled!==undefined){
+return stopDelivery([{problem:'Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.',terminal:true,nextAction:'report'}],run,[],true);
+}
+const lead=describePlanLine(planResult.plan);
+const round=run.answerLog.length+1;
+const reply=takeNextReply(run,round);
+if(reply===undefined){
+return{result:pauseDelivery(resolution,run,lead)};
+}
+phase('Revise');
+const questions=lead+'\n\n'+renderQuestions(resolution.asks);
+shownAsks=resolution.asks;
+shownResult=planResult;
+shownEntry={question:questions,labels:listShownLabels(shownAsks),reply:reply};
+resultSchema=buildReviseResultSchema(shownAsks);
+const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:listAnswerEntries(run),plan:planResult.plan,questions:questions,reply:reply});
+checked=await callCheckedPlanner(run,facts,{prompt:revisePrompt,label:'revise-'+round,phaseTitle:'Revise',schema:resultSchema});
+}
+}
+
+function describeQuestionProblem(planResult,run){
+return hasDefectQuestion(planResult.questions,PLANNER_QUESTION_KIND,run.level,AUTONOMY_TABLE,BRIEF_SCHEMA)?'A planner question fails the decision check, so '+RUN_NAME+' stopped.':undefined;
+}
+async function callCheckedPlanner(run,facts,call){
+let prompt=call.prompt;
+for(let retry=0;;retry+=1){
+const label=retry===0?call.label:call.label+'-fix-'+retry;
+const result=normalizePlanTitle(await agent(prompt,plannerCallOptions(label,call.phaseTitle,call.schema)),call.schema);
+const planProblem=describePlanProblem(result,call.schema,facts,run.trunk,run.references);
+const problem=planProblem===undefined?describeQuestionProblem(result,run):planProblem;
+const isFixable=problem!==undefined&&isFixableResult(result,call.schema);
+if(!isFixable||retry===maxCheckRetries()){
+return{planResult:result,problem:problem,isExhausted:isFixable};
+}
+prompt=buildCheckFixPrompt(call.prompt,problem,validateSchema(call.schema,result).errors);
+}
+}
+
 function applyApprovalChoices(approvals,asks,choices){
 const shownLabels=choices.length===0?[]:listShownLabels(asks);
 return choices.reduce((kept,choice)=>applyApprovalChoice(kept,listOptionItems(asks[shownLabels.indexOf(choice.label)]),choice.optionIndex),[...approvals]);
@@ -3011,24 +3350,6 @@ goOn:'Run the checks again on the new commit.',
 strength:'strong',
 why:'A check holds only for the commit it ran on, and the pull request needs every check to hold on the commit it pushes.'
 });
-}
-
-function describeQuestionProblem(planResult,run){
-return hasDefectQuestion(planResult.questions,PLANNER_QUESTION_KIND,run.level,AUTONOMY_TABLE,BRIEF_SCHEMA)?'A planner question fails the decision check, so '+RUN_NAME+' stopped.':undefined;
-}
-async function callCheckedPlanner(run,facts,call){
-let prompt=call.prompt;
-for(let retry=0;;retry+=1){
-const label=retry===0?call.label:call.label+'-fix-'+retry;
-const result=normalizePlanTitle(await agent(prompt,plannerCallOptions(label,call.phaseTitle,call.schema)),call.schema);
-const planProblem=describePlanProblem(result,call.schema,facts,run.trunk,run.references);
-const problem=planProblem===undefined?describeQuestionProblem(result,run):planProblem;
-const isFixable=problem!==undefined&&isFixableResult(result,call.schema);
-if(!isFixable||retry===maxCheckRetries()){
-return{planResult:result,problem:problem,isExhausted:isFixable};
-}
-prompt=buildCheckFixPrompt(call.prompt,problem,validateSchema(call.schema,result).errors);
-}
 }
 
 function gateIds(){
@@ -3370,317 +3691,6 @@ gates.notes[stepId]=ended.note;
 if(ended.answer!==undefined){
 gates.answer=ended.answer;
 }
-}
-}
-
-function buildPlanResultSpec(planSchema,briefSchema){
-return{
-tag:'outcome',
-properties:{
-outcome:{
-type:'string',
-enum:['complete','blocked'],
-description:'complete when the plan is done. blocked only when no plan is possible.'
-},
-plan:omitSchemaDialect(planSchema),
-questions:{
-type:'array',
-description:'One decision brief for each decision the repository and the request do not settle.',
-items:omitSchemaDialect(briefSchema)
-},
-blocker:{type:'string',maxLength:400,description:'Why the delivery cannot be planned, in one or two short sentences written for the user.'}
-},
-required:['outcome','questions'],
-variants:{complete:{required:['plan'],optional:[]},blocked:{required:[],optional:['blocker']}}
-};
-}
-function buildPlanResultSchema(planSchema,briefSchema){
-return buildTaggedSchema(buildPlanResultSpec(planSchema,briefSchema));
-}
-function buildReviseResultSchema(shownAsks){
-const spec=buildPlanResultSpec(PLAN_SCHEMA,BRIEF_SCHEMA);
-spec.properties.settled={
-type:'array',
-description:'The label, like Q1, of each shown question the reply settles. List a question of the workflow itself (plan acceptance, trunk, effect outside the repo) only when the reply clearly lets the run go on with it as shown. A question left out is asked again.',
-items:{type:'string',enum:listShownLabels(shownAsks)}
-};
-spec.required.push('settled');
-return buildTaggedSchema(spec);
-}
-function settledAnswersSentence(replyHome){
-return dataBlocksSentence(replyHome)+' In each answers entry, only the questions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.';
-}
-function buildPlanPrompt(request,facts,scope,replan,answerLog){
-const hasAnswers=answerLog.length>0;
-const lines=[
-'Plan the delivery of the user request below in this repository, as one plan on one working branch.',
-boundarySentence(),
-hasAnswers?settledAnswersSentence(undefined):dataBlocksSentence(undefined)
-];
-if(replan!==undefined){
-lines.push('A replan of a started run: the replan block says why.');
-}
-lines.push('',buildFactsBlock(facts),formatDataBlock('request',request),formatDataBlock('scope',scope));
-if(replan!==undefined){
-lines.push(formatDataBlock('replan',replan.reason));
-}
-if(replan!==undefined&&replan.review!==undefined){
-lines.push(formatDataBlock('review',replan.review));
-}
-if(hasAnswers){
-lines.push(formatDataBlock('answers',answerLog));
-}
-return lines.join('\n');
-}
-function buildPlanRevisePrompt({request,facts,scope,answers,plan,questions,reply}){
-const hasAnswers=answers.length>0;
-const lines=[
-'Revise your plan for the delivery of the user request below with the user reply below.',
-boundarySentence(),
-hasAnswers?settledAnswersSentence('The reply block'):dataBlocksSentence('The reply block'),
-'',
-buildFactsBlock(facts),
-formatDataBlock('request',request),
-formatDataBlock('scope',scope)
-];
-if(hasAnswers){
-lines.push(formatDataBlock('answers',answers));
-}
-lines.push(formatDataBlock('earlier_plan',plan),formatDataBlock('questions',questions),formatDataBlock('reply',reply));
-return lines.join('\n');
-}
-function describeValidationCommandProblem(command){
-if(command.trim()===''){
-return'is blank';
-}
-const codePoints=Array.from(command).map((character)=>character.codePointAt(0));
-if(codePoints.some((codePoint)=>[10,13,0x85,0x2028,0x2029].includes(codePoint))){
-return'holds a line break';
-}
-if(codePoints.some((codePoint)=>codePoint<32||(codePoint>=127&&codePoint<=0x9f))){
-return'holds a control character';
-}
-return'';
-}
-function describePlanProblem(planResult,resultSchema,facts,trunk,references){
-const stopped=', so '+RUN_NAME+' stopped.';
-if(!isPlainObject(planResult)){
-return'The planner returned no result'+stopped;
-}
-if(!validateSchema(resultSchema,planResult).ok){
-return'The planner returned a plan that does not fit the plan schema'+stopped;
-}
-if(planResult.outcome==='blocked'){
-return'The planner could not plan the delivery: '+describeReason(planResult.blocker);
-}
-const plan=planResult.plan;
-const pathLocation=findRepositoryPathProblem(PLAN_SCHEMA,plan,'');
-if(pathLocation!==''){
-return'The plan names a path at '+pathLocation+' that is not a plain path inside the repository'+stopped;
-}
-const wave=computeWave(plan.steps,[]);
-if(!wave.ok){
-return'The plan steps cannot be scheduled, so '+RUN_NAME+' stopped: '+toPrintableAscii(wave.problem);
-}
-if(plan.trunk_freshness!==facts.trunk_freshness){
-return'The plan copies a trunk freshness other than the facts'+stopped;
-}
-if(!isGitIdentifier(plan.branch)||!isGitIdentifier(plan.base)){
-return'The plan names a branch or base that is not a safe git name'+stopped;
-}
-if(!plan.versioning.artifact_files.every((artifactPath)=>isGitIdentifier(artifactPath))){
-return'The plan names a version file path that is not a safe git path'+stopped;
-}
-for(let index=0;index<plan.validation_commands.length;index+=1){
-const commandProblem=describeValidationCommandProblem(plan.validation_commands[index]);
-if(commandProblem!==''){
-return'The plan names a validation command at validation_commands['+index+'] that '+commandProblem+stopped;
-}
-}
-if(typedTitlePattern().test(cleanTitleText(plan.title))){
-return'The plan title starts with a commit type, which the workflow writes before it'+stopped;
-}
-if(buildTitleText(plan)===''){
-return'The plan title leaves no text once it is cleaned and cut to fit the pull request title'+stopped;
-}
-const isOnOtherBranch=facts.head_state==='branch'&&facts.branch!==trunk;
-if(isOnOtherBranch&&plan.branch!==facts.branch){
-return describeStartBranch(facts)+' and delivers on it, but the plan names branch '+encodeUntrustedText(plan.branch)+stopped;
-}
-if(!new RegExp(PLAN_SCHEMA.properties.branch.pattern,'u').test(plan.branch)){
-return'The plan names branch '+encodeUntrustedText(plan.branch)+describeTaxonomyMiss()+stopped;
-}
-return describeClosesProblem(plan,references);
-}
-function describeStartBranch(facts){
-return'The run started on branch '+encodeUntrustedText(facts.branch);
-}
-function describeTaxonomyMiss(){
-return', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens';
-}
-function questionKey(kind,scope,ask){
-return JSON.stringify([kind,scope,renderQuestions([ask])]);
-}
-function describeCount(count,noun){
-return count+' '+noun+(count===1?'':'s');
-}
-function describePlanLine(plan){
-return'The plan for branch '+encodeUntrustedText(plan.branch)+' has '+describeCount(plan.steps.length,'step')+' over '+describeCount(listPlanPaths(plan).length,'file')+': '+renderText(plan.digest.change);
-}
-function unshownBriefText(){
-return'Not shown.';
-}
-function resolveDecision(kind,brief,scope,run,resolution,listed){
-const decision=decide({kind:kind,level:run.level,brief:brief,listed:listed},AUTONOMY_TABLE,BRIEF_SCHEMA);
-if(decision.action==='take'){
-resolution.taken.push({brief:brief,kind:kind,listed:decision.listed});
-return'take';
-}
-const ask={brief:brief,reason:decision.reason,kind:kind};
-if(kind===EXTERNAL_EFFECT_KIND){
-ask.exact=true;
-}
-if(scope!==undefined){
-ask.key=questionKey(kind,scope,ask);
-if(run.answeredKeys.has(ask.key)){
-return'answered';
-}
-}
-resolution.asks.push(ask);
-return'ask';
-}
-function resolveTrunkFreshness(facts,run,resolution){
-const mapped=trunkFreshnessMap()[facts.trunk_freshness];
-if(mapped!=='decide'){
-return mapped;
-}
-const status=resolveDecision(TRUNK_STALE_KIND,buildTrunkStaleBrief(facts),'run',run,resolution);
-return status==='ask'?undefined:'stale';
-}
-function resolveExternalEffects(plan,run,resolution){
-for(const step of plan.steps){
-for(const effect of step.external_effects){
-if(effect.reversible){
-resolution.reversibleEffects.push({stepId:step.id,summary:effect.summary});
-continue;
-}
-resolveDecision(EXTERNAL_EFFECT_KIND,buildExternalEffectBrief(effect.summary),['run',step.id],run,resolution);
-}
-}
-}
-function resolvePlanAcceptance(plan,run,resolution,scope){
-const isRemediation=run.taken.some((entry)=>entry.kind===PLANNER_ESCALATION_ROUTING_KIND||entry.kind===ROOT_CLUSTER_ROUTING_KIND);
-const outsidePaths=listOutsidePaths(plan,scope);
-const holds={outside_limits:outsidePaths.length>0,repeats_surface:plan.remediation_gate.repeats_surface};
-const listed=Object.keys(holds).filter((name)=>holds[name]);
-const brief=isRemediation?buildRemediationPlanBrief(plan):buildPlanAcceptanceBrief(plan);
-return resolveDecision(isRemediation?REMEDIATION_PLAN_ACCEPTANCE_KIND:PLAN_ACCEPTANCE_KIND,markOutsideLimits(brief,outsidePaths),[run.pass,plan],run,resolution,listed);
-}
-function resolvePlanAsks(planResult,facts,run,scope){
-const resolution={asks:[],taken:[],freshness:undefined,reversibleEffects:[]};
-const plan=planResult.plan;
-planResult.questions.forEach((brief)=>resolveDecision(PLANNER_QUESTION_KIND,brief,run.pass,run,resolution));
-const acceptance=resolvePlanAcceptance(plan,run,resolution,scope);
-const acceptanceAsk=resolution.asks[resolution.asks.length-1];
-resolution.freshness=resolveTrunkFreshness(facts,run,resolution);
-resolveExternalEffects(plan,run,resolution);
-if(acceptance==='ask'&&resolution.asks.length>1){
-resolution.asks=resolution.asks.filter((ask)=>ask!==acceptanceAsk);
-}
-return resolution;
-}
-function acceptResolution(resolution,run){
-for(const entry of resolution.taken){
-const isListed=run.taken.some((listed)=>JSON.stringify(listed.brief)===JSON.stringify(entry.brief));
-if(!isListed){
-run.taken.push(entry);
-}
-}
-for(const effect of resolution.reversibleEffects){
-const isListed=run.reversibleEffects.some((listed)=>listed.stepId===effect.stepId&&listed.summary===effect.summary);
-if(!isListed){
-run.reversibleEffects.push(effect);
-}
-}
-}
-function markSettledAsks(settledLabels,shownAsks,run,settledKinds){
-shownAsks.forEach((ask,index)=>{
-if(ask.key!==undefined&&settledLabels.includes(questionLabel(index))){
-run.answeredKeys.add(ask.key);
-settledKinds.add(ask.kind);
-}
-});
-}
-function logPlanningReply(run,shownEntry,shownAsks,revise){
-run.answerLog.push(buildAnswerEntry(shownEntry,revise));
-run.approvals=applyApprovalChoices(run.approvals,shownAsks,readReplyChoices(shownEntry.reply,shownAsks));
-}
-function takeNextReply(run,round){
-const storedReply=readStoredReply(run.storedAnswers,round);
-if(storedReply!==undefined){
-return storedReply;
-}
-const pendingReply=run.pendingReply;
-run.pendingReply=undefined;
-return pendingReply;
-}
-async function runPlanningPass(run,facts,passScope,replan){
-phase('Plan');
-let scope=passScope;
-let resultSchema=PLAN_RESULT_SCHEMA;
-let shownAsks=[];
-let shownResult;
-let shownEntry;
-const settledKinds=new Set();
-if(facts.head_state==='branch'&&facts.branch!==run.trunk&&!new RegExp(PLAN_SCHEMA.properties.branch.pattern,'u').test(facts.branch)){
-return stopDelivery([{problem:describeStartBranch(facts)+describeTaxonomyMiss()+'.'}],run,[],true);
-}
-let checked=await callCheckedPlanner(run,facts,{prompt:buildPlanPrompt(run.request,facts,scope,replan,listAnswerEntries(run)),label:'plan-'+run.pass,phaseTitle:'Plan',schema:resultSchema});
-for(;;){
-let{planResult,problem}=checked;
-if(problem!==undefined){
-if(shownAsks.length>0){
-logPlanningReply(run,shownEntry,shownAsks);
-}
-const unusable=planResult===null?describeUnusableResult(problem,null):{problem:problem};
-return stopDelivery([checked.isExhausted?describeCheckLimit(problem):unusable],run,[],true);
-}
-if(shownAsks.length>0){
-logPlanningReply(run,shownEntry,shownAsks,planResult);
-markSettledAsks(run.answerLog[run.answerLog.length-1].settled,shownAsks,run,settledKinds);
-if(shownAsks.some((ask)=>[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind)&&run.answeredKeys.has(ask.key))){
-planResult=shownResult;
-}else{
-const rescoped=await runScopeStep(run,facts,run.answerLog.length);
-if(rescoped.problem!==undefined){
-return stopDelivery([rescoped],run,[],true);
-}
-scope=rescoped.scope;
-}
-}
-const resolution=resolvePlanAsks(planResult,facts,run,scope);
-if(resolution.asks.length===0){
-acceptResolution(resolution,run);
-return{plan:planResult.plan,freshness:resolution.freshness};
-}
-const resettled=resolution.asks.find((ask)=>settledKinds.has(ask.kind)&&[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND,TRUNK_STALE_KIND].includes(ask.kind));
-if(resettled!==undefined){
-return stopDelivery([{problem:'Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.',terminal:true,nextAction:'report'}],run,[],true);
-}
-const lead=describePlanLine(planResult.plan);
-const round=run.answerLog.length+1;
-const reply=takeNextReply(run,round);
-if(reply===undefined){
-return{result:pauseDelivery(resolution,run,lead)};
-}
-phase('Revise');
-const questions=lead+'\n\n'+renderQuestions(resolution.asks);
-shownAsks=resolution.asks;
-shownResult=planResult;
-shownEntry={question:questions,labels:listShownLabels(shownAsks),reply:reply};
-resultSchema=buildReviseResultSchema(shownAsks);
-const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:listAnswerEntries(run),plan:planResult.plan,questions:questions,reply:reply});
-checked=await callCheckedPlanner(run,facts,{prompt:revisePrompt,label:'revise-'+round,phaseTitle:'Revise',schema:resultSchema});
 }
 }
 
@@ -5119,10 +5129,6 @@ return{decisions:decisions.slice()};
 }
 return describeLaunchProblem('The decisions launch arg must be a list of 1 to '+maxDecisions()+' non-blank strings of at most '+maxDecisionLength()+' characters each');
 }
-function listAnswerEntries(run){
-const label=questionLabel(0);
-return run.decisions.map((decision)=>buildAnswerEntry({question:label+'. A decision you settled before the run started.',labels:[label],chosen:[{label:label}],reply:decision})).concat(run.answerLog);
-}
 function createRunState(launch){
 return{
 request:launch.request,
@@ -5155,12 +5161,6 @@ versionAnswer:undefined,
 factsStem:undefined,
 pluginRoot:undefined
 };
-}
-function keepReplanReview(passEnd,replan){
-if(passEnd.replan===undefined||replan===undefined||replan.review===undefined){
-return passEnd;
-}
-return{replan:{reason:passEnd.replan.reason,review:replan.review}};
 }
 async function runDeliveryPass(run,replan){
 const stopPass=(cause)=>keepReplanReview(stopDelivery([cause],run,[],true),replan);

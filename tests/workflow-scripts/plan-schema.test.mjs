@@ -6,7 +6,7 @@ import { loadLibs } from './harness.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const lib = loadLibs([repoRoot + 'plugin/workflow-src/lib/schema.js']);
-const planCheck = loadLibs([repoRoot + 'plugin/workflow-src/standard-delivery/plan.js']);
+const planCheck = loadLibs([repoRoot + 'plugin/workflow-src/lib/plan.js']);
 const planSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/plan-schema.json', 'utf8'));
 const factsSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/facts-schema.json', 'utf8'));
 const briefSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-brief-schema.json', 'utf8'));

@@ -1,30 +1,35 @@
 /*
- * standard-delivery checks.js: the check retries of the standard-delivery
- * workflow. A scope, plan or revise result that fails its check goes back
- * to its agent with the check, and one still failing ends the run.
+ * checks.js: the check retries of the planning pass a workflow shares. A
+ * plan or revise result that fails its check goes back to its agent with
+ * the check, and one still failing ends the run.
  *
  * Inputs
- *   run     the run state of main.js createRunState. callCheckedPlanner
+ *   run     the run state of the workflow's main.js. callCheckedPlanner
  *           reads trunk, references and level.
- *   facts   the checked facts of the pass, from runFactsStep (relay.js).
+ *   facts   the checked facts of the pass, from runFactsStep (lib/runner.js).
  *   call    {prompt, label, phaseTitle, schema} of one plan or revise call.
  *   maxCheckRetries(), isFixableResult, buildCheckFixPrompt and
- *   hasDefectQuestion of lib/retry.js; AUTONOMY_TABLE, BRIEF_SCHEMA and
- *   PLANNER_QUESTION_KIND of main.js.
+ *   hasDefectQuestion of lib/retry.js, plannerCallOptions of lib/runner.js
+ *   and describePlanProblem of lib/plan.js.
+ *   The constants of the workflow's main.js this file reads: RUN_NAME and
+ *   PLANNER_QUESTION_KIND, and the data constants AUTONOMY_TABLE and
+ *   BRIEF_SCHEMA. It reads no workflow function. Every workflow whose code
+ *   calls callCheckedPlanner declares them.
  *
  * Outputs
  *   callCheckedPlanner(run, facts, call)  {planResult, problem,
  *           isExhausted} of the last planner call.
  *   The retry prompt (buildCheckFixPrompt) and the terminal report cause of
  *   a result still failing its check (describeCheckLimit) are in
- *   lib/retry.js, which runScopeStep (scope.js) also reads.
+ *   lib/retry.js, which runScopeStep (standard-delivery scope.js) also
+ *   reads.
  *   callCheckedPlanner normalizes each result with normalizePlanTitle
  *   (lib/title.js) before the plan check.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
- *   main.js: the build bundles this module into it, so a row can name a
- *   function of this module.
+ *   main.js: the build bundles this library into it, so a row can name a
+ *   function of this library.
  *   Each plan and revise call goes through callCheckedPlanner: a result
  *   isFixableResult (lib/retry.js) accepts that fails the plan check is
  *   asked again with buildCheckFixPrompt, label plan-P-fix-N or revise-R-fix-N, up to
@@ -37,7 +42,7 @@
  *   reason in neither askReasons() nor auto: a defect in the brief, which
  *   the planner fixes, so the user is never asked a defect.
  *   Title type: normalizePlanTitle (lib/title.js) never changes the agent
- *   result, so describePlanProblem (plan.js) still refuses any typed title
+ *   result, so describePlanProblem (lib/plan.js) still refuses any typed title
  *   it returns as is.
  *   The retry prompt is the first prompt with one fix line after its first
  *   line and a check data block at its end, so it holds every block the
