@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { loadLibs, loadWorkflowSource } from './harness.mjs';
-import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, countProseCharacters, isDraftWorkflow, listDraftWorkflowIds, readProseBudgets, runCli } from '../../tools/build_workflows.mjs';
+import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, countProseCharacters, isDraftWorkflow, listDraftWorkflowIds, readDataConstant, readProseBudgets, runCli } from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const WORKFLOW_ID = 'pr-feedback-remediation';
@@ -19,6 +19,7 @@ const lib = loadLibs(LIB_FILES.map((file) => join(repoRoot, 'plugin/workflow-src
 const main = loadMainFunctions(builtSource);
 const contract = loadLibs([contractPath]);
 const reviewerText = readText(join(repoRoot, 'plugin/agents/github-reviewer.md'));
+const agentBriefSchema = readDataConstant(repoRoot, 'BRIEF_SCHEMA');
 
 const PR = '12';
 const LAUNCH = { references: [PR] };
@@ -43,6 +44,16 @@ const EXIT_RESULTS = {
   'merge-advised': { exit_reason: 'merge-advised', ...COUNTS, advisory_reason: 'bounded-tail', structural_home: 'Issue 9', recommendation_text: 'Merge now.' },
   blocked: { exit_reason: 'blocked', ...COUNTS, blocker_reason: 'preflight failed', blocked_candidates: [URL_B] }
 };
+const SCOPE = { documents: [], paths: [], limits: [] };
+const REQUEST_TEXT = 'Remediate the review feedback of pull request 12 that its review fix pass escalated, on the branch of that pull request.';
+const PLAN_LINE = 'The plan for branch "feature/cache" has 1 step over 1 file: Check the path first.';
+const DRAFT_END = 'The remediation is planned, but this draft builds no waves yet, so the remediation stopped. ' + PLAN_LINE;
+const ROUTE_BACK = ' Go back to planning, from fresh facts, for ';
+const ESCALATION_ASK = 'The review fix pass on pull request 12 escalated a finding to the planner.' + ROUTE_BACK + 'its remediation?';
+const CLUSTER_ASK = 'The review fix pass on pull request 12 found 2 findings in 1 file that share one suspected root.' + ROUTE_BACK + 'a remediation that closes the class?';
+const CHOSE_PLAN = ' Chose A: Plan the remediation from fresh facts.';
+const ESCALATION_REVIEW = { exit_reason: 'planner-escalation', escalation_target: 'planner', candidate_url: URL_A };
+const STOP_REPLAN = 'The user replied to a stop the run paused at, so plan again from the fresh facts with the answers block.';
 
 function readText(path) {
   return readFileSync(path, 'utf8').replace(/\r/g, '');
@@ -111,6 +122,59 @@ function blockedMessage(lead, next = FIX_NEXT) {
 
 function runFix(fixResult) {
   return runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'fix-1': fixResult });
+}
+
+function makePlan(changes = {}) {
+  return {
+    summary: 'Close the unchecked path.',
+    title: 'Close the unchecked path',
+    digest: { problem: 'One path is never checked.', change: 'Check the path first.' },
+    remediation_gate: { promotion_gate: { irreversible: false, architectural: false, safety: false }, grows_surface: false, repeats_surface: false },
+    branch: 'feature/cache',
+    base: 'main',
+    trunk_freshness: 'fresh',
+    classification: 'bugfix',
+    breaking: false,
+    versioning: { bump_trigger: 'no', no_bump_match: 'no', artifact_files: [], changelog_files: [] },
+    validation_commands: ['npm test'],
+    delivery: 'single',
+    steps: [{ id: 'STEP-001', owner: 'hivemind:drone', files: ['src/a.js'], outcome: 'The path is checked.', depends_on: [], external_effects: [] }],
+    ...changes
+  };
+}
+
+function planResult(plan = makePlan()) {
+  return { outcome: 'complete', plan: plan, questions: [] };
+}
+
+/**
+ * Returns a plan result whose remediation gate marks the plan
+ * architectural, so decide() asks its acceptance at every level.
+ */
+function flaggedPlanResult() {
+  return planResult(makePlan({ remediation_gate: { promotion_gate: { irreversible: false, architectural: true, safety: false }, grows_surface: false, repeats_surface: false } }));
+}
+
+function escalationResults(exitReason = 'planner-escalation', changes = {}) {
+  return { 'facts-1': factsRelay(), 'fix-1': EXIT_RESULTS[exitReason], 'facts-2': factsRelay(), 'scope-2': SCOPE, 'plan-2': planResult(), ...changes };
+}
+
+function decidedBlock(ask) {
+  return 'Decided for you:\n- D1. ' + ask + CHOSE_PLAN;
+}
+
+function draftEndMessage(ask) {
+  return { needs_user: false, outcome: 'blocked', message: DRAFT_END + '\n\n' + FIX_NEXT + '\n\n' + decidedBlock(ask) };
+}
+
+function resumeArgs(paused, reply) {
+  return { ...LAUNCH, ...paused.result.resume_args, reply: reply };
+}
+
+function assertReplayed(first, resumed) {
+  for (const call of first.calls) {
+    assert.equal(callOf(resumed, call.opts.label).prompt, call.prompt, call.opts.label);
+  }
 }
 
 /**
@@ -338,12 +402,154 @@ const ROW_TESTS = {
     });
   },
   'PFR-11': () => {
-    test('planner-escalation and root-cluster-suspected end blocked until the escalation step lands', async () => {
-      const escalation = await runFix(EXIT_RESULTS['planner-escalation']);
-      assert.deepEqual(escalation.result, blockedMessage('The review fix pass on pull request 12 ended planner-escalation on candidate "' + URL_A + '", and this draft has no escalation step yet, so the remediation stopped.'));
-      const cluster = await runFix(EXIT_RESULTS['root-cluster-suspected']);
-      assert.deepEqual(cluster.result, blockedMessage('The review fix pass on pull request 12 ended root-cluster-suspected on candidates "' + URL_A + '", "' + URL_B + '", and this draft has no escalation step yet, so the remediation stopped.'));
-      assert.deepEqual(labelsOf(cluster), ['facts-1', 'fix-1']);
+    test('planner-escalation routes to planning, taken at the default level and listed as decided', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults());
+      assert.deepEqual(run.result, draftEndMessage(ESCALATION_ASK));
+      assert.ok(!run.result.message.includes('no escalation step yet'), run.result.message);
+    });
+    test('root-cluster-suspected routes to planning with the root cluster kind', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults('root-cluster-suspected'));
+      assert.deepEqual(run.result, draftEndMessage(CLUSTER_ASK));
+      for (const [exitReason, kind] of [['planner-escalation', 'planner_escalation_routing'], ['root-cluster-suspected', 'root_cluster_routing']]) {
+        const state = main.createRunState({ trunk: 'main', pr: PR });
+        assert.ok(main.routeEscalation(EXIT_RESULTS[exitReason], state).replan !== undefined, exitReason);
+        assert.deepEqual(structuredClone(state.taken.map((entry) => entry.kind)), [kind], exitReason);
+      }
+    });
+  },
+  'PFR-12': () => {
+    test('the routing brief is code-built, fits BRIEF_SCHEMA and carries no reviewer text', () => {
+      const state = main.createRunState({ trunk: 'main', pr: PR });
+      const huge = { ...EXIT_RESULTS['root-cluster-suspected'], member_count: Number.MAX_SAFE_INTEGER, cluster_files: Array(20).fill('x'.repeat(500)) };
+      for (const fix of [EXIT_RESULTS['planner-escalation'], EXIT_RESULTS['root-cluster-suspected'], huge]) {
+        const brief = structuredClone(main.buildEscalationBrief(fix, state));
+        assert.ok(lib.validateSchema(agentBriefSchema, brief).ok, fix.exit_reason);
+        assert.deepEqual([brief.options[0].summary, brief.recommendation.option_id, brief.recommendation.strength], ['Plan the remediation from fresh facts.', 'A', 'strong']);
+        const text = JSON.stringify(brief);
+        for (const value of [URL_A, URL_B, 'src/a.js', 'One unchecked path.', 'Both name the same path.', 'planner"']) {
+          assert.ok(!text.includes(value), fix.exit_reason + ' ' + value);
+        }
+      }
+      assert.equal(main.buildEscalationBrief(EXIT_RESULTS['root-cluster-suspected'], state).problem, CLUSTER_ASK);
+    });
+  },
+  'PFR-13': () => {
+    test('the scope and plan prompts carry the code-built request and the fixed sentence', async () => {
+      assert.equal(main.buildRemediationRequest(PR), REQUEST_TEXT);
+      const run = await runWorkflow(LAUNCH, escalationResults());
+      for (const label of ['facts-2', 'scope-2', 'plan-2']) {
+        assert.equal(callOf(run, label).prompt.split('\n')[1], RELAY_SENTENCE, label);
+      }
+      for (const label of ['scope-2', 'plan-2']) {
+        assert.equal(readDataBlock(callOf(run, label).prompt, 'request'), REQUEST_TEXT, label);
+      }
+    });
+  },
+  'PFR-14': () => {
+    test('a planning pass runs fresh facts and its scan, then scope, then plan', async () => {
+      const scan = { results: [{ item_ref: 't1', verdict: 'clean' }] };
+      const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'facts-2': factsRelay({ external_texts: '1' }), 'scan-2': scan }));
+      assert.deepEqual(labelsOf(run), ['facts-1', 'fix-1', 'facts-2', 'scan-2', 'scope-2', 'plan-2']);
+      assert.deepEqual(run.phases, ['Facts', 'Fix', 'Facts', 'Scan', 'Scope', 'Plan']);
+      assert.ok(callOf(run, 'facts-2').prompt.includes('--trunk main --ref ' + PR));
+      assert.deepEqual([callOf(run, 'scope-2').opts.agentType, callOf(run, 'scope-2').opts.model], ['hivemind:cerebrate', 'sonnet']);
+      assert.equal(callOf(run, 'plan-2').opts.agentType, 'hivemind:cerebrate');
+      assert.ok(readDataBlock(callOf(run, 'plan-2').prompt, 'scope') !== undefined);
+    });
+  },
+  'PFR-15': () => {
+    test('the first plan prompt carries the replan reason and the review block of the fix result', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults());
+      const prompt = callOf(run, 'plan-2').prompt;
+      assert.equal(readDataBlock(prompt, 'replan'), 'The review fix pass on pull request 12 returned planner-escalation, so plan the remediation of what the review block reports, from the fresh facts.');
+      assert.deepEqual(readDataBlock(prompt, 'review'), ESCALATION_REVIEW);
+    });
+    test('the review block holds only the exit fields, with deferred_escalation_items when present', () => {
+      const cluster = EXIT_RESULTS['root-cluster-suspected'];
+      const { mode, findings_resolved, findings_open, ...clusterFields } = cluster;
+      assert.deepEqual([mode, findings_resolved, findings_open], ['fix', 1, 0]);
+      assert.deepEqual(structuredClone(main.projectEscalationReview(cluster)), clusterFields);
+      const deferred = { ...EXIT_RESULTS['planner-escalation'], deferred_escalation_items: [URL_B] };
+      assert.deepEqual(structuredClone(main.projectEscalationReview(deferred)), { ...ESCALATION_REVIEW, deferred_escalation_items: [URL_B] });
+    });
+  },
+  'PFR-16': () => {
+    test('a taken remediation acceptance ends blocked with one terminal cause naming the plan line', async () => {
+      assert.deepEqual(structuredClone(main.describeUnbuiltWaves(makePlan())), { problem: DRAFT_END, terminal: true });
+      const run = await runWorkflow(LAUNCH, escalationResults());
+      assert.deepEqual(labelsOf(run), ['facts-1', 'fix-1', 'facts-2', 'scope-2', 'plan-2']);
+      assert.ok(run.result.message.startsWith(DRAFT_END + '\n\n'), run.result.message);
+    });
+    test('a gate flag asks the remediation plan acceptance, the Promotion Gate', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult() }));
+      assert.equal(run.result.needs_user, true);
+      assert.ok(run.result.message.startsWith(PLAN_LINE + '\n\n**Q1. Run the remediation plan for the '), run.result.message);
+      assert.ok(run.result.message.includes(' The plan changes how the system is built.**'), run.result.message);
+    });
+  },
+  'PFR-17': () => {
+    test('a resume with answers, build and reply replays every earlier agent and revises', async () => {
+      const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult() }));
+      assert.deepEqual(first.result.resume_args, { answers: {}, build: BUILD_ID });
+      const results = escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult(), 'revise-1': { ...flaggedPlanResult(), settled: ['Q1'] } });
+      const resumed = await runWorkflow(resumeArgs(first, 'A'), results);
+      assert.deepEqual(labelsOf(resumed), [...labelsOf(first), 'revise-1']);
+      assertReplayed(first, resumed);
+      const revise = callOf(resumed, 'revise-1');
+      assert.equal(revise.prompt.split('\n')[1], RELAY_SENTENCE);
+      assert.equal(readDataBlock(revise.prompt, 'request'), REQUEST_TEXT);
+      assert.equal(readDataBlock(revise.prompt, 'reply'), 'A');
+      assert.deepEqual(resumed.result, draftEndMessage(ESCALATION_ASK));
+    });
+    test('a reply that settles nothing pauses again with the first reply in its answers', async () => {
+      const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult() }));
+      const results = escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult(), 'revise-1': { ...flaggedPlanResult(), settled: [] }, 'scope-2-1': SCOPE });
+      const resumed = await runWorkflow(resumeArgs(first, 'Wait.'), results);
+      assert.deepEqual(labelsOf(resumed), [...labelsOf(first), 'revise-1', 'scope-2-1']);
+      assert.deepEqual(resumed.result.resume_args, { answers: { 'round-1': 'Wait.' }, build: BUILD_ID });
+    });
+  },
+  'PFR-18': () => {
+    test('a reply to a facts stop of a planning pass plans again and keeps the review block', async () => {
+      const stopped = factsRelay({ delivery: 'stop', delivery_stops: 'dirty_paths' });
+      const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'facts-2': stopped }));
+      assert.deepEqual(labelsOf(first), ['facts-1', 'fix-1', 'facts-2']);
+      assert.equal(first.result.needs_user, true);
+      const results = escalationResults('planner-escalation', { 'facts-2': stopped, 'facts-3': factsRelay(), 'scope-3': SCOPE, 'plan-3': planResult() });
+      const resumed = await runWorkflow(resumeArgs(first, 'A'), results);
+      assert.deepEqual(labelsOf(resumed), ['facts-1', 'fix-1', 'facts-2', 'facts-3', 'scope-3', 'plan-3']);
+      assertReplayed(first, resumed);
+      const prompt = callOf(resumed, 'plan-3').prompt;
+      assert.equal(readDataBlock(prompt, 'replan'), STOP_REPLAN);
+      assert.deepEqual(readDataBlock(prompt, 'review'), ESCALATION_REVIEW);
+      assert.deepEqual(resumed.result, draftEndMessage(ESCALATION_ASK));
+    });
+    test('a null scope result ends blocked with run_again and no plan call', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'scope-2': null }));
+      assert.deepEqual(labelsOf(run), ['facts-1', 'fix-1', 'facts-2', 'scope-2']);
+      assert.equal(run.result.outcome, 'blocked');
+      assert.ok(run.result.message.includes('Next: nothing in the repo needs a fix, so run the request again later'), run.result.message);
+    });
+  },
+  'PFR-19': () => {
+    test('every label of a run with a check retry, a stop and a revise is unique', async () => {
+      const stopped = factsRelay({ delivery: 'stop', delivery_stops: 'dirty_paths' });
+      const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'facts-2': stopped }));
+      const results = escalationResults('planner-escalation', {
+        'facts-2': stopped,
+        'facts-3': factsRelay(),
+        'scope-3': SCOPE,
+        'plan-3': { outcome: 'complete', questions: [] },
+        'plan-3-fix-1': flaggedPlanResult(),
+        'revise-2': { ...flaggedPlanResult(), settled: ['Q1'] }
+      });
+      const second = await runWorkflow(resumeArgs(first, 'A'), results);
+      assert.equal(second.result.needs_user, true);
+      const resumed = await runWorkflow(resumeArgs(second, 'A'), results);
+      const labels = labelsOf(resumed);
+      assert.deepEqual(labels, ['facts-1', 'fix-1', 'facts-2', 'facts-3', 'scope-3', 'plan-3', 'plan-3-fix-1', 'revise-2']);
+      assert.equal(new Set(labels).size, labels.length);
+      assert.deepEqual(resumed.result, draftEndMessage(ESCALATION_ASK));
     });
   }
 };
@@ -384,7 +590,7 @@ describe('pr-feedback-remediation draft', () => {
   });
   test('each source file is at most 600 lines, ASCII, with no hash before a digit and no clock or randomness', () => {
     const files = readdirSync(sourceDir).filter((name) => name.endsWith('.js'));
-    assert.deepEqual(files.sort(), ['contract.js', 'fix.js', 'main.js', 'meta.js']);
+    assert.deepEqual(files.sort(), ['contract.js', 'escalation.js', 'fix.js', 'main.js', 'meta.js']);
     for (const name of files) {
       const source = readText(join(sourceDir, name));
       assert.ok(source.split('\n').length <= 600, name);

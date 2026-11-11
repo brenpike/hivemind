@@ -58,6 +58,6 @@
   "plugin/skills/triage-backlog/SKILL.md": 11952,
   "plugin/skills/zoom-out/SKILL.md": 388,
   "plugin/workflows/analysis-only.js": 16050,
-  "plugin/workflows/pr-feedback-remediation.js": 14300,
+  "plugin/workflows/pr-feedback-remediation.js": 29900,
   "plugin/workflows/standard-delivery.js": 43800
 }

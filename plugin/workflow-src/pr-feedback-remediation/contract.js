@@ -12,7 +12,7 @@
  *   tests/workflow-scripts/pr-feedback-remediation.test.mjs, which loads
  *   this file with loadLibs and requires each check to be a function of the
  *   script the build makes in memory: a check can live in main.js, in
- *   fix.js or in a shared library the build carries.
+ *   fix.js, in escalation.js or in a shared library the build carries.
  *   The build bundles every .js file of this directory but this one, so this
  *   file never reaches the built script.
  *
@@ -33,6 +33,14 @@ function contractRows() {
     { id: 'PFR-08', step: 'Fix', check: 'describeFixExit', rule: 'clean and merge-advised end complete with no pr, and merge-advised shows its advisory reason and its recommendation and structural home through quoteDiagnostic.' },
     { id: 'PFR-09', step: 'Fix', check: 'describeFixExit', rule: 'injection-suspect ends the run blocked with a terminal cause naming the encoded candidate URL and the pattern category.' },
     { id: 'PFR-10', step: 'Fix', check: 'describeFixExit', rule: 'blocked, user-input-required and high-severity-rejection end the run blocked naming the exit and each candidate URL through encodeUntrustedText, and blocked also quotes its blocker_reason through describeReason.' },
-    { id: 'PFR-11', step: 'Fix', check: 'describeFixExit', rule: 'planner-escalation and root-cluster-suspected end the run blocked naming the exit and its candidate URLs, since this draft has no escalation step yet.' }
+    { id: 'PFR-11', step: 'Route', check: 'routeEscalation', rule: 'planner-escalation and root-cluster-suspected never end at describeFixExit: the routing decision resolves through resolveTailDecision of tails.js with kind planner_escalation_routing or root_cluster_routing fixed by the exit, and at the table default level decide() takes it, so the final message lists it as a decision taken.' },
+    { id: 'PFR-12', step: 'Route', check: 'buildEscalationBrief', rule: 'The routing brief is built in code through buildTailBrief, names the pull request and, for a root cluster, only the member and file counts, carries no reviewer text, and fits BRIEF_SCHEMA with option A going back to planning from fresh facts at strength strong.' },
+    { id: 'PFR-13', step: 'Plan', check: 'buildRemediationRequest', rule: 'run.request is the code-built request naming the pull request, and the scope, plan and revise prompts carry it in their request block, with run.relaySentence as their second line.' },
+    { id: 'PFR-14', step: 'Plan', check: 'runRemediationPass', rule: 'After the routing, each planning pass runs runFactsStep from fresh facts, label facts-P with its scan scan-P, then runScopeStep, label scope-P, then runPlanningPass, label plan-P, P counting from 2, so every planner call follows the facts of its own pass.' },
+    { id: 'PFR-15', step: 'Plan', check: 'projectEscalationReview', rule: 'The plan prompt of the first planning pass carries a replan block naming the pull request and the exit, and a review block holding only the exit_reason and the fields fixExitFields() names for it, with deferred_escalation_items when the result has it.' },
+    { id: 'PFR-16', step: 'Plan', check: 'describeUnbuiltWaves', rule: 'The plan acceptance resolves through decide() as remediation_plan_acceptance, the Promotion Gate; once every question is settled or taken the run ends blocked with one terminal cause saying this draft builds no waves yet and naming describePlanLine(plan), followed by the decisions taken.' },
+    { id: 'PFR-17', step: 'Revise', check: 'pauseDelivery', rule: 'A plan acceptance decide() asks pauses through pauseDelivery with resume_args {answers, build}, and a resume with answers, build and reply replays every earlier agent prompt byte for byte from cache, then revises, label revise-R, and a reply that settles the acceptance ends at the draft end with no second pause.' },
+    { id: 'PFR-18', step: 'Plan', check: 'keepReplanReview', rule: 'A facts, scan or scope stop of a planning pass goes through stopDelivery with isReplan true, so a fix_cause stop pauses with a step_stop question, and its reply starts a new pass whose plan prompt keeps the review block.' },
+    { id: 'PFR-19', step: 'Labels', check: 'runEscalation', rule: 'Every agent call of a run has a label no other call of that run has, across the fix pass, every planning pass, every revise round and every check retry, so a resume gets every earlier result from cache.' }
   ];
 }
