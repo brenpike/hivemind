@@ -13,6 +13,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.6.12] - 2026-11-10
+
+### Added
+
+- Policy fixture `tests/policy/safety-reviewer-version-check.json` pins the `github-reviewer` version check in step 7: its condition, its `hivemind:bump-type` invocation, its stop rule, and the never-edit-a-version-file clause before the push.
+
+### Changed
+
+- `github-reviewer` Fix Mode Input notes and steps 3, 4, 6, 8 and 9 are reworded more tightly to fit its prose budget, dropping only text that repeats a rule stated elsewhere in the file. No rule changes.
+
+### Fixed
+
+- `github-reviewer` now runs a read-only `hivemind:bump-type` check before it pushes review fixes, on every watch path. The check runs after the fix commit and only when `CLAUDE.md` names version files. Whenever a version file does not hold the expected version (any `version_check: mismatch`, whatever the verdict), the reviewer returns `blocked`, naming the expected version. When the check itself fails (exit 1), it also returns `blocked`. Only a check that exits 0 with a match, a version it cannot read (`unreadable`) or a bump it cannot settle (`undetermined`) goes on to the push; any other result, such as output with no `version_check` line, returns `blocked`. The reviewer never edits a version file (ADR-0040 D3).
+
+No prose budget raised.
+
+Refs #409 (slice 3, PR 3).
+
 ## [7.6.11] - 2026-11-10
 
 ### Added
