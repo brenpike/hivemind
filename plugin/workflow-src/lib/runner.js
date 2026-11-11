@@ -97,8 +97,10 @@
  *   line of every prompt from the first agent on. The scope, plan and
  *   revise prompts carry the replies in data blocks and not
  *   resumedReplySentence(), so they take run.relaySentence through
- *   addRelaySentence, which leaves a prompt unchanged when it is unset, and
- *   a check retry of one keeps it. The sentence lowers the risk and does
+ *   addRelaySentence, which leaves a prompt unchanged when it is unset. The
+ *   checked call, runScopeStep (lib/scope.js) or callCheckedPlanner
+ *   (lib/checks.js), adds it last, at each send, to the first prompt and to
+ *   each check retry, so no retry builder moves it off line two. The sentence lowers the risk and does
  *   not close it: an agent that still obeys the relayed message returns a
  *   blocked or refused result, which every check above still reads.
  *   ADR-0037 records the residual.

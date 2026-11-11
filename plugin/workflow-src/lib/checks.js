@@ -5,12 +5,14 @@
  *
  * Inputs
  *   run     the run state of the workflow's main.js. callCheckedPlanner
- *           reads trunk, references and level.
+ *           reads trunk, references, level and relaySentence.
  *   facts   the checked facts of the pass, from runFactsStep (lib/runner.js).
  *   call    {prompt, label, phaseTitle, schema} of one plan or revise call.
+ *           call.prompt is the prompt before run.relaySentence is added.
  *   maxCheckRetries(), isFixableResult, buildCheckFixPrompt and
- *   hasDefectQuestion of lib/retry.js, plannerCallOptions of lib/runner.js
- *   and describePlanProblem of lib/plan.js.
+ *   hasDefectQuestion of lib/retry.js, plannerCallOptions and
+ *   addRelaySentence of lib/runner.js and describePlanProblem of
+ *   lib/plan.js.
  *   The constants of the workflow's main.js this file reads: RUN_NAME and
  *   PLANNER_QUESTION_KIND, and the data constants AUTONOMY_TABLE and
  *   BRIEF_SCHEMA. It reads no workflow function. Every workflow whose code
@@ -46,7 +48,10 @@
  *   it returns as is.
  *   The retry prompt is the first prompt with one fix line after its first
  *   line and a check data block at its end, so it holds every block the
- *   first prompt holds.
+ *   first prompt holds. run.relaySentence is added last, with
+ *   addRelaySentence (lib/runner.js) at each send, to the first prompt and
+ *   to each retry prompt, so it stays on line two and the fix line of a
+ *   retry is line three.
  *
  * Why
  *   A check slip is fixed by the agent that made it, never asked of the
@@ -55,8 +60,10 @@
  */
 
 /**
- * Calls the planner with call.prompt, normalizes its title and checks it.
- * A fixable problem calls it again with buildCheckFixPrompt, label
+ * Calls the planner with call.prompt plus run.relaySentence
+ * (addRelaySentence), normalizes its title and checks it.
+ * A fixable problem calls it again with buildCheckFixPrompt plus
+ * run.relaySentence, label
  * call.label plus '-fix-N', up to maxCheckRetries() times. Returns
  * {planResult, problem, isExhausted}: isExhausted when the last result
  * still has a fixable problem.
@@ -71,16 +78,16 @@ function describeQuestionProblem(planResult, run) {
 }
 
 async function callCheckedPlanner(run, facts, call) {
-  let prompt = call.prompt;
+  let attempt = call.prompt;
   for (let retry = 0; ; retry += 1) {
     const label = retry === 0 ? call.label : call.label + '-fix-' + retry;
-    const result = normalizePlanTitle(await agent(prompt, plannerCallOptions(label, call.phaseTitle, call.schema)), call.schema);
+    const result = normalizePlanTitle(await agent(addRelaySentence(attempt, run), plannerCallOptions(label, call.phaseTitle, call.schema)), call.schema);
     const planProblem = describePlanProblem(result, call.schema, facts, run.trunk, run.references);
     const problem = planProblem === undefined ? describeQuestionProblem(result, run) : planProblem;
     const isFixable = problem !== undefined && isFixableResult(result, call.schema);
     if (!isFixable || retry === maxCheckRetries()) {
       return { planResult: result, problem: problem, isExhausted: isFixable };
     }
-    prompt = buildCheckFixPrompt(call.prompt, problem, validateSchema(call.schema, result).errors);
+    attempt = buildCheckFixPrompt(call.prompt, problem, validateSchema(call.schema, result).errors);
   }
 }

@@ -66,7 +66,10 @@
  *   With no decision and an empty answerLog the scope prompt is the prompt
  *   of a run with no answers, and it carries no resume note, so a resume
  *   replays it from cache. It carries run.relaySentence only through
- *   addRelaySentence (lib/runner.js), and every check retry keeps it. Otherwise it carries listAnswerEntries(run), each
+ *   addRelaySentence (lib/runner.js), which runScopeStep adds last, at each
+ *   send, to the first prompt and to each check retry, so the sentence is
+ *   line two and the fix line of a retry line three. Otherwise it carries
+ *   listAnswerEntries(run), each
  *   launch decision then the whole log, in an answers data block
  *   right after the request block, and its data line calls settled only
  *   what the settled labels of each entry name, so an open question shown
@@ -183,11 +186,11 @@ function keepRepositoryPathEntries(scope, root) {
 
 async function runScopeStep(run, facts, round) {
   phase('Scope');
-  const prompt = addRelaySentence(buildScopePrompt(run.request, facts, listAnswerEntries(run)), run);
+  const prompt = buildScopePrompt(run.request, facts, listAnswerEntries(run));
   const options = scopeOptions(run.pass, round);
-  let scope = await agent(prompt, options);
+  let scope = await agent(addRelaySentence(prompt, run), options);
   for (let retry = 1; retry <= maxCheckRetries() && scope !== null && describeScopeProblem(scope) !== undefined; retry += 1) {
-    scope = await agent(buildCheckFixPrompt(prompt, describeScopeProblem(scope).problem, validateSchema(SCOPE_SCHEMA, scope).errors), { ...options, label: options.label + '-fix-' + retry });
+    scope = await agent(addRelaySentence(buildCheckFixPrompt(prompt, describeScopeProblem(scope).problem, validateSchema(SCOPE_SCHEMA, scope).errors), run), { ...options, label: options.label + '-fix-' + retry });
   }
   const unusable = describeScopeProblem(scope);
   if (unusable !== undefined && scope !== null) {
