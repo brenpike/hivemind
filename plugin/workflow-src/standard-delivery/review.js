@@ -273,10 +273,6 @@ function reviewStopTexts(review) {
   }
 }
 
-function quoteOrEmpty(text, limit) {
-  return quoteDiagnostic(text, limit) || encodeUntrustedText('');
-}
-
 function describeReviewStop(review, head) {
   const detail = reviewStopTexts(review).detail;
   const line = describeReviewOpen(review, head, ' after ' + describeCount(review.iterations_completed, 'iteration')) + describePullRequestStop();

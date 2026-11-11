@@ -1,11 +1,13 @@
 /*
- * standard-delivery specs.js: the routing specs of the runner scripts of
- * the standard-delivery workflow, their fixed warning texts and the
- * consistency checks of the bump-type relay.
+ * specs.js: the routing specs of the runner scripts a workflow shares,
+ * their fixed warning texts and the consistency checks of the bump-type
+ * relay.
  *
  * Inputs
- *   values  the routing lines of one relay, as readRelayedLines (relay.js)
- *           parses them with one of these specs.
+ *   values  the routing lines of one relay, as readRelayedLines
+ *           (lib/runner.js) parses them with one of these specs.
+ *   It reads no constant of the workflow's main.js and no workflow
+ *   function: gitIdentifierPattern is lib/identifier.js.
  *
  * Outputs
  *   createWorkingBranchRoutingSpec(), moltRoutingSpec(),
@@ -25,14 +27,14 @@
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
- *   main.js: the build bundles this module into it, so a row can name a
- *   function of this module.
+ *   main.js: the build bundles this library into it, so a row can name a
+ *   function of this library.
  *   The keys of each spec are the OUTPUT keys of its script, and each
  *   warning pattern holds only the fixed texts of its script.
  *
  * Why
  *   A relay is read only through the spec of the script that wrote it, so
- *   the specs of every runner step live in one place.
+ *   the specs of every workflow's runner steps live in one place.
  */
 
 function commitShaPattern() {

@@ -10,7 +10,7 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const sourceRoot = repoRoot + 'plugin/workflow-src/';
 const libDir = sourceRoot + 'lib/';
 const lib = loadLibs([libDir + 'result.js', libDir + 'stop.js', libDir + 'args.js']);
-const NEW_LIBS = ['args.js', 'facts.js', 'identifier.js'];
+const NEW_LIBS = ['args.js', 'facts.js', 'identifier.js', 'specs.js', 'commit.js'];
 
 const RUN_NOUN = 'delivery';
 const BUILD_ID = 'build-a1';

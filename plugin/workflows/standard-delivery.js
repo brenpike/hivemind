@@ -44,12 +44,13 @@ export const meta = {
  *   lib/approvals.js
  *   lib/tails.js
  *   lib/record.js
+ *   lib/specs.js
+ *   lib/commit.js
  *   standard-delivery/gates.js
  *   standard-delivery/pr.js
  *   standard-delivery/relay.js
  *   standard-delivery/review-schema.js
  *   standard-delivery/review.js
- *   standard-delivery/specs.js
  *   standard-delivery/waves.js
  *   standard-delivery/main.js
  * Do not edit by hand. Rebuild with `node tools/build_workflows.mjs`.
@@ -693,7 +694,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'b4e1a8fa8e534941';
+const BUILD_ID = '8b1f7bbc97e5db42';
 
 function supportedSchemaKeywords(){
 return[
@@ -3660,6 +3661,197 @@ return buildReplyReplan('a stop the run paused at');
 return{rerun:true,stopAnswer:asked.answer};
 }
 
+function commitShaPattern(){
+return/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+}
+function branchWarningTexts(){
+return{
+stale:'trunk is stale or diverged from origin; proceeding as acknowledged at preflight',
+skipped:'trunk freshness check was skipped'
+};
+}
+function createWorkingBranchRoutingSpec(){
+const warnings=branchWarningTexts();
+return{
+branch:{pattern:gitIdentifierPattern(),required:true},
+commit:{pattern:commitShaPattern(),required:true},
+created:{pattern:/^(?:true|false)$/,required:true},
+warning:{pattern:new RegExp('^(?:'+warnings.stale+'|'+warnings.skipped+')$'),required:false}
+};
+}
+function moltRoutingSpec(){
+return{
+branch:{pattern:gitIdentifierPattern(),required:true},
+commit:{pattern:commitShaPattern(),required:true},
+committed:{pattern:/^(?:true|false)$/,required:true}
+};
+}
+function bumpTypeRoutingSpec(){
+const count={pattern:/^(?:0|[1-9][0-9]*)$/,required:true};
+return{
+dominant_row:{pattern:/^(?:MAJOR|MINOR|PATCH|NO_BUMP|NONE|MULTI)$/,required:true},
+verdict:{pattern:/^(?:bump_required|no_bump|ask_user)$/,required:true},
+bump_type:{pattern:/^(?:major|minor|patch|none)$/,required:true},
+rule_applied:{pattern:/^[1-6]$/,required:true},
+counts:{block:{major:count,minor:count,patch:count,no_bump:count},required:true},
+mapped_commits:count,
+dropped_reverts:count
+};
+}
+function pullRequestWarningTexts(){
+return[
+'push was rejected; the branch is not on its remote',
+'no upstream and no origin remote; push deferred',
+'gh cannot read the push remote as a GitHub repository; the PR head repository was not checked'
+];
+}
+function openPlanPrRoutingSpec(){
+return{
+url:{pattern:/^https:\/\/[A-Za-z0-9._/-]+\/pull\/[0-9]+$/,required:true},
+head_ref_oid:{pattern:commitShaPattern(),required:true},
+created:{pattern:/^(?:true|false)$/,required:true},
+commented:{pattern:/^(?:true|false)$/,required:true},
+warning:{pattern:new RegExp('^(?:'+pullRequestWarningTexts().join('|')+')$'),required:false}
+};
+}
+function semverCorePattern(){
+return/^(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})$/;
+}
+function versionCheckRoutingSpec(){
+return{
+...bumpTypeRoutingSpec(),
+version_check:{pattern:/^(?:match|mismatch|unreadable|undetermined)$/,required:true},
+trunk_version:{pattern:semverCorePattern(),required:false},
+expected_version:{pattern:semverCorePattern(),required:false}
+};
+}
+function isConsistentBumpRelay(values){
+const counts=values.counts;
+const countSum=Number(counts.major)+Number(counts.minor)+Number(counts.patch)+Number(counts.no_bump);
+return(values.verdict==='bump_required')===(values.bump_type!=='none')
+&&countSum===Number(values.mapped_commits);
+}
+function isConsistentVersionRelay(values){
+const hasExpected=values.expected_version!==undefined;
+const hasTrunk=values.trunk_version!==undefined;
+if(!isConsistentBumpRelay(values)||(hasExpected&&!hasTrunk)){
+return false;
+}
+if(values.version_check==='match'||values.version_check==='mismatch'){
+return hasExpected&&values.verdict!=='ask_user';
+}
+return values.version_check==='unreadable'||(values.verdict==='ask_user'&&!hasExpected);
+}
+
+function buildInputsPath(run,kind,label){
+return typeof run.factsStem==='string'?'.hivemind/'+kind+'-inputs-'+run.factsStem+'-'+label+'.json':undefined;
+}
+function commitStepTexts(stepName){
+switch(stepName){
+case'wave':
+return{purpose:'the wave of plan steps that just ran',noun:'the wave'};
+case'fix':
+return{purpose:'the validation fix round that just ran',noun:'the fix round',subject:'fix the failed validation'};
+case'review':
+return{purpose:'the local review that just ran, with an empty file list',noun:'the local review',subject:'apply the local review fixes'};
+case'head':
+return{purpose:'nothing: the empty file list makes it report the head of the working branch after the user replied to a stop',noun:'the head check',subject:'read the branch head'};
+default:
+throw new Error('commitStepTexts: no texts for step '+JSON.stringify(stepName));
+}
+}
+function maxSubjectLength(){
+return 72;
+}
+function forbiddenSubjectTexts(){
+return['co-authored-by:','authored-by:','generated with','created with claude','\u{1f916} generated'];
+}
+function isUsableSubject(subject){
+const lowered=subject.toLowerCase();
+return subject!==''
+&&!subject.includes('!:')
+&&!/breaking[ -]change/i.test(subject)
+&&!forbiddenSubjectTexts().some((forbidden)=>lowered.includes(forbidden));
+}
+function toCommitSubject(text,fallbackSubject){
+const oneLine=text.replace(/[\s\x00-\x1f\x7f-\x9f]+/g,' ').trim();
+const subject=cutAtBoundary(oneLine,maxSubjectLength());
+return isUsableSubject(subject)?subject:fallbackSubject;
+}
+function listCommitWords(trunk,inputsPath){
+return['--trunk',trunk,'--inputs',inputsPath];
+}
+function buildCommitPrompt(files,plan,trunk,inputsPath,stepName,subject,pluginRoot){
+const content={type:commitTypeMap()[plan.classification],breaking:plan.breaking,subject:subject,files:files};
+return['Run the command below to commit '+commitStepTexts(stepName).purpose+'.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',listCommitWords(trunk,inputsPath),pluginRoot)),formatInputsFileBlock(inputsPath,content)].join('\n');
+}
+function readOutsidePath(payload){
+try{
+const parsed=JSON.parse(payload);
+return typeof parsed==='string'?parsed:payload;
+}catch(parseError){
+return payload;
+}
+}
+function quoteOrEmpty(text,limit){
+return quoteDiagnostic(text,limit)||encodeUntrustedText('');
+}
+function describeCommitBlocker(stderr,stepNoun){
+const lead='The commit step was blocked, so '+RUN_NAME+' stopped: '+describeRelayBlocker(stderr,false);
+const outsideLines=splitStderrLines(stderr).filter((line)=>line.startsWith('outside: '));
+if(outsideLines.length===0){
+return lead;
+}
+const pathLines=outsideLines.map((line)=>'- '+quoteOrEmpty(readOutsidePath(line.slice('outside: '.length))));
+return[lead+' Dirty paths outside the files of '+stepNoun+':',...capItemLines(pathLines)].join('\n');
+}
+function checkCommitRelay(relay,plan,stepName){
+const stepNoun=commitStepTexts(stepName).noun;
+const stopped='so '+RUN_NAME+' stopped. Check the branch for a commit of '+stepNoun+'.';
+if(!validateSchema(RELAY_SCHEMA,relay).ok){
+return describeUnusableRelay(relay,'commit',stopped);
+}
+if(relay.outcome==='blocked'){
+return{problem:describeCommitBlocker(relay.stderr,stepNoun),terminal:true,nextAction:readRelayAction(relay.stderr)};
+}
+const values=readRelayedLines(relay,moltRoutingSpec());
+if(values===undefined){
+return describeUnusableRelay(relay,'commit',stopped,true);
+}
+if(values.branch!==plan.branch){
+return{problem:'The commit step reported a branch other than the plan branch, '+stopped,terminal:true};
+}
+return{values:values};
+}
+function describeCommitEnd(commitValues,stepName){
+const noun=commitStepTexts(stepName).noun;
+return noun.charAt(0).toUpperCase()+noun.slice(1)+' was committed as '+commitValues.commit+', so that commit can hold partial edits.';
+}
+async function runCommitStep(run,plan,commit,stepCauses){
+if(!Array.isArray(stepCauses)){
+throw new Error('runCommitStep: stepCauses must be an array');
+}
+const subject=commit.subject??commitStepTexts(commit.stepName).subject;
+const isReplan=commit.stepName==='wave';
+phase('Commit');
+const listWords=(label)=>listCommitWords(run.trunk,buildInputsPath(run,'molt',label));
+const commandStop=describeCommandStop('commit',listWords(commit.label),listWords(commit.label+'-retry'));
+if(commandStop!==undefined){
+return stopDelivery(stepCauses.concat([commandStop]),run,[],isReplan);
+}
+const relay=await runRunnerRelay((label)=>addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,listWords(label)[3],commit.stepName,subject,run.pluginRoot),run),commit.label,'Commit');
+const checked=checkCommitRelay(relay,plan,commit.stepName);
+if(checked.problem!==undefined){
+return stopDelivery(stepCauses.concat([checked]),run,[],isReplan);
+}
+observeHead(run,checked.values.commit,plan.branch);
+if(stepCauses.length===0){
+return{values:checked.values};
+}
+const endLines=checked.values.committed==='true'?[describeCommitEnd(checked.values,commit.stepName)]:[];
+return stopDelivery(stepCauses,run,endLines,isReplan);
+}
+
 function gateIds(){
 return['validate','review'];
 }
@@ -4154,9 +4346,6 @@ return'A test case that hits its own time limit, in a file the branch does not c
 function validationFixSentence(){
 return'This is a validation fix task: the task is one fix round for the run\'s failed validation.';
 }
-function buildInputsPath(run,kind,label){
-return typeof run.factsStem==='string'?'.hivemind/'+kind+'-inputs-'+run.factsStem+'-'+label+'.json':undefined;
-}
 function listBranchWords(plan,freshness,trunk){
 return['--base',plan.base,'--branch',plan.branch,'--classification',plan.classification,'--trunk-freshness',freshness,'--trunk',trunk];
 }
@@ -4200,108 +4389,6 @@ return stopDelivery([{problem:'The branch step switched branch or commit again a
 }
 run.branchSwitches+=1;
 return{replan:{reason:'The branch step switched onto a branch or commit other than the one the facts were taken on, so plan again from the new facts.'}};
-}
-function commitStepTexts(stepName){
-switch(stepName){
-case'wave':
-return{purpose:'the wave of plan steps that just ran',noun:'the wave'};
-case'fix':
-return{purpose:'the validation fix round that just ran',noun:'the fix round',subject:'fix the failed validation'};
-case'review':
-return{purpose:'the local review that just ran, with an empty file list',noun:'the local review',subject:'apply the local review fixes'};
-case'head':
-return{purpose:'nothing: the empty file list makes it report the head of the working branch after the user replied to a stop',noun:'the head check',subject:'read the branch head'};
-default:
-throw new Error('commitStepTexts: no texts for step '+JSON.stringify(stepName));
-}
-}
-function maxSubjectLength(){
-return 72;
-}
-function forbiddenSubjectTexts(){
-return['co-authored-by:','authored-by:','generated with','created with claude','\u{1f916} generated'];
-}
-function isUsableSubject(subject){
-const lowered=subject.toLowerCase();
-return subject!==''
-&&!subject.includes('!:')
-&&!/breaking[ -]change/i.test(subject)
-&&!forbiddenSubjectTexts().some((forbidden)=>lowered.includes(forbidden));
-}
-function toCommitSubject(text,fallbackSubject){
-const oneLine=text.replace(/[\s\x00-\x1f\x7f-\x9f]+/g,' ').trim();
-const subject=cutAtBoundary(oneLine,maxSubjectLength());
-return isUsableSubject(subject)?subject:fallbackSubject;
-}
-function listCommitWords(trunk,inputsPath){
-return['--trunk',trunk,'--inputs',inputsPath];
-}
-function buildCommitPrompt(files,plan,trunk,inputsPath,stepName,subject,pluginRoot){
-const content={type:commitTypeMap()[plan.classification],breaking:plan.breaking,subject:subject,files:files};
-return['Run the command below to commit '+commitStepTexts(stepName).purpose+'.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',listCommitWords(trunk,inputsPath),pluginRoot)),formatInputsFileBlock(inputsPath,content)].join('\n');
-}
-function readOutsidePath(payload){
-try{
-const parsed=JSON.parse(payload);
-return typeof parsed==='string'?parsed:payload;
-}catch(parseError){
-return payload;
-}
-}
-function describeCommitBlocker(stderr,stepNoun){
-const lead='The commit step was blocked, so '+RUN_NAME+' stopped: '+describeRelayBlocker(stderr,false);
-const outsideLines=splitStderrLines(stderr).filter((line)=>line.startsWith('outside: '));
-if(outsideLines.length===0){
-return lead;
-}
-const pathLines=outsideLines.map((line)=>'- '+quoteOrEmpty(readOutsidePath(line.slice('outside: '.length))));
-return[lead+' Dirty paths outside the files of '+stepNoun+':',...capItemLines(pathLines)].join('\n');
-}
-function checkCommitRelay(relay,plan,stepName){
-const stepNoun=commitStepTexts(stepName).noun;
-const stopped='so '+RUN_NAME+' stopped. Check the branch for a commit of '+stepNoun+'.';
-if(!validateSchema(RELAY_SCHEMA,relay).ok){
-return describeUnusableRelay(relay,'commit',stopped);
-}
-if(relay.outcome==='blocked'){
-return{problem:describeCommitBlocker(relay.stderr,stepNoun),terminal:true,nextAction:readRelayAction(relay.stderr)};
-}
-const values=readRelayedLines(relay,moltRoutingSpec());
-if(values===undefined){
-return describeUnusableRelay(relay,'commit',stopped,true);
-}
-if(values.branch!==plan.branch){
-return{problem:'The commit step reported a branch other than the plan branch, '+stopped,terminal:true};
-}
-return{values:values};
-}
-function describeCommitEnd(commitValues,stepName){
-const noun=commitStepTexts(stepName).noun;
-return noun.charAt(0).toUpperCase()+noun.slice(1)+' was committed as '+commitValues.commit+', so that commit can hold partial edits.';
-}
-async function runCommitStep(run,plan,commit,stepCauses){
-if(!Array.isArray(stepCauses)){
-throw new Error('runCommitStep: stepCauses must be an array');
-}
-const subject=commit.subject??commitStepTexts(commit.stepName).subject;
-const isReplan=commit.stepName==='wave';
-phase('Commit');
-const listWords=(label)=>listCommitWords(run.trunk,buildInputsPath(run,'molt',label));
-const commandStop=describeCommandStop('commit',listWords(commit.label),listWords(commit.label+'-retry'));
-if(commandStop!==undefined){
-return stopDelivery(stepCauses.concat([commandStop]),run,[],isReplan);
-}
-const relay=await runRunnerRelay((label)=>addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,listWords(label)[3],commit.stepName,subject,run.pluginRoot),run),commit.label,'Commit');
-const checked=checkCommitRelay(relay,plan,commit.stepName);
-if(checked.problem!==undefined){
-return stopDelivery(stepCauses.concat([checked]),run,[],isReplan);
-}
-observeHead(run,checked.values.commit,plan.branch);
-if(stepCauses.length===0){
-return{values:checked.values};
-}
-const endLines=checked.values.committed==='true'?[describeCommitEnd(checked.values,commit.stepName)]:[];
-return stopDelivery(stepCauses,run,endLines,isReplan);
 }
 
 function findingIdField(){
@@ -4555,9 +4642,6 @@ default:
 throw new Error('reviewStopTexts: no texts for exit reason '+JSON.stringify(review.exit_reason));
 }
 }
-function quoteOrEmpty(text,limit){
-return quoteDiagnostic(text,limit)||encodeUntrustedText('');
-}
 function describeReviewStop(review,head){
 const detail=reviewStopTexts(review).detail;
 const line=describeReviewOpen(review,head,' after '+describeCount(review.iterations_completed,'iteration'))+describePullRequestStop();
@@ -4778,88 +4862,6 @@ return routed;
 }
 function notConfiguredReviewLine(){
 return'local review: the run was launched with local_review false, so the gate is not configured and does not count as held.';
-}
-
-function commitShaPattern(){
-return/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
-}
-function branchWarningTexts(){
-return{
-stale:'trunk is stale or diverged from origin; proceeding as acknowledged at preflight',
-skipped:'trunk freshness check was skipped'
-};
-}
-function createWorkingBranchRoutingSpec(){
-const warnings=branchWarningTexts();
-return{
-branch:{pattern:gitIdentifierPattern(),required:true},
-commit:{pattern:commitShaPattern(),required:true},
-created:{pattern:/^(?:true|false)$/,required:true},
-warning:{pattern:new RegExp('^(?:'+warnings.stale+'|'+warnings.skipped+')$'),required:false}
-};
-}
-function moltRoutingSpec(){
-return{
-branch:{pattern:gitIdentifierPattern(),required:true},
-commit:{pattern:commitShaPattern(),required:true},
-committed:{pattern:/^(?:true|false)$/,required:true}
-};
-}
-function bumpTypeRoutingSpec(){
-const count={pattern:/^(?:0|[1-9][0-9]*)$/,required:true};
-return{
-dominant_row:{pattern:/^(?:MAJOR|MINOR|PATCH|NO_BUMP|NONE|MULTI)$/,required:true},
-verdict:{pattern:/^(?:bump_required|no_bump|ask_user)$/,required:true},
-bump_type:{pattern:/^(?:major|minor|patch|none)$/,required:true},
-rule_applied:{pattern:/^[1-6]$/,required:true},
-counts:{block:{major:count,minor:count,patch:count,no_bump:count},required:true},
-mapped_commits:count,
-dropped_reverts:count
-};
-}
-function pullRequestWarningTexts(){
-return[
-'push was rejected; the branch is not on its remote',
-'no upstream and no origin remote; push deferred',
-'gh cannot read the push remote as a GitHub repository; the PR head repository was not checked'
-];
-}
-function openPlanPrRoutingSpec(){
-return{
-url:{pattern:/^https:\/\/[A-Za-z0-9._/-]+\/pull\/[0-9]+$/,required:true},
-head_ref_oid:{pattern:commitShaPattern(),required:true},
-created:{pattern:/^(?:true|false)$/,required:true},
-commented:{pattern:/^(?:true|false)$/,required:true},
-warning:{pattern:new RegExp('^(?:'+pullRequestWarningTexts().join('|')+')$'),required:false}
-};
-}
-function semverCorePattern(){
-return/^(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})$/;
-}
-function versionCheckRoutingSpec(){
-return{
-...bumpTypeRoutingSpec(),
-version_check:{pattern:/^(?:match|mismatch|unreadable|undetermined)$/,required:true},
-trunk_version:{pattern:semverCorePattern(),required:false},
-expected_version:{pattern:semverCorePattern(),required:false}
-};
-}
-function isConsistentBumpRelay(values){
-const counts=values.counts;
-const countSum=Number(counts.major)+Number(counts.minor)+Number(counts.patch)+Number(counts.no_bump);
-return(values.verdict==='bump_required')===(values.bump_type!=='none')
-&&countSum===Number(values.mapped_commits);
-}
-function isConsistentVersionRelay(values){
-const hasExpected=values.expected_version!==undefined;
-const hasTrunk=values.trunk_version!==undefined;
-if(!isConsistentBumpRelay(values)||(hasExpected&&!hasTrunk)){
-return false;
-}
-if(values.version_check==='match'||values.version_check==='mismatch'){
-return hasExpected&&values.verdict!=='ask_user';
-}
-return values.version_check==='unreadable'||(values.verdict==='ask_user'&&!hasExpected);
 }
 
 function buildNextActionProperty(){
