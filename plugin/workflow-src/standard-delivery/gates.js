@@ -165,13 +165,6 @@ function gateNames() {
   return { validate: 'validation', review: 'local review' };
 }
 
-function joinNames(names, conjunction) {
-  if (names.length < 3) {
-    return names.join(' ' + conjunction + ' ');
-  }
-  return names.slice(0, -1).join(', ') + ' ' + conjunction + ' ' + names[names.length - 1];
-}
-
 function gateLabel(stepName, run, count) {
   return stepName + '-' + run.pass + '-' + count;
 }

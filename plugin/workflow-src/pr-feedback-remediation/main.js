@@ -151,7 +151,7 @@ async function runFixCall(run, facts) {
     return { cause: inputStop };
   }
   phase('Fix');
-  const fix = await agent(addResumeNote(buildFixPrompt(fixInputs), run), fixOptions(run));
+  const fix = await agent(addResumeNote(buildFixPassPrompt(fixInputs), run), fixOptions(run));
   const resultProblem = describeFixResultProblem(fix);
   return resultProblem === undefined ? { fix: fix } : { cause: resultProblem };
 }

@@ -693,7 +693,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'a50b4a3704e8cd4f';
+const BUILD_ID = 'b4e1a8fa8e534941';
 
 function supportedSchemaKeywords(){
 return[
@@ -3329,6 +3329,12 @@ return[{statement:unshownBriefText(),origin:origin,evidence:unshownBriefText()}]
 function buildBriefOption(id,summary,effort='small',value='high',reversible=true){
 return{id:id,summary:summary,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:effort,value:value,reversible:reversible,beyond_request:false};
 }
+function joinNames(names,conjunction){
+if(names.length<3){
+return names.join(' '+conjunction+' ');
+}
+return names.slice(0,-1).join(', ')+' '+conjunction+' '+names[names.length-1];
+}
 function listVersionOptions(values){
 if(values.version_check==='unreadable'){
 return[buildBriefOption('A','Keep the version each file holds on the branch.'),buildBriefOption('B','Set the version your reply names in each file.')];
@@ -3662,12 +3668,6 @@ return run.localReview?gateIds():gateIds().filter((gateId)=>gateId!=='review');
 }
 function gateNames(){
 return{validate:'validation',review:'local review'};
-}
-function joinNames(names,conjunction){
-if(names.length<3){
-return names.join(' '+conjunction+' ');
-}
-return names.slice(0,-1).join(', ')+' '+conjunction+' '+names[names.length-1];
 }
 function gateLabel(stepName,run,count){
 return stepName+'-'+run.pass+'-'+count;

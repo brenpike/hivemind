@@ -32,8 +32,6 @@
  *   runRemediationPass(run, replan)  one planning pass: {result} or
  *          {replan}.
  *   runEscalation(fix, run)  the run result after the escalation.
- *   joinNames(names, conjunction)  names joined in prose, which
- *          buildRemediationPlanBrief (lib/briefs.js) reads.
  *
  * Invariants
  *   The routing decision resolves through resolveTailDecision
@@ -133,11 +131,4 @@ async function runEscalation(fix, run) {
     }
     replan = passEnd.replan;
   }
-}
-
-function joinNames(names, conjunction) {
-  if (names.length < 3) {
-    return names.join(' ' + conjunction + ' ');
-  }
-  return names.slice(0, -1).join(', ') + ' ' + conjunction + ' ' + names[names.length - 1];
 }

@@ -16,9 +16,9 @@
  *   values   the routing values of a version check whose version_check is
  *            undetermined or unreadable (standard-delivery gates.js).
  *   unshownBriefText and describeCount (lib/plan.js), isRepositoryPath and
- *   listPlanPaths (lib/paths.js), and the workflow functions gateNames and
- *   joinNames (standard-delivery gates.js), maxFixRounds (standard-delivery
- *   main.js) and buildUndecidedAsk (standard-delivery tails.js).
+ *   listPlanPaths (lib/paths.js), and the workflow functions gateNames
+ *   (standard-delivery gates.js), maxFixRounds (standard-delivery main.js)
+ *   and buildUndecidedAsk (standard-delivery tails.js).
  *   The constants of the workflow's main.js this file reads:
  *   PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND, TRUNK_STALE_KIND,
  *   EXTERNAL_EFFECT_KIND, STEP_STOP_KIND, VERSION_BUMP_INDETERMINABLE_KIND,
@@ -49,6 +49,8 @@
  *            standard-delivery review.js.
  *   buildBriefGate(irreversible)  the gate of a code-built brief, never
  *            architectural or safety.
+ *   joinNames(names, conjunction)  names joined in prose, also read by
+ *            lib/record.js.
  *   buildValidationRemediationBrief, buildFixLimitBrief and
  *   buildGateRerunBrief  the tail briefs standard-delivery gates.js
  *            resolves.
@@ -292,6 +294,13 @@ function buildUnshownAssumptions(origin = 'repo') {
  */
 function buildBriefOption(id, summary, effort = 'small', value = 'high', reversible = true) {
   return { id: id, summary: summary, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: effort, value: value, reversible: reversible, beyond_request: false };
+}
+
+function joinNames(names, conjunction) {
+  if (names.length < 3) {
+    return names.join(' ' + conjunction + ' ');
+  }
+  return names.slice(0, -1).join(', ') + ' ' + conjunction + ' ' + names[names.length - 1];
 }
 
 function listVersionOptions(values) {

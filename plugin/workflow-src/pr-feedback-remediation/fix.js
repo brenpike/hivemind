@@ -27,7 +27,7 @@
  *   describeFixInputStop(fixInputs)  a terminal report cause naming the
  *          first of pr, working_branch and base that fails isGitIdentifier,
  *          else undefined.
- *   buildFixPrompt(fixInputs)  the fix pass prompt before addResumeNote.
+ *   buildFixPassPrompt(fixInputs)  the fix pass prompt before addResumeNote.
  *   fixOptions(run)  the reviewer call options, label fix-<pass>.
  *   hasDeferredItemsMismatch(fix)  true when deferred_escalation_items is
  *          present on a result that is not an escalation with
@@ -156,7 +156,7 @@ function describeFixInputStop(fixInputs) {
   return { problem: 'The fix pass input ' + failing + ' is not a safe git name, so ' + RUN_NAME + ' stopped before the fix pass.', terminal: true, nextAction: 'report' };
 }
 
-function buildFixPrompt(fixInputs) {
+function buildFixPassPrompt(fixInputs) {
   return [
     'Run one review fix pass on the pull request the fix_mode_input block below names, and return its result.',
     dataBlocksSentence(),
@@ -236,7 +236,7 @@ async function runFixPass(run, facts) {
     return { cause: inputStop };
   }
   phase('Fix');
-  const fix = await agent(addResumeNote(buildFixPrompt(fixInputs), run), fixOptions(run));
+  const fix = await agent(addResumeNote(buildFixPassPrompt(fixInputs), run), fixOptions(run));
   const resultProblem = describeFixResultProblem(fix);
   if (resultProblem !== undefined) {
     return { cause: resultProblem };
