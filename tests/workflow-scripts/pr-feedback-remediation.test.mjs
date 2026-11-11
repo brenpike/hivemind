@@ -391,6 +391,16 @@ const ROW_TESTS = {
         assert.equal(main.describeFixResultProblem({ ...result, deferred_escalation_items: [URL_B] }).problem, 'The review fix pass returned a result that does not fit its schema, so the remediation stopped.', exitReason);
       }
     });
+    test('a negative count fails the fix result schema', () => {
+      const cases = [
+        { ...CLEAN, findings_resolved: -1 },
+        { ...CLEAN, findings_open: -3 },
+        { ...EXIT_RESULTS['root-cluster-suspected'], member_count: -2 }
+      ];
+      for (const result of cases) {
+        assert.equal(main.describeFixResultProblem(result).problem, 'The review fix pass returned a result that does not fit its schema, so the remediation stopped.', JSON.stringify(result));
+      }
+    });
   },
   'PFR-08': () => {
     test('clean ends complete with no pr', async () => {
