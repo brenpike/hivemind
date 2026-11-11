@@ -12,6 +12,8 @@
  *   replan the replan data the next pass plans from: {reason, review?}.
  *   plan   the plan runPlanningPass (lib/plan.js) returns once every
  *          question of its pass is settled or taken.
+ *   describeFixLead(run) (fix.js) leads the routing brief and the replan
+ *   reason.
  *   The constants of main.js this file reads: RUN_NAME,
  *   PLANNER_ESCALATION_ROUTING_KIND and ROOT_CLUSTER_ROUTING_KIND.
  *
@@ -59,12 +61,12 @@
  */
 
 function buildRemediationRequest(pr) {
-  return 'Remediate the review feedback of pull request ' + pr + ' that its review fix pass escalated, on the branch of that pull request.';
+  return 'Remediate the review feedback of pull request ' + pr + ' that its review fix pass escalated, on the pull request branch.';
 }
 
 function buildEscalationBrief(fix, run) {
   const isCluster = fix.exit_reason === 'root-cluster-suspected';
-  const lead = 'The review fix pass on pull request ' + run.pr;
+  const lead = describeFixLead(run);
   return buildTailBrief({
     kind: isCluster ? ROOT_CLUSTER_ROUTING_KIND : PLANNER_ESCALATION_ROUTING_KIND,
     problem: (isCluster
@@ -72,7 +74,7 @@ function buildEscalationBrief(fix, run) {
       : lead + ' escalated a finding to the planner.') + ' Go back to planning, from fresh facts, for ' + (isCluster ? 'a remediation that closes the class?' : 'its remediation?'),
     goOn: 'Plan the remediation from fresh facts.',
     strength: 'strong',
-    why: 'A review fix cannot close it, and a remediation plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.'
+    why: 'A review fix cannot close it, and a plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.'
   });
 }
 
@@ -92,7 +94,7 @@ function routeEscalation(fix, run) {
   if (decided.result !== undefined) {
     return decided;
   }
-  const reason = 'The review fix pass on pull request ' + run.pr + ' returned ' + fix.exit_reason + ', so plan the remediation of what the review block reports, from the fresh facts.';
+  const reason = describeFixLead(run) + ' returned ' + fix.exit_reason + ', so plan a remediation of the review block from the fresh facts.';
   return { replan: { reason: reason, review: projectEscalationReview(fix) } };
 }
 

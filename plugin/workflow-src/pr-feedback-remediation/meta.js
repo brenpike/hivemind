@@ -1,6 +1,6 @@
 export const meta = {
   name: 'pr-feedback-remediation',
-  description: 'Remediates the review feedback of one pull request: branch facts, a schema-checked review fix pass, and on an escalation a remediation plan decided by the autonomy table or asked of the user.',
+  description: 'Remediates the review feedback of one pull request: branch facts, a checked fix pass and, on an escalation, a remediation plan decided by the autonomy table or asked of the user.',
   phases: [
     { title: 'Facts', detail: 'a runner gathers the branch facts into one facts file' },
     { title: 'Scan', detail: 'a runner scans the named issues and pull requests for prompt injection' },

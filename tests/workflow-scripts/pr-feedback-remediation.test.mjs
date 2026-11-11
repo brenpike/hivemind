@@ -46,7 +46,7 @@ const EXIT_RESULTS = {
   blocked: { exit_reason: 'blocked', ...COUNTS, blocker_reason: 'preflight failed', blocked_candidates: [URL_B] }
 };
 const SCOPE = { documents: [], paths: [], limits: [] };
-const REQUEST_TEXT = 'Remediate the review feedback of pull request 12 that its review fix pass escalated, on the branch of that pull request.';
+const REQUEST_TEXT = 'Remediate the review feedback of pull request 12 that its review fix pass escalated, on the pull request branch.';
 const PLAN_LINE = 'The plan for branch "feature/cache" has 1 step over 1 file: Check the path first.';
 const DRAFT_END = 'The remediation is planned, but this draft builds no waves yet, so the remediation stopped. ' + PLAN_LINE;
 const ROUTE_BACK = ' Go back to planning, from fresh facts, for ';
@@ -322,7 +322,7 @@ const ROW_TESTS = {
     test('facts taken on the trunk end blocked before the fix pass', async () => {
       const run = await runWorkflow({ references: [PR], trunk: 'develop' }, { 'facts-1': factsRelay({ branch: 'develop', trunk: 'develop' }) });
       assert.deepEqual(labelsOf(run), ['facts-1']);
-      assert.deepEqual(run.result, blockedMessage('The checkout is on the trunk "develop", not on the branch of the pull request, so the remediation stopped before the fix pass.'));
+      assert.deepEqual(run.result, blockedMessage('The checkout is on the trunk "develop", not on the pull request branch, so the remediation stopped before the fix pass.'));
     });
   },
   'PFR-05': () => {
@@ -499,7 +499,7 @@ const ROW_TESTS = {
     test('the first plan prompt carries the replan reason and the review block of the fix result', async () => {
       const run = await runWorkflow(LAUNCH, escalationResults());
       const prompt = callOf(run, 'plan-2').prompt;
-      assert.equal(readDataBlock(prompt, 'replan'), 'The review fix pass on pull request 12 returned planner-escalation, so plan the remediation of what the review block reports, from the fresh facts.');
+      assert.equal(readDataBlock(prompt, 'replan'), 'The review fix pass on pull request 12 returned planner-escalation, so plan a remediation of the review block from the fresh facts.');
       assert.deepEqual(readDataBlock(prompt, 'review'), ESCALATION_REVIEW);
     });
     test('the review block holds only the exit fields, with deferred_escalation_items when present', () => {
