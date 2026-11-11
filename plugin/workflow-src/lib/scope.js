@@ -1,17 +1,20 @@
 /*
- * standard-delivery scope.js: the scope step of the standard-delivery
- * workflow. It holds the scope schema, the scope prompt and options, the
- * scope check and the scope step.
+ * scope.js: the scope step a workflow shares. It holds the scope schema,
+ * the scope prompt and options, the scope check and the scope step.
  *
  * Inputs
- *   run    the run state of main.js createRunState: request, pass,
- *          decisions and answerLog, read through listAnswerEntries.
- *   facts  the checked facts of the pass, from runFactsStep (relay.js).
+ *   run    the run state of the workflow's main.js: request, pass,
+ *          decisions and answerLog, read through listAnswerEntries
+ *          (lib/plan.js).
+ *   facts  the checked facts of the pass, from runFactsStep (lib/runner.js).
  *          Its root line, the checkout root, converts scope paths.
  *   scope  the planner result in Scope Mode, under SCOPE_SCHEMA.
  *   round  undefined for the scope of a pass, else the answer round after
  *          whose reply the same pass scopes again.
- *   PLANNER_AGENT, SCOPE_MODEL and SCOPE_SCHEMA from main.js.
+ *   The constants of the workflow's main.js this file reads: PLANNER_AGENT,
+ *   RUN_NAME, SCOPE_MODEL and SCOPE_SCHEMA, which main.js builds with
+ *   buildScopeSchema. It reads no workflow function. Every workflow whose
+ *   code calls runScopeStep declares them.
  *
  * Outputs
  *   runScopeStep(run, facts, round)  {scope} or {problem, nextAction},
@@ -21,7 +24,7 @@
  *                             after a path under the checkout root is made
  *                             relative to it (toRepositoryRelativePath),
  *                             and every limit, its origin kept.
- *   The step, as meta.js names it:
+ *   The step, as the workflow's meta.js names it:
  *   Scope   hivemind:cerebrate in Scope Mode, on SCOPE_MODEL at effort
  *           high, returns the path and start line of each section of the
  *           documents the request names and the drift of each path a
@@ -37,8 +40,8 @@
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
- *   main.js: the build bundles this module into it, so a row can name a
- *   function of this module.
+ *   main.js: the build bundles this library into it, so a row can name a
+ *   function of this library.
  *   The scope result is checked before any field is read. A null result,
  *   an agent failure, stops the run before planning through
  *   describeUnusableResult (lib/stop.js), with the agent-failure sentence
@@ -52,7 +55,7 @@
  *   marked with repositoryPathMark(), that starts with the facts root line
  *   and a slash is first cut to the rest after that slash; a root line of
  *   none, or no root line, converts nothing. An entry whose path then fails
- *   isRepositoryPath (paths.js) is dropped from the scope
+ *   isRepositoryPath (lib/paths.js) is dropped from the scope
  *   (keepRepositoryPathEntries), as an entry left out: the planner then
  *   reads or checks it itself.
  *   A limit path is made relative to the facts root the same way and loses

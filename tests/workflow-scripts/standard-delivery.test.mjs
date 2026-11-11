@@ -12,7 +12,7 @@ import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, isDraf
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const WORKFLOW_ID = 'standard-delivery';
 const sourceDir = join(repoRoot, 'plugin/workflow-src', WORKFLOW_ID);
-const MOVED_LIB_PATHS = ['plan.js', 'checks.js'].map((file) => 'plugin/workflow-src/lib/' + file);
+const MOVED_LIB_PATHS = ['plan.js', 'checks.js', 'scope.js'].map((file) => 'plugin/workflow-src/lib/' + file);
 const moduleSource = readModuleSet();
 const metaSource = readText(join(sourceDir, 'meta.js'));
 const contractPath = join(sourceDir, 'contract.js');

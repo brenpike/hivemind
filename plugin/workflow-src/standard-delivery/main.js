@@ -13,8 +13,9 @@
  * The phase modules of this directory hold every other function, and the
  * build bundles them, in name order, ahead of this file: approvals.js,
  * briefs.js, gates.js, pr.js, record.js, relay.js, review-schema.js,
- * review.js, scope.js, specs.js, tails.js and waves.js. The planning pass
- * and its check retries are lib/plan.js and lib/checks.js.
+ * review.js, specs.js, tails.js and waves.js. The planning pass and its
+ * check retries are lib/plan.js and lib/checks.js, and the scope step
+ * lib/scope.js.
  * Each opens with the contract of its steps. This file holds the launch reading, the
  * run state, the pass loop and every top-level constant and limit other
  * than maxTitleLength(), which lib/title.js holds.
@@ -45,7 +46,7 @@
  *          (ADR-0037 decision 23).
  *   AUTONOMY_TABLE, BRIEF_SCHEMA, PLAN_SCHEMA  data constants copied in by
  *          the build. SCOPE_SCHEMA, built here by buildScopeSchema
- *          (scope.js), is the scope step result schema.
+ *          (lib/scope.js), is the scope step result schema.
  *
  * Outputs
  *   pauseForUser({resumeArgs, blocks}) when a question needs the user,
@@ -259,7 +260,7 @@
  *   (keepReplanReview, lib/plan.js), and a reply to a local review stop that plans again carries that
  *   review (review.js). Every pass starts with the facts step,
  *   so every planner call follows the facts of its own pass (ADR-0037
- *   invariant 3). Then the scope step (scope.js) runs once, after the facts
+ *   invariant 3). Then the scope step (lib/scope.js) runs once, after the facts
  *   step and the scan and before planning, and again after each reply round
  *   of the pass unless the reply settled the shown plan acceptance
  *   (lib/plan.js). Its checked scope reaches only the plan and revise prompts

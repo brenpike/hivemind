@@ -39,6 +39,7 @@ export const meta = {
  *   lib/title.js
  *   lib/plan.js
  *   lib/checks.js
+ *   lib/scope.js
  *   standard-delivery/approvals.js
  *   standard-delivery/briefs.js
  *   standard-delivery/gates.js
@@ -47,7 +48,6 @@ export const meta = {
  *   standard-delivery/relay.js
  *   standard-delivery/review-schema.js
  *   standard-delivery/review.js
- *   standard-delivery/scope.js
  *   standard-delivery/specs.js
  *   standard-delivery/tails.js
  *   standard-delivery/waves.js
@@ -693,7 +693,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '30485ba51c18d332';
+const BUILD_ID = '8d02731ed4eb9d58';
 
 function supportedSchemaKeywords(){
 return[
@@ -3088,6 +3088,92 @@ prompt=buildCheckFixPrompt(call.prompt,problem,validateSchema(call.schema,result
 }
 }
 
+function buildScopeItem(properties){
+return{type:'object',properties:properties,required:Object.keys(properties),additionalProperties:false};
+}
+function buildScopeSchema(){
+const pathField={type:'string',maxLength:400,description:repositoryPathMark()+' It is relative to the repository root, like tools/validate.sh, never absolute.'};
+const documentItem=buildScopeItem({
+path:pathField,
+line:{type:'integer',description:'The 1-based line where the section starts.'}
+});
+const pathItem=buildScopeItem({
+path:pathField,
+exists:{type:'boolean',description:'true when the path exists now.'},
+drift:{type:'string',minLength:0,maxLength:400,description:externalLabel()+' How the path differs from what the section says, empty when it does not.'}
+});
+const limitItem=buildScopeItem({path:pathField,origin:{type:'string',enum:['request','answer']}});
+return{
+type:'object',
+properties:{
+documents:{type:'array',maxItems:10,description:'The sections of the named documents, empty when none.',items:documentItem},
+paths:{type:'array',maxItems:30,description:'The paths a section or the request names for the work, empty when none.',items:pathItem},
+limits:{type:'array',maxItems:30,description:'Only the paths or directories the request or an answer limits the work to, empty when none.',items:limitItem}
+},
+required:['documents','paths','limits'],
+additionalProperties:false
+};
+}
+function buildScopePrompt(request,facts,answerLog){
+const hasAnswers=answerLog.length>0;
+const lines=[
+'Scope the user request below for its planner, in Scope Mode.',
+boundarySentence(),
+hasAnswers?settledAnswersSentence(undefined):dataBlocksSentence(),
+'',
+buildFactsBlock(facts),
+formatDataBlock('request',request)
+];
+if(hasAnswers){
+lines.push(formatDataBlock('answers',answerLog));
+}
+return lines.join('\n');
+}
+function scopeOptions(pass,round){
+const label=round===undefined?'scope-'+pass:'scope-'+pass+'-'+round;
+return{agentType:PLANNER_AGENT,model:SCOPE_MODEL,effort:'high',schema:toAgentSchema(SCOPE_SCHEMA),label:label,phase:'Scope'};
+}
+function describeScopeProblem(scope){
+const isUsable=validateSchema(SCOPE_SCHEMA,scope).ok;
+return isUsable?undefined:describeUnusableResult('The scope step returned a result it could not use, so '+RUN_NAME+' stopped before planning.',scope);
+}
+function toRepositoryRelativePath(path,root){
+if(typeof root!=='string'||root==='none'){
+return path;
+}
+const prefix=root.endsWith('/')?root:root+'/';
+return path.startsWith(prefix)?path.slice(prefix.length):path;
+}
+function relativizeScopeEntry(entry,root){
+return{...entry,path:toRepositoryRelativePath(entry.path,root)};
+}
+function toLimitEntry(limit,root){
+const entry=relativizeScopeEntry(limit,root);
+return entry.path.endsWith('/')?Object.assign(entry,{path:entry.path.slice(0,-1)}):entry;
+}
+function keepRepositoryPathEntries(scope,root){
+const keepEntries=(entries)=>entries.map((entry)=>relativizeScopeEntry(entry,root)).filter((entry)=>isRepositoryPath(entry.path));
+return{
+documents:keepEntries(scope.documents),
+paths:keepEntries(scope.paths),
+limits:scope.limits.map((limit)=>toLimitEntry(limit,root))
+};
+}
+async function runScopeStep(run,facts,round){
+phase('Scope');
+const prompt=buildScopePrompt(run.request,facts,listAnswerEntries(run));
+const options=scopeOptions(run.pass,round);
+let scope=await agent(prompt,options);
+for(let retry=1;retry<=maxCheckRetries()&&scope!==null&&describeScopeProblem(scope)!==undefined;retry+=1){
+scope=await agent(buildCheckFixPrompt(prompt,describeScopeProblem(scope).problem,validateSchema(SCOPE_SCHEMA,scope).errors),{...options,label:options.label+'-fix-'+retry});
+}
+const unusable=describeScopeProblem(scope);
+if(unusable!==undefined&&scope!==null){
+return describeCheckLimit(unusable.problem);
+}
+return unusable===undefined?{scope:keepRepositoryPathEntries(scope,facts.root)}:unusable;
+}
+
 function applyApprovalChoices(approvals,asks,choices){
 const shownLabels=choices.length===0?[]:listShownLabels(asks);
 return choices.reduce((kept,choice)=>applyApprovalChoice(kept,listOptionItems(asks[shownLabels.indexOf(choice.label)]),choice.optionIndex),[...approvals]);
@@ -4645,92 +4731,6 @@ return routed;
 }
 function notConfiguredReviewLine(){
 return'local review: the run was launched with local_review false, so the gate is not configured and does not count as held.';
-}
-
-function buildScopeItem(properties){
-return{type:'object',properties:properties,required:Object.keys(properties),additionalProperties:false};
-}
-function buildScopeSchema(){
-const pathField={type:'string',maxLength:400,description:repositoryPathMark()+' It is relative to the repository root, like tools/validate.sh, never absolute.'};
-const documentItem=buildScopeItem({
-path:pathField,
-line:{type:'integer',description:'The 1-based line where the section starts.'}
-});
-const pathItem=buildScopeItem({
-path:pathField,
-exists:{type:'boolean',description:'true when the path exists now.'},
-drift:{type:'string',minLength:0,maxLength:400,description:externalLabel()+' How the path differs from what the section says, empty when it does not.'}
-});
-const limitItem=buildScopeItem({path:pathField,origin:{type:'string',enum:['request','answer']}});
-return{
-type:'object',
-properties:{
-documents:{type:'array',maxItems:10,description:'The sections of the named documents, empty when none.',items:documentItem},
-paths:{type:'array',maxItems:30,description:'The paths a section or the request names for the work, empty when none.',items:pathItem},
-limits:{type:'array',maxItems:30,description:'Only the paths or directories the request or an answer limits the work to, empty when none.',items:limitItem}
-},
-required:['documents','paths','limits'],
-additionalProperties:false
-};
-}
-function buildScopePrompt(request,facts,answerLog){
-const hasAnswers=answerLog.length>0;
-const lines=[
-'Scope the user request below for its planner, in Scope Mode.',
-boundarySentence(),
-hasAnswers?settledAnswersSentence(undefined):dataBlocksSentence(),
-'',
-buildFactsBlock(facts),
-formatDataBlock('request',request)
-];
-if(hasAnswers){
-lines.push(formatDataBlock('answers',answerLog));
-}
-return lines.join('\n');
-}
-function scopeOptions(pass,round){
-const label=round===undefined?'scope-'+pass:'scope-'+pass+'-'+round;
-return{agentType:PLANNER_AGENT,model:SCOPE_MODEL,effort:'high',schema:toAgentSchema(SCOPE_SCHEMA),label:label,phase:'Scope'};
-}
-function describeScopeProblem(scope){
-const isUsable=validateSchema(SCOPE_SCHEMA,scope).ok;
-return isUsable?undefined:describeUnusableResult('The scope step returned a result it could not use, so '+RUN_NAME+' stopped before planning.',scope);
-}
-function toRepositoryRelativePath(path,root){
-if(typeof root!=='string'||root==='none'){
-return path;
-}
-const prefix=root.endsWith('/')?root:root+'/';
-return path.startsWith(prefix)?path.slice(prefix.length):path;
-}
-function relativizeScopeEntry(entry,root){
-return{...entry,path:toRepositoryRelativePath(entry.path,root)};
-}
-function toLimitEntry(limit,root){
-const entry=relativizeScopeEntry(limit,root);
-return entry.path.endsWith('/')?Object.assign(entry,{path:entry.path.slice(0,-1)}):entry;
-}
-function keepRepositoryPathEntries(scope,root){
-const keepEntries=(entries)=>entries.map((entry)=>relativizeScopeEntry(entry,root)).filter((entry)=>isRepositoryPath(entry.path));
-return{
-documents:keepEntries(scope.documents),
-paths:keepEntries(scope.paths),
-limits:scope.limits.map((limit)=>toLimitEntry(limit,root))
-};
-}
-async function runScopeStep(run,facts,round){
-phase('Scope');
-const prompt=buildScopePrompt(run.request,facts,listAnswerEntries(run));
-const options=scopeOptions(run.pass,round);
-let scope=await agent(prompt,options);
-for(let retry=1;retry<=maxCheckRetries()&&scope!==null&&describeScopeProblem(scope)!==undefined;retry+=1){
-scope=await agent(buildCheckFixPrompt(prompt,describeScopeProblem(scope).problem,validateSchema(SCOPE_SCHEMA,scope).errors),{...options,label:options.label+'-fix-'+retry});
-}
-const unusable=describeScopeProblem(scope);
-if(unusable!==undefined&&scope!==null){
-return describeCheckLimit(unusable.problem);
-}
-return unusable===undefined?{scope:keepRepositoryPathEntries(scope,facts.root)}:unusable;
 }
 
 function commitShaPattern(){
