@@ -352,7 +352,7 @@ function maxGateReruns() {
 }
 
 function maxReviewIterations() {
-  return 6;
+  return 10;
 }
 
 function maxServiceWaits() {

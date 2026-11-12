@@ -696,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'cf89dbce7f6b0e5a';
+const BUILD_ID = '60a53273ca3917b3';
 
 function supportedSchemaKeywords(){
 return[
@@ -5113,7 +5113,7 @@ function maxGateReruns(){
 return 4;
 }
 function maxReviewIterations(){
-return 6;
+return 10;
 }
 function maxServiceWaits(){
 return 6;
