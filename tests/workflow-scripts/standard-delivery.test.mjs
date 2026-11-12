@@ -4049,10 +4049,11 @@ const ROW_TESTS = {
         assert.ok(run.result.message.includes('\n\n' + HELD_ALL + OTHER + '.'), run.result.message);
       });
     }
-    test('the launch check is readLocalReview, after the trunk check', () => {
-      assert.deepEqual({ ...main.readLocalReview({}) }, { localReview: true });
-      assert.deepEqual({ ...main.readLocalReview({ local_review: false }) }, { localReview: false });
-      assert.ok(moduleSource.indexOf('readLocalReview(argsObject)') > moduleSource.indexOf('isGitIdentifier(launchInputs.trunk)'));
+    test('the launch check is readBooleanLaunchArg for local_review, after the trunk check', () => {
+      assert.deepEqual({ ...main.readBooleanLaunchArg({}, 'local_review', true) }, { value: true });
+      assert.deepEqual({ ...main.readBooleanLaunchArg({ local_review: false }, 'local_review', true) }, { value: false });
+      assert.deepEqual({ ...main.readBooleanLaunchArg({ local_review: null }, 'local_review', true) }, { problem: 'The local_review launch arg must be true or false, so the delivery did not start.' });
+      assert.ok(moduleSource.indexOf("readBooleanLaunchArg(argsObject, 'local_review', true)") > moduleSource.indexOf('isGitIdentifier(launchInputs.trunk)'));
     });
   },
   'SD-48': () => {
@@ -4070,10 +4071,10 @@ const ROW_TESTS = {
         assert.equal(readRunnerInputs(callOf(run, 'pr-1').prompt).draft, draft);
       });
     }
-    test('the launch check is readDraft, after readLocalReview', () => {
-      assert.deepEqual({ ...main.readDraft({}) }, { draft: false });
-      assert.deepEqual({ ...main.readDraft({ draft: true }) }, { draft: true });
-      assert.ok(moduleSource.indexOf('readDraft(argsObject)') > moduleSource.indexOf('readLocalReview(argsObject)'));
+    test('the launch check is readBooleanLaunchArg for draft, after local_review', () => {
+      assert.deepEqual({ ...main.readBooleanLaunchArg({}, 'draft', false) }, { value: false });
+      assert.deepEqual({ ...main.readBooleanLaunchArg({ draft: true }, 'draft', false) }, { value: true });
+      assert.ok(moduleSource.indexOf("readBooleanLaunchArg(argsObject, 'draft', false)") > moduleSource.indexOf("readBooleanLaunchArg(argsObject, 'local_review', true)"));
     });
     test('real open-plan-pr.sh opens a draft PR for draft true and a ready PR for an absent draft', async () => {
       for (const [args, wantDraft] of [[{ ...LAUNCH, draft: true }, true], [LAUNCH, false]]) {

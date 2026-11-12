@@ -6,8 +6,10 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState: pass, decisions,
- *          answerLog, head, trunk, approvals, taken, rejected, undone, open
- *          and waits.
+ *          answerLog, head, trunk, approvals, taken, rejected, undone, open,
+ *          waits, run.replans and run.reviewReplans, and run.resumeLedger,
+ *          which only this module sets and reads: true from a review replan
+ *          or a rerun of a blocked review until the next review run.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   gates  the gate loop state of runGates (lib/gates.js): runs.review, answer
  *          and takenReview, which only this module sets and reads: the review
@@ -97,7 +99,11 @@
  *           injection-suspect is terminal. Either rerun of a blocked
  *           review, and the next review run after a review replan, gets
  *           fixLedgerPath() as resume_from_ledger, once, so it keeps its
- *           iteration count and its break-fix and root-cluster history. The
+ *           break-fix and root-cluster history. Local review counts only
+ *           the iterations after the ledger's last replan exit
+ *           (planner-escalation or root-cluster-suspected), so a rerun of a
+ *           blocked review keeps its iteration count and the run after a
+ *           review replan does not. The
  *           engine sets that path in code, never from the reviewer's
  *           ledger_path. A
  *           review result that fails REVIEW_SCHEMA, gives option ids other than

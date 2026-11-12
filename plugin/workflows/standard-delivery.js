@@ -696,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '60a53273ca3917b3';
+const BUILD_ID = '3426acf3742a61e9';
 
 function supportedSchemaKeywords(){
 return[
@@ -5142,11 +5142,11 @@ return launchInputs;
 if(!isGitIdentifier(launchInputs.trunk)){
 return describeLaunchProblem('The trunk launch arg is not a safe git branch name');
 }
-const reviewInput=readLocalReview(argsObject);
+const reviewInput=readBooleanLaunchArg(argsObject,'local_review',true);
 if(reviewInput.problem!==undefined){
 return reviewInput;
 }
-const draftInput=readDraft(argsObject);
+const draftInput=readBooleanLaunchArg(argsObject,'draft',false);
 if(draftInput.problem!==undefined){
 return draftInput;
 }
@@ -5154,28 +5154,20 @@ const decisionsInput=readDecisions(argsObject);
 if(decisionsInput.problem!==undefined){
 return decisionsInput;
 }
-return{argsObject:argsObject,request:argsObject.request,trunk:launchInputs.trunk,references:launchInputs.references,localReview:reviewInput.localReview,draft:draftInput.draft,decisions:decisionsInput.decisions};
+return{argsObject:argsObject,request:argsObject.request,trunk:launchInputs.trunk,references:launchInputs.references,localReview:reviewInput.value,draft:draftInput.value,decisions:decisionsInput.decisions};
 }
 function describeLaunchProblem(reason){
 return{problem:reason+', so '+RUN_NAME+' did not start.'};
 }
-function readLocalReview(argsObject){
-if(argsObject.local_review===undefined){
-return{localReview:true};
+function readBooleanLaunchArg(argsObject,name,absentValue){
+const value=argsObject[name];
+if(value===undefined){
+return{value:absentValue};
 }
-if(argsObject.local_review===true||argsObject.local_review===false){
-return{localReview:argsObject.local_review};
+if(value===true||value===false){
+return{value:value};
 }
-return describeLaunchProblem('The local_review launch arg must be true or false');
-}
-function readDraft(argsObject){
-if(argsObject.draft===undefined){
-return{draft:false};
-}
-if(argsObject.draft===true||argsObject.draft===false){
-return{draft:argsObject.draft};
-}
-return describeLaunchProblem('The draft launch arg must be true or false');
+return describeLaunchProblem('The '+name+' launch arg must be true or false');
 }
 function isDecision(decision){
 return isNonEmptyString(decision)&&Array.from(decision).length<=maxDecisionLength();
