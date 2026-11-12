@@ -408,7 +408,7 @@ README.md
 | `hivemind:drone` | opus | Implementation within explicitly assigned file scope; the default owner of every step. |
 | `hivemind:changeling` | sonnet | Presentational UI/UX work within explicitly assigned file scope. |
 | `hivemind:synapse` | haiku | Runs one committed runner script (facts, commit, push or pull request) and relays its output word for word. Started only by workflow scripts, never by the overlord or a user. Tools: Bash and Write. A plugin hook allows only the five exact runner commands. |
-| `hivemind:local-reviewer` | opus | Pre-PR adversarial Codex review loop (`max_iterations` 10). Fixes simple findings itself (2 files or fewer, no architecture or contract impact); a fix that fails its check is undone (only its own files go back to the last commit) and listed. Escalates complex ones to the overlord, and stops on break-fix cycles. Needs the `codex` companion. |
+| `hivemind:local-reviewer` | opus | Pre-PR adversarial Codex review loop (`max_iterations` 6). Fixes simple findings itself (2 files or fewer, no architecture or contract impact); a fix that fails its check is undone (only its own files go back to the last commit) and listed. Escalates complex ones to the overlord, and stops on break-fix cycles. Needs the `codex` companion. |
 | `hivemind:github-reviewer` | opus | Stateless, one-shot post-PR worker: fetches and classifies review feedback, applies fixes, pushes, replies, and resolves threads. Dispatched by `hivemind:github-review-loop`, which does the monitoring. |
 
 ## Skills
