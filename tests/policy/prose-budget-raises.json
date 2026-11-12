@@ -16,6 +16,14 @@
       "approved_by": "user",
       "date": "2026-11-04",
       "reason": "E1: new shared Silence Discipline section replaces the copy in 12 skill files; net prose change across files -15,910 bytes"
+    },
+    {
+      "path": "plugin/workflows/pr-feedback-remediation.js",
+      "from": 29900,
+      "to": 38200,
+      "approved_by": "user",
+      "date": "2026-11-11",
+      "reason": "PR5 of #409 slice 3: the draft now runs the shared lib/ tail code standard-delivery already ships (waves, gates, commit, push, record); authored prose across the repo fell 1,452 and standard-delivery's budget dropped 43800 to 42100. Evidence: ADR-0040 Amendment 2026-11-11."
     }
   ]
 }
