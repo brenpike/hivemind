@@ -692,7 +692,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '7d805ba31db6d05c';
+const BUILD_ID = '4be26e656db543e6';
 
 function supportedSchemaKeywords(){
 return[
@@ -4572,6 +4572,9 @@ blocked:['blocker_reason','blocked_candidates']
 function escalationExits(){
 return['planner-escalation','root-cluster-suspected'];
 }
+function fixQuestionExits(){
+return['user-input-required','high-severity-rejection'];
+}
 function buildFixText(maxLength,text,isExternal){
 return{type:'string',maxLength:maxLength,description:(isExternal?externalLabel()+' ':'')+text};
 }
@@ -4627,8 +4630,12 @@ return{problem:describeStopBeforeFix('The checkout is on the trunk '+encodeUntru
 }
 return undefined;
 }
-function listFixInputs(run,facts){
-return{mode:'fix',pr:run.pr,working_branch:facts.branch,base:run.trunk};
+function listFixInputs(run,facts,answer){
+const fixInputs={mode:'fix',pr:run.pr,working_branch:facts.branch,base:run.trunk};
+if(answer!==undefined){
+fixInputs.user_answer=answer;
+}
+return fixInputs;
 }
 function describeFixInputStop(fixInputs){
 const failing=['pr','working_branch','base'].find((name)=>!isGitIdentifier(fixInputs[name]));
@@ -4640,13 +4647,14 @@ return{problem:describeStopBeforeFix('The fix pass input '+failing+' is not a sa
 function buildFixPassPrompt(fixInputs){
 return[
 'Run one review fix pass on the pull request the fix_mode_input block names.',
-dataBlocksSentence(),
+dataBlocksSentence(fixInputs.user_answer===undefined?undefined:'The reply in user_answer'),
 '',
 formatDataBlock('fix_mode_input',fixInputs)
 ].join('\n');
 }
-function fixOptions(run){
-return{agentType:REVIEWER_AGENT,schema:toAgentSchema(FIX_RESULT_SCHEMA),label:'fix-'+run.pass,phase:'Fix'};
+function fixOptions(run,answer){
+const label='fix-'+run.pass+(answer===undefined?'':'-a'+run.answerLog.length);
+return{agentType:REVIEWER_AGENT,schema:toAgentSchema(FIX_RESULT_SCHEMA),label:label,phase:'Fix'};
 }
 function hasDeferredItemsMismatch(fix){
 const expected=escalationExits().includes(fix.exit_reason)&&fix.findings_resolved>0;
@@ -4692,12 +4700,31 @@ case'injection-suspect':
 return{cause:{problem:ended+', a suspected prompt injection of pattern '+fix.pattern_category+', so '+RUN_NAME+' stopped.',terminal:true}};
 case'blocked':
 return{cause:{problem:ended+', so '+RUN_NAME+' stopped: '+describeReason(fix.blocker_reason),nextAction:readBlockerAction(fix.blocker_reason,undefined)}};
-case'user-input-required':
-case'high-severity-rejection':
-return{cause:{problem:ended+', so '+RUN_NAME+' stopped.'}};
 default:
 throw new Error('describeFixExit: no end for exit_reason '+JSON.stringify(fix.exit_reason));
 }
+}
+function buildFixQuestionBrief(fix){
+return buildTailBrief({
+kind:fix.exit_reason==='user-input-required'?REVIEW_QUESTION_KIND:HIGH_SEVERITY_REJECTION_KIND,
+problem:'How should the review fix pass settle the finding above?',
+goOn:'Fix the finding.',
+other:'Leave it unfixed.',
+strength:'none',
+why:describeOnlyYou('settle this finding')
+});
+}
+function describeFixQuestionLead(fix,run){
+const said=fix.escalation_target??fix.rationale_text;
+return describeFixLead(run)+' ended '+fix.exit_reason+describeFixCandidates(fix)+'. The reviewer says '+encodeUntrustedText(said)+'.';
+}
+function askFixQuestion(fix,run){
+const brief=buildFixQuestionBrief(fix);
+const asked=askTail(buildUndecidedAsk(brief.kind,brief,run),run,describeFixQuestionLead(fix,run));
+if(asked.answer===undefined){
+return asked;
+}
+return{answer:{candidate_url:fix.candidate_url,...asked.answer}};
 }
 
 function gateIds(){
@@ -4778,6 +4805,8 @@ const REMEDIATION_PLAN_ACCEPTANCE_KIND='remediation_plan_acceptance';
 const VALIDATION_REMEDIATION_KIND='validation_remediation';
 const VERSION_BUMP_INDETERMINABLE_KIND='version_bump_indeterminable';
 const STEP_STOP_KIND='step_stop';
+const REVIEW_QUESTION_KIND='review_question';
+const HIGH_SEVERITY_REJECTION_KIND='high_severity_rejection';
 const RELAY_SCHEMA=buildRelaySchema();
 const WORKER_SCHEMA=buildWorkerSchema();
 const FIX_SCHEMA=buildGateEditSchema();
@@ -4859,16 +4888,30 @@ factsStem:undefined,
 pluginRoot:undefined
 };
 }
-async function runFixCall(run,facts){
-const fixInputs=listFixInputs(run,facts);
+async function runFixCall(run,facts,answer){
+const fixInputs=listFixInputs(run,facts,answer);
 const inputStop=describeFixInputStop(fixInputs);
 if(inputStop!==undefined){
 return{cause:inputStop};
 }
 phase('Fix');
-const fix=await agent(addResumeNote(buildFixPassPrompt(fixInputs),run),fixOptions(run));
+const fix=await agent(addResumeNote(buildFixPassPrompt(fixInputs),run),fixOptions(run,answer));
 const resultProblem=describeFixResultProblem(fix);
 return resultProblem===undefined?{fix:fix}:{cause:resultProblem};
+}
+async function runFixRounds(run,facts){
+let answer;
+for(;;){
+const fixed=await runFixCall(run,facts,answer);
+if(fixed.cause!==undefined||!fixQuestionExits().includes(fixed.fix.exit_reason)){
+return fixed;
+}
+const asked=askFixQuestion(fixed.fix,run);
+if(asked.result!==undefined){
+return asked;
+}
+answer=asked.answer;
+}
 }
 function finishBlocked(causes){
 return finish({outcome:'blocked',causes:causes});
@@ -4887,7 +4930,10 @@ const headStop=describeHeadStop(checked.facts,run);
 if(headStop!==undefined){
 return finishBlocked([headStop]);
 }
-const fixed=await runFixCall(run,checked.facts);
+const fixed=await runFixRounds(run,checked.facts);
+if(fixed.result!==undefined){
+return fixed.result;
+}
 if(fixed.cause!==undefined){
 return finishBlocked([fixed.cause]);
 }
