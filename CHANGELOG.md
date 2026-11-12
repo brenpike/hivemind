@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [8.0.0] - 2026-11-12
+
+### Added
+
+- `plugin/workflows/pr-feedback-remediation.js`, the built `hivemind:pr-feedback-remediation` workflow script. The `DRAFT` marker is gone. Built length 173754 of 190000, prose 37793 of the 38200 budget.
+- ADR-0040 Amendment 2026-11-12: the go-live permission check is one supervised run of the built workflow in auto mode, with no headless or API-billed run. The result is pending, and a later commit records it.
+
+### Changed
+
+- BREAKING: outside Instinct, a watch ending `planner-escalation` or `root-cluster-suspected` launches the `hivemind:pr-feedback-remediation` workflow script. The watch runs in the main session as `hivemind:github-review-loop` and keeps no run ledger, so resume-on-start and the decision report do not see it. A result with `pr` restarts the watch. The first launch needs one approval per project; a No interrupts the turn and the user restarts the watch. To opt out, add `Workflow(hivemind:pr-feedback-remediation)` to `permissions.deny`: the watch then falls back to the state machine with intake `fix`. A request routed to `pr-feedback-remediation` checks out the PR's head branch first.
+- Tests: the build prose-guard tests now name `pr-feedback-remediation` as the first live workflow that bundles `lib/plan.js`.
+
+Refs #409 (slice 3, PR 6).
+
 ## [7.9.0] - 2026-11-11
 
 ### Added
