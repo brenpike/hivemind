@@ -136,10 +136,10 @@ function describeLaunchProblem(reason) {
 
 function readRemediationLaunch(rawArgs) {
   if (!isPlainObject(rawArgs)) {
-    return describeLaunchProblem('The launch args must be an object of references and trunk');
+    return describeLaunchProblem('The launch args must be an object of ' + joinNames(launchKeys().slice(0, 2), 'and'));
   }
   if (Object.keys(rawArgs).some((key) => !launchKeys().includes(key))) {
-    return describeLaunchProblem('The launch args may hold only references, trunk, answers, build and reply');
+    return describeLaunchProblem('The launch args may hold only ' + joinNames(launchKeys(), 'and'));
   }
   const launchInputs = readLaunchInputs(rawArgs, RUN_NOUN, BUILD_ID);
   if (launchInputs.problem !== undefined) {

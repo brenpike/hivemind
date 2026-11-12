@@ -58,7 +58,7 @@ const REQUEST_TEXT = 'Remediate the review feedback of pull request 12 that its 
 const PLAN_LINE = 'The plan for branch "feature/cache" has 1 step over 1 file: Check the path first.';
 const PUSHED_LINE = 'Pushed commit ' + OTHER + ' to pull request ' + PR_URL + ' and commented on it.';
 const HELD_LINE = 'Validation held on commit ' + OTHER + '.';
-const HEAD_MOVED = 'The pull request branch moved after the facts were read, so plan again from the new facts.';
+const HEAD_MOVED = 'The pull request branch moved after the facts were read, so plan again from fresh facts.';
 const ROUTE_BACK = ' Go back to planning, from fresh facts, for ';
 const ESCALATION_ASK = 'The review fix pass on pull request 12 escalated a finding to the planner.' + ROUTE_BACK + 'its remediation?';
 const CLUSTER_ASK = 'The review fix pass on pull request 12 found 2 findings in 1 file that share one suspected root.' + ROUTE_BACK + 'a remediation that closes the class?';
@@ -838,7 +838,7 @@ const ROW_TESTS = {
     test('a second move is a terminal stop', async () => {
       const run = await runWorkflow(LAUNCH, movedHeadResults({ 'head-3': moltRelay(OTHER, 'false') }));
       assert.deepEqual(labelsOf(run).slice(-1), ['head-3']);
-      assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: 'The pull request branch moved again after a replan, so the remediation stopped before any wave.\n\n' + FIX_NEXT + '\n\n' + decidedBlock(ESCALATION_ASK) });
+      assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: 'The pull request branch moved again, so the remediation stopped before any wave.\n\n' + FIX_NEXT + '\n\n' + decidedBlock(ESCALATION_ASK) });
     });
   },
   'PFR-22': () => {
@@ -914,7 +914,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, escalationResults());
       const comment = readPrInputs(callOf(run, 'pr-2').prompt).comment;
       const gates = 'Gates:\n- validation: passed, held on commit ' + OTHER;
-      assert.equal(comment, ['The remediation pushed commit ' + OTHER + ' to this pull request.', gates, decidedBlock(ESCALATION_ASK)].join('\n\n'));
+      assert.equal(comment, ['The remediation pushed commit ' + OTHER + '.', gates, decidedBlock(ESCALATION_ASK)].join('\n\n'));
     });
     test('with no shown decision the inputs file carries no comment', () => {
       const state = main.createRunState({ trunk: 'main', pr: PR });

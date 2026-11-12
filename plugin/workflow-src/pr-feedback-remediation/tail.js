@@ -83,23 +83,28 @@ function buildPullRequestComment(run, gates) {
   if (!run.taken.some(isShownDecision)) {
     return undefined;
   }
-  const parts = ['The remediation pushed commit ' + run.head + ' to this pull request.', ...renderPullRequestRecord(run, gates)];
+  const parts = ['The remediation pushed commit ' + run.head + '.', ...renderPullRequestRecord(run, gates)];
   return cleanPullRequestText(parts.join('\n\n'), true);
+}
+
+function describeWaveStop(reason) {
+  return reason + ', so ' + RUN_NAME + ' stopped before any wave.';
 }
 
 function describeBaseStop(plan, run) {
   if (plan.base === run.trunk) {
     return undefined;
   }
-  return { problem: 'The plan base is not the trunk ' + encodeUntrustedText(run.trunk) + ', so ' + RUN_NAME + ' stopped before any wave.', terminal: true, nextAction: 'report' };
+  return { problem: describeWaveStop('The plan base is not the trunk ' + encodeUntrustedText(run.trunk)), terminal: true, nextAction: 'report' };
 }
 
 function requestHeadReplan(run) {
+  const moved = 'The pull request branch moved';
   if (run.headMoves > 0) {
-    return stopDelivery([{ problem: 'The pull request branch moved again after a replan, so ' + RUN_NAME + ' stopped before any wave.', terminal: true }], run, [], true);
+    return stopDelivery([{ problem: describeWaveStop(moved + ' again'), terminal: true }], run, [], true);
   }
   run.headMoves += 1;
-  return { replan: { reason: 'The pull request branch moved after the facts were read, so plan again from the new facts.' } };
+  return { replan: { reason: moved + ' after the facts were read, so ' + describeStopThen(true) + '.' } };
 }
 
 async function readPassHead(run, plan, facts) {
