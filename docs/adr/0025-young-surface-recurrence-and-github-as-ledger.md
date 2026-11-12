@@ -51,9 +51,9 @@ Decisions 1 and 2 stand: youth is still a hard gate, and GitHub is still the rec
 
 ## Amendment — 2026-11-11 (fix-ledger history across a replan, ADR-0041)
 
-`docs/adr/0041-local-review-class-fix-in-round.md` keeps the local reviewer's fix-ledger history across a review replan (ADR-0041 decision 2).
+See `docs/adr/0041-local-review-class-fix-in-round.md`, decision 2.
 
-- **The replan hands on the ledger.** On the script engine the replan route passes the fixed ledger path, set in code, to the next review run as `resume_from_ledger`, once. It never passes the reviewer's returned `ledger_path`. The iteration count restarts after the ledger's last `root-cluster-suspected` or `planner-escalation` exit, and the earlier iterations stay as history for the break-fix, recurrence and class-fix checks.
-- **No new local recurrence file.** The history lives in the fix ledger the local reviewer already writes. GitHub stays the recurrence ledger of the GitHub loop.
+- **The history survives a replan.** Recurrence checks do not start blind after one.
+- **No new local recurrence file.** GitHub stays the recurrence ledger of the GitHub loop.
 
 Decisions 1 and 2 stand. Status remains accepted.
