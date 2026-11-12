@@ -1,7 +1,9 @@
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { loadLibs, loadWorkflowSource } from './harness.mjs';
@@ -24,6 +26,12 @@ const agentBriefSchema = readDataConstant(repoRoot, 'BRIEF_SCHEMA');
 const PR = '12';
 const LAUNCH = { references: [PR] };
 const HEAD = '1'.repeat(40);
+const OTHER = '2'.repeat(40);
+const PR_URL = 'https://github.com/o/r/pull/12';
+const WORKER_DONE = { outcome: 'complete', summary: 'Done.' };
+const VALIDATE_PASSED = { outcome: 'passed' };
+const BUMP_MATCH = 'dominant_row: MINOR\nverdict: bump_required\nbump_type: minor\nrule_applied: 3\ncounts:\n  major: 0\n  minor: 1\n  patch: 0\n  no_bump: 0\nmapped_commits: 1\ndropped_reverts: 0\nversion_check: match\ntrunk_version: 1.2.3\nexpected_version: 1.3.0\n';
+const BUMP_UNDETERMINED = 'dominant_row: MULTI\nverdict: ask_user\nbump_type: none\nrule_applied: 1\ncounts:\n  major: 0\n  minor: 1\n  patch: 1\n  no_bump: 0\nmapped_commits: 2\ndropped_reverts: 0\nversion_check: undetermined\ntrunk_version: 1.2.3\n';
 const FACTS_FILE = '.hivemind/facts/facts-20261021T120000Z-0123456789ab.json';
 const FACTS_KEYS = ['facts_file', 'facts_lines', 'head_state', 'branch', 'head', 'trunk', 'trunk_freshness', 'trunk_ahead', 'trunk_behind', 'trunk_commit', 'cut', 'external_texts', 'delivery', 'delivery_stops', 'root', 'plugin_root'];
 const PLUGIN_ROOT = join(repoRoot, 'plugin');
@@ -46,9 +54,11 @@ const EXIT_RESULTS = {
   blocked: { exit_reason: 'blocked', ...COUNTS, blocker_reason: 'preflight failed', blocked_candidates: [URL_B] }
 };
 const SCOPE = { documents: [], paths: [], limits: [] };
-const REQUEST_TEXT = 'Remediate the review feedback of pull request 12 that its review fix pass escalated, on the branch of that pull request.';
+const REQUEST_TEXT = 'Remediate the review feedback of pull request 12 that its review fix pass escalated, on the pull request branch.';
 const PLAN_LINE = 'The plan for branch "feature/cache" has 1 step over 1 file: Check the path first.';
-const DRAFT_END = 'The remediation is planned, but this draft builds no waves yet, so the remediation stopped. ' + PLAN_LINE;
+const PUSHED_LINE = 'Pushed commit ' + OTHER + ' to pull request ' + PR_URL + ' and commented on it.';
+const HELD_LINE = 'Validation held on commit ' + OTHER + '.';
+const HEAD_MOVED = 'The pull request branch moved after the facts were read, so plan again from fresh facts.';
 const ROUTE_BACK = ' Go back to planning, from fresh facts, for ';
 const ESCALATION_ASK = 'The review fix pass on pull request 12 escalated a finding to the planner.' + ROUTE_BACK + 'its remediation?';
 const CLUSTER_ASK = 'The review fix pass on pull request 12 found 2 findings in 1 file that share one suspected root.' + ROUTE_BACK + 'a remediation that closes the class?';
@@ -161,16 +171,76 @@ function flaggedPlanResult() {
   return planResult(makePlan({ remediation_gate: { promotion_gate: { irreversible: false, architectural: true, safety: false }, grows_surface: false, repeats_surface: false } }));
 }
 
+function routingStdout(values) {
+  return Object.entries(values).filter(([, value]) => value !== undefined).map(([key, value]) => key + ': ' + value).join('\n') + '\n';
+}
+
+function moltRelay(commit, committed) {
+  return { outcome: 'ran', stdout: routingStdout({ branch: 'feature/cache', commit: commit, committed: committed }) };
+}
+
+function readCommandWord(prompt, flag) {
+  const words = readDataBlock(prompt, 'command').split(' ');
+  return words[words.indexOf(flag) + 1];
+}
+
+function readPrInputs(prompt) {
+  return JSON.parse(readDataBlock(prompt, 'inputs_file').content);
+}
+
+/**
+ * A pull request runner stand-in for the reuse path: it reports the
+ * --expect-commit of its command block as the PR head, created false and
+ * commented true exactly when its inputs carry a comment.
+ */
+function cannedPrRunner(changes = {}) {
+  return (prompt) => {
+    const commented = Object.hasOwn(readPrInputs(prompt), 'comment') ? 'true' : undefined;
+    return { outcome: 'ran', stdout: routingStdout({ url: PR_URL, head_ref_oid: readCommandWord(prompt, '--expect-commit'), created: 'false', commented: commented, ...changes }) };
+  };
+}
+
+/**
+ * The tail results of pass `pass`: a head check on HEAD, one worker, its
+ * commit at OTHER, validation passed and the pull request reused.
+ */
+function tailResults(pass, changes = {}) {
+  return {
+    ['head-' + pass]: moltRelay(HEAD, 'false'),
+    ['work-' + pass + '-STEP-001']: WORKER_DONE,
+    ['commit-' + pass + '-1']: moltRelay(OTHER, 'true'),
+    ['validate-' + pass + '-1']: VALIDATE_PASSED,
+    ['pr-' + pass]: cannedPrRunner(),
+    ...changes
+  };
+}
+
+function tailLabels(pass) {
+  return ['head-' + pass, 'work-' + pass + '-STEP-001', 'commit-' + pass + '-1', 'validate-' + pass + '-1', 'pr-' + pass];
+}
+
 function escalationResults(exitReason = 'planner-escalation', changes = {}) {
-  return { 'facts-1': factsRelay(), 'fix-1': EXIT_RESULTS[exitReason], 'facts-2': factsRelay(), 'scope-2': SCOPE, 'plan-2': planResult(), ...changes };
+  return { 'facts-1': factsRelay(), 'fix-1': EXIT_RESULTS[exitReason], 'facts-2': factsRelay(), 'scope-2': SCOPE, 'plan-2': planResult(), ...tailResults(2), ...changes };
+}
+
+/**
+ * Returns the escalation results whose pass 2 head check sees OTHER, so
+ * pass 3 plans again from fresh facts, with `changes`.
+ */
+function movedHeadResults(changes = {}) {
+  return escalationResults('planner-escalation', { 'head-2': moltRelay(OTHER, 'false'), 'facts-3': factsRelay(), 'scope-3': SCOPE, 'plan-3': planResult(), ...tailResults(3), ...changes });
+}
+
+function versionedPlanResult() {
+  return planResult(makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'], changelog_files: [] } }));
 }
 
 function decidedBlock(ask) {
   return 'Decided for you:\n- D1. ' + ask + CHOSE_PLAN;
 }
 
-function draftEndMessage(ask) {
-  return { needs_user: false, outcome: 'blocked', message: DRAFT_END + '\n\n' + FIX_NEXT + '\n\n' + decidedBlock(ask) };
+function completeResult(ask) {
+  return { needs_user: false, outcome: 'complete', pr: { url: PR_URL, head_ref_oid: OTHER, created: false }, message: [PUSHED_LINE, HELD_LINE, decidedBlock(ask)].join('\n\n') };
 }
 
 function resumeArgs(paused, reply) {
@@ -221,6 +291,128 @@ function collectUnbounded(node, path, found) {
     }
   }
   return found;
+}
+
+const scratchRoots = [];
+after(() => scratchRoots.forEach((root) => rmSync(root, { recursive: true, force: true })));
+
+function runGitIn(scratch, gitArgs) {
+  const run = spawnSync('git', gitArgs, { cwd: scratch.repo, env: scratch.env, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  return run.stdout.trim();
+}
+
+function writeRepoFile(scratch, relativePath, content) {
+  mkdirSync(dirname(join(scratch.repo, relativePath)), { recursive: true });
+  writeFileSync(join(scratch.repo, relativePath), content);
+}
+
+function writeStub(path, lines) {
+  writeFileSync(path, lines.join('\n') + '\n');
+  chmodSync(path, 0o755);
+}
+
+/**
+ * Writes the stub ssh, which runs the git service of its last argument
+ * locally, and the stub gh, which serves the reuse path of open-plan-pr.sh:
+ * one open pull request PR_URL whose head is the origin feature/cache
+ * commit, a head repository id for the push URL, and a comment log.
+ */
+function writeReuseStubs(stubDir, origin, logDir) {
+  writeStub(join(stubDir, 'ssh'), ['#!/bin/sh', 'for last; do :; done', 'eval "set -- $last"', 'service=$1', 'shift', 'exec git "${service#git-}" "$@"']);
+  const listLine = '[{"number":12,"url":"' + PR_URL + '","headRefName":"feature/cache","headRefOid":"%s","baseRefName":"main","headRepository":{"id":"R_1"}}]';
+  writeStub(join(stubDir, 'gh'), [
+    '#!/bin/sh',
+    'case "$1 $2" in',
+    '  "repo view") printf \'{"id":"R_1"}\\n\' ;;',
+    '  "pr list") printf \'' + listLine + '\\n\' "$(git --git-dir=\'' + origin + '\' rev-parse refs/heads/feature/cache)" ;;',
+    '  "pr comment") for arg in "$@"; do case "$arg" in --body-file=*) cat "${arg#--body-file=}" >>\'' + logDir + '/comments.md\' ;; esac; done ;;',
+    '  *) exit 1 ;;',
+    'esac'
+  ]);
+}
+
+/**
+ * Makes a scratch repo on branch feature/cache, one commit ahead of main,
+ * with both branches on a bare origin reached through an ssh URL, so
+ * open-plan-pr.sh reads a head repository id and takes its reuse path.
+ */
+function makeReuseScratch() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'hivemind-remediation-')));
+  scratchRoots.push(root);
+  const [home, stubDir, repo, logDir] = ['home', 'stub-bin', 'repo', 'gh-log'].map((name) => join(root, name));
+  [home, stubDir, repo, logDir].forEach((dir) => mkdirSync(dir, { recursive: true }));
+  const origin = join(root, 'origin.git');
+  writeFileSync(join(home, '.gitconfig'), '[user]\n\tname = Remediation Test\n\temail = remediation@example.invalid\n[commit]\n\tgpgsign = false\n');
+  writeReuseStubs(stubDir, origin, logDir);
+  const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, '.config'), GIT_CONFIG_NOSYSTEM: '1', GIT_CEILING_DIRECTORIES: root, GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: join(stubDir, 'ssh'), GIT_SSH_VARIANT: 'ssh', HIVEMIND_OPEN_PLAN_PR_REREAD_DELAY: '0', PATH: stubDir + ':' + process.env.PATH };
+  ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_COMMON_DIR', 'GIT_LITERAL_PATHSPECS'].forEach((name) => delete env[name]);
+  const scratch = { repo: repo, env: env, origin: origin, logDir: logDir };
+  runGitIn(scratch, ['init', '-q']);
+  runGitIn(scratch, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  writeRepoFile(scratch, 'README.md', 'scratch\n');
+  runGitIn(scratch, ['add', 'README.md']);
+  runGitIn(scratch, ['commit', '-q', '-m', 'initial']);
+  writeFileSync(join(repo, '.git/info/exclude'), '.hivemind/\n');
+  runGitIn(scratch, ['init', '-q', '--bare', origin]);
+  runGitIn(scratch, ['remote', 'add', 'origin', 'ssh://example.invalid' + origin]);
+  runGitIn(scratch, ['push', '-q', 'origin', 'main']);
+  runGitIn(scratch, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+  runGitIn(scratch, ['checkout', '-q', '-b', 'feature/cache']);
+  writeRepoFile(scratch, 'src/a.js', 'first\n');
+  runGitIn(scratch, ['add', 'src/a.js']);
+  runGitIn(scratch, ['commit', '-q', '-m', 'fix: the first review fix']);
+  runGitIn(scratch, ['push', '-q', 'origin', 'feature/cache']);
+  return scratch;
+}
+
+/**
+ * Does what synapse.md says a runner does with a prompt: writes the
+ * inputs_file and body_file contents to their paths, then runs the command
+ * with bash -c and relays it.
+ */
+function runCommandBlock(scratch, prompt) {
+  for (const name of ['inputs_file', 'body_file'].filter((blockName) => prompt.split('\n').includes('<' + blockName + '>'))) {
+    const file = readDataBlock(prompt, name);
+    writeRepoFile(scratch, file.path, typeof file.content === 'string' ? file.content : JSON.stringify(file.content));
+  }
+  const command = readDataBlock(prompt, 'command').split('{plugin-root}').join(PLUGIN_ROOT);
+  const run = spawnSync('bash', ['-c', command], { cwd: scratch.repo, env: scratch.env, encoding: 'utf8' });
+  return run.status === 0 ? { outcome: 'ran', stdout: run.stdout } : { outcome: 'blocked', stderr: run.stderr };
+}
+
+/**
+ * Returns the escalation results of a run on the scratch repo: canned facts
+ * at its head, the real head check, wave commit and pull request runner, and
+ * a worker that edits src/a.js. Each pull request relay is pushed to
+ * prRelays.
+ */
+function realScratchResults(scratch, prRelays) {
+  const start = runGitIn(scratch, ['rev-parse', 'HEAD']);
+  const real = (prompt) => runCommandBlock(scratch, prompt);
+  const worker = (prompt) => {
+    writeRepoFile(scratch, 'src/a.js', 'edited by ' + readDataBlock(prompt, 'step').id + '\n');
+    return WORKER_DONE;
+  };
+  const recordPr = (prompt) => {
+    const relay = real(prompt);
+    prRelays.push(relay);
+    return relay;
+  };
+  return escalationResults('planner-escalation', { 'facts-1': factsRelay({ head: start }), 'facts-2': factsRelay({ head: start }), 'head-2': real, 'work-2-STEP-001': worker, 'commit-2-1': real, 'pr-2': recordPr });
+}
+
+/**
+ * Returns the escalation results of a versioned plan whose first validation
+ * asks the version question, with `changes`.
+ */
+function versionAskResults(changes = {}) {
+  return escalationResults('planner-escalation', { 'plan-2': versionedPlanResult(), 'validate-2-1': { outcome: 'passed', version: { outcome: 'ran', stdout: BUMP_UNDETERMINED } }, ...changes });
+}
+
+function versionFixResults() {
+  const fixed = { outcome: 'complete', files: ['VERSION'] };
+  return versionAskResults({ 'fix-2-1': fixed, 'fix-commit-2-1': moltRelay('3'.repeat(40), 'true'), 'validate-2-2': { outcome: 'passed', version: { outcome: 'ran', stdout: BUMP_MATCH } } });
 }
 
 function readContractIds(source) {
@@ -278,11 +470,23 @@ const ROW_TESTS = {
       assert.equal(first.result.needs_user, true);
       const results = escalationResults('planner-escalation', { ...failed, 'revise-1': { outcome: 'complete' }, 'revise-1-fix-1': { ...flaggedPlanResult(), settled: ['Q1'] } });
       const resumed = await runWorkflow(resumeArgs(first, 'A'), results);
-      assert.deepEqual(labelsOf(resumed), ['facts-1', 'fix-1', 'facts-2', 'scope-2', 'scope-2-fix-1', 'plan-2', 'plan-2-fix-1', 'revise-1', 'revise-1-fix-1']);
+      assert.deepEqual(labelsOf(resumed), ['facts-1', 'fix-1', 'facts-2', 'scope-2', 'scope-2-fix-1', 'plan-2', 'plan-2-fix-1', 'revise-1', 'revise-1-fix-1', ...tailLabels(2)]);
       for (const label of ['scope-2-fix-1', 'plan-2-fix-1', 'revise-1-fix-1']) {
         const lines = callOf(resumed, label).prompt.split('\n');
         assert.deepEqual(lines.slice(1, 3), [RELAY_SENTENCE, 'Fix your result per the check block.'], label);
       }
+    });
+    test('every tail prompt carries the sentence, a validation fix round with and without user_answer included', async () => {
+      const failed = { outcome: 'failed', failures: 'npm test failed.' };
+      const fixed = { outcome: 'complete', files: ['src/a.js'] };
+      const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'validate-2-1': failed, 'fix-2-1': fixed, 'fix-commit-2-1': moltRelay('3'.repeat(40), 'true'), 'validate-2-2': VALIDATE_PASSED }));
+      assert.deepEqual(labelsOf(run).slice(5), ['head-2', 'work-2-STEP-001', 'commit-2-1', 'validate-2-1', 'fix-2-1', 'fix-commit-2-1', 'validate-2-2', 'pr-2']);
+      assert.ok(!callOf(run, 'fix-2-1').prompt.includes('<user_answer>'));
+      const first = await runWorkflow(LAUNCH, versionAskResults());
+      assert.equal(first.result.needs_user, true, first.result.message);
+      const resumed = await runWorkflow(resumeArgs(first, 'A'), versionFixResults());
+      assert.ok(callOf(resumed, 'fix-2-1').prompt.includes('<user_answer>'));
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
     });
   },
   'PFR-03': () => {
@@ -322,7 +526,7 @@ const ROW_TESTS = {
     test('facts taken on the trunk end blocked before the fix pass', async () => {
       const run = await runWorkflow({ references: [PR], trunk: 'develop' }, { 'facts-1': factsRelay({ branch: 'develop', trunk: 'develop' }) });
       assert.deepEqual(labelsOf(run), ['facts-1']);
-      assert.deepEqual(run.result, blockedMessage('The checkout is on the trunk "develop", not on the branch of the pull request, so the remediation stopped before the fix pass.'));
+      assert.deepEqual(run.result, blockedMessage('The checkout is on the trunk "develop", not on the pull request branch, so the remediation stopped before the fix pass.'));
     });
   },
   'PFR-05': () => {
@@ -442,12 +646,12 @@ const ROW_TESTS = {
   'PFR-11': () => {
     test('planner-escalation routes to planning, taken at the default level and listed as decided', async () => {
       const run = await runWorkflow(LAUNCH, escalationResults());
-      assert.deepEqual(run.result, draftEndMessage(ESCALATION_ASK));
+      assert.deepEqual(run.result, completeResult(ESCALATION_ASK));
       assert.ok(!run.result.message.includes('no escalation step yet'), run.result.message);
     });
     test('root-cluster-suspected routes to planning with the root cluster kind', async () => {
       const run = await runWorkflow(LAUNCH, escalationResults('root-cluster-suspected'));
-      assert.deepEqual(run.result, draftEndMessage(CLUSTER_ASK));
+      assert.deepEqual(run.result, completeResult(CLUSTER_ASK));
       for (const [exitReason, kind] of [['planner-escalation', 'planner_escalation_routing'], ['root-cluster-suspected', 'root_cluster_routing']]) {
         const state = main.createRunState({ trunk: 'main', pr: PR });
         assert.ok(main.routeEscalation(EXIT_RESULTS[exitReason], state).replan !== undefined, exitReason);
@@ -487,8 +691,8 @@ const ROW_TESTS = {
     test('a planning pass runs fresh facts and its scan, then scope, then plan', async () => {
       const scan = { results: [{ item_ref: 't1', verdict: 'clean' }] };
       const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'facts-2': factsRelay({ external_texts: '1' }), 'scan-2': scan }));
-      assert.deepEqual(labelsOf(run), ['facts-1', 'fix-1', 'facts-2', 'scan-2', 'scope-2', 'plan-2']);
-      assert.deepEqual(run.phases, ['Facts', 'Fix', 'Facts', 'Scan', 'Scope', 'Plan']);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'fix-1', 'facts-2', 'scan-2', 'scope-2', 'plan-2', ...tailLabels(2)]);
+      assert.deepEqual(run.phases.slice(0, 6), ['Facts', 'Fix', 'Facts', 'Scan', 'Scope', 'Plan']);
       assert.ok(callOf(run, 'facts-2').prompt.includes('--trunk main --ref ' + PR));
       assert.deepEqual([callOf(run, 'scope-2').opts.agentType, callOf(run, 'scope-2').opts.model], ['hivemind:cerebrate', 'sonnet']);
       assert.equal(callOf(run, 'plan-2').opts.agentType, 'hivemind:cerebrate');
@@ -499,7 +703,7 @@ const ROW_TESTS = {
     test('the first plan prompt carries the replan reason and the review block of the fix result', async () => {
       const run = await runWorkflow(LAUNCH, escalationResults());
       const prompt = callOf(run, 'plan-2').prompt;
-      assert.equal(readDataBlock(prompt, 'replan'), 'The review fix pass on pull request 12 returned planner-escalation, so plan the remediation of what the review block reports, from the fresh facts.');
+      assert.equal(readDataBlock(prompt, 'replan'), 'The review fix pass on pull request 12 returned planner-escalation, so plan a remediation of the review block from the fresh facts.');
       assert.deepEqual(readDataBlock(prompt, 'review'), ESCALATION_REVIEW);
     });
     test('the review block holds only the exit fields, with deferred_escalation_items when present', () => {
@@ -512,11 +716,19 @@ const ROW_TESTS = {
     });
   },
   'PFR-16': () => {
-    test('a taken remediation acceptance ends blocked with one terminal cause naming the plan line', async () => {
-      assert.deepEqual(structuredClone(main.describeUnbuiltWaves(makePlan())), { problem: DRAFT_END, terminal: true });
+    test('a taken remediation acceptance runs the tail on the facts of its pass', async () => {
       const run = await runWorkflow(LAUNCH, escalationResults());
-      assert.deepEqual(labelsOf(run), ['facts-1', 'fix-1', 'facts-2', 'scope-2', 'plan-2']);
-      assert.ok(run.result.message.startsWith(DRAFT_END + '\n\n'), run.result.message);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'fix-1', 'facts-2', 'scope-2', 'plan-2', ...tailLabels(2)]);
+      assert.deepEqual(run.result, completeResult(ESCALATION_ASK));
+      assert.ok(!builtSource.includes('builds no waves'));
+    });
+    test('a replan of the tail keeps the review block', async () => {
+      const replan = { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The path moved.' };
+      const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'work-2-STEP-001': replan, 'facts-3': factsRelay(), 'scope-3': SCOPE, 'plan-3': planResult(), ...tailResults(3) }));
+      assert.deepEqual(labelsOf(run), ['facts-1', 'fix-1', 'facts-2', 'scope-2', 'plan-2', 'head-2', 'work-2-STEP-001', 'commit-2-1', 'facts-3', 'scope-3', 'plan-3', ...tailLabels(3)]);
+      assert.equal(readDataBlock(callOf(run, 'plan-3').prompt, 'replan'), 'Step "STEP-001" needs a new plan: it says "The path moved.".');
+      assert.deepEqual(readDataBlock(callOf(run, 'plan-3').prompt, 'review'), ESCALATION_REVIEW);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
     });
     test('a gate flag asks the remediation plan acceptance, the Promotion Gate', async () => {
       const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult() }));
@@ -531,13 +743,13 @@ const ROW_TESTS = {
       assert.deepEqual(first.result.resume_args, { answers: {}, build: BUILD_ID });
       const results = escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult(), 'revise-1': { ...flaggedPlanResult(), settled: ['Q1'] } });
       const resumed = await runWorkflow(resumeArgs(first, 'A'), results);
-      assert.deepEqual(labelsOf(resumed), [...labelsOf(first), 'revise-1']);
+      assert.deepEqual(labelsOf(resumed), [...labelsOf(first), 'revise-1', ...tailLabels(2)]);
       assertReplayed(first, resumed);
       const revise = callOf(resumed, 'revise-1');
       assert.equal(revise.prompt.split('\n')[1], RELAY_SENTENCE);
       assert.equal(readDataBlock(revise.prompt, 'request'), REQUEST_TEXT);
       assert.equal(readDataBlock(revise.prompt, 'reply'), 'A');
-      assert.deepEqual(resumed.result, draftEndMessage(ESCALATION_ASK));
+      assert.deepEqual(resumed.result, completeResult(ESCALATION_ASK));
     });
     test('a reply that settles nothing pauses again with the first reply in its answers', async () => {
       const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult() }));
@@ -553,14 +765,14 @@ const ROW_TESTS = {
       const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'facts-2': stopped }));
       assert.deepEqual(labelsOf(first), ['facts-1', 'fix-1', 'facts-2']);
       assert.equal(first.result.needs_user, true);
-      const results = escalationResults('planner-escalation', { 'facts-2': stopped, 'facts-3': factsRelay(), 'scope-3': SCOPE, 'plan-3': planResult() });
+      const results = escalationResults('planner-escalation', { 'facts-2': stopped, 'facts-3': factsRelay(), 'scope-3': SCOPE, 'plan-3': planResult(), ...tailResults(3) });
       const resumed = await runWorkflow(resumeArgs(first, 'A'), results);
-      assert.deepEqual(labelsOf(resumed), ['facts-1', 'fix-1', 'facts-2', 'facts-3', 'scope-3', 'plan-3']);
+      assert.deepEqual(labelsOf(resumed), ['facts-1', 'fix-1', 'facts-2', 'facts-3', 'scope-3', 'plan-3', ...tailLabels(3)]);
       assertReplayed(first, resumed);
       const prompt = callOf(resumed, 'plan-3').prompt;
       assert.equal(readDataBlock(prompt, 'replan'), STOP_REPLAN);
       assert.deepEqual(readDataBlock(prompt, 'review'), ESCALATION_REVIEW);
-      assert.deepEqual(resumed.result, draftEndMessage(ESCALATION_ASK));
+      assert.deepEqual(resumed.result, completeResult(ESCALATION_ASK));
     });
     test('a null scope result ends blocked with run_again and no plan call', async () => {
       const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'scope-2': null }));
@@ -579,15 +791,164 @@ const ROW_TESTS = {
         'scope-3': SCOPE,
         'plan-3': { outcome: 'complete', questions: [] },
         'plan-3-fix-1': flaggedPlanResult(),
-        'revise-2': { ...flaggedPlanResult(), settled: ['Q1'] }
+        'revise-2': { ...flaggedPlanResult(), settled: ['Q1'] },
+        ...tailResults(3)
       });
       const second = await runWorkflow(resumeArgs(first, 'A'), results);
       assert.equal(second.result.needs_user, true);
       const resumed = await runWorkflow(resumeArgs(second, 'A'), results);
       const labels = labelsOf(resumed);
-      assert.deepEqual(labels, ['facts-1', 'fix-1', 'facts-2', 'facts-3', 'scope-3', 'plan-3', 'plan-3-fix-1', 'revise-2']);
+      assert.deepEqual(labels, ['facts-1', 'fix-1', 'facts-2', 'facts-3', 'scope-3', 'plan-3', 'plan-3-fix-1', 'revise-2', ...tailLabels(3)]);
       assert.equal(new Set(labels).size, labels.length);
-      assert.deepEqual(resumed.result, draftEndMessage(ESCALATION_ASK));
+      assert.deepEqual(resumed.result, completeResult(ESCALATION_ASK));
+    });
+    test('a resume after a tail pause replays every earlier call and makes one pull request call', async () => {
+      const first = await runWorkflow(LAUNCH, versionAskResults());
+      const resumed = await runWorkflow(resumeArgs(first, 'A'), versionFixResults());
+      assertReplayed(first, resumed);
+      const labels = labelsOf(resumed);
+      assert.equal(new Set(labels).size, labels.length);
+      assert.deepEqual(labels.filter((label) => label.startsWith('pr-')), ['pr-2']);
+    });
+  },
+  'PFR-20': () => {
+    test('a plan base other than the trunk ends blocked, terminal with report, before any runner call of the tail', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': planResult(makePlan({ base: 'develop' })) }));
+      assert.deepEqual(labelsOf(run), ['facts-1', 'fix-1', 'facts-2', 'scope-2', 'plan-2']);
+      assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: 'The plan base is not the trunk "main", so the remediation stopped before any wave.\n\n' + REPORT_NEXT + '\n\n' + decidedBlock(ESCALATION_ASK) });
+      assert.equal(main.describeBaseStop(makePlan(), { trunk: 'main' }), undefined);
+    });
+  },
+  'PFR-21': () => {
+    test('the head check runs the molt runner with an empty file list before any wave', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults());
+      const call = callOf(run, 'head-2');
+      assert.deepEqual([call.opts.agentType, call.opts.model, call.opts.phase], ['hivemind:synapse', 'haiku', 'Commit']);
+      assert.deepEqual(readDataBlock(call.prompt, 'inputs_file').content.files, []);
+      assert.equal(readCommandWord(call.prompt, '--trunk'), 'main');
+      assert.ok(labelsOf(run).indexOf('head-2') < labelsOf(run).indexOf('work-2-STEP-001'));
+    });
+    test('a head other than the facts head plans again once from fresh facts, keeping the review block', async () => {
+      const run = await runWorkflow(LAUNCH, movedHeadResults());
+      assert.deepEqual(labelsOf(run), ['facts-1', 'fix-1', 'facts-2', 'scope-2', 'plan-2', 'head-2', 'facts-3', 'scope-3', 'plan-3', ...tailLabels(3)]);
+      assert.equal(readDataBlock(callOf(run, 'plan-3').prompt, 'replan'), HEAD_MOVED);
+      assert.deepEqual(readDataBlock(callOf(run, 'plan-3').prompt, 'review'), ESCALATION_REVIEW);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+    });
+    test('a second move is a terminal stop', async () => {
+      const run = await runWorkflow(LAUNCH, movedHeadResults({ 'head-3': moltRelay(OTHER, 'false') }));
+      assert.deepEqual(labelsOf(run).slice(-1), ['head-3']);
+      assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: 'The pull request branch moved again, so the remediation stopped before any wave.\n\n' + FIX_NEXT + '\n\n' + decidedBlock(ESCALATION_ASK) });
+    });
+  },
+  'PFR-22': () => {
+    test('each wave runs its workers and its molt commit on the pull request branch with --trunk the launch trunk', async () => {
+      const develop = escalationResults('planner-escalation', { 'facts-1': factsRelay({ trunk: 'develop' }), 'facts-2': factsRelay({ trunk: 'develop' }), 'plan-2': planResult(makePlan({ base: 'develop' })) });
+      const run = await runWorkflow({ references: [PR], trunk: 'develop' }, develop);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const worker = callOf(run, 'work-2-STEP-001');
+      assert.deepEqual([worker.opts.agentType, worker.opts.phase], ['hivemind:drone', 'Waves']);
+      assert.equal(readDataBlock(worker.prompt, 'step').id, 'STEP-001');
+      assert.deepEqual(readDataBlock(worker.prompt, 'git'), { branch: 'feature/cache', base: 'develop', trunk: 'develop' });
+      const commit = callOf(run, 'commit-2-1');
+      assert.equal(readCommandWord(commit.prompt, '--trunk'), 'develop');
+      assert.deepEqual(readDataBlock(commit.prompt, 'inputs_file').content.files, ['src/a.js']);
+    });
+  },
+  'PFR-23': () => {
+    test('validation is the one gate: no local review and no gate line not configured', async () => {
+      assert.deepEqual(structuredClone([main.gateIds(), main.configuredGateIds(), main.listNotConfiguredGateLines(), main.gateNames()]), [['validate'], ['validate'], [], { validate: 'validation' }]);
+      const run = await runWorkflow(LAUNCH, escalationResults());
+      const validate = callOf(run, 'validate-2-1');
+      assert.deepEqual([validate.opts.agentType, validate.opts.phase], ['hivemind:drone', 'Validate']);
+      assert.equal(validate.opts.schema.properties.version, undefined);
+      assert.ok(!labelsOf(run).some((label) => label.startsWith('review')));
+      assert.ok(!builtSource.includes('function runReviewGate('));
+      assert.ok(!builtSource.includes('the local review that just ran') && !builtSource.includes('apply the local review fixes') && !builtSource.includes('function reviewCommitTexts('), 'the draft carries no local review commit text');
+      assert.throws(() => main.commitStepTexts('review'), /no texts for step "review"/);
+    });
+    test('with version files the validation runs the version check', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': versionedPlanResult(), 'validate-2-1': { outcome: 'passed', version: { outcome: 'ran', stdout: BUMP_MATCH } } }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const validate = callOf(run, 'validate-2-1');
+      assert.deepEqual(readDataBlock(validate.prompt, 'version').version_files, ['VERSION']);
+      assert.notEqual(validate.opts.schema.properties.version, undefined);
+      assert.ok(readDataBlock(callOf(run, 'pr-2').prompt, 'body_file').content.includes('- validation: passed, version 1.3.0, held on commit ' + OTHER));
+    });
+  },
+  'PFR-24': () => {
+    test('the pull request step runs open-plan-pr once with the plan branch, the trunk and the held commit', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults());
+      const call = callOf(run, 'pr-2');
+      assert.deepEqual([call.opts.agentType, call.opts.phase], ['hivemind:synapse', 'PR']);
+      assert.deepEqual(['--head', '--base', '--expect-commit'].map((flag) => readCommandWord(call.prompt, flag)), ['feature/cache', 'main', OTHER]);
+      assert.equal(labelsOf(run).filter((label) => label.startsWith('pr-')).length, 1);
+    });
+    test('a head_ref_oid other than the held commit is a terminal stop', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'pr-2': cannedPrRunner({ head_ref_oid: HEAD }) }));
+      assert.equal(run.result.outcome, 'blocked');
+      assert.ok(run.result.message.startsWith('The pull request step reported a head commit other than the commit every gate held on'), run.result.message);
+    });
+    test('real molt.sh and the real open-plan-pr.sh reuse path push H to the open pull request, commenting only when a comment is sent', async () => {
+      const scratch = makeReuseScratch();
+      const start = runGitIn(scratch, ['rev-parse', 'HEAD']);
+      const prRelays = [];
+      const run = await runWorkflow(LAUNCH, realScratchResults(scratch, prRelays));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const head = runGitIn(scratch, ['rev-parse', 'HEAD']);
+      assert.notEqual(head, start);
+      assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: head, created: false });
+      assert.equal(runGitIn(scratch, ['--git-dir=' + scratch.origin, 'rev-parse', 'refs/heads/feature/cache']), head);
+      assert.ok(prRelays[0].stdout.includes('created: false\ncommented: true\n'), prRelays[0].stdout);
+      const comment = readPrInputs(callOf(run, 'pr-2').prompt).comment;
+      assert.equal(readFileSync(join(scratch.logDir, 'comments.md'), 'utf8'), comment);
+      const words = ['--head', 'feature/cache', '--base', 'main', '--expect-commit', head, '--inputs', '.hivemind/pr-inputs-quiet.json', '--body-file', '.hivemind/pr-inputs-quiet-body.json'];
+      const quiet = runCommandBlock(scratch, main.buildPullRequestPrompt(words, { title: 'fix: Close the unchecked path', body: 'Body.' }, false, PLUGIN_ROOT));
+      assert.equal(quiet.outcome, 'ran', quiet.stderr);
+      assert.equal(quiet.stdout, 'url: ' + PR_URL + '\nhead_ref_oid: ' + head + '\ncreated: false\n');
+      assert.equal(readFileSync(join(scratch.logDir, 'comments.md'), 'utf8'), comment);
+    });
+  },
+  'PFR-25': () => {
+    test('the comment is the remediation lead naming H, then the run record', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults());
+      const comment = readPrInputs(callOf(run, 'pr-2').prompt).comment;
+      const gates = 'Gates:\n- validation: passed, held on commit ' + OTHER;
+      assert.equal(comment, ['The remediation pushed commit ' + OTHER + '.', gates, decidedBlock(ESCALATION_ASK)].join('\n\n'));
+    });
+    test('with no shown decision the inputs file carries no comment', () => {
+      const state = main.createRunState({ trunk: 'main', pr: PR });
+      state.head = OTHER;
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, slow: [] };
+      assert.equal(main.buildPullRequestComment(state, gates), undefined);
+      state.taken = [{ brief: { problem: 'Run the plan?' }, kind: 'remediation_plan_acceptance', listed: [] }];
+      assert.equal(main.buildPullRequestComment(state, gates), undefined);
+      const words = ['--head', 'feature/cache', '--base', 'main', '--expect-commit', OTHER, '--inputs', 'i.json', '--body-file', 'b.json'];
+      assert.ok(!Object.hasOwn(readPrInputs(main.buildPullRequestPrompt(words, { title: 'T', body: 'B' }, false, PLUGIN_ROOT)), 'comment'));
+    });
+  },
+  'PFR-26': () => {
+    test('a taken decision reaches the pull request texts as it is, never labeled local review', async () => {
+      const entry = { brief: { problem: 'P' }, kind: 'planner_escalation_routing', listed: [] };
+      assert.equal(main.toPullRequestDecision(entry), entry);
+      const run = await runWorkflow(LAUNCH, escalationResults('root-cluster-suspected'));
+      const prompt = callOf(run, 'pr-2').prompt;
+      for (const text of [readPrInputs(prompt).comment, readDataBlock(prompt, 'body_file').content]) {
+        assert.ok(text.includes(CLUSTER_ASK), text);
+        assert.ok(!/local review/i.test(text), text);
+      }
+    });
+  },
+  'PFR-27': () => {
+    test('the run ends complete with pr, naming the pull request and the commit validation held on', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults());
+      assert.deepEqual(run.result, completeResult(ESCALATION_ASK));
+      assert.deepEqual(Object.keys(run.result), ['needs_user', 'outcome', 'pr', 'message']);
+    });
+    test('a pull request the run had to open is named as opened, created true', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'pr-2': cannedPrRunner({ created: 'true', commented: 'false' }) }));
+      assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: true });
+      assert.ok(run.result.message.startsWith('Opened pull request ' + PR_URL + ' on commit ' + OTHER + '.\n\n' + HELD_LINE), run.result.message);
     });
   }
 };
@@ -628,7 +989,7 @@ describe('pr-feedback-remediation draft', () => {
   });
   test('each source file is at most 600 lines, ASCII, with no hash before a digit and no clock or randomness', () => {
     const files = readdirSync(sourceDir).filter((name) => name.endsWith('.js'));
-    assert.deepEqual(files.sort(), ['contract.js', 'escalation.js', 'fix.js', 'main.js', 'meta.js']);
+    assert.deepEqual(files.sort(), ['contract.js', 'escalation.js', 'fix.js', 'main.js', 'meta.js', 'tail.js']);
     for (const name of files) {
       const source = readText(join(sourceDir, name));
       assert.ok(source.split('\n').length <= 600, name);
@@ -647,6 +1008,6 @@ describe('pr-feedback-remediation draft', () => {
   test('meta names the workflow and its phases', async () => {
     const run = await workflow.run({ args: undefined, results: {} });
     assert.equal(run.meta.name, WORKFLOW_ID);
-    assert.deepEqual(structuredClone(run.meta.phases).map((phase) => phase.title), ['Facts', 'Scan', 'Fix', 'Scope', 'Plan', 'Revise']);
+    assert.deepEqual(structuredClone(run.meta.phases).map((phase) => phase.title), ['Facts', 'Scan', 'Fix', 'Scope', 'Plan', 'Revise', 'Waves', 'Commit', 'Validate', 'PR']);
   });
 });

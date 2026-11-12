@@ -12,11 +12,15 @@
  *
  * The phase modules of this directory hold every other function, and the
  * build bundles them, in name order, ahead of this file: gates.js, pr.js,
- * relay.js, review-schema.js, review.js, specs.js and waves.js. The
- * planning pass and its check retries are lib/plan.js and lib/checks.js,
- * the scope step lib/scope.js, the code-built briefs lib/briefs.js, the
- * approval rules lib/approvals.js, the tail asks lib/tails.js and the run
- * record and run ends lib/record.js.
+ * relay.js, review-schema.js and review.js. gates.js and pr.js hold only
+ * the hooks of the gate loop and of the pull request step. The planning
+ * pass and its check retries are lib/plan.js and lib/checks.js, the scope
+ * step lib/scope.js, the code-built briefs lib/briefs.js, the approval
+ * rules lib/approvals.js, the tail asks lib/tails.js, the waves
+ * lib/workers.js, the commit step lib/commit.js, the runner specs
+ * lib/specs.js, the gate loop lib/gates.js, the pull request step
+ * lib/pr.js and the run record, the rejected findings block and the run
+ * ends lib/record.js.
  * Each opens with the contract of its steps. This file holds the launch reading, the
  * run state, the pass loop and every top-level constant and limit other
  * than maxTitleLength(), which lib/title.js holds.
@@ -149,7 +153,7 @@
  *   changes the user's own replies approved, never a decision the run took.
  *   No version question plans again: its reply becomes run.versionAnswer
  *   and runs one fix round, and no later version check of the run fails
- *   or asks (gates.js).
+ *   or asks (lib/gates.js).
  *   Every blocked result carries one Next line as a whole block right
  *   after its first block, and no block carries shorten. A blocked run end
  *   takes a list of causes, {problem, nextAction?} each, never a message:
@@ -173,7 +177,7 @@
  *   holds every action phrase.
  *   A blocked wave says run_again only when every blocked worker does.
  *   Compound rule: a file-changing step passes its own causes to
- *   runCommitStep (relay.js), which stops through stopDelivery with them
+ *   runCommitStep (lib/commit.js), which stops through stopDelivery with them
  *   and a failed commit's cause after them, so no stop hides another. A
  *   facts, scan, scope, plan or branch stop goes through stopDelivery with
  *   isReplan true, and its reply starts a new pass outside maxReplans();
@@ -288,7 +292,7 @@
  *   unique and a resume replays every earlier prompt byte for byte and gets
  *   every earlier result, side effects included, from cache. A commit or
  *   pull request inputs path is the pass's facts file stem, run.factsStem,
- *   and the call label (relay.js buildInputsPath), so it is unique too,
+ *   and the call label (lib/commit.js buildInputsPath), so it is unique too,
  *   given a faithful facts relay. run.pluginRoot is the plugin_root of the
  *   pass's checked facts relay, and every runner command after the facts
  *   step holds it in place of {plugin-root}, or the placeholder when it is

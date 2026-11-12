@@ -13,6 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.8.0] - 2026-11-11
+
+### Added
+
+- The draft `hivemind:pr-feedback-remediation` workflow gains its tail, in `plugin/workflow-src/pr-feedback-remediation/tail.js`: waves with a molt commit each, validation with the version check, the push through the `open-plan-pr` reuse path with `--expect-commit`, the one decisions comment, and `pr` in the result. The workflow is still a draft and not live; go-live is PR6.
+
+### Changed
+
+- The RECORDED RESIDUAL R4 header in the `open-plan-pr` script (`plugin/skills/open-plan-pr/scripts/`) notes that a `pr-feedback-remediation` run passes the comment input only when it took a decision, so it adds at most one decisions comment to the reused PR, and a resume by name posts none (ADR-0040 edge case d). Script behavior does not change.
+- Shared code moves into `plugin/workflow-src/lib/`, with function bodies unchanged: `specs.js`, the wave and worker code (`workers.js`), `gates.js`, `commit.js` and `pr.js`. `standard-delivery` behavior does not change.
+- Prompt text cuts: the draft loses 2003 characters and `standard-delivery` loses 1657.
+
+The `pr-feedback-remediation` draft prose is 37869 against a budget raised from 29900 to 38200 (user-approved; evidence in ADR-0040 Amendment 2026-11-11). The `standard-delivery` prose is 41748 against a budget lowered from 43800 to 42100, and its built length is 189059 of 190000. The `BUILD_ID` of `plugin/workflows/standard-delivery.js` changes, so a run paused on the old build cannot resume on this one.
+
+Refs #409 (slice 3, PR 5).
+
 ## [7.7.0] - 2026-11-11
 
 ### Added

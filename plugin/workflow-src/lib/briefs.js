@@ -16,9 +16,9 @@
  *   values   the routing values of a version check whose version_check is
  *            undetermined or unreadable (standard-delivery gates.js).
  *   unshownBriefText and describeCount (lib/plan.js), isRepositoryPath and
- *   listPlanPaths (lib/paths.js), and the workflow functions gateNames and
- *   joinNames (standard-delivery gates.js), maxFixRounds (standard-delivery
- *   main.js) and buildUndecidedAsk (standard-delivery tails.js).
+ *   listPlanPaths (lib/paths.js), and the workflow functions gateNames
+ *   (standard-delivery gates.js), maxFixRounds (standard-delivery main.js)
+ *   and buildUndecidedAsk (standard-delivery tails.js).
  *   The constants of the workflow's main.js this file reads:
  *   PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND, TRUNK_STALE_KIND,
  *   EXTERNAL_EFFECT_KIND, STEP_STOP_KIND, VERSION_BUMP_INDETERMINABLE_KIND,
@@ -49,15 +49,17 @@
  *            standard-delivery review.js.
  *   buildBriefGate(irreversible)  the gate of a code-built brief, never
  *            architectural or safety.
+ *   joinNames(names, conjunction)  names joined in prose, also read by
+ *            lib/record.js.
  *   buildValidationRemediationBrief, buildFixLimitBrief and
  *   buildGateRerunBrief  the tail briefs standard-delivery gates.js
  *            resolves.
  *   buildStepStopBrief(isReplan)  the fix_cause step_stop brief
- *            stopDelivery (standard-delivery record.js) asks. It has one option, strength
- *            strong, and its problem says to clear the cause named above
- *            and commit any change, then reply, and whether the reply takes
- *            the stopped step again or plans again from fresh facts. It is
- *            built through buildTailBrief with its option B left out.
+ *            stopDelivery (standard-delivery record.js) asks. Its problem
+ *            says to clear the cause named above and commit any change,
+ *            then reply; its one option, strength strong, says whether the
+ *            reply takes the stopped step again or plans again from fresh
+ *            facts. It is buildTailBrief with option B left out.
  *   buildApprovalAsks(holds, isReplan, run)  the asks of an approve stop,
  *            one step_stop ask per held item {stepId, category, item}, in
  *            hold order. Its shown brief names the encoded step in its
@@ -164,7 +166,7 @@ function buildExternalEffectBrief(summary) {
       buildBriefOption('A', 'Go on and let the step make this effect.', 'small', 'high', false),
       buildBriefOption('B', 'Change or drop the step first.', 'small', 'medium')
     ],
-    recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide whether this effect outside the repo may happen.' },
+    recommendation: { option_id: 'A', strength: 'none', why: describeOnlyYou('decide whether this effect outside the repo may happen') },
     assumptions: buildUnshownAssumptions('assumed'),
     gate: buildBriefGate(true),
     verbatim: summary
@@ -201,7 +203,7 @@ function markOutsideLimits(brief, outsidePaths) {
   return Object.assign(brief, { problem: problem.length <= BRIEF_SCHEMA.properties.problem.maxLength ? problem : brief.problem });
 }
 
-function buildTailBrief({ kind, problem, goOn, other = 'Plan again: this run gives your reply to the planner before anything goes further.', strength, why }) {
+function buildTailBrief({ kind, problem, goOn, other = 'Plan again from your reply.', strength, why }) {
   return {
     id: 'tail',
     kind: kind,
@@ -218,15 +220,15 @@ function buildTailBrief({ kind, problem, goOn, other = 'Plan again: this run giv
 }
 
 function describeStopThen(isReplan) {
-  return isReplan ? 'the run plans again from fresh facts' : 'the run takes the stopped step again';
+  return isReplan ? 'plan again from fresh facts' : 'take the stopped step again';
 }
 
 function buildStepStopBrief(isReplan) {
   const action = describeStopAction('fix_cause', 'commit any change and reply');
   const brief = buildTailBrief({
     kind: STEP_STOP_KIND,
-    problem: action.charAt(0).toUpperCase() + action.slice(1) + ', and ' + describeStopThen(isReplan) + '.',
-    goOn: isReplan ? 'Go on: plan again from fresh facts.' : 'Go on: take the stopped step again.',
+    problem: action.charAt(0).toUpperCase() + action.slice(1) + '.',
+    goOn: 'Go on: ' + describeStopThen(isReplan) + '.',
     strength: 'strong',
     why: 'Clearing it lets the step go on.'
   });
@@ -240,7 +242,7 @@ function buildApprovalBrief(stepText, change, isReplan) {
     goOn: 'Approve this change.',
     other: 'Keep it as it is, and ' + describeStopThen(isReplan) + ' without it.',
     strength: 'none',
-    why: 'Only you can approve a change the destructive-fix gate holds back.'
+    why: describeOnlyYou('approve it')
   });
   brief.options[0].destructive = [change];
   return brief;
@@ -294,13 +296,28 @@ function buildBriefOption(id, summary, effort = 'small', value = 'high', reversi
   return { id: id, summary: summary, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: effort, value: value, reversible: reversible, beyond_request: false };
 }
 
+/**
+ * Returns the why of a brief with strength none: only the user can do
+ * action.
+ */
+function describeOnlyYou(action) {
+  return 'Only you can ' + action + '.';
+}
+
+function joinNames(names, conjunction) {
+  if (names.length < 3) {
+    return names.join(' ' + conjunction + ' ');
+  }
+  return names.slice(0, -1).join(', ') + ' ' + conjunction + ' ' + names[names.length - 1];
+}
+
 function listVersionOptions(values) {
   if (values.version_check === 'unreadable') {
-    return [buildBriefOption('A', 'Keep the version each file holds on the branch.'), buildBriefOption('B', 'Set the version your reply names in each file.')];
+    return [buildBriefOption('A', 'Keep the branch version of each file.'), buildBriefOption('B', 'Set each file to the version you name.')];
   }
   const trunk = values.trunk_version;
-  const bumpOptions = [['A', 'major'], ['B', 'minor'], ['C', 'patch']].map(([id, bumpType]) => buildBriefOption(id, 'Make a ' + bumpType + ' version bump' + (trunk === undefined ? '.' : ', to version ' + raiseVersion(trunk, bumpType) + '.')));
-  return bumpOptions.concat(buildBriefOption('D', 'Make no version bump' + (trunk === undefined ? '.' : ', keeping version ' + trunk + '.')));
+  const bumpOptions = [['A', 'major'], ['B', 'minor'], ['C', 'patch']].map(([id, bumpType]) => buildBriefOption(id, 'Make a ' + bumpType + ' bump' + (trunk === undefined ? '.' : ', to version ' + raiseVersion(trunk, bumpType) + '.')));
+  return bumpOptions.concat(buildBriefOption('D', 'Make no bump' + (trunk === undefined ? '.' : ', keeping version ' + trunk + '.')));
 }
 
 function buildVersionQuestionBrief(values) {
@@ -309,11 +326,11 @@ function buildVersionQuestionBrief(values) {
     id: 'version',
     kind: VERSION_BUMP_INDETERMINABLE_KIND,
     problem: isUnreadable
-      ? 'The version check cannot read one version from the version files. It reads the top-level version string of a .json file, the one version = "X.Y.Z" line of a .toml file and any other file whole, each a plain X.Y.Z version, the same at the trunk. Which version should they hold?'
-      : 'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
+      ? 'The version check cannot read one X.Y.Z version from the version files, on the branch and at the trunk: the top-level version string of a .json file, the one version = "X.Y.Z" line of a .toml file, or any other file whole. Which version should they hold?'
+      : 'The commits and the plan do not settle the version bump. Which bump does the delivery need?',
     criticality: buildUnshownCriticality(),
     options: listVersionOptions(values),
-    recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide the version of this delivery.' },
+    recommendation: { option_id: 'A', strength: 'none', why: describeOnlyYou('decide the version') },
     assumptions: buildUnshownAssumptions(),
     gate: buildBriefGate()
   };
@@ -322,10 +339,10 @@ function buildVersionQuestionBrief(values) {
 function buildValidationRemediationBrief(head, round) {
   return buildTailBrief({
     kind: VALIDATION_REMEDIATION_KIND,
-    problem: 'Validation failed on commit ' + head + '. Run fix round ' + round + ' of at most ' + maxFixRounds() + ', where a worker fixes the failures and the run commits the fix and checks again?',
+    problem: 'Validation failed on commit ' + head + '. Should a worker fix the failures in fix round ' + round + ' of at most ' + maxFixRounds() + '?',
     goOn: 'Run a fix round.',
     strength: 'strong',
-    why: 'A fix round stays on the branch and is listed for you, and every check runs again on its commit.'
+    why: 'The fix stays on the branch, is listed for you, and every check runs again on its commit.'
   });
 }
 
@@ -333,9 +350,9 @@ function buildFixLimitBrief(head) {
   return buildTailBrief({
     kind: VALIDATION_REMEDIATION_KIND,
     problem: 'Validation still fails on commit ' + head + ' after ' + maxFixRounds() + ' fix rounds. How should the failures be fixed?',
-    goOn: 'Say how to fix the failures: this run plans the fix from your reply.',
+    goOn: 'Say how: the run plans the fix from your reply.',
     strength: 'none',
-    why: 'The fix rounds did not make validation pass, so only you can decide what comes next.'
+    why: describeOnlyYou('decide what comes next')
   });
 }
 
@@ -344,8 +361,8 @@ function buildGateRerunBrief(staleIds, head) {
   return buildTailBrief({
     kind: GATE_RERUN_KIND,
     problem: 'Commit ' + head + ' landed after ' + names + ' held on an earlier commit. Run ' + names + ' again on the new commit?',
-    goOn: 'Run the checks again on the new commit.',
+    goOn: 'Run the checks again.',
     strength: 'strong',
-    why: 'A check holds only for the commit it ran on, and the pull request needs every check to hold on the commit it pushes.'
+    why: 'The pull request needs every check to hold on the commit it pushes.'
   });
 }

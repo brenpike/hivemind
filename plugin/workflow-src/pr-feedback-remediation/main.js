@@ -4,15 +4,18 @@
  * launches it when a watch ends on an escalation. It gathers the branch
  * facts, then runs one schema-checked hivemind:github-reviewer fix pass on
  * the pull request. On a planner escalation or a suspected root cluster it
- * plans the remediation (escalation.js), and otherwise it ends on that
- * pass's exit.
+ * plans the remediation (escalation.js), then runs its tail (tail.js): the
+ * waves, validation as the one gate, and one push to the pull request.
+ * Otherwise it ends on that pass's exit.
  *
- * fix.js holds the fix pass and escalation.js the remediation planning, and
- * the build bundles them ahead of this file. The planning pass, its scope
- * step, briefs and stops are the shared libraries lib/plan.js,
- * lib/checks.js, lib/scope.js, lib/briefs.js, lib/approvals.js,
- * lib/tails.js and lib/record.js. This file holds the launch reading, the
- * run state, the run and every top-level constant.
+ * fix.js holds the fix pass, escalation.js the remediation planning and
+ * tail.js the tail, and the build bundles them ahead of this file. The
+ * planning pass, its scope step, briefs and stops are the shared libraries
+ * lib/plan.js, lib/checks.js, lib/scope.js, lib/briefs.js,
+ * lib/approvals.js, lib/tails.js and lib/record.js, and the tail runs
+ * lib/workers.js, lib/commit.js, lib/gates.js and lib/pr.js. This file
+ * holds the launch reading, the run state, the run and every top-level
+ * constant and limit; each limit has the value standard-delivery gives it.
  *
  * Inputs
  *   args   the Workflow args global. Only a plain object is read, and it
@@ -33,10 +36,12 @@
  *
  * Outputs
  *   finish({outcome: 'complete', blocks}) or finish({outcome: 'blocked',
- *   causes}) (lib/result.js) on the fix pass's own exit. A complete end
+ *   causes}) (lib/result.js) on the fix pass's own exit. That complete end
  *   carries no pr. Once an escalation was routed, every end goes through
- *   lib/record.js: pauseDelivery when a question needs the user, else
- *   finishDeliveryBlocked, which also lists the taken decisions.
+ *   lib/record.js: pauseDelivery when a question needs the user,
+ *   finishDeliveryComplete with pr {url, head_ref_oid, created} once the
+ *   pull request step ran, else finishDeliveryBlocked, which also lists
+ *   the taken decisions.
  *
  * Invariants
  *   Relayed message (ADR-0040 edge case a): the harness relays the user
@@ -58,6 +63,17 @@
  *   run.level is the table's default_level: no launch key sets it.
  *   Every blocked end passes its causes to finish, which builds the lead
  *   and the Next line (lib/stop.js).
+ *   Every agent call of a run has a label no other call of it has, so a
+ *   resume replays every earlier call from cache, the pull request runner
+ *   included, and posts no second comment.
+ *
+ * Residuals
+ *   A pull request closed or merged mid-run has no open pull request on
+ *   the pushed commit, so open-plan-pr opens a new one, created true, and
+ *   the result names it.
+ *   Inherited from the reuse path of standard-delivery: at the gate rerun
+ *   cap the run record and the final message say the pull request is a
+ *   draft, while a reused pull request stays as it is.
  *
  * Why
  *   The watch stays in the main session (ADR-0040 decision 1), so the
@@ -78,11 +94,33 @@ const GATE_RERUN_KIND = 'gate_rerun';
 const PLANNER_ESCALATION_ROUTING_KIND = 'planner_escalation_routing';
 const ROOT_CLUSTER_ROUTING_KIND = 'root_cluster_routing';
 const REMEDIATION_PLAN_ACCEPTANCE_KIND = 'remediation_plan_acceptance';
+const VALIDATION_REMEDIATION_KIND = 'validation_remediation';
+const VERSION_BUMP_INDETERMINABLE_KIND = 'version_bump_indeterminable';
 const STEP_STOP_KIND = 'step_stop';
 const RELAY_SCHEMA = buildRelaySchema();
+const WORKER_SCHEMA = buildWorkerSchema();
+const FIX_SCHEMA = buildGateEditSchema();
+const VALIDATE_SCHEMA = buildValidateSchema(false);
+const VALIDATE_COMMANDS_SCHEMA = buildValidateSchema(true);
 const FIX_RESULT_SCHEMA = buildFixResultSchema();
 const PLAN_RESULT_SCHEMA = buildPlanResultSchema(PLAN_SCHEMA, BRIEF_SCHEMA);
 const SCOPE_SCHEMA = buildScopeSchema();
+
+function maxReplans() {
+  return 3;
+}
+
+function maxFixRounds() {
+  return 3;
+}
+
+function maxGateReruns() {
+  return 4;
+}
+
+function maxPullRequestTextLength() {
+  return 60000;
+}
 
 function launchKeys() {
   return ['references', 'trunk', 'answers', 'build', replyField()];
@@ -98,10 +136,10 @@ function describeLaunchProblem(reason) {
 
 function readRemediationLaunch(rawArgs) {
   if (!isPlainObject(rawArgs)) {
-    return describeLaunchProblem('The launch args must be an object of references and trunk');
+    return describeLaunchProblem('The launch args must be an object of ' + joinNames(launchKeys().slice(0, 2), 'and'));
   }
   if (Object.keys(rawArgs).some((key) => !launchKeys().includes(key))) {
-    return describeLaunchProblem('The launch args may hold only references, trunk, answers, build and reply');
+    return describeLaunchProblem('The launch args may hold only ' + joinNames(launchKeys(), 'and'));
   }
   const launchInputs = readLaunchInputs(rawArgs, RUN_NOUN, BUILD_ID);
   if (launchInputs.problem !== undefined) {
@@ -132,8 +170,19 @@ function createRunState(launch, argsObject = {}) {
     taken: [],
     reversibleEffects: [],
     approvals: [],
+    rejected: [],
+    undone: [],
+    open: [],
+    head: undefined,
+    branch: undefined,
+    headRound: undefined,
+    notRunGates: [],
+    draft: false,
     waveCount: 0,
     pass: 1,
+    replans: 0,
+    headMoves: 0,
+    versionAnswer: undefined,
     factsStem: undefined,
     pluginRoot: undefined
   };
@@ -151,7 +200,7 @@ async function runFixCall(run, facts) {
     return { cause: inputStop };
   }
   phase('Fix');
-  const fix = await agent(addResumeNote(buildFixPrompt(fixInputs), run), fixOptions(run));
+  const fix = await agent(addResumeNote(buildFixPassPrompt(fixInputs), run), fixOptions(run));
   const resultProblem = describeFixResultProblem(fix);
   return resultProblem === undefined ? { fix: fix } : { cause: resultProblem };
 }

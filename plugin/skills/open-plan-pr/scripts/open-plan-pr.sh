@@ -248,10 +248,13 @@
 #   Root cause:  each run that reuses an open PR posts its own decisions comment. A new run after
 #                an ADR-0037 decision 2 restart reuses the PR and posts again. A resume by name
 #                gets the runner result from cache (ADR-0037 decision 8), so it does not post
-#                again.
+#                again. A pr-feedback-remediation run passes the comment input only when it took
+#                a decision, so it adds at most one decisions comment to the reused PR, and a
+#                resume by name posts none (ADR-0040 edge case d).
 #   Inherited:   no. The comment input is new with this script; on main, open-plan-pr had no
 #                comment input and posted nothing on a reused PR.
-#   Bounded impact: at most one redundant comment, and one notification, per new run. No wrong
+#   Bounded impact: at most one redundant comment, and one notification, per new run or per
+#                pr-feedback-remediation run that took a decision. No wrong
 #                state, no data loss, no security effect. The PR, its branch and the pushed commit
 #                are unchanged.
 #   Rejected remediations:

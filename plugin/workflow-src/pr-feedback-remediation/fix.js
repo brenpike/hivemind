@@ -20,6 +20,9 @@
  *          planner: planner-escalation and root-cluster-suspected.
  *   fixFieldSchemas()  the schema of each conditional field.
  *   buildFixResultSchema()  FIX_RESULT_SCHEMA, which main.js builds once.
+ *   describeStopBeforeFix(reason)  reason, then that the run stopped before
+ *          the fix pass.
+ *   describeFixLead(run)  the lead naming the fix pass on the pull request.
  *   describeHeadStop(facts, run)  a stop cause when the facts were taken
  *          on no branch or on the trunk, else undefined.
  *   listFixInputs(run, facts)  the fix mode input: mode fix, pr,
@@ -27,7 +30,7 @@
  *   describeFixInputStop(fixInputs)  a terminal report cause naming the
  *          first of pr, working_branch and base that fails isGitIdentifier,
  *          else undefined.
- *   buildFixPrompt(fixInputs)  the fix pass prompt before addResumeNote.
+ *   buildFixPassPrompt(fixInputs)  the fix pass prompt before addResumeNote.
  *   fixOptions(run)  the reviewer call options, label fix-<pass>.
  *   hasDeferredItemsMismatch(fix)  true when deferred_escalation_items is
  *          present on a result that is not an escalation with
@@ -100,8 +103,8 @@ function buildFixList(maxItems, text, isExternal) {
 
 function fixFieldSchemas() {
   return {
-    escalation_target: buildFixText(300, 'Who or what the escalation goes to.', true),
-    candidate_url: buildFixText(500, 'The URL of the candidate the exit is about.', true),
+    escalation_target: buildFixText(300, 'The escalation target.', true),
+    candidate_url: buildFixText(500, 'The candidate URL of the exit.', true),
     pattern_category: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4'], description: 'The injection pattern category.' },
     rationale_text: buildFixText(600, 'Why the reviewer rejects the finding.', true),
     cluster_files: buildFixList(20, 'Each file of the root cluster.', true),
@@ -134,12 +137,20 @@ function buildFixResultSchema() {
   return buildTaggedSchema({ tag: 'exit_reason', properties: properties, required: required, variants: variants });
 }
 
+function describeStopBeforeFix(reason) {
+  return reason + ', so ' + RUN_NAME + ' stopped before the fix pass.';
+}
+
+function describeFixLead(run) {
+  return 'The review fix pass on pull request ' + run.pr;
+}
+
 function describeHeadStop(facts, run) {
   if (facts.head_state !== 'branch') {
-    return { problem: 'The checkout is not on a branch, so ' + RUN_NAME + ' stopped before the fix pass.' };
+    return { problem: describeStopBeforeFix('The checkout is not on a branch') };
   }
   if (facts.branch === run.trunk) {
-    return { problem: 'The checkout is on the trunk ' + encodeUntrustedText(run.trunk) + ', not on the branch of the pull request, so ' + RUN_NAME + ' stopped before the fix pass.' };
+    return { problem: describeStopBeforeFix('The checkout is on the trunk ' + encodeUntrustedText(run.trunk) + ', not on the pull request branch') };
   }
   return undefined;
 }
@@ -153,12 +164,12 @@ function describeFixInputStop(fixInputs) {
   if (failing === undefined) {
     return undefined;
   }
-  return { problem: 'The fix pass input ' + failing + ' is not a safe git name, so ' + RUN_NAME + ' stopped before the fix pass.', terminal: true, nextAction: 'report' };
+  return { problem: describeStopBeforeFix('The fix pass input ' + failing + ' is not a safe git name'), terminal: true, nextAction: 'report' };
 }
 
-function buildFixPrompt(fixInputs) {
+function buildFixPassPrompt(fixInputs) {
   return [
-    'Run one review fix pass on the pull request the fix_mode_input block below names, and return its result.',
+    'Run one review fix pass on the pull request the fix_mode_input block names.',
     dataBlocksSentence(),
     '',
     formatDataBlock('fix_mode_input', fixInputs)
@@ -207,7 +218,7 @@ function describeMergeAdvice(fix, lead) {
 }
 
 function describeFixExit(fix, run) {
-  const lead = 'The review fix pass on pull request ' + run.pr;
+  const lead = describeFixLead(run);
   const ended = lead + ' ended ' + fix.exit_reason + describeFixCandidates(fix);
   switch (fix.exit_reason) {
     case 'clean':
@@ -236,7 +247,7 @@ async function runFixPass(run, facts) {
     return { cause: inputStop };
   }
   phase('Fix');
-  const fix = await agent(addResumeNote(buildFixPrompt(fixInputs), run), fixOptions(run));
+  const fix = await agent(addResumeNote(buildFixPassPrompt(fixInputs), run), fixOptions(run));
   const resultProblem = describeFixResultProblem(fix);
   if (resultProblem !== undefined) {
     return { cause: resultProblem };

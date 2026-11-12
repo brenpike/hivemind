@@ -10,7 +10,7 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const sourceRoot = repoRoot + 'plugin/workflow-src/';
 const libDir = sourceRoot + 'lib/';
 const lib = loadLibs([libDir + 'result.js', libDir + 'stop.js', libDir + 'args.js']);
-const NEW_LIBS = ['args.js', 'facts.js', 'identifier.js'];
+const NEW_LIBS = ['args.js', 'facts.js', 'identifier.js', 'specs.js', 'commit.js', 'workers.js', 'gates.js', 'pr.js'];
 
 const RUN_NOUN = 'delivery';
 const BUILD_ID = 'build-a1';
@@ -246,7 +246,7 @@ describe('the new libs are plain workflow libs', () => {
   test('the workflow modules checked include analysis-only main.js and every standard-delivery module', () => {
     const modules = listWorkflowModules();
     assert.ok(modules.includes(sourceRoot + 'analysis-only/main.js'));
-    for (const name of ['main.js', 'relay.js', 'waves.js', 'gates.js', 'review.js', 'pr.js']) {
+    for (const name of ['main.js', 'relay.js', 'gates.js', 'review.js', 'pr.js']) {
       assert.ok(modules.includes(sourceRoot + 'standard-delivery/' + name), name);
     }
   });

@@ -1,17 +1,23 @@
 /*
- * standard-delivery specs.js: the routing specs of the runner scripts of
- * the standard-delivery workflow, their fixed warning texts and the
- * consistency checks of the bump-type relay.
+ * specs.js: the routing specs of the runner scripts a workflow shares,
+ * their fixed warning texts and the consistency checks of the bump-type
+ * relay.
  *
  * Inputs
- *   values  the routing lines of one relay, as readRelayedLines (relay.js)
- *           parses them with one of these specs.
+ *   values  the routing lines of one relay, as readRelayedLines
+ *           (lib/runner.js) parses them with one of these specs.
+ *   It reads no constant of the workflow's main.js and no workflow
+ *   function: gitIdentifierPattern is lib/identifier.js.
  *
  * Outputs
  *   createWorkingBranchRoutingSpec(), moltRoutingSpec(),
  *   bumpTypeRoutingSpec() and openPlanPrRoutingSpec()  the routing spec of
  *           create-working-branch.sh, molt.sh, bump-type.sh and
  *           open-plan-pr.sh, for parseRoutingLines (lib/routing.js).
+ *           open-plan-pr.sh prints commented only when its inputs carry a
+ *           comment, so openPlanPrRoutingSpec() makes it optional and the
+ *           pull request step (checkPullRequestRelay, lib/pr.js) requires
+ *           it exactly when it sent a comment.
  *   branchWarningTexts() and pullRequestWarningTexts()  the fixed warning
  *           texts of create-working-branch.sh and open-plan-pr.sh.
  *   versionCheckRoutingSpec()  bumpTypeRoutingSpec() plus the bump-type.sh
@@ -25,14 +31,14 @@
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
- *   main.js: the build bundles this module into it, so a row can name a
- *   function of this module.
+ *   main.js: the build bundles this library into it, so a row can name a
+ *   function of this library.
  *   The keys of each spec are the OUTPUT keys of its script, and each
  *   warning pattern holds only the fixed texts of its script.
  *
  * Why
  *   A relay is read only through the spec of the script that wrote it, so
- *   the specs of every runner step live in one place.
+ *   the specs of every workflow's runner steps live in one place.
  */
 
 function commitShaPattern() {
@@ -90,7 +96,7 @@ function openPlanPrRoutingSpec() {
     url: { pattern: /^https:\/\/[A-Za-z0-9._/-]+\/pull\/[0-9]+$/, required: true },
     head_ref_oid: { pattern: commitShaPattern(), required: true },
     created: { pattern: /^(?:true|false)$/, required: true },
-    commented: { pattern: /^(?:true|false)$/, required: true },
+    commented: { pattern: /^(?:true|false)$/, required: false },
     warning: { pattern: new RegExp('^(?:' + pullRequestWarningTexts().join('|') + ')$'), required: false }
   };
 }

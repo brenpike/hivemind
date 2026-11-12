@@ -9,7 +9,7 @@
  *          answerLog, head, trunk, approvals, taken, rejected, undone, open
  *          and waits.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
- *   gates  the gate loop state of runGates (gates.js): runs.review, answer
+ *   gates  the gate loop state of runGates (lib/gates.js): runs.review, answer
  *          and takenReview, which only this module sets and reads: the review
  *          whose call the run took, kept for the next review run alone.
  *   review the local reviewer result, under REVIEW_SCHEMA.
@@ -28,11 +28,12 @@
  *           fixes. caller_validates true holds because a review that ends on a
  *           new commit sends the run back to the first gate, so validation runs
  *           again on that commit, and the reviewer checks only the files each
- *           fix touched. Then the commit runner runs with an empty file list,
- *           so any edit left behind stops it, and the gate holds on the commit
- *           it reports. localReviewRoutes() routes each exit_reason: clean
- *           holds, diminishing returns resolve through decide() and a take
- *           holds, a planner escalation or root cluster resolves through
+ *           fix touched. Then the commit runner runs with an empty file list
+ *           and the texts reviewCommitTexts() gives, so any edit left behind
+ *           stops it, and the gate holds on the commit it reports.
+ *           localReviewRoutes() routes each exit_reason: clean holds,
+ *           diminishing returns resolve through decide() and a take holds, a
+ *           planner escalation or root cluster resolves through
  *           decide() and a take starts a new pass with replan data: the review
  *           projected to its exit_reason and the fields reviewExitFields()
  *           names for it, so rejected_findings, undone_fixes, ledger_path and
@@ -90,7 +91,7 @@
  *           reply, logged with settled [] and decided_by run, runs local
  *           review again; past the waits it returns {draft}. blocked with no
  *           retry_minutes asks one fix_cause step_stop question through
- *           stopDelivery (record.js), and the reply runs local review again;
+ *           stopDelivery (lib/record.js), and the reply runs local review again;
  *           injection-suspect is terminal. Either rerun of a blocked
  *           review passes its ledger_path as resume_from_ledger, once, so
  *           the next loop keeps its iteration count and its break-fix and
@@ -128,12 +129,12 @@
  *   logged review round, only inside the inputs data block as answers, it
  *   reaches the user only encoded by
  *   encodeUntrustedText, and it reaches the pull request texts only through
- *   neutralizePullRequestText (pr.js): a routing decision taken on a review
+ *   neutralizePullRequestText (lib/pr.js): a routing decision taken on a review
  *   result is shown there with a fixed problem text, a taken review call as
  *   its compact decision line, the short finding id, the encoded ask and the
  *   encoded chosen summary with no why, and the rejected findings and
  *   undone fixes as their short ids in the block of
- *   buildRejectedFindingsBlock. A review question shows reviewer text,
+ *   buildRejectedFindingsBlock (lib/record.js). A review question shows reviewer text,
  *   encoded, so its shown brief can exceed a BRIEF_SCHEMA bound
  *   once encoded, but decide() reads only the code-built brief of
  *   removeReviewerText, which always fits it, so a valid review never asks as
@@ -273,10 +274,6 @@ function reviewStopTexts(review) {
   }
 }
 
-function quoteOrEmpty(text, limit) {
-  return quoteDiagnostic(text, limit) || encodeUntrustedText('');
-}
-
 function describeReviewStop(review, head) {
   const detail = reviewStopTexts(review).detail;
   const line = describeReviewOpen(review, head, ' after ' + describeCount(review.iterations_completed, 'iteration')) + describePullRequestStop();
@@ -289,41 +286,6 @@ function describeReviewStop(review, head) {
  */
 function describeReviewOpen(review, head, after) {
   return reviewStopTexts(review).lead + ' on commit ' + head + after + ', with ' + describeCount(review.findings_open, 'finding') + ' still open';
-}
-
-/**
- * Returns the tail of a stop before the pull request, also read by
- * gates.js.
- */
-function describePullRequestStop() {
-  return ', so ' + RUN_NAME + ' stopped before the pull request.';
-}
-
-function quoteShortFindingId(findingId) {
-  return encodeUntrustedText(Array.from(findingId).slice(0, 8).join(''));
-}
-
-function pushShortIdLines(lines, findings) {
-  findings.forEach((finding) => lines.push('- ' + quoteShortFindingId(finding.finding_id)));
-}
-
-/**
- * Returns the block of the held local review gate: its note, then the
- * short id of each rejected finding under the rejected heading, shown
- * unless only undone fixes are listed, then, when any fix was undone, the
- * undone heading and the short id of each undone fix.
- */
-function buildRejectedFindingsBlock(note, rejectedFindings, undoneFixes = []) {
-  const lines = ['Local review: ' + note + '.'];
-  if (rejectedFindings.length > 0 || undoneFixes.length === 0) {
-    lines[0] += ' The findings it rejected:';
-    pushShortIdLines(lines, rejectedFindings);
-  }
-  if (undoneFixes.length > 0) {
-    lines.push('The findings whose fix it undid:');
-    pushShortIdLines(lines, undoneFixes);
-  }
-  return { text: lines.join('\n') };
 }
 
 function buildReviewOption(option, question) {
@@ -562,6 +524,14 @@ function routeLocalReview(review, run) {
   }
 }
 
+/**
+ * Returns the commit texts of the local review commit, in the shape
+ * commitStepTexts (lib/commit.js) gives: purpose, noun and subject.
+ */
+function reviewCommitTexts() {
+  return { purpose: 'the local review that just ran, with an empty file list', noun: 'the local review', subject: 'apply the local review fixes' };
+}
+
 async function runReviewGate(run, plan, gates) {
   const count = gates.runs.review;
   const answer = gates.answer;
@@ -575,7 +545,7 @@ async function runReviewGate(run, plan, gates) {
   if (unusable === undefined) {
     keepReviewLists(run, review);
   }
-  const committed = await runCommitStep(run, plan, { files: [], label: gateLabel('review-commit', run, count), stepName: 'review' }, unusable === undefined ? [] : [unusable]);
+  const committed = await runCommitStep(run, plan, { files: [], label: gateLabel('review-commit', run, count), texts: reviewCommitTexts() }, unusable === undefined ? [] : [unusable]);
   if (committed.values === undefined) {
     return committed;
   }

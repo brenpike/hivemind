@@ -2,7 +2,8 @@
  * pr-feedback-remediation escalation.js: the remediation planning of the
  * pr-feedback-remediation workflow, run when the fix pass ends
  * planner-escalation or root-cluster-suspected: the routing decision, the
- * review block, the planning passes and the draft end.
+ * review block and the planning passes, each of which hands its settled or
+ * taken plan to the tail (tail.js).
  *
  * Inputs
  *   fix    a fix pass result that fits FIX_RESULT_SCHEMA, whose exit_reason
@@ -10,9 +11,9 @@
  *   run    the run state of main.js. The passes read and update every field
  *          lib/plan.js, lib/scope.js, lib/tails.js and lib/record.js name.
  *   replan the replan data the next pass plans from: {reason, review?}.
- *   plan   the plan runPlanningPass (lib/plan.js) returns once every
- *          question of its pass is settled or taken.
- *   The constants of main.js this file reads: RUN_NAME,
+ *   describeFixLead(run) (fix.js) leads the routing brief and the replan
+ *   reason.
+ *   The constants of main.js this file reads:
  *   PLANNER_ESCALATION_ROUTING_KIND and ROOT_CLUSTER_ROUTING_KIND.
  *
  * Outputs
@@ -27,13 +28,10 @@
  *   routeEscalation(fix, run)  the routing pause {result}, else {replan}
  *          with the review block, once decide() took the routing or the
  *          user replied to it.
- *   describeUnbuiltWaves(plan)  the terminal cause the draft ends on once
- *          the plan is settled or taken, naming describePlanLine(plan).
  *   runRemediationPass(run, replan)  one planning pass: {result} or
- *          {replan}.
+ *          {replan}. A settled or taken plan runs runRemediationTail
+ *          (tail.js) on the facts of its pass.
  *   runEscalation(fix, run)  the run result after the escalation.
- *   joinNames(names, conjunction)  names joined in prose, which
- *          buildRemediationPlanBrief (lib/briefs.js) reads.
  *
  * Invariants
  *   The routing decision resolves through resolveTailDecision
@@ -50,9 +48,8 @@
  *   A facts, scan or scope stop goes through stopDelivery (lib/record.js)
  *   with isReplan true, and the reply to it plans again with the review
  *   block kept (keepReplanReview, lib/plan.js). A planning stop or pause
- *   comes back from runPlanningPass the same way.
- *   This draft builds no wave, so a settled or taken plan ends the run
- *   blocked with one terminal cause through finishDeliveryBlocked.
+ *   comes back from runPlanningPass the same way, and so does every
+ *   {replan} of the tail.
  *
  * Why
  *   The fix pass stops at a finding a review fix cannot close, so the
@@ -61,12 +58,12 @@
  */
 
 function buildRemediationRequest(pr) {
-  return 'Remediate the review feedback of pull request ' + pr + ' that its review fix pass escalated, on the branch of that pull request.';
+  return 'Remediate the review feedback of pull request ' + pr + ' that its review fix pass escalated, on the pull request branch.';
 }
 
 function buildEscalationBrief(fix, run) {
   const isCluster = fix.exit_reason === 'root-cluster-suspected';
-  const lead = 'The review fix pass on pull request ' + run.pr;
+  const lead = describeFixLead(run);
   return buildTailBrief({
     kind: isCluster ? ROOT_CLUSTER_ROUTING_KIND : PLANNER_ESCALATION_ROUTING_KIND,
     problem: (isCluster
@@ -74,7 +71,7 @@ function buildEscalationBrief(fix, run) {
       : lead + ' escalated a finding to the planner.') + ' Go back to planning, from fresh facts, for ' + (isCluster ? 'a remediation that closes the class?' : 'its remediation?'),
     goOn: 'Plan the remediation from fresh facts.',
     strength: 'strong',
-    why: 'A review fix cannot close it, and a remediation plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.'
+    why: 'A review fix cannot close it, and a plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.'
   });
 }
 
@@ -94,12 +91,8 @@ function routeEscalation(fix, run) {
   if (decided.result !== undefined) {
     return decided;
   }
-  const reason = 'The review fix pass on pull request ' + run.pr + ' returned ' + fix.exit_reason + ', so plan the remediation of what the review block reports, from the fresh facts.';
+  const reason = describeFixLead(run) + ' returned ' + fix.exit_reason + ', so plan a remediation of the review block from the fresh facts.';
   return { replan: { reason: reason, review: projectEscalationReview(fix) } };
-}
-
-function describeUnbuiltWaves(plan) {
-  return { problem: 'The remediation is planned, but this draft builds no waves yet, so ' + RUN_NAME + ' stopped. ' + describePlanLine(plan), terminal: true };
 }
 
 async function runRemediationPass(run, replan) {
@@ -116,7 +109,7 @@ async function runRemediationPass(run, replan) {
   if (planned.plan === undefined) {
     return keepReplanReview(planned, replan);
   }
-  return { result: finishDeliveryBlocked([describeUnbuiltWaves(planned.plan)], run) };
+  return keepReplanReview(await runRemediationTail(run, planned.plan, checked.facts), replan);
 }
 
 async function runEscalation(fix, run) {
@@ -133,11 +126,4 @@ async function runEscalation(fix, run) {
     }
     replan = passEnd.replan;
   }
-}
-
-function joinNames(names, conjunction) {
-  if (names.length < 3) {
-    return names.join(' ' + conjunction + ' ');
-  }
-  return names.slice(0, -1).join(', ') + ' ' + conjunction + ' ' + names[names.length - 1];
 }

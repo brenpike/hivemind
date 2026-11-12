@@ -12,7 +12,7 @@ import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, isDraf
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const WORKFLOW_ID = 'standard-delivery';
 const sourceDir = join(repoRoot, 'plugin/workflow-src', WORKFLOW_ID);
-const MOVED_LIB_PATHS = ['plan.js', 'checks.js', 'scope.js', 'briefs.js', 'approvals.js', 'tails.js', 'record.js'].map((file) => 'plugin/workflow-src/lib/' + file);
+const MOVED_LIB_PATHS = ['plan.js', 'checks.js', 'scope.js', 'briefs.js', 'approvals.js', 'tails.js', 'record.js', 'gates.js', 'pr.js'].map((file) => 'plugin/workflow-src/lib/' + file);
 const moduleSource = readModuleSet();
 const metaSource = readText(join(sourceDir, 'meta.js'));
 const contractPath = join(sourceDir, 'contract.js');
@@ -69,7 +69,7 @@ const MALFORMED_FACTS = 'The facts step returned malformed facts, so the deliver
 const NOT_READY = 'The branch is not ready for delivery, so the delivery stopped before planning:';
 const PR_URL = 'https://github.com/o/r/pull/7';
 const NEXT_STEP_LINE = 'Next: clear the cause named above, then run the request again.';
-const OPEN_LEAD = 'The delivery ran no further step, because questions are still open.';
+const OPEN_LEAD = 'The delivery stopped: questions are still open.';
 const TAIL_LEAD = 'Every plan step is committed on branch "feature/cache", with head ' + OTHER + '.';
 const PLAN_PAUSE_START = /^The plan for branch "feature\/cache" has \d+ steps? over \d+ files?: [^\n]+\n\n\*\*Q1\. /;
 const RUN_AGAIN = 'Next: run the request again with the answers in it.';
@@ -344,7 +344,7 @@ function parsedVersion(changes) {
 }
 
 const VERSION_PLAN = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'], changelog_files: [] } });
-const VERSION_LINE = 'Version check: each file of the version_files block must hold version 1.3.0, the trunk version 1.2.3 raised by a minor bump.';
+const VERSION_LINE = 'Version check: The commits call for a minor bump of the trunk version 1.2.3. Set each file of the version_files block to version 1.3.0.';
 
 /**
  * The happy results of a run whose plan names the version file VERSION and
@@ -1028,7 +1028,7 @@ function approvalQuestionLines(label, stepId, hold, then) {
     '**' + label + '. Step ' + JSON.stringify(stepId) + ' waits for your approval at the destructive-fix gate.**',
     '- A: Approve this change. Choosing it approves these destructive changes: ' + JSON.stringify(hold.item) + ' (category ' + hold.category + ')',
     '- B: Keep it as it is, and ' + then + ' without it.',
-    'Recommendation: none. Only you can approve a change the destructive-fix gate holds back.'
+    'Recommendation: none. Only you can approve it.'
   ].join('\n');
 }
 
@@ -2336,7 +2336,7 @@ const ROW_TESTS = {
     test('a reversible effect is not asked and is listed in the final message', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(effectPlan('Post a preview link.', true)) }));
       assert.equal(run.result.outcome, 'complete');
-      assert.ok(run.result.message.includes('Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."'), run.result.message);
+      assert.ok(run.result.message.includes('Reversible effects outside the repo:\n- step "STEP-001": "Post a preview link."'), run.result.message);
     });
     test('the external_effect kind is a hard stop of the autonomy table', () => {
       assert.deepEqual({ ...lib.decide({ kind: 'external_effect', level: 'high', brief: main.buildExternalEffectBrief(summary) }, readJson('plugin/references/decision-autonomy-table.json'), briefSchema) }, { action: 'ask', reason: 'hard_stop' });
@@ -2548,7 +2548,7 @@ const ROW_TESTS = {
       assert.deepEqual(readDataBlock(first.prompt, 'git'), { branch: 'feature/cache', base: 'main', trunk: 'main' });
       assert.equal(readDataBlock(first.prompt, 'plan_summary'), plan.summary);
       assert.deepEqual(readDataBlock(callOf(run, 'work-1-S3').prompt, 'wave_scopes'), []);
-      assert.deepEqual(first.prompt.split('\n').slice(0, 4), ['Do one step of the approved delivery plan: the step in the step block below.', lib.boundarySentence(), lib.dataBlocksSentence(), '']);
+      assert.deepEqual(first.prompt.split('\n').slice(0, 4), ['Do one step of the approved plan: the step block below.', lib.boundarySentence(), lib.dataBlocksSentence(), '']);
       assert.ok(!first.prompt.includes('Never commit'));
       assert.ok(safetyRailsText.includes('wave workers never git-write'));
       assert.equal(first.opts.agentType, 'hivemind:drone');
@@ -2849,7 +2849,7 @@ const ROW_TESTS = {
     const waveLead = 'A worker did not finish its step, so the delivery stopped after its wave:';
     const stopQuestion = lib.renderQuestions([limitAsk(main.buildStepStopBrief(true))]);
     const approvalQuestionsOf = (holds) => lib.renderQuestions(main.buildApprovalAsks(holds, true, main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] })));
-    const reportHoldLine = (stepId, quoted) => '- Step "' + stepId + '" stopped at the destructive-fix gate without a change the run can approve: it says "' + quoted + '".';
+    const reportHoldLine = (stepId, quoted) => '- Step "' + stepId + '" stopped at the destructive-fix gate with no change the run can approve: it says "' + quoted + '".';
     const runBlockedWave = (workers) => {
       const ids = Object.keys(workers);
       const plan = makePlan({ steps: ids.map((id, index) => makeStep(id, ['src/f' + index + '.js'])) });
@@ -3029,7 +3029,7 @@ const ROW_TESTS = {
         message: [
           openedLine(OTHER),
           HELD_ALL + OTHER + '.',
-          'Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."',
+          'Reversible effects outside the repo:\n- step "STEP-001": "Post a preview link."',
           lib.renderDecisionsCompact(taken)
         ].join('\n\n')
       });
@@ -3216,7 +3216,7 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const call = callOf(run, 'validate-1-1');
       const lines = withoutDataBlock(withoutDataBlock(withoutDataBlock(call.prompt, 'inputs'), 'git'), 'version').split('\n');
-      assert.deepEqual(lines, ['Run the project\'s validation on the working branch as it is checked out.', main.validationCommandsSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), main.versionCheckSentence(), '']);
+      assert.deepEqual(lines, ['Run the project\'s validation on the checked-out working branch.', main.validationCommandsSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), main.versionCheckSentence(), '']);
       assert.ok(call.prompt.indexOf('<inputs>') < call.prompt.indexOf('<git>') && call.prompt.indexOf('<git>') < call.prompt.indexOf('<version>'), call.prompt);
       assert.deepEqual(readDataBlock(call.prompt, 'git'), { base: 'main' });
       assert.deepEqual(readDataBlock(call.prompt, 'version'), { base: TRUNK_COMMIT, bump_trigger: 'yes', no_bump_match: 'no', version_files: ['VERSION'] });
@@ -3306,7 +3306,7 @@ const ROW_TESTS = {
     });
     test('a blocked validation may carry the version relay, and pauses as blocked', async () => {
       const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': validateWithVersion({}, { outcome: 'blocked', blocker: 'npm is missing.' }) }));
-      assertStepStopPause(run, 'The validation step was blocked, so the delivery stopped before the pull request: it says "npm is missing.".', 'validate-1-1');
+      assertStepStopPause(run, 'The validation step was blocked, so the delivery stopped before the pull request. It says "npm is missing.".', 'validate-1-1');
     });
     test('a version already at its target in a pass after a replan passes, with no fix and no stop', async () => {
       const results = versionResults({
@@ -3335,9 +3335,9 @@ const ROW_TESTS = {
       assertTailPause(run, [versionAskOf(ASK_UNDETERMINED)], 'validate-1-1');
       const brief = structuredClone(main.buildVersionQuestionBrief(parsedVersion(ASK_UNDETERMINED)));
       assert.equal(brief.kind, 'version_bump_indeterminable');
-      assert.deepEqual(brief.options.map((option) => option.summary), ['Make a major version bump, to version 2.0.0.', 'Make a minor version bump, to version 1.3.0.', 'Make a patch version bump, to version 1.2.4.', 'Make no version bump, keeping version 1.2.3.']);
+      assert.deepEqual(brief.options.map((option) => option.summary), ['Make a major bump, to version 2.0.0.', 'Make a minor bump, to version 1.3.0.', 'Make a patch bump, to version 1.2.4.', 'Make no bump, keeping version 1.2.3.']);
       const noTrunk = structuredClone(main.buildVersionQuestionBrief(parsedVersion({ ...ASK_UNDETERMINED, trunk_version: undefined })));
-      assert.deepEqual(noTrunk.options.map((option) => option.summary), ['Make a major version bump.', 'Make a minor version bump.', 'Make a patch version bump.', 'Make no version bump.']);
+      assert.deepEqual(noTrunk.options.map((option) => option.summary), ['Make a major bump.', 'Make a minor bump.', 'Make a patch bump.', 'Make no bump.']);
       for (const shown of [brief, noTrunk]) {
         assert.ok(lib.validateSchema(briefSchema, shown).ok, JSON.stringify(shown));
         assert.equal(shown.recommendation.strength, 'none');
@@ -3363,11 +3363,11 @@ const ROW_TESTS = {
       for (const format of ['.json', '.toml', 'version = "X.Y.Z"', 'any other file whole']) {
         assert.ok(brief.problem.includes(format), format);
       }
-      assert.deepEqual(brief.options.map((option) => option.summary), ['Keep the version each file holds on the branch.', 'Set the version your reply names in each file.']);
+      assert.deepEqual(brief.options.map((option) => option.summary), ['Keep the branch version of each file.', 'Set each file to the version you name.']);
     });
     for (const [checkName, values, causeLine] of [
       ['undetermined', ASK_UNDETERMINED, 'Version check: The commits since the trunk do not settle the version bump.'],
-      ['unreadable', MINOR_UNREADABLE, 'Version check: The check cannot read one version from the files of the version_files block.']
+      ['unreadable', MINOR_UNREADABLE, 'Version check: The check cannot read one version from the version_files block.']
     ]) {
       test(`the reply to ${checkName} runs one fix round with the version_files and user_answer blocks, and no later version check fails or asks`, async () => {
         const results = versionResults({
@@ -3476,8 +3476,8 @@ const ROW_TESTS = {
       assert.equal(call.opts.phase, 'Validate');
       assert.deepEqual(call.opts.schema.properties.outcome.enum, ['passed', 'failed', 'blocked']);
       assert.deepEqual(Object.keys(call.opts.schema.properties), ['outcome', 'failures', 'slow', 'blocker', 'next_action']);
-      assert.equal(call.opts.schema.properties.outcome.description, 'passed when every command passes. failed when any fails. blocked when a command cannot run.');
-      assert.deepEqual(withoutDataBlock(withoutDataBlock(call.prompt, 'inputs'), 'git').split('\n'), ['Run the project\'s validation on the working branch as it is checked out.', main.validationCommandsSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), '']);
+      assert.equal(call.opts.schema.properties.outcome.description, 'passed when every command passes. failed when any fails. blocked when one cannot run.');
+      assert.deepEqual(withoutDataBlock(withoutDataBlock(call.prompt, 'inputs'), 'git').split('\n'), ['Run the project\'s validation on the checked-out working branch.', main.validationCommandsSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), '']);
       assert.deepEqual(readDataBlock(call.prompt, 'inputs'), { commands: commands });
       assert.ok(call.prompt.indexOf('<inputs>') < call.prompt.indexOf('<git>'), call.prompt);
       assert.deepEqual(readDataBlock(call.prompt, 'git'), { base: 'main' });
@@ -3495,10 +3495,10 @@ const ROW_TESTS = {
       const call = callOf(run, 'validate-1-1');
       assert.equal(call.opts.agentType, 'hivemind:drone');
       assert.ok(!Object.prototype.hasOwnProperty.call(call.opts, 'model'));
-      assert.deepEqual(withoutDataBlock(call.prompt, 'git').split('\n'), ['Run the project\'s validation on the working branch as it is checked out.', main.validationTaskSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), '']);
+      assert.deepEqual(withoutDataBlock(call.prompt, 'git').split('\n'), ['Run the project\'s validation on the checked-out working branch.', main.validationTaskSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), '']);
       assert.deepEqual(readDataBlock(call.prompt, 'git'), { base: 'main' });
       assert.deepEqual(call.opts.schema.properties.outcome.enum, ['passed', 'failed', 'not_run', 'blocked']);
-      assert.equal(call.opts.schema.properties.outcome.description, 'passed when every validation command passes. failed when any fails. not_run when the project documents no validation commands. blocked when a command cannot run.');
+      assert.equal(call.opts.schema.properties.outcome.description, 'passed when every command passes. failed when any fails. not_run when the project documents no validation commands. blocked when one cannot run.');
     });
     test('the validation sentences match the Validation Procedure clause of definitions.md', () => {
       const procedureStart = definitionsText.indexOf('## Validation Procedure');
@@ -3512,10 +3512,12 @@ const ROW_TESTS = {
         assert.ok(clause.includes(phrase), phrase);
       }
       const commandsSentence = main.validationCommandsSentence();
-      assert.equal(commandsSentence, 'This is a validation task: running each command of the inputs block once, in order and in the foreground, is its whole task, not a Worker Self-Check.');
+      for (const phrase of ['This is a validation task', 'not a Worker Self-Check', 'whole task: run each command of the inputs block once, in order and in the foreground.']) {
+        assert.ok(commandsSentence.includes(phrase), phrase);
+      }
       assert.ok(!commandsSentence.includes('governance') && !commandsSentence.includes('${CLAUDE_PLUGIN_ROOT}'), 'the commands sentence names no governance doc');
       const taskSentence = main.validationTaskSentence();
-      for (const phrase of ['its whole task', 'not a Worker Self-Check', 'the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md']) {
+      for (const phrase of ['This is a validation task', 'whole task: the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md', 'not a Worker Self-Check']) {
         assert.ok(taskSentence.includes(phrase), phrase);
       }
       assert.ok(procedure.includes('If `CLAUDE.md` lists no validation commands, validation is "Not run"'));
@@ -3597,7 +3599,7 @@ const ROW_TESTS = {
     test('blocked pauses at the validation step, and the reply runs the head check, then validation again with the next count', async () => {
       const results = happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: 'npm is not installed.' }, 'head-1-1': headRelay(OTHER), 'validate-1-2': VALIDATE_PASSED });
       const run = await runWorkflow(LAUNCH, results);
-      assertStepStopPause(run, 'The validation step was blocked, so the delivery stopped before the pull request: it says "npm is not installed.".', 'validate-1-1');
+      assertStepStopPause(run, 'The validation step was blocked, so the delivery stopped before the pull request. It says "npm is not installed.".', 'validate-1-1');
       const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'npm is installed now.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
       assert.deepEqual(labelsOf(resumed), [...labelsOf(run), 'head-1-1', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
@@ -3674,7 +3676,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(run), labels);
       const ask = limitAsk(main.buildFixLimitBrief(fixCommits[2]));
       assertTailPause(run, [ask]);
-      assert.ok(run.result.message.includes('- A: Say how to fix the failures: this run plans the fix from your reply.'), run.result.message);
+      assert.ok(run.result.message.includes('- A: Say how: the run plans the fix from your reply.'), run.result.message);
       const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'Mock the database.'), { ...results, 'facts-2': STOP_FACTS });
       assert.deepEqual(labelsOf(resumed), [...labels, 'facts-2']);
     });
@@ -3720,7 +3722,7 @@ const ROW_TESTS = {
       });
       const paused = await runWorkflow(LAUNCH, results);
       const lead = 'The validation fix round was blocked, so the delivery stopped: it says "' + HOLD_BLOCKER + '".';
-      assert.equal(paused.result.message, lead + '\n\n' + approvalQuestionLines('Q1', 'fix', DROP_USERS, 'the run takes the stopped step again') + '\n\nReply with an option, like A, or in your own words.');
+      assert.equal(paused.result.message, lead + '\n\n' + approvalQuestionLines('Q1', 'fix', DROP_USERS, 'take the stopped step again') + '\n\nReply with an option, like A, or in your own words.');
       assert.ok(!hasDataBlock(callOf(paused, 'fix-1-1').prompt, 'approvals'));
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'a.'), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
@@ -3753,7 +3755,7 @@ const ROW_TESTS = {
         'review-commit-1-1': commitRelay({ commit: FOURTH, committed: 'false' })
       });
       const paused = await runWorkflow(LAUNCH, results);
-      const question = 'The validation fix round was blocked, so the delivery stopped: it says "' + HOLD_BLOCKER + '".\n\n' + approvalQuestionLines('Q1', 'fix', DROP_USERS, 'the run takes the stopped step again') + '\n\nReply with an option, like A, or in your own words.';
+      const question = 'The validation fix round was blocked, so the delivery stopped: it says "' + HOLD_BLOCKER + '".\n\n' + approvalQuestionLines('Q1', 'fix', DROP_USERS, 'take the stopped step again') + '\n\nReply with an option, like A, or in your own words.';
       assert.equal(paused.result.message, question);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'B'), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
@@ -3807,7 +3809,7 @@ const ROW_TESTS = {
         assert.ok(prBodyOf(run, 'pr-1').includes('- validation: passed, version 1.3.0, held on commit ' + THIRD), prBodyOf(run, 'pr-1'));
       }
       const noBump = parsedVersion({ dominant_row: 'NO_BUMP', verdict: 'no_bump', bump_type: 'none', rule_applied: '4', counts: { major: '0', minor: '0', patch: '0', no_bump: '1' }, version_check: 'mismatch', expected_version: '1.2.3' });
-      assert.equal(main.describeVersionMismatch(noBump), 'Version check: each file of the version_files block must hold version 1.2.3, the trunk version, since the commits call for no version bump.');
+      assert.equal(main.describeVersionMismatch(noBump), 'Version check: The commits call for no version bump. Set each file of the version_files block to version 1.2.3.');
     });
     test('a mismatch over failed commands joins the version line to the failures and resolves through validation_remediation', async () => {
       const failed = validateWithVersion(MINOR_MISMATCH, { outcome: 'failed', failures: FAILURE_TEXT });
@@ -3910,9 +3912,14 @@ const ROW_TESTS = {
       assert.ok(lib.validateSchema(briefSchema, brief).ok);
       assert.deepEqual(structuredClone(lib.decide({ kind: 'gate_rerun', level: undefined, brief: brief }, autonomyTable, briefSchema)), { action: 'take', reason: 'auto', listed: [] });
       assert.equal(brief.problem, 'Commit ' + THIRD + ' landed after validation and local review held on an earlier commit. Run validation and local review again on the new commit?');
+      assert.deepEqual(structuredClone(brief.options.map((option) => option.summary)), ['Run the checks again.', 'Plan again from your reply.']);
       assert.equal(main.buildGateRerunBrief.length, 2);
-      assert.ok(lib.validateSchema(briefSchema, main.buildValidationRemediationBrief(OTHER, 1)).ok);
-      assert.ok(lib.validateSchema(briefSchema, main.buildFixLimitBrief(OTHER)).ok);
+      const remediation = main.buildValidationRemediationBrief(OTHER, 1);
+      assert.ok(lib.validateSchema(briefSchema, remediation).ok);
+      assert.equal(remediation.problem, 'Validation failed on commit ' + OTHER + '. Should a worker fix the failures in fix round 1 of at most ' + main.maxFixRounds() + '?');
+      const limit = main.buildFixLimitBrief(OTHER);
+      assert.ok(lib.validateSchema(briefSchema, limit).ok);
+      assert.equal(limit.recommendation.option_id + ' ' + limit.recommendation.strength, 'B none');
     });
   },
   'SD-28': () => {
@@ -4044,7 +4051,7 @@ const ROW_TESTS = {
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults());
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS.slice(0, -2), 'pr-1']);
-      assert.ok(run.result.message.endsWith('\n\nValidation held on commit ' + OTHER + '. Not configured for this run: local review.'), run.result.message);
+      assert.ok(run.result.message.endsWith('\n\nValidation held on commit ' + OTHER + '. Not configured: local review.'), run.result.message);
       assert.ok(prBodyOf(run, 'pr-1').includes('- local review: not configured for this run'), prBodyOf(run, 'pr-1'));
       assert.ok(!run.phases.includes('Review'));
     });
@@ -5415,7 +5422,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [strong]) }));
       const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       const gates = gatesBlock(['validation: passed, held on commit ' + OTHER, 'local review: clean, held on commit ' + OTHER]);
-      const record = ['Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."', gates, lib.renderDecisionsCompact([{ brief: strong }])];
+      const record = ['Reversible effects outside the repo:\n- step "STEP-001": "Post a preview link."', gates, lib.renderDecisionsCompact([{ brief: strong }])];
       assert.equal(inputs.body, [bodyStart(plan), ...record].join('\n\n'));
       assert.equal(inputs.comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', ...record].join('\n\n'));
       assert.ok(inputs.body.startsWith('Reads hit the database every time. Add a cache layer in front of the reads.\n\nSteps:\n- STEP-001 (src/cache.js): Step STEP-001 is done.\n\n'), inputs.body);
@@ -5599,7 +5606,7 @@ const ROW_TESTS = {
       const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js'], { outcome: 'P'.repeat(61000) })] });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan) }));
       assert.equal(run.result.outcome, 'blocked');
-      const match = run.result.message.match(/^The pull request body would be ([0-9]+) characters, more than the limit of 60000, so the delivery stopped before the pull request and pushed nothing\./);
+      const match = run.result.message.match(/^The pull request body would be ([0-9]+) characters, over the limit of 60000, so the delivery stopped\. This step pushed nothing\./);
       assert.ok(match, run.result.message.slice(0, 300));
       assert.ok(!run.result.message.includes('short form'), run.result.message.slice(0, 300));
       assert.equal(run.result.message.split('\n\n')[1], main.nextStepLine('report'));
@@ -5617,9 +5624,9 @@ const ROW_TESTS = {
       assert.ok(commentOverhead > bodyOverhead, 'the comment lead is longer than the steps block of the body');
       assert.equal(main.buildPullRequestTexts(runWith('P'.repeat(60000 - commentOverhead)), plan, gates).problem, undefined);
       const texts = main.buildPullRequestTexts(runWith('P'.repeat(60000 - commentOverhead + 1)), plan, gates);
-      assert.equal(texts.problem, 'The pull request comment would be 60001 characters, more than the limit of 60000, so the delivery stopped before the pull request and pushed nothing.');
+      assert.equal(texts.problem, 'The pull request comment would be 60001 characters, over the limit of 60000, so the delivery stopped. This step pushed nothing.');
     });
-    const attributionProblem = (noun) => 'The pull request ' + noun + ' would hold an attribution string, so the delivery stopped before the pull request and pushed nothing.';
+    const attributionProblem = (noun) => 'The pull request ' + noun + ' would hold an attribution string, so the delivery stopped. This step pushed nothing.';
     test('a title, body or comment that holds a forbiddenSubjectTexts() string in any case names that text, neutralized text included', () => {
       assert.deepEqual([...main.forbiddenSubjectTexts()], ['co-authored-by:', 'authored-by:', 'generated with', 'created with claude', '\u{1f916} generated']);
       const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, slow: [] };
@@ -5659,7 +5666,7 @@ const ROW_TESTS = {
       const scriptWarnings = [...openPlanPrText.matchAll(/^ *[a-z_]*warning='([^']+)'$/gm)].map((match) => match[1]);
       assert.deepEqual([...scriptWarnings].sort(), [...main.pullRequestWarningTexts()].sort());
       const spec = main.openPlanPrRoutingSpec();
-      assert.deepEqual(Object.entries(spec).filter(([, entry]) => entry.required).map(([key]) => key), ['url', 'head_ref_oid', 'created', 'commented']);
+      assert.deepEqual(Object.entries(spec).filter(([, entry]) => entry.required).map(([key]) => key), ['url', 'head_ref_oid', 'created']);
       main.pullRequestWarningTexts().forEach((text) => assert.ok(spec.warning.pattern.test(text), text));
     });
     test('canned reuse-and-comment stdout parses with the spec, and the run finishes with the reused PR', async () => {
@@ -5668,7 +5675,48 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': { outcome: 'ran', stdout: stdout } }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: false });
-      assert.equal(run.result.message, 'Pushed commit ' + OTHER + ' to the open pull request ' + PR_URL + ' and commented on it.\n\n' + HELD_ALL + OTHER + '.');
+      assert.equal(run.result.message, 'Pushed commit ' + OTHER + ' to pull request ' + PR_URL + ' and commented on it.\n\n' + HELD_ALL + OTHER + '.');
+    });
+    test('with a comment hook that returns undefined, the texts and the inputs file carry no comment', () => {
+      const hook = main.buildPullRequestComment;
+      main.buildPullRequestComment = () => undefined;
+      try {
+        const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+        state.head = OTHER;
+        const texts = main.buildPullRequestTexts(state, makePlan(), { held: { validate: OTHER }, notes: { validate: 'passed' }, slow: [] });
+        assert.deepEqual(Object.keys(texts), ['title', 'body']);
+        const words = ['--head', 'feature/cache', '--base', 'main', '--expect-commit', OTHER, '--inputs', '.hivemind/pr-inputs-x-pr-1.json', '--body-file', '.hivemind/pr-inputs-x-pr-1-body.json'];
+        const prompt = main.buildPullRequestPrompt(words, texts, false, pluginRoot);
+        assert.deepEqual(JSON.parse(readDataBlock(prompt, 'inputs_file').content), { title: texts.title, draft: false });
+      } finally {
+        main.buildPullRequestComment = hook;
+      }
+      assert.equal(main.buildPullRequestComment, hook);
+    });
+    test('the relay check requires commented exactly when a comment was sent, and then unequal to created', () => {
+      for (const [changes, hasComment, isUsable] of [
+        [{ commented: undefined }, false, true],
+        [{ created: 'false', commented: undefined }, false, true],
+        [{ commented: 'false' }, false, false],
+        [{ created: 'false', commented: 'true' }, false, false],
+        [{ commented: 'false' }, true, true],
+        [{ created: 'false', commented: 'true' }, true, true],
+        [{ commented: undefined }, true, false],
+        [{ commented: 'true' }, true, false]
+      ]) {
+        const checked = main.checkPullRequestRelay(prRelay({ head_ref_oid: OTHER, ...changes }), OTHER, hasComment);
+        const label = JSON.stringify([changes, hasComment]);
+        assert.equal(checked.values !== undefined, isUsable, label);
+        assert.equal(checked.problem === undefined || checked.problem.startsWith('The pull request step returned malformed routing lines, '), true, label);
+      }
+    });
+    test('the complete message says the run commented on the open pull request only when the relay says commented true', () => {
+      const reused = { url: PR_URL, head_ref_oid: OTHER, created: 'false' };
+      const pushed = 'Pushed commit ' + OTHER + ' to pull request ' + PR_URL;
+      assert.equal(main.describePullRequest({ ...reused, commented: 'true' }), pushed + ' and commented on it.');
+      assert.equal(main.describePullRequest(reused), pushed + '.');
+      assert.equal(main.describePullRequest({ ...reused, commented: 'false' }), pushed + '.');
+      assert.equal(main.describePullRequest({ ...reused, created: 'true' }), openedLine(OTHER));
     });
     for (const warning of ['push was rejected; the branch is not on its remote', 'no upstream and no origin remote; push deferred', 'gh cannot read the push remote as a GitHub repository; the PR head repository was not checked']) {
       test(`the warning ${JSON.stringify(warning)} is named in the final message`, async () => {
@@ -5761,7 +5809,7 @@ const ROW_TESTS = {
       assert.deepEqual(scriptLines, ['pushed: no', 'pushed: yes']);
       assert.ok(openPlanPrText.includes('printf \'%s\\n\' "$pushed_line" >&2'), 'the script prints the pushed line as one stderr line');
       assert.ok(/^blocker\(\) \{ relay_child_stderr; write_pushed_line; printf 'blocker: %s\\n' "\$1" >&2; exit 1; \}$/m.test(openPlanPrText), 'the pushed line comes right before the blocker line');
-      const prSource = readText(join(sourceDir, 'pr.js'));
+      const prSource = readText(join(repoRoot, 'plugin/workflow-src/lib/pr.js'));
       const workflowLines = [...prSource.matchAll(/\/\^(pushed: [a-z]+)\$\/m/g)].map((match) => match[1]).sort();
       assert.deepEqual(workflowLines, scriptLines);
       for (const line of scriptLines) {
@@ -5770,8 +5818,8 @@ const ROW_TESTS = {
       assert.equal(main.describeBlockedPush('blocker: the PR could not be created\n', OTHER, false, 'UNSEEN_ZQ'), 'UNSEEN_ZQ');
     });
     test('no pull request stop guesses with may be: the run says what it saw of the push', () => {
-      const prSource = readText(join(sourceDir, 'pr.js'));
-      assert.ok(!/\bmay be\b/i.test(prSource), 'pr.js holds may be');
+      const prSource = readText(join(repoRoot, 'plugin/workflow-src/lib/pr.js'));
+      assert.ok(!/\bmay be\b/i.test(prSource), 'lib/pr.js holds may be');
       assert.ok(!builtSource.includes('The branch may be on its remote'));
     });
   },
@@ -5823,7 +5871,7 @@ const ROW_TESTS = {
     test('with local_review false the final message names the PR and names the gate not configured', async () => {
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults());
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.equal(run.result.message, openedLine(OTHER) + '\n\nValidation held on commit ' + OTHER + '. Not configured for this run: local review.');
+      assert.equal(run.result.message, openedLine(OTHER) + '\n\nValidation held on commit ' + OTHER + '. Not configured: local review.');
       assert.ok(!run.result.message.includes('Gates that did not run'), run.result.message);
     });
     test('a reused PR comment carries the full run record, and the final message its lines, each taken decision not of a routine kind and no commit list', async () => {
@@ -5832,13 +5880,13 @@ const ROW_TESTS = {
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults({ 'plan-1': planResult(plan, [strong]), 'pr-1': cannedPrRunner({ created: 'false', commented: 'true' }) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: false });
-      const effects = 'Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."';
+      const effects = 'Reversible effects outside the repo:\n- step "STEP-001": "Post a preview link."';
       const taken = [{ brief: strong }];
       const gates = gatesBlock(['validation: passed, held on commit ' + OTHER, 'local review: not configured for this run']);
       const comment = readRunnerInputs(callOf(run, 'pr-1').prompt).comment;
       assert.equal(comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', effects, gates, lib.renderDecisionsCompact(taken)].join('\n\n'));
-      const pushed = 'Pushed commit ' + OTHER + ' to the open pull request ' + PR_URL + ' and commented on it.';
-      const held = 'Validation held on commit ' + OTHER + '. Not configured for this run: local review.';
+      const pushed = 'Pushed commit ' + OTHER + ' to pull request ' + PR_URL + ' and commented on it.';
+      const held = 'Validation held on commit ' + OTHER + '. Not configured: local review.';
       assert.equal(run.result.message, [pushed, held, effects, lib.renderDecisionsCompact(taken)].join('\n\n'));
     });
   },
@@ -5948,6 +5996,35 @@ const ROW_TESTS = {
       assert.equal('relaySentence' in main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] }), false);
       assert.equal(main.addRelaySentence('a\nb', { answerLog: [{ question: 'q', reply: 'r' }] }), 'a\nb');
       assert.equal(main.addRelaySentence('a\nb', { answerLog: [], relaySentence: relaySentence }), 'a\n' + relaySentence + '\nb');
+    });
+    test('a validation fix round that carries user_answer takes run.relaySentence as its second line, and unset its prompt is the fix prompt as built', async () => {
+      const relaySentence = 'RELAY_SENTENCE_ZQ.';
+      const fix = { failures: 'F.', userAnswer: { question: 'Q.', reply: 'R.' } };
+      const prompts = [];
+      main.phase = () => undefined;
+      main.agent = async (prompt) => {
+        prompts.push(prompt);
+        throw new Error('fix prompt captured');
+      };
+      try {
+        for (const sentence of [relaySentence, undefined]) {
+          const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+          run.pass = 1;
+          run.answerLog.push({ question: 'Q.', reply: 'R.' });
+          if (sentence !== undefined) {
+            run.relaySentence = sentence;
+          }
+          await assert.rejects(main.runFixRound(run, makePlan(), fix, { runs: { fix: 0 }, fixAnswer: undefined }), /fix prompt captured/);
+        }
+      } finally {
+        delete main.phase;
+        delete main.agent;
+      }
+      const built = main.buildFixPrompt(fix, makePlan(), main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] }));
+      assert.equal(prompts[0].split('\n')[1], relaySentence);
+      assert.equal(prompts[0].replace('\n' + relaySentence, ''), built);
+      assert.equal(prompts[1], built);
+      assert.ok(prompts.every((prompt) => !prompt.includes(main.resumedReplySentence())));
     });
   },
   'SD-50': () => {
@@ -6566,7 +6643,11 @@ const ROW_TESTS = {
       const schemas = [main.buildWorkerSchema(), main.buildGateEditSchema(), main.buildValidateSchema(false), main.buildValidateSchema(true)];
       for (const schema of schemas) {
         assert.deepEqual([...schema.properties.next_action.enum], ['fix_cause', 'run_again']);
-        assert.equal(schema.properties.next_action.description, 'run_again when the cause is outside the repo and passes with no change, such as machine load, a timeout or a network failure. fix_cause otherwise. Only with outcome blocked.');
+        const description = schema.properties.next_action.description;
+        for (const phrase of ['run_again for a cause outside the repo that passes with no change', 'machine load, a timeout or a network failure', 'fix_cause otherwise.']) {
+          assert.ok(description.includes(phrase), phrase);
+        }
+        assert.ok(description.endsWith(' Only with outcome blocked.'), description);
         assert.ok(!schema.required.includes('next_action'));
       }
     });
@@ -6653,7 +6734,7 @@ const ROW_TESTS = {
     test('a blocked validation or fix round whose blocker gives no reason is report whatever its next_action, never the fix line', async () => {
       for (const next of [{ next_action: 'fix_cause' }, { next_action: 'run_again' }, {}]) {
         const validate = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', ...next } }));
-        assertStepStopEnd(validate, 'The validation step was blocked, so the delivery stopped before the pull request: it gave no reason.\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
+        assertStepStopEnd(validate, 'The validation step was blocked, so the delivery stopped before the pull request. It gave no reason.\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
         assert.ok(!validate.result.message.includes('named above'), validate.result.message);
         const fix = await runWorkflow(LAUNCH, fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], ...next }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }));
         assertStepStopEnd(fix, 'The validation fix round was blocked, so the delivery stopped: it gave no reason.\n\n' + main.nextStepLine('report'), 'fix-commit-1-1', 'report');
@@ -6661,7 +6742,7 @@ const ROW_TESTS = {
       }
     });
     test('a blocked validation passes its next action through to its stop: run_again ends the run, and fix_cause or none pauses with the step_stop question', async () => {
-      const lead = 'The validation step was blocked, so the delivery stopped before the pull request: ' + lib.describeReason(timedOut);
+      const lead = 'The validation step was blocked, so the delivery stopped before the pull request. It' + lib.describeReason(timedOut).slice(2);
       for (const [next, nextAction] of [[{ next_action: 'run_again' }, 'run_again'], [{ next_action: 'fix_cause' }, undefined], [{}, undefined]]) {
         const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: timedOut, ...next } }));
         assertStopOf(run, lead, 'validate-1-1', nextAction, false);
@@ -7619,19 +7700,20 @@ const ROW_TESTS = {
       assert.equal(main.buildWaveSubject([makeStep('S1!', ['src/a.js']), makeStep('S2', ['src/b.js'])], 2), 'S1!, S2: Step S1! is done.');
       assert.equal(main.buildWaveSubject([makeStep('S1', ['src/a.js']), makeStep('S2!', ['src/b.js'])], 2), 'complete wave 2 of the delivery plan');
     });
-    test('the fix round and review commits and the head check have fixed subjects, the wave has none, and no step is named bump', () => {
+    test('the fix round and review commits and the head check have fixed subjects, the wave has none, the review texts are review.js own, and no step is named bump', () => {
       assert.throws(() => main.commitStepTexts('bump'), /no texts for step "bump"/);
+      assert.throws(() => main.commitStepTexts('review'), /no texts for step "review"/);
       assert.equal(main.commitStepTexts('fix').subject, 'fix the failed validation');
-      assert.equal(main.commitStepTexts('review').subject, 'apply the local review fixes');
+      assert.deepEqual({ ...main.reviewCommitTexts() }, { purpose: 'the local review that just ran, with an empty file list', noun: 'the local review', subject: 'apply the local review fixes' });
       assert.equal(main.commitStepTexts('head').subject, 'read the branch head');
       assert.equal(main.commitStepTexts('wave').subject, undefined);
     });
     test('every key of the commit inputs_file content is a field molt.sh takes', () => {
       const moltFields = readMoltInputFields();
       assert.ok(moltFields.includes('subject') && moltFields.includes('files'), moltFields.join(','));
-      for (const stepName of ['wave', 'fix', 'review', 'head']) {
-        const subject = main.commitStepTexts(stepName).subject || 'Step S1 is done.';
-        const content = readDataBlock(main.buildCommitPrompt(['src/a.js'], makePlan(), 'main', '.hivemind/molt-inputs-x.json', stepName, subject), 'inputs_file').content;
+      for (const [stepName, texts] of [...['wave', 'fix', 'head'].map((name) => [name, main.commitStepTexts(name)]), ['review', main.reviewCommitTexts()]]) {
+        const subject = texts.subject || 'Step S1 is done.';
+        const content = readDataBlock(main.buildCommitPrompt(['src/a.js'], makePlan(), 'main', '.hivemind/molt-inputs-x.json', texts.purpose, subject), 'inputs_file').content;
         assert.deepEqual(Object.keys(content), ['type', 'breaking', 'subject', 'files'], stepName);
         Object.keys(content).forEach((key) => assert.ok(moltFields.includes(key), stepName + ' ' + key));
       }
@@ -7640,7 +7722,8 @@ const ROW_TESTS = {
       const scratch = makeScratchRepo();
       const multiStep = [makeStep('S1', ['src/a.js'], { outcome: longOutcome }), makeStep('S2', ['src/b.js'])];
       const subjects = [
-        ...['fix', 'review', 'head'].map((stepName) => main.commitStepTexts(stepName).subject),
+        ...['fix', 'head'].map((stepName) => main.commitStepTexts(stepName).subject),
+        main.reviewCommitTexts().subject,
         main.buildWaveSubject([makeStep('S1', ['src/a.js'], { outcome: longOutcome })], 1),
         main.buildWaveSubject(multiStep, 1),
         main.buildWaveSubject([makeStep('S'.repeat(64), ['src/a.js']), makeStep('T'.repeat(64), ['src/b.js'])], 1),
@@ -8214,14 +8297,13 @@ const ROW_TESTS = {
     });
     test('the one step_stop brief, fix_cause, fits BRIEF_SCHEMA with one option and a strong recommendation, and names what the reply does', () => {
       for (const isReplan of [false, true]) {
-        const then = isReplan ? 'the run plans again from fresh facts.' : 'the run takes the stopped step again.';
         const brief = structuredClone(main.buildStepStopBrief(isReplan));
         assert.ok(lib.validateSchema(briefSchema, brief).ok, JSON.stringify(brief));
         assert.equal(brief.kind, 'step_stop');
         assert.equal(brief.options.length, 1);
         assert.equal(brief.options[0].summary, isReplan ? 'Go on: plan again from fresh facts.' : 'Go on: take the stopped step again.');
         assert.deepEqual(brief.recommendation, { option_id: 'A', strength: 'strong', why: 'Clearing it lets the step go on.' });
-        assert.equal(brief.problem, 'Clear the cause named above, then commit any change and reply, and ' + then);
+        assert.equal(brief.problem, 'Clear the cause named above, then commit any change and reply.');
         assert.ok(!JSON.stringify(brief).includes('Only you can tell when what stopped the run is out of the way.') && !brief.problem.includes('Fix what stopped the run'), brief.problem);
       }
       for (const text of ["the run's own step failed; reply to try once more", 'The cause clears itself.', 'A stop that comes back is a workflow defect: report it, do not retry.', 'so reply later, for example once the machine is idle']) {
@@ -8263,7 +8345,7 @@ const ROW_TESTS = {
       const launchEnd = calls.find((use) => findEnclosingFunction(code, use.index) === 'runDelivery');
       assert.ok(code.startsWith('finishDeliveryBlocked([launch],undefined)', launchEnd.index), code.slice(launchEnd.index, launchEnd.index + 60));
     });
-    const replanThen = 'the run plans again from fresh facts';
+    const replanThen = 'plan again from fresh facts';
     test('an approve lead cause asks one approval question per held item through askTails, never the step_stop brief, and decide() takes none', () => {
       const holds = [{ stepId: 'S1', ...DROP_USERS }, { stepId: 'S2', ...DROP_ORDERS }];
       for (const level of autonomyTable.levels) {
@@ -8277,7 +8359,7 @@ const ROW_TESTS = {
       for (const ask of main.buildApprovalAsks(holds, false, stopState())) {
         assert.equal(ask.kind, 'step_stop');
         assert.equal(ask.brief.recommendation.strength, 'none');
-        assert.ok(ask.brief.options[1].summary.endsWith('the run takes the stopped step again without it.'), ask.brief.options[1].summary);
+        assert.ok(ask.brief.options[1].summary.endsWith('take the stopped step again without it.'), ask.brief.options[1].summary);
       }
     });
     test('the brief decide() reads of an approval question fits BRIEF_SCHEMA with the longest step id and item, and holds neither', () => {
@@ -8310,7 +8392,7 @@ const ROW_TESTS = {
       const results = { ...heldWaveResults([DROP_USERS]), 'work-2-STEP-001': holdResult([DROP_USERS], { summary: 'Stopped.' }), 'commit-2-1': commitRelay({ commit: OTHER, committed: 'false' }) };
       const paused = await runWorkflow(LAUNCH, results);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'A'), results);
-      const line = '- Step "STEP-001" stopped at the destructive-fix gate without a change the run can approve: it says "' + HOLD_BLOCKER + '".';
+      const line = '- Step "STEP-001" stopped at the destructive-fix gate with no change the run can approve: it says "' + HOLD_BLOCKER + '".';
       assertStepStopEnd(run, 'A worker did not finish its step, so the delivery stopped after its wave:\n' + line + '\n\n' + main.nextStepLine('report'), 'commit-2-1', 'report');
     });
     test('two held items answered Q1 A Q2 B approve the first and keep the second, and Q1 B Q2 A the reverse', async () => {
@@ -8510,7 +8592,7 @@ const ROW_TESTS = {
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
       assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'pr-1-2']);
       const check = callOf(resumed, 'head-1-1');
-      assert.ok(check.prompt.startsWith('Run the command below to commit nothing: the empty file list makes it report the head of the working branch after the user replied to a stop.\n'), check.prompt);
+      assert.ok(check.prompt.startsWith('Run the command below to commit nothing: with no files it reports the working branch head after a reply to a stop.\n'), check.prompt);
       assert.deepEqual(readRunnerInputs(check.prompt), { files: [], type: 'feat', breaking: false, subject: 'read the branch head', trunk: 'main' });
       assert.equal(check.opts.phase, 'Commit');
       assert.deepEqual(readRunnerInputs(callOf(resumed, 'pr-1-2').prompt), readRunnerInputs(callOf(resumed, 'pr-1').prompt));
@@ -9067,7 +9149,7 @@ const ROW_TESTS = {
       const plan = makePlan();
       const git = lib.formatDataBlock('git', { branch: plan.branch, base: plan.base, trunk: 'main' });
       assert.equal(callOf(run, 'work-1-STEP-001').prompt, [
-        'Do one step of the approved delivery plan: the step in the step block below.',
+        'Do one step of the approved plan: the step block below.',
         lib.boundarySentence(),
         lib.dataBlocksSentence(),
         '',
@@ -9077,7 +9159,7 @@ const ROW_TESTS = {
         git
       ].join('\n'));
       assert.equal(callOf(run, 'fix-1-1').prompt, [
-        'Fix the failed validation of the delivery: the failures block below holds what the validation reported.',
+        'Fix the failed validation in the failures block below.',
         main.validationFixSentence(),
         lib.boundarySentence(),
         lib.dataBlocksSentence(),

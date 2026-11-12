@@ -7,8 +7,8 @@
  *           launch check failed: reversibleEffects, notRunGates, taken,
  *           approvals, branch, head, headRound, waveCount, answerLog and
  *           open, the findings local review left open.
- *   gates   the gate loop state of runGates (standard-delivery gates.js),
- *           once the gates ran:
+ *   gates   the gate loop state of runGates (lib/gates.js), once the
+ *           gates ran:
  *           notes, slow and draft.
  *   lead    the what-happened line of a pause, built by its call site.
  *   causes  the causes of a stop, {problem, nextAction?, terminal?,
@@ -30,15 +30,14 @@
  *   The constants of the workflow's main.js this file reads:
  *   PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND, GATE_RERUN_KIND
  *   and STEP_STOP_KIND. pauseDelivery also reads BUILD_ID, the line the
- *   build injects. The workflow functions it reads: the gate and review
- *   helpers of finishDeliveryComplete, gateNames, gateIds,
- *   configuredGateIds and joinNames (standard-delivery gates.js) and
- *   buildRejectedFindingsBlock (standard-delivery review.js), which
- *   buildRunRecordParts also reads with renderPullRequestGates
- *   (standard-delivery pr.js) and quoteShortFindingId (standard-delivery
- *   review.js). Every workflow whose code calls finishDeliveryComplete or
- *   buildRunRecordParts declares them, and every workflow whose code calls
- *   a function of this file declares the constants it reads.
+ *   build injects. The workflow functions it reads: the gate hooks of
+ *   finishDeliveryComplete, gateNames, gateIds and configuredGateIds (the
+ *   workflow's gates.js, as lib/gates.js names them). Every workflow whose
+ *   code calls finishDeliveryComplete declares them, and every workflow
+ *   whose code calls a function of this file declares the constants it
+ *   reads. Every other function it reads is a library's, among them
+ *   joinNames (lib/briefs.js) and renderPullRequestGates (lib/pr.js),
+ *   which buildRunRecordParts reads.
  *
  * Outputs
  *   finishDeliveryBlocked, finishDeliveryComplete, finishOpenQuestions and
@@ -49,10 +48,16 @@
  *           a new pass outside maxReplans(), else {rerun: true,
  *           stopAnswer}, stopAnswer the {question, reply} of askTails: the
  *           gate loop takes the stopped step again, reading the head first
- *           when that step does not read it itself (standard-delivery
- *           gates.js).
+ *           when that step does not read it itself (lib/gates.js).
  *   observeHead(run, commit, branch)  sets run.head to commit, run.branch
  *           to branch and run.headRound to the run.answerLog length.
+ *   quoteShortFindingId(findingId)  the first 8 characters of findingId,
+ *           encoded by encodeUntrustedText.
+ *   buildRejectedFindingsBlock(note, rejectedFindings, undoneFixes)  the
+ *           {text} block of the held local review gate: the note, then the
+ *           short id of each rejected finding under its heading, shown
+ *           unless only undone fixes are listed, then, when any fix was
+ *           undone, its heading and the short id of each undone fix.
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
  *           request body and its comment carry, with no commit list, in
  *           order: when gates.draft is set the plain draft line naming its
@@ -62,8 +67,7 @@
  *           quoteOpenTitle, cut to a hard bound, under one label, external,
  *           the slow test cases
  *           of gates.slow when it is not empty, the rejected findings
- *           block of buildRejectedFindingsBlock (standard-delivery
- *           review.js) when run.rejected
+ *           block of buildRejectedFindingsBlock when run.rejected
  *           or run.undone is not empty, its note did not hold when the
  *           review gate never held, the approvals of run.approvals one
  *           line each through renderDestructiveChange under one label, then
@@ -123,7 +127,9 @@
  *           (renderDecisionsCompact), as every final message lists them
  *           (ADR-0037 decision 3).
  *   finishDeliveryComplete  one line naming the pull request opened or
- *           pushed to and its commit, one line naming the gates that held and
+ *           pushed to and its commit, saying the run commented on it only
+ *           when the relay's commented is true (describePullRequest), one
+ *           line naming the gates that held and
  *           any gate not configured, or when gates.draft is set the line
  *           naming the draft and its reason, the warning line when there is one, the
  *           rejected findings block when run.rejected or run.undone is not
@@ -140,9 +146,9 @@
  *   function of this library.
  *   One head writer (issue 457): observeHead is the only code that writes
  *   run.head, run.branch or run.headRound, and its callers feed it only a
- *   commit read from a checked relay: runCommitStep (standard-delivery
- *   relay.js) the molt commit, the head check of the gate loop
- *   (standard-delivery gates.js) included, and runDeliveryPass
+ *   commit read from a checked relay: runCommitStep (lib/commit.js) the
+ *   molt commit, the head check of the gate loop (lib/gates.js) included,
+ *   and runDeliveryPass
  *   (standard-delivery main.js) the branch commit of each new pass before
  *   any wave. One head read per reply: every reply adds one entry to
  *   run.answerLog, its round, so the head is unread exactly when
@@ -178,7 +184,7 @@
  */
 
 function renderReversibleEffects(effects) {
-  const lines = ['Effects outside the repo that the plan declares as reversible:'];
+  const lines = ['Reversible effects outside the repo:'];
   effects.forEach((effect) => lines.push('- step ' + encodeUntrustedText(effect.stepId) + ': ' + encodeUntrustedText(effect.summary)));
   return lines.join('\n');
 }
@@ -224,6 +230,33 @@ function quoteOpenTitle(title) {
   return encodeUntrustedText(kept) + (kept === title ? '' : ', shortened');
 }
 
+function quoteShortFindingId(findingId) {
+  return encodeUntrustedText(Array.from(findingId).slice(0, 8).join(''));
+}
+
+function pushShortIdLines(lines, findings) {
+  findings.forEach((finding) => lines.push('- ' + quoteShortFindingId(finding.finding_id)));
+}
+
+/**
+ * Returns the block of the held local review gate: its note, then the
+ * short id of each rejected finding under the rejected heading, shown
+ * unless only undone fixes are listed, then, when any fix was undone, the
+ * undone heading and the short id of each undone fix.
+ */
+function buildRejectedFindingsBlock(note, rejectedFindings, undoneFixes = []) {
+  const lines = ['Local review: ' + note + '.'];
+  if (rejectedFindings.length > 0 || undoneFixes.length === 0) {
+    lines[0] += ' The findings it rejected:';
+    pushShortIdLines(lines, rejectedFindings);
+  }
+  if (undoneFixes.length > 0) {
+    lines.push('The findings whose fix it undid:');
+    pushShortIdLines(lines, undoneFixes);
+  }
+  return { text: lines.join('\n') };
+}
+
 function hasListedFindings(run) {
   return run.rejected.length > 0 || run.undone.length > 0;
 }
@@ -231,7 +264,7 @@ function hasListedFindings(run) {
 function buildRunRecordParts(run, taken, gates) {
   const shown = taken.filter(isShownDecision);
   const isDraft = gates !== undefined && gates.draft !== undefined;
-  const parts = isDraft ? [{ id: 'draft', text: 'This pull request is a draft: ' + gates.draft, external: false }] : [];
+  const parts = isDraft ? [{ id: 'draft', text: describeDraftLine('This', gates.draft), external: false }] : [];
   if (run.reversibleEffects.length > 0) {
     parts.push({ id: 'reversible_effects', text: renderReversibleEffects(run.reversibleEffects), external: true });
   }
@@ -259,6 +292,10 @@ function buildRunRecordParts(run, taken, gates) {
     parts.push({ id: 'decisions', text: renderDecisionsCompact(shown), external: true });
   }
   return parts;
+}
+
+function describeDraftLine(article, reason) {
+  return article + ' pull request is a draft: ' + reason;
 }
 
 function describeBranchLine(run) {
@@ -291,7 +328,7 @@ function finishDeliveryBlocked(causes, run, endLines = []) {
 function describePullRequest(values) {
   return values.created === 'true'
     ? 'Opened pull request ' + values.url + ' on commit ' + values.head_ref_oid + '.'
-    : 'Pushed commit ' + values.head_ref_oid + ' to the open pull request ' + values.url + ' and commented on it.';
+    : 'Pushed commit ' + values.head_ref_oid + ' to pull request ' + values.url + (values.commented === 'true' ? ' and commented on it.' : '.');
 }
 
 function describeHeldGates(run) {
@@ -299,12 +336,12 @@ function describeHeldGates(run) {
   const notConfigured = gateIds().filter((gateId) => !configuredGateIds(run).includes(gateId)).map((gateId) => gateNames()[gateId]);
   const heldLine = joinNames(held, 'and') + ' held on commit ' + run.head + '.';
   const line = heldLine.charAt(0).toUpperCase() + heldLine.slice(1);
-  return notConfigured.length === 0 ? line : line + ' Not configured for this run: ' + joinNames(notConfigured, 'and') + '.';
+  return notConfigured.length === 0 ? line : line + ' Not configured: ' + joinNames(notConfigured, 'and') + '.';
 }
 
 function finishDeliveryComplete(run, plan, prValues, gates) {
   const pr = { url: prValues.url, head_ref_oid: prValues.head_ref_oid, created: prValues.created === 'true' };
-  const blocks = [{ text: describePullRequest(prValues) }, { text: gates.draft === undefined ? describeHeldGates(run) : 'The pull request is a draft: ' + gates.draft }];
+  const blocks = [{ text: describePullRequest(prValues) }, { text: gates.draft === undefined ? describeHeldGates(run) : describeDraftLine('The', gates.draft) }];
   if (prValues.warning !== undefined) {
     blocks.push({ text: 'The pull request step warned: ' + prValues.warning + '.' });
   }
@@ -316,7 +353,7 @@ function finishDeliveryComplete(run, plan, prValues, gates) {
 }
 
 function finishOpenQuestions(resolution, stopReason, run) {
-  const cause = { problem: 'The delivery ran no further step, because questions are still open.', nextAction: 'answer' };
+  const cause = { problem: 'The delivery stopped: questions are still open.', nextAction: 'answer' };
   return finishDeliveryBlocked([cause], { ...run, taken: run.taken.concat(resolution.taken) }, [renderOpenQuestions(resolution.asks, stopReason)]);
 }
 
