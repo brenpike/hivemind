@@ -696,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '62d6589046f977db';
+const BUILD_ID = '57b8aa8619944c5b';
 
 function supportedSchemaKeywords(){
 return[
@@ -3244,7 +3244,7 @@ options:[
 buildBriefOption('A','Go on and let the step make this effect.','small','high',false),
 buildBriefOption('B','Change or drop the step first.','small','medium')
 ],
-recommendation:{option_id:'A',strength:'none',why:'Only you can decide whether this effect outside the repo may happen.'},
+recommendation:{option_id:'A',strength:'none',why:describeOnlyYou('decide whether this effect outside the repo may happen')},
 assumptions:buildUnshownAssumptions('assumed'),
 gate:buildBriefGate(true),
 verbatim:summary
@@ -3266,7 +3266,7 @@ return brief;
 const problem=brief.problem+' It changes '+describeCount(outsidePaths.length,'file')+' outside the limits you set.';
 return Object.assign(brief,{problem:problem.length<=BRIEF_SCHEMA.properties.problem.maxLength?problem:brief.problem});
 }
-function buildTailBrief({kind,problem,goOn,other='Plan again: this run gives your reply to the planner before anything goes further.',strength,why}){
+function buildTailBrief({kind,problem,goOn,other='Plan again from your reply.',strength,why}){
 return{
 id:'tail',
 kind:kind,
@@ -3282,14 +3282,14 @@ gate:buildBriefGate()
 };
 }
 function describeStopThen(isReplan){
-return isReplan?'the run plans again from fresh facts':'the run takes the stopped step again';
+return isReplan?'plan again from fresh facts':'take the stopped step again';
 }
 function buildStepStopBrief(isReplan){
 const action=describeStopAction('fix_cause','commit any change and reply');
 const brief=buildTailBrief({
 kind:STEP_STOP_KIND,
-problem:action.charAt(0).toUpperCase()+action.slice(1)+', and '+describeStopThen(isReplan)+'.',
-goOn:isReplan?'Go on: plan again from fresh facts.':'Go on: take the stopped step again.',
+problem:action.charAt(0).toUpperCase()+action.slice(1)+'.',
+goOn:'Go on: '+describeStopThen(isReplan)+'.',
 strength:'strong',
 why:'Clearing it lets the step go on.'
 });
@@ -3302,7 +3302,7 @@ problem:stepText+describeGateWait()+'.',
 goOn:'Approve this change.',
 other:'Keep it as it is, and '+describeStopThen(isReplan)+' without it.',
 strength:'none',
-why:'Only you can approve a change the destructive-fix gate holds back.'
+why:describeOnlyYou('approve it')
 });
 brief.options[0].destructive=[change];
 return brief;
@@ -3332,6 +3332,9 @@ return[{statement:unshownBriefText(),origin:origin,evidence:unshownBriefText()}]
 function buildBriefOption(id,summary,effort='small',value='high',reversible=true){
 return{id:id,summary:summary,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:effort,value:value,reversible:reversible,beyond_request:false};
 }
+function describeOnlyYou(action){
+return'Only you can '+action+'.';
+}
 function joinNames(names,conjunction){
 if(names.length<3){
 return names.join(' '+conjunction+' ');
@@ -3340,11 +3343,11 @@ return names.slice(0,-1).join(', ')+' '+conjunction+' '+names[names.length-1];
 }
 function listVersionOptions(values){
 if(values.version_check==='unreadable'){
-return[buildBriefOption('A','Keep the version each file holds on the branch.'),buildBriefOption('B','Set the version your reply names in each file.')];
+return[buildBriefOption('A','Keep the branch version of each file.'),buildBriefOption('B','Set each file to the version you name.')];
 }
 const trunk=values.trunk_version;
-const bumpOptions=[['A','major'],['B','minor'],['C','patch']].map(([id,bumpType])=>buildBriefOption(id,'Make a '+bumpType+' version bump'+(trunk===undefined?'.':', to version '+raiseVersion(trunk,bumpType)+'.')));
-return bumpOptions.concat(buildBriefOption('D','Make no version bump'+(trunk===undefined?'.':', keeping version '+trunk+'.')));
+const bumpOptions=[['A','major'],['B','minor'],['C','patch']].map(([id,bumpType])=>buildBriefOption(id,'Make a '+bumpType+' bump'+(trunk===undefined?'.':', to version '+raiseVersion(trunk,bumpType)+'.')));
+return bumpOptions.concat(buildBriefOption('D','Make no bump'+(trunk===undefined?'.':', keeping version '+trunk+'.')));
 }
 function buildVersionQuestionBrief(values){
 const isUnreadable=values.version_check==='unreadable';
@@ -3352,11 +3355,11 @@ return{
 id:'version',
 kind:VERSION_BUMP_INDETERMINABLE_KIND,
 problem:isUnreadable
-?'The version check cannot read one version from the version files. It reads the top-level version string of a .json file, the one version = "X.Y.Z" line of a .toml file and any other file whole, each a plain X.Y.Z version, the same at the trunk. Which version should they hold?'
-:'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
+?'The version check cannot read one X.Y.Z version from the version files, on the branch and at the trunk: the top-level version string of a .json file, the one version = "X.Y.Z" line of a .toml file, or any other file whole. Which version should they hold?'
+:'The commits and the plan do not settle the version bump. Which bump does the delivery need?',
 criticality:buildUnshownCriticality(),
 options:listVersionOptions(values),
-recommendation:{option_id:'A',strength:'none',why:'Only you can decide the version of this delivery.'},
+recommendation:{option_id:'A',strength:'none',why:describeOnlyYou('decide the version')},
 assumptions:buildUnshownAssumptions(),
 gate:buildBriefGate()
 };
@@ -3364,19 +3367,19 @@ gate:buildBriefGate()
 function buildValidationRemediationBrief(head,round){
 return buildTailBrief({
 kind:VALIDATION_REMEDIATION_KIND,
-problem:'Validation failed on commit '+head+'. Run fix round '+round+' of at most '+maxFixRounds()+', where a worker fixes the failures and the run commits the fix and checks again?',
+problem:'Validation failed on commit '+head+'. Should a worker fix the failures in fix round '+round+' of at most '+maxFixRounds()+'?',
 goOn:'Run a fix round.',
 strength:'strong',
-why:'A fix round stays on the branch and is listed for you, and every check runs again on its commit.'
+why:'The fix stays on the branch, is listed for you, and every check runs again on its commit.'
 });
 }
 function buildFixLimitBrief(head){
 return buildTailBrief({
 kind:VALIDATION_REMEDIATION_KIND,
 problem:'Validation still fails on commit '+head+' after '+maxFixRounds()+' fix rounds. How should the failures be fixed?',
-goOn:'Say how to fix the failures: this run plans the fix from your reply.',
+goOn:'Say how: the run plans the fix from your reply.',
 strength:'none',
-why:'The fix rounds did not make validation pass, so only you can decide what comes next.'
+why:describeOnlyYou('decide what comes next')
 });
 }
 function buildGateRerunBrief(staleIds,head){
@@ -3384,9 +3387,9 @@ const names=joinNames(staleIds.map((gateId)=>gateNames()[gateId]),'and');
 return buildTailBrief({
 kind:GATE_RERUN_KIND,
 problem:'Commit '+head+' landed after '+names+' held on an earlier commit. Run '+names+' again on the new commit?',
-goOn:'Run the checks again on the new commit.',
+goOn:'Run the checks again.',
 strength:'strong',
-why:'A check holds only for the commit it ran on, and the pull request needs every check to hold on the commit it pushes.'
+why:'The pull request needs every check to hold on the commit it pushes.'
 });
 }
 
@@ -3495,7 +3498,7 @@ return replanFromTailAsk(resolution.asks[0],run);
 }
 
 function renderReversibleEffects(effects){
-const lines=['Effects outside the repo that the plan declares as reversible:'];
+const lines=['Reversible effects outside the repo:'];
 effects.forEach((effect)=>lines.push('- step '+encodeUntrustedText(effect.stepId)+': '+encodeUntrustedText(effect.summary)));
 return lines.join('\n');
 }
@@ -3548,7 +3551,7 @@ return run.rejected.length>0||run.undone.length>0;
 function buildRunRecordParts(run,taken,gates){
 const shown=taken.filter(isShownDecision);
 const isDraft=gates!==undefined&&gates.draft!==undefined;
-const parts=isDraft?[{id:'draft',text:'This pull request is a draft: '+gates.draft,external:false}]:[];
+const parts=isDraft?[{id:'draft',text:describeDraftLine('This',gates.draft),external:false}]:[];
 if(run.reversibleEffects.length>0){
 parts.push({id:'reversible_effects',text:renderReversibleEffects(run.reversibleEffects),external:true});
 }
@@ -3577,6 +3580,9 @@ parts.push({id:'decisions',text:renderDecisionsCompact(shown),external:true});
 }
 return parts;
 }
+function describeDraftLine(article,reason){
+return article+' pull request is a draft: '+reason;
+}
 function describeBranchLine(run){
 return'Branch '+encodeUntrustedText(run.branch)+' is at commit '+run.head+'.';
 }
@@ -3604,18 +3610,18 @@ return finish({outcome:'blocked',causes:causes,blocks:blocks});
 function describePullRequest(values){
 return values.created==='true'
 ?'Opened pull request '+values.url+' on commit '+values.head_ref_oid+'.'
-:'Pushed commit '+values.head_ref_oid+' to the open pull request '+values.url+(values.commented==='true'?' and commented on it.':'.');
+:'Pushed commit '+values.head_ref_oid+' to pull request '+values.url+(values.commented==='true'?' and commented on it.':'.');
 }
 function describeHeldGates(run){
 const held=configuredGateIds(run).map((gateId)=>gateNames()[gateId]);
 const notConfigured=gateIds().filter((gateId)=>!configuredGateIds(run).includes(gateId)).map((gateId)=>gateNames()[gateId]);
 const heldLine=joinNames(held,'and')+' held on commit '+run.head+'.';
 const line=heldLine.charAt(0).toUpperCase()+heldLine.slice(1);
-return notConfigured.length===0?line:line+' Not configured for this run: '+joinNames(notConfigured,'and')+'.';
+return notConfigured.length===0?line:line+' Not configured: '+joinNames(notConfigured,'and')+'.';
 }
 function finishDeliveryComplete(run,plan,prValues,gates){
 const pr={url:prValues.url,head_ref_oid:prValues.head_ref_oid,created:prValues.created==='true'};
-const blocks=[{text:describePullRequest(prValues)},{text:gates.draft===undefined?describeHeldGates(run):'The pull request is a draft: '+gates.draft}];
+const blocks=[{text:describePullRequest(prValues)},{text:gates.draft===undefined?describeHeldGates(run):describeDraftLine('The',gates.draft)}];
 if(prValues.warning!==undefined){
 blocks.push({text:'The pull request step warned: '+prValues.warning+'.'});
 }
@@ -3626,7 +3632,7 @@ blocks.push(...buildRecordTailBlocks(run,run.taken));
 return finish({outcome:'complete',blocks:blocks,pr:pr});
 }
 function finishOpenQuestions(resolution,stopReason,run){
-const cause={problem:'The delivery ran no further step, because questions are still open.',nextAction:'answer'};
+const cause={problem:'The delivery stopped: questions are still open.',nextAction:'answer'};
 return finishDeliveryBlocked([cause],{...run,taken:run.taken.concat(resolution.taken)},[renderOpenQuestions(resolution.asks,stopReason)]);
 }
 function checkPauseAsk(ask){

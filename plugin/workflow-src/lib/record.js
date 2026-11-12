@@ -184,7 +184,7 @@
  */
 
 function renderReversibleEffects(effects) {
-  const lines = ['Effects outside the repo that the plan declares as reversible:'];
+  const lines = ['Reversible effects outside the repo:'];
   effects.forEach((effect) => lines.push('- step ' + encodeUntrustedText(effect.stepId) + ': ' + encodeUntrustedText(effect.summary)));
   return lines.join('\n');
 }
@@ -264,7 +264,7 @@ function hasListedFindings(run) {
 function buildRunRecordParts(run, taken, gates) {
   const shown = taken.filter(isShownDecision);
   const isDraft = gates !== undefined && gates.draft !== undefined;
-  const parts = isDraft ? [{ id: 'draft', text: 'This pull request is a draft: ' + gates.draft, external: false }] : [];
+  const parts = isDraft ? [{ id: 'draft', text: describeDraftLine('This', gates.draft), external: false }] : [];
   if (run.reversibleEffects.length > 0) {
     parts.push({ id: 'reversible_effects', text: renderReversibleEffects(run.reversibleEffects), external: true });
   }
@@ -292,6 +292,10 @@ function buildRunRecordParts(run, taken, gates) {
     parts.push({ id: 'decisions', text: renderDecisionsCompact(shown), external: true });
   }
   return parts;
+}
+
+function describeDraftLine(article, reason) {
+  return article + ' pull request is a draft: ' + reason;
 }
 
 function describeBranchLine(run) {
@@ -324,7 +328,7 @@ function finishDeliveryBlocked(causes, run, endLines = []) {
 function describePullRequest(values) {
   return values.created === 'true'
     ? 'Opened pull request ' + values.url + ' on commit ' + values.head_ref_oid + '.'
-    : 'Pushed commit ' + values.head_ref_oid + ' to the open pull request ' + values.url + (values.commented === 'true' ? ' and commented on it.' : '.');
+    : 'Pushed commit ' + values.head_ref_oid + ' to pull request ' + values.url + (values.commented === 'true' ? ' and commented on it.' : '.');
 }
 
 function describeHeldGates(run) {
@@ -332,12 +336,12 @@ function describeHeldGates(run) {
   const notConfigured = gateIds().filter((gateId) => !configuredGateIds(run).includes(gateId)).map((gateId) => gateNames()[gateId]);
   const heldLine = joinNames(held, 'and') + ' held on commit ' + run.head + '.';
   const line = heldLine.charAt(0).toUpperCase() + heldLine.slice(1);
-  return notConfigured.length === 0 ? line : line + ' Not configured for this run: ' + joinNames(notConfigured, 'and') + '.';
+  return notConfigured.length === 0 ? line : line + ' Not configured: ' + joinNames(notConfigured, 'and') + '.';
 }
 
 function finishDeliveryComplete(run, plan, prValues, gates) {
   const pr = { url: prValues.url, head_ref_oid: prValues.head_ref_oid, created: prValues.created === 'true' };
-  const blocks = [{ text: describePullRequest(prValues) }, { text: gates.draft === undefined ? describeHeldGates(run) : 'The pull request is a draft: ' + gates.draft }];
+  const blocks = [{ text: describePullRequest(prValues) }, { text: gates.draft === undefined ? describeHeldGates(run) : describeDraftLine('The', gates.draft) }];
   if (prValues.warning !== undefined) {
     blocks.push({ text: 'The pull request step warned: ' + prValues.warning + '.' });
   }
@@ -349,7 +353,7 @@ function finishDeliveryComplete(run, plan, prValues, gates) {
 }
 
 function finishOpenQuestions(resolution, stopReason, run) {
-  const cause = { problem: 'The delivery ran no further step, because questions are still open.', nextAction: 'answer' };
+  const cause = { problem: 'The delivery stopped: questions are still open.', nextAction: 'answer' };
   return finishDeliveryBlocked([cause], { ...run, taken: run.taken.concat(resolution.taken) }, [renderOpenQuestions(resolution.asks, stopReason)]);
 }
 

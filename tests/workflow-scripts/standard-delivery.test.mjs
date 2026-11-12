@@ -69,7 +69,7 @@ const MALFORMED_FACTS = 'The facts step returned malformed facts, so the deliver
 const NOT_READY = 'The branch is not ready for delivery, so the delivery stopped before planning:';
 const PR_URL = 'https://github.com/o/r/pull/7';
 const NEXT_STEP_LINE = 'Next: clear the cause named above, then run the request again.';
-const OPEN_LEAD = 'The delivery ran no further step, because questions are still open.';
+const OPEN_LEAD = 'The delivery stopped: questions are still open.';
 const TAIL_LEAD = 'Every plan step is committed on branch "feature/cache", with head ' + OTHER + '.';
 const PLAN_PAUSE_START = /^The plan for branch "feature\/cache" has \d+ steps? over \d+ files?: [^\n]+\n\n\*\*Q1\. /;
 const RUN_AGAIN = 'Next: run the request again with the answers in it.';
@@ -1028,7 +1028,7 @@ function approvalQuestionLines(label, stepId, hold, then) {
     '**' + label + '. Step ' + JSON.stringify(stepId) + ' waits for your approval at the destructive-fix gate.**',
     '- A: Approve this change. Choosing it approves these destructive changes: ' + JSON.stringify(hold.item) + ' (category ' + hold.category + ')',
     '- B: Keep it as it is, and ' + then + ' without it.',
-    'Recommendation: none. Only you can approve a change the destructive-fix gate holds back.'
+    'Recommendation: none. Only you can approve it.'
   ].join('\n');
 }
 
@@ -2336,7 +2336,7 @@ const ROW_TESTS = {
     test('a reversible effect is not asked and is listed in the final message', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(effectPlan('Post a preview link.', true)) }));
       assert.equal(run.result.outcome, 'complete');
-      assert.ok(run.result.message.includes('Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."'), run.result.message);
+      assert.ok(run.result.message.includes('Reversible effects outside the repo:\n- step "STEP-001": "Post a preview link."'), run.result.message);
     });
     test('the external_effect kind is a hard stop of the autonomy table', () => {
       assert.deepEqual({ ...lib.decide({ kind: 'external_effect', level: 'high', brief: main.buildExternalEffectBrief(summary) }, readJson('plugin/references/decision-autonomy-table.json'), briefSchema) }, { action: 'ask', reason: 'hard_stop' });
@@ -3029,7 +3029,7 @@ const ROW_TESTS = {
         message: [
           openedLine(OTHER),
           HELD_ALL + OTHER + '.',
-          'Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."',
+          'Reversible effects outside the repo:\n- step "STEP-001": "Post a preview link."',
           lib.renderDecisionsCompact(taken)
         ].join('\n\n')
       });
@@ -3335,9 +3335,9 @@ const ROW_TESTS = {
       assertTailPause(run, [versionAskOf(ASK_UNDETERMINED)], 'validate-1-1');
       const brief = structuredClone(main.buildVersionQuestionBrief(parsedVersion(ASK_UNDETERMINED)));
       assert.equal(brief.kind, 'version_bump_indeterminable');
-      assert.deepEqual(brief.options.map((option) => option.summary), ['Make a major version bump, to version 2.0.0.', 'Make a minor version bump, to version 1.3.0.', 'Make a patch version bump, to version 1.2.4.', 'Make no version bump, keeping version 1.2.3.']);
+      assert.deepEqual(brief.options.map((option) => option.summary), ['Make a major bump, to version 2.0.0.', 'Make a minor bump, to version 1.3.0.', 'Make a patch bump, to version 1.2.4.', 'Make no bump, keeping version 1.2.3.']);
       const noTrunk = structuredClone(main.buildVersionQuestionBrief(parsedVersion({ ...ASK_UNDETERMINED, trunk_version: undefined })));
-      assert.deepEqual(noTrunk.options.map((option) => option.summary), ['Make a major version bump.', 'Make a minor version bump.', 'Make a patch version bump.', 'Make no version bump.']);
+      assert.deepEqual(noTrunk.options.map((option) => option.summary), ['Make a major bump.', 'Make a minor bump.', 'Make a patch bump.', 'Make no bump.']);
       for (const shown of [brief, noTrunk]) {
         assert.ok(lib.validateSchema(briefSchema, shown).ok, JSON.stringify(shown));
         assert.equal(shown.recommendation.strength, 'none');
@@ -3363,7 +3363,7 @@ const ROW_TESTS = {
       for (const format of ['.json', '.toml', 'version = "X.Y.Z"', 'any other file whole']) {
         assert.ok(brief.problem.includes(format), format);
       }
-      assert.deepEqual(brief.options.map((option) => option.summary), ['Keep the version each file holds on the branch.', 'Set the version your reply names in each file.']);
+      assert.deepEqual(brief.options.map((option) => option.summary), ['Keep the branch version of each file.', 'Set each file to the version you name.']);
     });
     for (const [checkName, values, causeLine] of [
       ['undetermined', ASK_UNDETERMINED, 'Version check: The commits since the trunk do not settle the version bump.'],
@@ -3676,7 +3676,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(run), labels);
       const ask = limitAsk(main.buildFixLimitBrief(fixCommits[2]));
       assertTailPause(run, [ask]);
-      assert.ok(run.result.message.includes('- A: Say how to fix the failures: this run plans the fix from your reply.'), run.result.message);
+      assert.ok(run.result.message.includes('- A: Say how: the run plans the fix from your reply.'), run.result.message);
       const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'Mock the database.'), { ...results, 'facts-2': STOP_FACTS });
       assert.deepEqual(labelsOf(resumed), [...labels, 'facts-2']);
     });
@@ -3722,7 +3722,7 @@ const ROW_TESTS = {
       });
       const paused = await runWorkflow(LAUNCH, results);
       const lead = 'The validation fix round was blocked, so the delivery stopped: it says "' + HOLD_BLOCKER + '".';
-      assert.equal(paused.result.message, lead + '\n\n' + approvalQuestionLines('Q1', 'fix', DROP_USERS, 'the run takes the stopped step again') + '\n\nReply with an option, like A, or in your own words.');
+      assert.equal(paused.result.message, lead + '\n\n' + approvalQuestionLines('Q1', 'fix', DROP_USERS, 'take the stopped step again') + '\n\nReply with an option, like A, or in your own words.');
       assert.ok(!hasDataBlock(callOf(paused, 'fix-1-1').prompt, 'approvals'));
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'a.'), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
@@ -3755,7 +3755,7 @@ const ROW_TESTS = {
         'review-commit-1-1': commitRelay({ commit: FOURTH, committed: 'false' })
       });
       const paused = await runWorkflow(LAUNCH, results);
-      const question = 'The validation fix round was blocked, so the delivery stopped: it says "' + HOLD_BLOCKER + '".\n\n' + approvalQuestionLines('Q1', 'fix', DROP_USERS, 'the run takes the stopped step again') + '\n\nReply with an option, like A, or in your own words.';
+      const question = 'The validation fix round was blocked, so the delivery stopped: it says "' + HOLD_BLOCKER + '".\n\n' + approvalQuestionLines('Q1', 'fix', DROP_USERS, 'take the stopped step again') + '\n\nReply with an option, like A, or in your own words.';
       assert.equal(paused.result.message, question);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'B'), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
@@ -3912,9 +3912,14 @@ const ROW_TESTS = {
       assert.ok(lib.validateSchema(briefSchema, brief).ok);
       assert.deepEqual(structuredClone(lib.decide({ kind: 'gate_rerun', level: undefined, brief: brief }, autonomyTable, briefSchema)), { action: 'take', reason: 'auto', listed: [] });
       assert.equal(brief.problem, 'Commit ' + THIRD + ' landed after validation and local review held on an earlier commit. Run validation and local review again on the new commit?');
+      assert.deepEqual(structuredClone(brief.options.map((option) => option.summary)), ['Run the checks again.', 'Plan again from your reply.']);
       assert.equal(main.buildGateRerunBrief.length, 2);
-      assert.ok(lib.validateSchema(briefSchema, main.buildValidationRemediationBrief(OTHER, 1)).ok);
-      assert.ok(lib.validateSchema(briefSchema, main.buildFixLimitBrief(OTHER)).ok);
+      const remediation = main.buildValidationRemediationBrief(OTHER, 1);
+      assert.ok(lib.validateSchema(briefSchema, remediation).ok);
+      assert.equal(remediation.problem, 'Validation failed on commit ' + OTHER + '. Should a worker fix the failures in fix round 1 of at most ' + main.maxFixRounds() + '?');
+      const limit = main.buildFixLimitBrief(OTHER);
+      assert.ok(lib.validateSchema(briefSchema, limit).ok);
+      assert.equal(limit.recommendation.option_id + ' ' + limit.recommendation.strength, 'B none');
     });
   },
   'SD-28': () => {
@@ -4046,7 +4051,7 @@ const ROW_TESTS = {
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults());
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS.slice(0, -2), 'pr-1']);
-      assert.ok(run.result.message.endsWith('\n\nValidation held on commit ' + OTHER + '. Not configured for this run: local review.'), run.result.message);
+      assert.ok(run.result.message.endsWith('\n\nValidation held on commit ' + OTHER + '. Not configured: local review.'), run.result.message);
       assert.ok(prBodyOf(run, 'pr-1').includes('- local review: not configured for this run'), prBodyOf(run, 'pr-1'));
       assert.ok(!run.phases.includes('Review'));
     });
@@ -5417,7 +5422,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [strong]) }));
       const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       const gates = gatesBlock(['validation: passed, held on commit ' + OTHER, 'local review: clean, held on commit ' + OTHER]);
-      const record = ['Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."', gates, lib.renderDecisionsCompact([{ brief: strong }])];
+      const record = ['Reversible effects outside the repo:\n- step "STEP-001": "Post a preview link."', gates, lib.renderDecisionsCompact([{ brief: strong }])];
       assert.equal(inputs.body, [bodyStart(plan), ...record].join('\n\n'));
       assert.equal(inputs.comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', ...record].join('\n\n'));
       assert.ok(inputs.body.startsWith('Reads hit the database every time. Add a cache layer in front of the reads.\n\nSteps:\n- STEP-001 (src/cache.js): Step STEP-001 is done.\n\n'), inputs.body);
@@ -5670,7 +5675,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': { outcome: 'ran', stdout: stdout } }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: false });
-      assert.equal(run.result.message, 'Pushed commit ' + OTHER + ' to the open pull request ' + PR_URL + ' and commented on it.\n\n' + HELD_ALL + OTHER + '.');
+      assert.equal(run.result.message, 'Pushed commit ' + OTHER + ' to pull request ' + PR_URL + ' and commented on it.\n\n' + HELD_ALL + OTHER + '.');
     });
     test('with a comment hook that returns undefined, the texts and the inputs file carry no comment', () => {
       const hook = main.buildPullRequestComment;
@@ -5707,7 +5712,7 @@ const ROW_TESTS = {
     });
     test('the complete message says the run commented on the open pull request only when the relay says commented true', () => {
       const reused = { url: PR_URL, head_ref_oid: OTHER, created: 'false' };
-      const pushed = 'Pushed commit ' + OTHER + ' to the open pull request ' + PR_URL;
+      const pushed = 'Pushed commit ' + OTHER + ' to pull request ' + PR_URL;
       assert.equal(main.describePullRequest({ ...reused, commented: 'true' }), pushed + ' and commented on it.');
       assert.equal(main.describePullRequest(reused), pushed + '.');
       assert.equal(main.describePullRequest({ ...reused, commented: 'false' }), pushed + '.');
@@ -5866,7 +5871,7 @@ const ROW_TESTS = {
     test('with local_review false the final message names the PR and names the gate not configured', async () => {
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults());
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.equal(run.result.message, openedLine(OTHER) + '\n\nValidation held on commit ' + OTHER + '. Not configured for this run: local review.');
+      assert.equal(run.result.message, openedLine(OTHER) + '\n\nValidation held on commit ' + OTHER + '. Not configured: local review.');
       assert.ok(!run.result.message.includes('Gates that did not run'), run.result.message);
     });
     test('a reused PR comment carries the full run record, and the final message its lines, each taken decision not of a routine kind and no commit list', async () => {
@@ -5875,13 +5880,13 @@ const ROW_TESTS = {
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults({ 'plan-1': planResult(plan, [strong]), 'pr-1': cannedPrRunner({ created: 'false', commented: 'true' }) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: false });
-      const effects = 'Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."';
+      const effects = 'Reversible effects outside the repo:\n- step "STEP-001": "Post a preview link."';
       const taken = [{ brief: strong }];
       const gates = gatesBlock(['validation: passed, held on commit ' + OTHER, 'local review: not configured for this run']);
       const comment = readRunnerInputs(callOf(run, 'pr-1').prompt).comment;
       assert.equal(comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', effects, gates, lib.renderDecisionsCompact(taken)].join('\n\n'));
-      const pushed = 'Pushed commit ' + OTHER + ' to the open pull request ' + PR_URL + ' and commented on it.';
-      const held = 'Validation held on commit ' + OTHER + '. Not configured for this run: local review.';
+      const pushed = 'Pushed commit ' + OTHER + ' to pull request ' + PR_URL + ' and commented on it.';
+      const held = 'Validation held on commit ' + OTHER + '. Not configured: local review.';
       assert.equal(run.result.message, [pushed, held, effects, lib.renderDecisionsCompact(taken)].join('\n\n'));
     });
   },
@@ -8292,14 +8297,13 @@ const ROW_TESTS = {
     });
     test('the one step_stop brief, fix_cause, fits BRIEF_SCHEMA with one option and a strong recommendation, and names what the reply does', () => {
       for (const isReplan of [false, true]) {
-        const then = isReplan ? 'the run plans again from fresh facts.' : 'the run takes the stopped step again.';
         const brief = structuredClone(main.buildStepStopBrief(isReplan));
         assert.ok(lib.validateSchema(briefSchema, brief).ok, JSON.stringify(brief));
         assert.equal(brief.kind, 'step_stop');
         assert.equal(brief.options.length, 1);
         assert.equal(brief.options[0].summary, isReplan ? 'Go on: plan again from fresh facts.' : 'Go on: take the stopped step again.');
         assert.deepEqual(brief.recommendation, { option_id: 'A', strength: 'strong', why: 'Clearing it lets the step go on.' });
-        assert.equal(brief.problem, 'Clear the cause named above, then commit any change and reply, and ' + then);
+        assert.equal(brief.problem, 'Clear the cause named above, then commit any change and reply.');
         assert.ok(!JSON.stringify(brief).includes('Only you can tell when what stopped the run is out of the way.') && !brief.problem.includes('Fix what stopped the run'), brief.problem);
       }
       for (const text of ["the run's own step failed; reply to try once more", 'The cause clears itself.', 'A stop that comes back is a workflow defect: report it, do not retry.', 'so reply later, for example once the machine is idle']) {
@@ -8341,7 +8345,7 @@ const ROW_TESTS = {
       const launchEnd = calls.find((use) => findEnclosingFunction(code, use.index) === 'runDelivery');
       assert.ok(code.startsWith('finishDeliveryBlocked([launch],undefined)', launchEnd.index), code.slice(launchEnd.index, launchEnd.index + 60));
     });
-    const replanThen = 'the run plans again from fresh facts';
+    const replanThen = 'plan again from fresh facts';
     test('an approve lead cause asks one approval question per held item through askTails, never the step_stop brief, and decide() takes none', () => {
       const holds = [{ stepId: 'S1', ...DROP_USERS }, { stepId: 'S2', ...DROP_ORDERS }];
       for (const level of autonomyTable.levels) {
@@ -8355,7 +8359,7 @@ const ROW_TESTS = {
       for (const ask of main.buildApprovalAsks(holds, false, stopState())) {
         assert.equal(ask.kind, 'step_stop');
         assert.equal(ask.brief.recommendation.strength, 'none');
-        assert.ok(ask.brief.options[1].summary.endsWith('the run takes the stopped step again without it.'), ask.brief.options[1].summary);
+        assert.ok(ask.brief.options[1].summary.endsWith('take the stopped step again without it.'), ask.brief.options[1].summary);
       }
     });
     test('the brief decide() reads of an approval question fits BRIEF_SCHEMA with the longest step id and item, and holds neither', () => {
