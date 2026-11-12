@@ -294,3 +294,33 @@ This amendment replaces the method of edge case (c). The edge case's text stays 
 **Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks the workflow to take such a question itself, or to end blocked on it, contests this record and is a repeat.
 
 **Prose budgets.** The rebuilt `plugin/workflows/pr-feedback-remediation.js` is 175330 characters of the 190000 built length limit, and its prose is 38026 of the 38200 budget. No budget raise.
+
+## Amendment 2026-11-12: a question exit takes the Question gate on every path
+
+**The findings.** Codex review threads discussion_r4554133264 (the workflow fix pass had no answer path) and discussion_r4555707637 (`plugin/agents/overlord.md` line 29, the direct watch had no route for question exits) on PR 566, both priority P1. Returned together, they are one root cluster.
+
+**Root cause.** The route from a question exit (`user-input-required`, `high-severity-rejection`) back to the asker's `user_answer` was keyed on a path, the state machine's `question` gate, not on the exit. Go-live moved the engine-path watch and the direct watch request off the state machine. Reflex and Instinct asked under Stop Conditions with no stated route for the reply.
+
+**The fix.** One sentence in the overlord's Question gate takes either exit on any path as the state that asked. A contract test fails if either token appears anywhere else in `plugin/agents/overlord.md`. Commit 1181ce9b.
+
+**Closed by construction.** The key is the exit token, which every path receives, so a future path inherits the route.
+
+**Decision 3 stands.** Instinct still never hands an escalation to the workflow, and the gate is not a hand-off.
+
+**The workflow half.** Closed by the fix-pass amendment above. Inside a run, the overlord sees `needs_user` and resumes per `## Engine`.
+
+**Known consequence.** An answered rerun that escalates launches with references and trunk only, so the fix pass may ask again. This is bounded: every ask needs a user reply, and nothing is lost.
+
+**No cap on reruns.** GitHub reviewer questions carry no recommendation, so each rerun needs a user reply.
+
+**Rejected alternatives.**
+
+- Adding the exits to the `## Engine` escalation paragraph. That is a per-path copy of the route.
+- The skill asking and rerunning itself. That is more surface.
+- Routing to the state machine. Slice 5 retires it.
+
+**Slice 5.** The rule stays when the state machine retires.
+
+**Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks a path to restate the route, to end blocked on a question exit, or to cap the reruns contests this record and is a repeat.
+
+**Prose budgets.** `plugin/agents/overlord.md` is 39027 of its 39056-byte budget, CRs stripped. No budget raise.
