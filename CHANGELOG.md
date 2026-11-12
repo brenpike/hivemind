@@ -23,12 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Local review fixes a whole class in the round when the class fix stays within its 2-file bar (`plugin/governance/remediation-doctrine.md` Root-Cluster, `plugin/agents/local-reviewer.md` step 6). A finding on a construct already class-fixed goes to the planner.
-- The local reviewer's fix-ledger history is kept across a review replan: the replan route passes the reviewer's own `ledger_path` to the next review run as `resume_from_ledger`.
+- The local reviewer's fix-ledger history is kept across a review replan: the replan route passes the fixed fix-ledger path `.hivemind/review-loop/fix-ledger.yaml`, set in code, to the next review run as `resume_from_ledger`.
 - The step-9 young-surface reroute of `plugin/agents/local-reviewer.md` is gone, so diminishing returns on a young surface no longer turn into `root-cluster-suspected`.
 - First-Finding Triage question 2 asks the other failure axes of the construct.
 - After a class fix, the step-3a sweep of `plugin/agents/local-reviewer.md` starts at that construct.
 - The local review limit drops from 10 to 6 rounds per run (`max_iterations` 6, `maxReviewIterations()`), and a pull request gets at most one review replan (`maxReviewReplans()` 1).
 - Review-driven plans run on Sonnet, then once more on Opus when the checked plan flags `architectural` (`plan-P-opus` or `revise-R-opus`), and the rest of that pass stays on Opus. This applies in `hivemind:standard-delivery` (row SD-85) and in the draft `hivemind:pr-feedback-remediation` workflow (row PFR-28).
+
+### Fixed
+
+- The rerun of a blocked local review now passes the fixed fix-ledger path `.hivemind/review-loop/fix-ledger.yaml`, set in code, as `resume_from_ledger`, not the `ledger_path` the reviewer returned. No value the reviewer returns names the ledger the next review run reads or writes.
 
 The `BUILD_ID` of `plugin/workflows/standard-delivery.js` changes, so a run paused on the old build cannot resume on this one.
 

@@ -610,7 +610,7 @@ A finding that asks to pass the fix ledger identity or path back to the reviewer
 - A different ledger at that path needs a second writer. That is the reopen condition of this record, and it is unchanged.
 - Accepting a caller-supplied path would cut against Trust-Boundary Discipline in `plugin/governance/security-policy.md`.
 
-**Scope noted 2026-11-11 (issue 563).** This record's scope stays the resume with `user_answer`. The replan and blocked-rerun hand-offs of the reviewer's own `ledger_path` as `resume_from_ledger` fall outside it: the engine passes on a path the reviewer itself returned, never a caller-chosen one (see `docs/adr/0041-local-review-class-fix-in-round.md`, decision 2).
+**Scope noted 2026-11-11 (issue 563).** This record's scope stays the resume with `user_answer`. The replan and blocked-rerun reruns pass the fixed path `.hivemind/review-loop/fix-ledger.yaml`, set in code, as `resume_from_ledger`. They never pass a reviewer-returned or caller-chosen path, so they keep this record's reasons: the path is fixed, and a supplied path would cut against Trust-Boundary Discipline in `plugin/governance/security-policy.md` (see `docs/adr/0041-local-review-class-fix-in-round.md`, decision 2).
 
 The rest of ADR-0037 is unchanged.
 

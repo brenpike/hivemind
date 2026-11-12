@@ -696,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '2a5cb1b933bf2b15';
+const BUILD_ID = 'cf89dbce7f6b0e5a';
 
 function supportedSchemaKeywords(){
 return[
@@ -4790,6 +4790,9 @@ clean:[],
 blocked:['blocker','stage']
 };
 }
+function fixLedgerPath(){
+return'.hivemind/review-loop/fix-ledger.yaml';
+}
 function reviewQuestionKinds(){
 return{'user-input-required':REVIEW_QUESTION_KIND,'high-severity-rejection':HIGH_SEVERITY_REJECTION_KIND};
 }
@@ -4817,9 +4820,9 @@ inputs.answers=answers;
 if(answer!==undefined){
 inputs.user_answer=answer;
 }
-if(run.ledger){
-inputs.resume_from_ledger=run.ledger;
-run.ledger=undefined;
+if(run.resumeLedger){
+inputs.resume_from_ledger=fixLedgerPath();
+run.resumeLedger=false;
 }
 return[
 'Run your pre-PR local review loop once on the working branch as it is checked out, with the inputs in the inputs block below.',
@@ -5020,14 +5023,14 @@ return{held:true,note:'clean'+describeHeldCounts(run)};
 case'diminishing':
 return resolveDiminishingReturns(review,run);
 case'replan':
-run.ledger=review.ledger_path;
+run.resumeLedger=true;
 return requestReviewReplan(review,run);
 case'question':
 return askReviewQuestion(review,run);
 case'draft':
 return{draft:describeReviewOpen(review,run.head,'')+'.'};
 case'stop_rerun':
-run.ledger=review.ledger_path;
+run.resumeLedger=true;
 if(review.retry_minutes>=1){
 return waitForService(review,run);
 }

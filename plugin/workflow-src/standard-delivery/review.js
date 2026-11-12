@@ -95,11 +95,11 @@
  *           retry_minutes asks one fix_cause step_stop question through
  *           stopDelivery (lib/record.js), and the reply runs local review again;
  *           injection-suspect is terminal. Either rerun of a blocked
- *           review passes its ledger_path as resume_from_ledger, once, so
- *           the next loop keeps its iteration count and its break-fix and
- *           root-cluster history. The replan route keeps its ledger_path
- *           the same way, so the next review run, in the new pass, gets it
- *           as resume_from_ledger once and keeps that history. A
+ *           review, and the next review run after a review replan, gets
+ *           fixLedgerPath() as resume_from_ledger, once, so it keeps its
+ *           iteration count and its break-fix and root-cluster history. The
+ *           engine sets that path in code, never from the reviewer's
+ *           ledger_path. A
  *           review result that fails REVIEW_SCHEMA, gives option ids other than
  *           A, B, C and D in that order, or recommends no option has a report
  *           lead, so stopDelivery ends the run blocked. describeReviewProblem reads the result before the
@@ -142,7 +142,9 @@
  *   encoded, so its shown brief can exceed a BRIEF_SCHEMA bound
  *   once encoded, but decide() reads only the code-built brief of
  *   removeReviewerText, which always fits it, so a valid review never asks as
- *   malformed_brief.
+ *   malformed_brief. It never names a path the engine passes on: the fix
+ *   ledger path a review run resumes is fixLedgerPath(), set in code, and the
+ *   engine never takes the reviewer's ledger_path.
  *
  * Why
  *   The review result is the one step result that carries Codex-derived
@@ -179,6 +181,14 @@ function reviewExitFields() {
   };
 }
 
+/**
+ * Returns the one fix ledger path of plugin/agents/local-reviewer.md
+ * (Fix Ledger & Safety).
+ */
+function fixLedgerPath() {
+  return '.hivemind/review-loop/fix-ledger.yaml';
+}
+
 function reviewQuestionKinds() {
   return { 'user-input-required': REVIEW_QUESTION_KIND, 'high-severity-rejection': HIGH_SEVERITY_REJECTION_KIND };
 }
@@ -212,11 +222,12 @@ function buildReviewPrompt(plan, run, answer) {
   /*
    * A rerun after a blocked review, or the review after a review replan,
    * resumes its fix ledger, so its break-fix and root-cluster history
-   * carry over.
+   * carry over. The path is fixLedgerPath(), set in code, never the
+   * reviewer's ledger_path.
    */
-  if (run.ledger) {
-    inputs.resume_from_ledger = run.ledger;
-    run.ledger = undefined;
+  if (run.resumeLedger) {
+    inputs.resume_from_ledger = fixLedgerPath();
+    run.resumeLedger = false;
   }
   return [
     'Run your pre-PR local review loop once on the working branch as it is checked out, with the inputs in the inputs block below.',
@@ -515,14 +526,14 @@ function routeLocalReview(review, run) {
     case 'diminishing':
       return resolveDiminishingReturns(review, run);
     case 'replan':
-      run.ledger = review.ledger_path;
+      run.resumeLedger = true;
       return requestReviewReplan(review, run);
     case 'question':
       return askReviewQuestion(review, run);
     case 'draft':
       return { draft: describeReviewOpen(review, run.head, '') + '.' };
     case 'stop_rerun':
-      run.ledger = review.ledger_path;
+      run.resumeLedger = true;
       if (review.retry_minutes >= 1) {
         return waitForService(review, run);
       }
