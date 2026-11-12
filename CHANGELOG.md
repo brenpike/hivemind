@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `docs/adr/0041-local-review-class-fix-in-round.md` records the decisions of issue 563: the in-round class fix, the fix-ledger history kept across a review replan, the removed young-surface reroute, the lower review limit and the review-driven planning models. ADR-0038 and ADR-0025 get dated amendments, and ADR-0037 gets dated notes on its "reviewer limit is fixed at 10" bullet and its 2026-10-25 ledger-path record.
+- `tests/policy/safety-root-cluster-class-fix.json` pins the in-round class fix.
+- `docs/adr/0041-local-review-class-fix-in-round.md` records the decisions of issue 563: the in-round class fix, the fix-ledger history kept across a review replan, the removed young-surface reroute, the review iteration policy and the review-driven planning models. ADR-0038 and ADR-0025 get dated amendments, and ADR-0037 gets dated notes on its "reviewer limit is fixed at 10" bullet and its 2026-10-25 ledger-path record.
 - Contract row PFR-28 for the draft `hivemind:pr-feedback-remediation` workflow: its planning passes always carry a review block, so they plan on Sonnet first and go to Opus when a checked plan flags `architectural`.
 
 ### Changed
@@ -27,7 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The step-9 young-surface reroute of `plugin/agents/local-reviewer.md` is gone, so diminishing returns on a young surface no longer turn into `root-cluster-suspected`.
 - First-Finding Triage question 2 asks the other failure axes of the construct.
 - After a class fix, the step-3a sweep of `plugin/agents/local-reviewer.md` starts at that construct.
-- The local review limit drops from 10 to 6 rounds per run (`max_iterations` 6, `maxReviewIterations()`), and a pull request gets at most one review replan (`maxReviewReplans()` 1).
+- The local review limit stays 10 rounds per run, counting only the rounds after the last replan exit, and a pull request gets at most one review replan (`maxReviewReplans()` 1).
+- `readLocalReview` and `readDraft` in `plugin/workflow-src/standard-delivery/main.js` become one shared `readBooleanLaunchArg`, with messages unchanged, to fit the build limit. The built `plugin/workflows/standard-delivery.js` measures 189,909 characters before and 189,668 after, against the limit of 190000.
 - Review-driven plans run on Sonnet, then once more on Opus when the checked plan flags `architectural` (`plan-P-opus` or `revise-R-opus`), and the rest of that pass stays on Opus. This applies in `hivemind:standard-delivery` (row SD-85) and in the draft `hivemind:pr-feedback-remediation` workflow (row PFR-28).
 
 ### Fixed
