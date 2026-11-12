@@ -344,7 +344,7 @@ function parsedVersion(changes) {
 }
 
 const VERSION_PLAN = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'], changelog_files: [] } });
-const VERSION_LINE = 'Version check: each file of the version_files block must hold version 1.3.0, the trunk version 1.2.3 raised by a minor bump.';
+const VERSION_LINE = 'Version check: The commits call for a minor bump of the trunk version 1.2.3. Set each file of the version_files block to version 1.3.0.';
 
 /**
  * The happy results of a run whose plan names the version file VERSION and
@@ -2548,7 +2548,7 @@ const ROW_TESTS = {
       assert.deepEqual(readDataBlock(first.prompt, 'git'), { branch: 'feature/cache', base: 'main', trunk: 'main' });
       assert.equal(readDataBlock(first.prompt, 'plan_summary'), plan.summary);
       assert.deepEqual(readDataBlock(callOf(run, 'work-1-S3').prompt, 'wave_scopes'), []);
-      assert.deepEqual(first.prompt.split('\n').slice(0, 4), ['Do one step of the approved delivery plan: the step in the step block below.', lib.boundarySentence(), lib.dataBlocksSentence(), '']);
+      assert.deepEqual(first.prompt.split('\n').slice(0, 4), ['Do one step of the approved plan: the step block below.', lib.boundarySentence(), lib.dataBlocksSentence(), '']);
       assert.ok(!first.prompt.includes('Never commit'));
       assert.ok(safetyRailsText.includes('wave workers never git-write'));
       assert.equal(first.opts.agentType, 'hivemind:drone');
@@ -2849,7 +2849,7 @@ const ROW_TESTS = {
     const waveLead = 'A worker did not finish its step, so the delivery stopped after its wave:';
     const stopQuestion = lib.renderQuestions([limitAsk(main.buildStepStopBrief(true))]);
     const approvalQuestionsOf = (holds) => lib.renderQuestions(main.buildApprovalAsks(holds, true, main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] })));
-    const reportHoldLine = (stepId, quoted) => '- Step "' + stepId + '" stopped at the destructive-fix gate without a change the run can approve: it says "' + quoted + '".';
+    const reportHoldLine = (stepId, quoted) => '- Step "' + stepId + '" stopped at the destructive-fix gate with no change the run can approve: it says "' + quoted + '".';
     const runBlockedWave = (workers) => {
       const ids = Object.keys(workers);
       const plan = makePlan({ steps: ids.map((id, index) => makeStep(id, ['src/f' + index + '.js'])) });
@@ -3216,7 +3216,7 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const call = callOf(run, 'validate-1-1');
       const lines = withoutDataBlock(withoutDataBlock(withoutDataBlock(call.prompt, 'inputs'), 'git'), 'version').split('\n');
-      assert.deepEqual(lines, ['Run the project\'s validation on the working branch as it is checked out.', main.validationCommandsSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), main.versionCheckSentence(), '']);
+      assert.deepEqual(lines, ['Run the project\'s validation on the checked-out working branch.', main.validationCommandsSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), main.versionCheckSentence(), '']);
       assert.ok(call.prompt.indexOf('<inputs>') < call.prompt.indexOf('<git>') && call.prompt.indexOf('<git>') < call.prompt.indexOf('<version>'), call.prompt);
       assert.deepEqual(readDataBlock(call.prompt, 'git'), { base: 'main' });
       assert.deepEqual(readDataBlock(call.prompt, 'version'), { base: TRUNK_COMMIT, bump_trigger: 'yes', no_bump_match: 'no', version_files: ['VERSION'] });
@@ -3306,7 +3306,7 @@ const ROW_TESTS = {
     });
     test('a blocked validation may carry the version relay, and pauses as blocked', async () => {
       const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': validateWithVersion({}, { outcome: 'blocked', blocker: 'npm is missing.' }) }));
-      assertStepStopPause(run, 'The validation step was blocked, so the delivery stopped before the pull request: it says "npm is missing.".', 'validate-1-1');
+      assertStepStopPause(run, 'The validation step was blocked, so the delivery stopped before the pull request. It says "npm is missing.".', 'validate-1-1');
     });
     test('a version already at its target in a pass after a replan passes, with no fix and no stop', async () => {
       const results = versionResults({
@@ -3367,7 +3367,7 @@ const ROW_TESTS = {
     });
     for (const [checkName, values, causeLine] of [
       ['undetermined', ASK_UNDETERMINED, 'Version check: The commits since the trunk do not settle the version bump.'],
-      ['unreadable', MINOR_UNREADABLE, 'Version check: The check cannot read one version from the files of the version_files block.']
+      ['unreadable', MINOR_UNREADABLE, 'Version check: The check cannot read one version from the version_files block.']
     ]) {
       test(`the reply to ${checkName} runs one fix round with the version_files and user_answer blocks, and no later version check fails or asks`, async () => {
         const results = versionResults({
@@ -3476,8 +3476,8 @@ const ROW_TESTS = {
       assert.equal(call.opts.phase, 'Validate');
       assert.deepEqual(call.opts.schema.properties.outcome.enum, ['passed', 'failed', 'blocked']);
       assert.deepEqual(Object.keys(call.opts.schema.properties), ['outcome', 'failures', 'slow', 'blocker', 'next_action']);
-      assert.equal(call.opts.schema.properties.outcome.description, 'passed when every command passes. failed when any fails. blocked when a command cannot run.');
-      assert.deepEqual(withoutDataBlock(withoutDataBlock(call.prompt, 'inputs'), 'git').split('\n'), ['Run the project\'s validation on the working branch as it is checked out.', main.validationCommandsSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), '']);
+      assert.equal(call.opts.schema.properties.outcome.description, 'passed when every command passes. failed when any fails. blocked when one cannot run.');
+      assert.deepEqual(withoutDataBlock(withoutDataBlock(call.prompt, 'inputs'), 'git').split('\n'), ['Run the project\'s validation on the checked-out working branch.', main.validationCommandsSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), '']);
       assert.deepEqual(readDataBlock(call.prompt, 'inputs'), { commands: commands });
       assert.ok(call.prompt.indexOf('<inputs>') < call.prompt.indexOf('<git>'), call.prompt);
       assert.deepEqual(readDataBlock(call.prompt, 'git'), { base: 'main' });
@@ -3495,10 +3495,10 @@ const ROW_TESTS = {
       const call = callOf(run, 'validate-1-1');
       assert.equal(call.opts.agentType, 'hivemind:drone');
       assert.ok(!Object.prototype.hasOwnProperty.call(call.opts, 'model'));
-      assert.deepEqual(withoutDataBlock(call.prompt, 'git').split('\n'), ['Run the project\'s validation on the working branch as it is checked out.', main.validationTaskSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), '']);
+      assert.deepEqual(withoutDataBlock(call.prompt, 'git').split('\n'), ['Run the project\'s validation on the checked-out working branch.', main.validationTaskSentence(), lib.runnerReadOnlySentence(), main.slowCaseSentence(), '']);
       assert.deepEqual(readDataBlock(call.prompt, 'git'), { base: 'main' });
       assert.deepEqual(call.opts.schema.properties.outcome.enum, ['passed', 'failed', 'not_run', 'blocked']);
-      assert.equal(call.opts.schema.properties.outcome.description, 'passed when every validation command passes. failed when any fails. not_run when the project documents no validation commands. blocked when a command cannot run.');
+      assert.equal(call.opts.schema.properties.outcome.description, 'passed when every command passes. failed when any fails. not_run when the project documents no validation commands. blocked when one cannot run.');
     });
     test('the validation sentences match the Validation Procedure clause of definitions.md', () => {
       const procedureStart = definitionsText.indexOf('## Validation Procedure');
@@ -3512,10 +3512,12 @@ const ROW_TESTS = {
         assert.ok(clause.includes(phrase), phrase);
       }
       const commandsSentence = main.validationCommandsSentence();
-      assert.equal(commandsSentence, 'This is a validation task: running each command of the inputs block once, in order and in the foreground, is its whole task, not a Worker Self-Check.');
+      for (const phrase of ['This is a validation task', 'not a Worker Self-Check', 'whole task: run each command of the inputs block once, in order and in the foreground.']) {
+        assert.ok(commandsSentence.includes(phrase), phrase);
+      }
       assert.ok(!commandsSentence.includes('governance') && !commandsSentence.includes('${CLAUDE_PLUGIN_ROOT}'), 'the commands sentence names no governance doc');
       const taskSentence = main.validationTaskSentence();
-      for (const phrase of ['its whole task', 'not a Worker Self-Check', 'the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md']) {
+      for (const phrase of ['This is a validation task', 'whole task: the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md', 'not a Worker Self-Check']) {
         assert.ok(taskSentence.includes(phrase), phrase);
       }
       assert.ok(procedure.includes('If `CLAUDE.md` lists no validation commands, validation is "Not run"'));
@@ -3597,7 +3599,7 @@ const ROW_TESTS = {
     test('blocked pauses at the validation step, and the reply runs the head check, then validation again with the next count', async () => {
       const results = happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: 'npm is not installed.' }, 'head-1-1': headRelay(OTHER), 'validate-1-2': VALIDATE_PASSED });
       const run = await runWorkflow(LAUNCH, results);
-      assertStepStopPause(run, 'The validation step was blocked, so the delivery stopped before the pull request: it says "npm is not installed.".', 'validate-1-1');
+      assertStepStopPause(run, 'The validation step was blocked, so the delivery stopped before the pull request. It says "npm is not installed.".', 'validate-1-1');
       const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'npm is installed now.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
       assert.deepEqual(labelsOf(resumed), [...labelsOf(run), 'head-1-1', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
@@ -3807,7 +3809,7 @@ const ROW_TESTS = {
         assert.ok(prBodyOf(run, 'pr-1').includes('- validation: passed, version 1.3.0, held on commit ' + THIRD), prBodyOf(run, 'pr-1'));
       }
       const noBump = parsedVersion({ dominant_row: 'NO_BUMP', verdict: 'no_bump', bump_type: 'none', rule_applied: '4', counts: { major: '0', minor: '0', patch: '0', no_bump: '1' }, version_check: 'mismatch', expected_version: '1.2.3' });
-      assert.equal(main.describeVersionMismatch(noBump), 'Version check: each file of the version_files block must hold version 1.2.3, the trunk version, since the commits call for no version bump.');
+      assert.equal(main.describeVersionMismatch(noBump), 'Version check: The commits call for no version bump. Set each file of the version_files block to version 1.2.3.');
     });
     test('a mismatch over failed commands joins the version line to the failures and resolves through validation_remediation', async () => {
       const failed = validateWithVersion(MINOR_MISMATCH, { outcome: 'failed', failures: FAILURE_TEXT });
@@ -6636,7 +6638,11 @@ const ROW_TESTS = {
       const schemas = [main.buildWorkerSchema(), main.buildGateEditSchema(), main.buildValidateSchema(false), main.buildValidateSchema(true)];
       for (const schema of schemas) {
         assert.deepEqual([...schema.properties.next_action.enum], ['fix_cause', 'run_again']);
-        assert.equal(schema.properties.next_action.description, 'run_again when the cause is outside the repo and passes with no change, such as machine load, a timeout or a network failure. fix_cause otherwise. Only with outcome blocked.');
+        const description = schema.properties.next_action.description;
+        for (const phrase of ['run_again for a cause outside the repo that passes with no change', 'machine load, a timeout or a network failure', 'fix_cause otherwise.']) {
+          assert.ok(description.includes(phrase), phrase);
+        }
+        assert.ok(description.endsWith(' Only with outcome blocked.'), description);
         assert.ok(!schema.required.includes('next_action'));
       }
     });
@@ -6723,7 +6729,7 @@ const ROW_TESTS = {
     test('a blocked validation or fix round whose blocker gives no reason is report whatever its next_action, never the fix line', async () => {
       for (const next of [{ next_action: 'fix_cause' }, { next_action: 'run_again' }, {}]) {
         const validate = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', ...next } }));
-        assertStepStopEnd(validate, 'The validation step was blocked, so the delivery stopped before the pull request: it gave no reason.\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
+        assertStepStopEnd(validate, 'The validation step was blocked, so the delivery stopped before the pull request. It gave no reason.\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
         assert.ok(!validate.result.message.includes('named above'), validate.result.message);
         const fix = await runWorkflow(LAUNCH, fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], ...next }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }));
         assertStepStopEnd(fix, 'The validation fix round was blocked, so the delivery stopped: it gave no reason.\n\n' + main.nextStepLine('report'), 'fix-commit-1-1', 'report');
@@ -6731,7 +6737,7 @@ const ROW_TESTS = {
       }
     });
     test('a blocked validation passes its next action through to its stop: run_again ends the run, and fix_cause or none pauses with the step_stop question', async () => {
-      const lead = 'The validation step was blocked, so the delivery stopped before the pull request: ' + lib.describeReason(timedOut);
+      const lead = 'The validation step was blocked, so the delivery stopped before the pull request. It' + lib.describeReason(timedOut).slice(2);
       for (const [next, nextAction] of [[{ next_action: 'run_again' }, 'run_again'], [{ next_action: 'fix_cause' }, undefined], [{}, undefined]]) {
         const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: timedOut, ...next } }));
         assertStopOf(run, lead, 'validate-1-1', nextAction, false);
@@ -8380,7 +8386,7 @@ const ROW_TESTS = {
       const results = { ...heldWaveResults([DROP_USERS]), 'work-2-STEP-001': holdResult([DROP_USERS], { summary: 'Stopped.' }), 'commit-2-1': commitRelay({ commit: OTHER, committed: 'false' }) };
       const paused = await runWorkflow(LAUNCH, results);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'A'), results);
-      const line = '- Step "STEP-001" stopped at the destructive-fix gate without a change the run can approve: it says "' + HOLD_BLOCKER + '".';
+      const line = '- Step "STEP-001" stopped at the destructive-fix gate with no change the run can approve: it says "' + HOLD_BLOCKER + '".';
       assertStepStopEnd(run, 'A worker did not finish its step, so the delivery stopped after its wave:\n' + line + '\n\n' + main.nextStepLine('report'), 'commit-2-1', 'report');
     });
     test('two held items answered Q1 A Q2 B approve the first and keep the second, and Q1 B Q2 A the reverse', async () => {
@@ -9137,7 +9143,7 @@ const ROW_TESTS = {
       const plan = makePlan();
       const git = lib.formatDataBlock('git', { branch: plan.branch, base: plan.base, trunk: 'main' });
       assert.equal(callOf(run, 'work-1-STEP-001').prompt, [
-        'Do one step of the approved delivery plan: the step in the step block below.',
+        'Do one step of the approved plan: the step block below.',
         lib.boundarySentence(),
         lib.dataBlocksSentence(),
         '',
@@ -9147,7 +9153,7 @@ const ROW_TESTS = {
         git
       ].join('\n'));
       assert.equal(callOf(run, 'fix-1-1').prompt, [
-        'Fix the failed validation of the delivery: the failures block below holds what the validation reported.',
+        'Fix the failed validation in the failures block below.',
         main.validationFixSentence(),
         lib.boundarySentence(),
         lib.dataBlocksSentence(),

@@ -26,9 +26,12 @@
  *          of the workflow's main.js.
  *   buildNextActionProperty()  the next_action property the worker, gate
  *          edit and validate schemas share.
- *   buildStageProperty() and describeHeldChanges()  the stage property
- *          and the destructive list description the worker and gate edit
- *          schemas share.
+ *   buildStageProperty(), buildBlockerProperty(subject),
+ *          describeHeldChanges() and buildBlockedVariant()  the stage and
+ *          blocker properties, the destructive list description and the
+ *          blocked variant the worker and gate edit schemas share; the
+ *          validate schema shares the blocker property too. subject names
+ *          what the blocker explains.
  *   describeUnusableEdit(result)  the cause of an unusable worker or gate
  *          edit result, through describeUnusableResult (lib/stop.js).
  *   buildWaveSubject(waveSteps, waveNumber)  the commit subject of a wave:
@@ -82,7 +85,7 @@ function buildNextActionProperty() {
   return {
     type: 'string',
     enum: ['fix_cause', 'run_again'],
-    description: 'run_again when the cause is outside the repo and passes with no change, such as machine load, a timeout or a network failure. fix_cause otherwise.'
+    description: 'run_again for a cause outside the repo that passes with no change, such as machine load, a timeout or a network failure. fix_cause otherwise.'
   };
 }
 
@@ -90,8 +93,16 @@ function buildStageProperty() {
   return { type: 'string', maxLength: 40, description: 'Worker Report stage.' };
 }
 
+function buildBlockedVariant() {
+  return { required: [], optional: ['blocker', 'next_action', 'stage', 'destructive'] };
+}
+
+function buildBlockerProperty(subject) {
+  return { type: 'string', maxLength: 400, description: subject + ', in one or two short sentences written for the user.' };
+}
+
 function describeHeldChanges() {
-  return 'With stage destructive-fix-gate: each change held back for approval, by gate category number and the one item it changes, named exactly.';
+  return 'With stage destructive-fix-gate: each change held for approval, by gate category and the one item it changes, named exactly.';
 }
 
 function describeUnusableEdit(result) {
@@ -105,10 +116,10 @@ function buildWorkerSchema() {
       outcome: {
         type: 'string',
         enum: ['complete', 'blocked', 'needs_replan'],
-        description: 'complete when the step outcome holds. blocked when the step cannot be done. needs_replan when the plan must change first.'
+        description: 'complete when the step outcome holds. blocked when it cannot be done. needs_replan when the plan must change first.'
       },
       summary: { type: 'string', description: 'What you changed, in one or two sentences.' },
-      blocker: { type: 'string', maxLength: 400, description: 'Why the step is blocked or needs a new plan, in one or two short sentences written for the user.' },
+      blocker: buildBlockerProperty('Why the step is blocked or needs a new plan'),
       next_action: buildNextActionProperty(),
       stage: buildStageProperty(),
       destructive: buildDestructiveListSchema(describeHeldChanges())
@@ -116,7 +127,7 @@ function buildWorkerSchema() {
     required: ['outcome', 'summary'],
     variants: {
       complete: { required: [], optional: [] },
-      blocked: { required: [], optional: ['blocker', 'next_action', 'stage', 'destructive'] },
+      blocked: buildBlockedVariant(),
       needs_replan: { required: [], optional: ['blocker'] }
     }
   });
@@ -124,7 +135,7 @@ function buildWorkerSchema() {
 
 function buildWorkerPrompt(step, waveScopes, plan, run) {
   return [
-    'Do one step of the approved delivery plan: the step in the step block below.',
+    'Do one step of the approved plan: the step block below.',
     boundarySentence(),
     dataBlocksSentence(describeApprovalsHome(run.approvals)),
     '',
@@ -180,7 +191,7 @@ function describeBlockedVerb(outcome) {
   if (outcome.holds === undefined) {
     return ' was blocked: ';
   }
-  return outcome.nextAction === 'approve' ? describeGateWait() + ': ' : ' stopped at the destructive-fix gate without a change the run can approve: ';
+  return outcome.nextAction === 'approve' ? describeGateWait() + ': ' : ' stopped at the destructive-fix gate with no change the run can approve: ';
 }
 
 function describeBlockedStep(outcome) {

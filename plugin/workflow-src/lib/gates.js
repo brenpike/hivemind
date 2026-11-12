@@ -189,29 +189,34 @@ function buildGateEditSchema() {
     tag: 'outcome',
     properties: {
       outcome: { type: 'string', enum: ['complete', 'blocked'], description: 'complete when the task is done. blocked when it cannot be done.' },
-      blocker: { type: 'string', maxLength: 400, description: 'Why the task cannot be done, in one or two short sentences written for the user.' },
+      blocker: buildBlockerProperty('Why the task cannot be done'),
       next_action: buildNextActionProperty(),
-      files: { type: 'array', description: 'Every path you created, edited or deleted, relative to the top of the repository.', items: { type: 'string' } },
+      files: { type: 'array', description: 'Every path you created, edited or deleted, relative to the repository root.', items: { type: 'string' } },
       stage: buildStageProperty(),
       destructive: buildDestructiveListSchema(describeHeldChanges())
     },
     required: ['outcome', 'files'],
-    variants: { complete: { required: [], optional: [] }, blocked: { required: [], optional: ['blocker', 'next_action', 'stage', 'destructive'] } }
+    variants: { complete: { required: [], optional: [] }, blocked: buildBlockedVariant() }
   });
 }
 
+function describeNoValidationCommands() {
+  return 'the project documents no validation commands';
+}
+
 function buildValidateSchema(hasCommands, hasVersion) {
+  const notRun = hasCommands ? '' : ' not_run when ' + describeNoValidationCommands() + '.';
   const spec = {
     tag: 'outcome',
     properties: {
       outcome: {
         type: 'string',
         enum: ['passed', 'failed', 'blocked'],
-        description: 'passed when every command passes. failed when any fails. blocked when a command cannot run.'
+        description: 'passed when every command passes. failed when any fails.' + notRun + ' blocked when one cannot run.'
       },
-      failures: { type: 'string', description: 'What failed: each failing command with its failure output.' },
+      failures: { type: 'string', description: 'Each failing command with its failure output.' },
       slow: { type: 'array', maxItems: 20, description: 'Each test case that passed only when run once more alone.', items: { type: 'string', maxLength: 200 } },
-      blocker: { type: 'string', maxLength: 400, description: 'The command that cannot run and why, in one or two short sentences written for the user.' },
+      blocker: buildBlockerProperty('The command that cannot run and why'),
       next_action: buildNextActionProperty()
     },
     required: ['outcome'],
@@ -222,8 +227,7 @@ function buildValidateSchema(hasCommands, hasVersion) {
     }
   };
   if (!hasCommands) {
-    spec.properties.outcome.enum = ['passed', 'failed', 'not_run', 'blocked'];
-    spec.properties.outcome.description = 'passed when every validation command passes. failed when any fails. not_run when the project documents no validation commands. blocked when a command cannot run.';
+    spec.properties.outcome.enum.splice(2, 0, 'not_run');
     spec.variants.not_run = { required: [], optional: [] };
   }
   if (hasVersion) {
@@ -256,16 +260,20 @@ function readGateEditOutcome(result, schema, approvals) {
   return { status: 'complete', files: result.files };
 }
 
+function describeValidationTask(work) {
+  return 'This is a validation task, not a Worker Self-Check. Its whole task: ' + work + '.';
+}
+
 function validationTaskSentence() {
-  return 'This is a validation task: the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md is its whole task, not a Worker Self-Check.';
+  return describeValidationTask('the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md');
 }
 
 function validationCommandsSentence() {
-  return 'This is a validation task: running each command of the inputs block once, in order and in the foreground, is its whole task, not a Worker Self-Check.';
+  return describeValidationTask('run each command of the inputs block once, in order and in the foreground');
 }
 
 function slowCaseSentence() {
-  return 'A test case that hits its own time limit, in a file the branch does not change from the base in the git block, runs once more alone: if it passes, it counts as passed and goes in slow.';
+  return 'A test case that hits its own time limit in a file the branch does not change from the git block base runs once more alone: if it passes, it counts as passed and goes in slow.';
 }
 
 function validationFixSentence() {
@@ -281,12 +289,12 @@ function describePullRequestStop() {
 }
 
 function versionCheckSentence() {
-  return 'The hivemind:bump-type run is part of this validation task: invoke the hivemind:bump-type skill once, with each value of the version block below as the input of the same name, and relay that run in the version field.';
+  return 'The hivemind:bump-type run is part of this validation task: invoke the skill once with the version block below as its inputs, and relay the run in the version field.';
 }
 
 function buildValidatePrompt(plan, trunkCommit) {
   const commands = plan.validation_commands;
-  const lines = ['Run the project\'s validation on the working branch as it is checked out.', commands.length === 0 ? validationTaskSentence() : validationCommandsSentence(), runnerReadOnlySentence(), slowCaseSentence()];
+  const lines = ['Run the project\'s validation on the checked-out working branch.', commands.length === 0 ? validationTaskSentence() : validationCommandsSentence(), runnerReadOnlySentence(), slowCaseSentence()];
   const blocks = commands.length === 0 ? [] : [formatDataBlock('inputs', { commands: commands })];
   blocks.push(formatDataBlock('git', { base: plan.base }));
   if (hasVersionFiles(plan)) {
@@ -305,11 +313,13 @@ function selectValidateSchema(plan) {
 }
 
 function readValidateOutcome(result, schema) {
+  const step = 'The validation step';
   if (!validateSchema(schema, result).ok) {
-    return describeUnusableResult('The validation step returned no usable result' + describePullRequestStop(), result);
+    return describeUnusableResult(step + ' returned no usable result' + describePullRequestStop(), result);
   }
   if (result.outcome === 'blocked') {
-    return { problem: 'The validation step was blocked, so ' + RUN_NAME + ' stopped before the pull request: ' + describeReason(result.blocker), nextAction: readBlockerAction(result.blocker, result.next_action) };
+    const reason = describeReason(result.blocker);
+    return { problem: step + ' was blocked' + describePullRequestStop() + ' ' + reason.charAt(0).toUpperCase() + reason.slice(1), nextAction: readBlockerAction(result.blocker, result.next_action) };
   }
   const validation = { status: result.outcome, failures: result.failures, slow: result.slow };
   if (Object.hasOwn(result, 'version')) {
@@ -319,28 +329,33 @@ function readValidateOutcome(result, schema) {
 }
 
 function checkVersionRelay(relay) {
+  const step = 'The version check of the validation step';
   if (relay.outcome === 'blocked') {
-    return { problem: 'The version check of the validation step was blocked' + describePullRequestStop() + ' ' + describeRelayBlocker(relay.stderr, true), nextAction: readRelayAction(relay.stderr) };
+    return { problem: step + ' was blocked' + describePullRequestStop() + ' ' + describeRelayBlocker(relay.stderr, true), nextAction: readRelayAction(relay.stderr) };
   }
   const values = readRelayedLines(relay, versionCheckRoutingSpec());
   if (values === undefined || !isConsistentVersionRelay(values)) {
-    return describeUnusableResult('The version check of the validation step returned malformed routing lines' + describePullRequestStop(), relay);
+    return describeUnusableResult(step + ' returned malformed routing lines' + describePullRequestStop(), relay);
   }
   return { values: values };
 }
 
+function describeVersionLine(cause, target) {
+  return 'Version check: ' + cause + ' Set each file of the version_files block ' + target + '.';
+}
+
 function describeVersionMismatch(values) {
-  const source = values.verdict === 'bump_required' ? 'the trunk version ' + values.trunk_version + ' raised by a ' + values.bump_type + ' bump' : 'the trunk version, since the commits call for no version bump';
-  return 'Version check: each file of the version_files block must hold version ' + values.expected_version + ', ' + source + '.';
+  const cause = values.verdict === 'bump_required' ? 'The commits call for a ' + values.bump_type + ' bump of the trunk version ' + values.trunk_version + '.' : 'The commits call for no version bump.';
+  return describeVersionLine(cause, 'to version ' + values.expected_version);
 }
 
 function describeVersionQuestionLine(values) {
-  const cause = values.version_check === 'unreadable' ? 'The check cannot read one version from the files of the version_files block.' : 'The commits since the trunk do not settle the version bump.';
-  return 'Version check: ' + cause + ' Set each file of the version_files block as the reply in the user_answer block says.';
+  const cause = values.version_check === 'unreadable' ? 'The check cannot read one version from the version_files block.' : 'The commits since the trunk do not settle the version bump.';
+  return describeVersionLine(cause, 'as the reply in the user_answer block says');
 }
 
 function describeValidateNote(validation, plan, run) {
-  const note = validation.status === 'passed' ? 'passed' : 'not run, the project documents no validation commands';
+  const note = validation.status === 'passed' ? 'passed' : 'not run, ' + describeNoValidationCommands();
   if (!hasVersionFiles(plan)) {
     return note;
   }
@@ -377,7 +392,7 @@ function applyVersionCheck(validation, run) {
 
 function buildFixPrompt(fix, plan, run) {
   const lines = [
-    'Fix the failed validation of the delivery: the failures block below holds what the validation reported.',
+    'Fix the failed validation in the failures block below.',
     validationFixSentence(),
     boundarySentence(),
     dataBlocksSentence(describeApprovalsHome(run.approvals, fix.userAnswer === undefined ? undefined : 'The reply in user_answer')),
@@ -468,7 +483,7 @@ async function runValidateGate(run, plan, facts, gates) {
     return askVersionQuestion(run, plan, gates, validation);
   }
   if (validation.status === 'not_run') {
-    listNotRunGate(run, 'validation: the project documents no validation commands.');
+    listNotRunGate(run, 'validation: ' + describeNoValidationCommands() + '.');
   }
   if (validation.status !== 'failed') {
     gates.slow = validation.slow ?? [];
