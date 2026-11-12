@@ -416,6 +416,15 @@ describe('overlord workflow definition reads', () => {
       assert.ok(questionGateParagraph.includes(phrase), `Question gate paragraph lacks ${phrase}`);
     }
   });
+  test('the Question gate takes a pausing exit on any path as the state that asked', () => {
+    assert.ok(questionGateParagraph.includes('exit on any path takes this gate as the state that asked'), 'Question gate paragraph lacks the pausing-exit sentence');
+  });
+  test('each pausing exit token has its single home in the Question gate', () => {
+    for (const token of ['`user-input-required`', '`high-severity-rejection`']) {
+      assert.equal(body.split(token).length - 1, 1, `overlord body names ${token} other than exactly once`);
+      assert.ok(questionGateParagraph.includes(token), `Question gate paragraph lacks ${token}`);
+    }
+  });
   test('Workflow State Execution sends the scan rule to the gather-facts consumer rules', () => {
     assert.ok(stateExecutionSection.includes('the scan its consumer rules require does not pass'), '## Workflow State Execution does not defer the scan rule to the skill consumer rules');
     assert.ok(stateExecutionSection.includes('the texts the scan did not account for'), '## Workflow State Execution does not surface the texts the scan did not account for');
