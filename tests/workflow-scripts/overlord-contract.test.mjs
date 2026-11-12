@@ -425,6 +425,12 @@ describe('overlord workflow definition reads', () => {
       assert.ok(questionGateParagraph.includes(token), `Question gate paragraph lacks ${token}`);
     }
   });
+  test('a path with no run ledger sends every run-ledger write, the Question gate\'s included, to the final report', () => {
+    const rule = 'Without a run ledger, each run-ledger write goes to the final report.';
+    assert.equal(body.split(rule).length - 1, 1, 'overlord body states the no-ledger rule other than exactly once');
+    assert.ok(readSection(body, '## Continuous Execution').includes(rule), '## Continuous Execution lacks the no-ledger rule');
+    assert.ok(!readSection(body, '## Instinct').includes('run-ledger write'), '## Instinct keeps its own copy of the no-ledger rule');
+  });
   test('Workflow State Execution sends the scan rule to the gather-facts consumer rules', () => {
     assert.ok(stateExecutionSection.includes('the scan its consumer rules require does not pass'), '## Workflow State Execution does not defer the scan rule to the skill consumer rules');
     assert.ok(stateExecutionSection.includes('the texts the scan did not account for'), '## Workflow State Execution does not surface the texts the scan did not account for');
