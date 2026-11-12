@@ -7,8 +7,11 @@
  *   run     the run state of the workflow's main.js. callCheckedPlanner
  *           reads trunk, references, level and relaySentence.
  *   facts   the checked facts of the pass, from runFactsStep (lib/runner.js).
- *   call    {prompt, label, phaseTitle, schema} of one plan or revise call.
- *           call.prompt is the prompt before run.relaySentence is added.
+ *   call    {prompt, label, phaseTitle, schema, model} of one plan or
+ *           revise call. call.prompt is the prompt before run.relaySentence
+ *           is added. call.model is optional: the first call and every
+ *           -fix-N retry run on it through plannerCallOptions, and with none
+ *           their options hold no model key.
  *   maxCheckRetries(), isFixableResult, buildCheckFixPrompt and
  *   hasDefectQuestion of lib/retry.js, plannerCallOptions and
  *   addRelaySentence of lib/runner.js and describePlanProblem of
@@ -21,6 +24,15 @@
  * Outputs
  *   callCheckedPlanner(run, facts, call)  {planResult, problem,
  *           isExhausted} of the last planner call.
+ *   callPassPlanner(run, facts, call, pass)  what callCheckedPlanner
+ *           returns for call on pass.model. runPlanningPass (lib/plan.js)
+ *           sends every plan and revise call through it, with pass.model
+ *           sonnet for a pass whose replan data carries a review, else
+ *           undefined. A sonnet result that passes the plan check and flags
+ *           plan.remediation_gate.promotion_gate.architectural sends the
+ *           same call once more on opus, label call.label plus '-opus', and
+ *           sets pass.model to opus, so every later call of the pass,
+ *           revise calls included, runs on opus and is never re-sent.
  *   The retry prompt (buildCheckFixPrompt) and the terminal report cause of
  *   a result still failing its check (describeCheckLimit) are in
  *   lib/retry.js, which runScopeStep (standard-delivery scope.js) also
@@ -81,7 +93,7 @@ async function callCheckedPlanner(run, facts, call) {
   let attempt = call.prompt;
   for (let retry = 0; ; retry += 1) {
     const label = retry === 0 ? call.label : call.label + '-fix-' + retry;
-    const result = normalizePlanTitle(await agent(addRelaySentence(attempt, run), plannerCallOptions(label, call.phaseTitle, call.schema)), call.schema);
+    const result = normalizePlanTitle(await agent(addRelaySentence(attempt, run), plannerCallOptions(label, call.phaseTitle, call.schema, call.model)), call.schema);
     const planProblem = describePlanProblem(result, call.schema, facts, run.trunk, run.references);
     const problem = planProblem === undefined ? describeQuestionProblem(result, run) : planProblem;
     const isFixable = problem !== undefined && isFixableResult(result, call.schema);
@@ -90,4 +102,20 @@ async function callCheckedPlanner(run, facts, call) {
     }
     attempt = buildCheckFixPrompt(call.prompt, problem, validateSchema(call.schema, result).errors);
   }
+}
+
+/**
+ * Calls callCheckedPlanner with call on pass.model. When pass.model is
+ * sonnet and the checked result flags
+ * plan.remediation_gate.promotion_gate.architectural, sends call once more
+ * on opus, label call.label plus '-opus', and sets pass.model to opus.
+ * Returns the checked result of the last call.
+ */
+async function callPassPlanner(run, facts, call, pass) {
+  const checked = await callCheckedPlanner(run, facts, { ...call, model: pass.model });
+  if (pass.model !== 'sonnet' || checked.problem !== undefined || !checked.planResult.plan.remediation_gate.promotion_gate.architectural) {
+    return checked;
+  }
+  pass.model = 'opus';
+  return callCheckedPlanner(run, facts, { ...call, label: call.label + '-opus', model: pass.model });
 }

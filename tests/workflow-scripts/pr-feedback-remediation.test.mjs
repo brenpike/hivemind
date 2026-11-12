@@ -465,12 +465,12 @@ const ROW_TESTS = {
       assert.equal(callOf(run, 'facts-1-retry').prompt.split('\n')[1], RELAY_SENTENCE);
     });
     test('a scope, plan and revise check retry keeps the sentence as its second line, with the fix line third', async () => {
-      const failed = { 'scope-2': {}, 'scope-2-fix-1': SCOPE, 'plan-2': { outcome: 'complete' }, 'plan-2-fix-1': flaggedPlanResult() };
+      const failed = { 'scope-2': {}, 'scope-2-fix-1': SCOPE, 'plan-2': { outcome: 'complete' }, 'plan-2-fix-1': flaggedPlanResult(), 'plan-2-opus': flaggedPlanResult() };
       const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', failed));
       assert.equal(first.result.needs_user, true);
       const results = escalationResults('planner-escalation', { ...failed, 'revise-1': { outcome: 'complete' }, 'revise-1-fix-1': { ...flaggedPlanResult(), settled: ['Q1'] } });
       const resumed = await runWorkflow(resumeArgs(first, 'A'), results);
-      assert.deepEqual(labelsOf(resumed), ['facts-1', 'fix-1', 'facts-2', 'scope-2', 'scope-2-fix-1', 'plan-2', 'plan-2-fix-1', 'revise-1', 'revise-1-fix-1', ...tailLabels(2)]);
+      assert.deepEqual(labelsOf(resumed), ['facts-1', 'fix-1', 'facts-2', 'scope-2', 'scope-2-fix-1', 'plan-2', 'plan-2-fix-1', 'plan-2-opus', 'revise-1', 'revise-1-fix-1', ...tailLabels(2)]);
       for (const label of ['scope-2-fix-1', 'plan-2-fix-1', 'revise-1-fix-1']) {
         const lines = callOf(resumed, label).prompt.split('\n');
         assert.deepEqual(lines.slice(1, 3), [RELAY_SENTENCE, 'Fix your result per the check block.'], label);
@@ -731,7 +731,7 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
     });
     test('a gate flag asks the remediation plan acceptance, the Promotion Gate', async () => {
-      const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult() }));
+      const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult(), 'plan-2-opus': flaggedPlanResult() }));
       assert.equal(run.result.needs_user, true);
       assert.ok(run.result.message.startsWith(PLAN_LINE + '\n\n**Q1. Run the remediation plan for the '), run.result.message);
       assert.ok(run.result.message.includes(' The plan changes how the system is built.**'), run.result.message);
@@ -739,9 +739,9 @@ const ROW_TESTS = {
   },
   'PFR-17': () => {
     test('a resume with answers, build and reply replays every earlier agent and revises', async () => {
-      const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult() }));
+      const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult(), 'plan-2-opus': flaggedPlanResult() }));
       assert.deepEqual(first.result.resume_args, { answers: {}, build: BUILD_ID });
-      const results = escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult(), 'revise-1': { ...flaggedPlanResult(), settled: ['Q1'] } });
+      const results = escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult(), 'plan-2-opus': flaggedPlanResult(), 'revise-1': { ...flaggedPlanResult(), settled: ['Q1'] } });
       const resumed = await runWorkflow(resumeArgs(first, 'A'), results);
       assert.deepEqual(labelsOf(resumed), [...labelsOf(first), 'revise-1', ...tailLabels(2)]);
       assertReplayed(first, resumed);
@@ -752,8 +752,8 @@ const ROW_TESTS = {
       assert.deepEqual(resumed.result, completeResult(ESCALATION_ASK));
     });
     test('a reply that settles nothing pauses again with the first reply in its answers', async () => {
-      const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult() }));
-      const results = escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult(), 'revise-1': { ...flaggedPlanResult(), settled: [] }, 'scope-2-1': SCOPE });
+      const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult(), 'plan-2-opus': flaggedPlanResult() }));
+      const results = escalationResults('planner-escalation', { 'plan-2': flaggedPlanResult(), 'plan-2-opus': flaggedPlanResult(), 'revise-1': { ...flaggedPlanResult(), settled: [] }, 'scope-2-1': SCOPE });
       const resumed = await runWorkflow(resumeArgs(first, 'Wait.'), results);
       assert.deepEqual(labelsOf(resumed), [...labelsOf(first), 'revise-1', 'scope-2-1']);
       assert.deepEqual(resumed.result.resume_args, { answers: { 'round-1': 'Wait.' }, build: BUILD_ID });
@@ -791,6 +791,7 @@ const ROW_TESTS = {
         'scope-3': SCOPE,
         'plan-3': { outcome: 'complete', questions: [] },
         'plan-3-fix-1': flaggedPlanResult(),
+        'plan-3-opus': flaggedPlanResult(),
         'revise-2': { ...flaggedPlanResult(), settled: ['Q1'] },
         ...tailResults(3)
       });
@@ -798,7 +799,7 @@ const ROW_TESTS = {
       assert.equal(second.result.needs_user, true);
       const resumed = await runWorkflow(resumeArgs(second, 'A'), results);
       const labels = labelsOf(resumed);
-      assert.deepEqual(labels, ['facts-1', 'fix-1', 'facts-2', 'facts-3', 'scope-3', 'plan-3', 'plan-3-fix-1', 'revise-2', ...tailLabels(3)]);
+      assert.deepEqual(labels, ['facts-1', 'fix-1', 'facts-2', 'facts-3', 'scope-3', 'plan-3', 'plan-3-fix-1', 'plan-3-opus', 'revise-2', ...tailLabels(3)]);
       assert.equal(new Set(labels).size, labels.length);
       assert.deepEqual(resumed.result, completeResult(ESCALATION_ASK));
     });
@@ -949,6 +950,28 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'pr-2': cannedPrRunner({ created: 'true', commented: 'false' }) }));
       assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: true });
       assert.ok(run.result.message.startsWith('Opened pull request ' + PR_URL + ' on commit ' + OTHER + '.\n\n' + HELD_LINE), run.result.message);
+    });
+  },
+  'PFR-28': () => {
+    test('a planning pass plans from its review block on sonnet, and an unflagged plan makes no opus call', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults());
+      assert.equal(callOf(run, 'plan-2').opts.agentType, 'hivemind:cerebrate');
+      assert.equal(callOf(run, 'plan-2').opts.model, 'sonnet');
+      assert.deepEqual(readDataBlock(callOf(run, 'plan-2').prompt, 'review'), ESCALATION_REVIEW);
+      assert.ok(!labelsOf(run).some((label) => label.endsWith('-opus')), labelsOf(run).join(' '));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+    });
+    test('a flagged plan-2 goes once more on opus as plan-2-opus with the same prompt, and revise-1 runs on opus', async () => {
+      const flagged = { 'plan-2': flaggedPlanResult(), 'plan-2-opus': flaggedPlanResult() };
+      const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', flagged));
+      assert.deepEqual(labelsOf(first), ['facts-1', 'fix-1', 'facts-2', 'scope-2', 'plan-2', 'plan-2-opus']);
+      assert.equal(callOf(first, 'plan-2-opus').opts.agentType, 'hivemind:cerebrate');
+      assert.equal(callOf(first, 'plan-2-opus').opts.model, 'opus');
+      assert.equal(callOf(first, 'plan-2-opus').prompt, callOf(first, 'plan-2').prompt);
+      const results = escalationResults('planner-escalation', { ...flagged, 'revise-1': { ...flaggedPlanResult(), settled: ['Q1'] } });
+      const resumed = await runWorkflow(resumeArgs(first, 'A'), results);
+      assert.equal(callOf(resumed, 'revise-1').opts.model, 'opus');
+      assert.deepEqual(resumed.result, completeResult(ESCALATION_ASK));
     });
   }
 };

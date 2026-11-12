@@ -1,0 +1,30 @@
+{
+  "rule": "Root-Cluster in-round class fix doctrine section coupling",
+  "description": "`plugin/governance/remediation-doctrine.md` `## Root-Cluster` is the single source for when local review may close a root cluster with a class fix in the same round instead of returning `root-cluster-suspected`. The source pin is the section heading. Two further pins in the same file carry the load-bearing claims. (1) The permission and all four of its conditions in one span: local review applies, in the same round and by judgment with no script trigger, a class fix within its 2-file bar that changes no architecture or contract and passes the **Closed-by-Construction Acceptance Test**; dropping the same-round or no-script-trigger clause, the 2-file bar, the no-architecture-or-contract condition or the acceptance test turns the suite red. It is load-bearing because each condition is what keeps an in-round class fix from becoming an unbounded structural change that bypasses the cerebrate zoom-out. (2) The one-shot limit and its obligation: a later finding on a construct local review already class-fixed returns `root-cluster-suspected`; deleting it, or rewriting the outcome to another in-round fix, turns the suite red. It is load-bearing because without it local review could class-fix the same construct round after round and never escalate. The consumers pin the POINTER only, never remedy prose, so honest rewording of the doctrine body does not break them: `plugin/agents/local-reviewer.md` must still carry its step-6 reference that `remediation-doctrine.md` `(Root-Cluster)` allows the in-round class fix, and `plugin/agents/github-reviewer.md` and `plugin/agents/drone.md` must still cite the doctrine file with `Root-Cluster` as the first section name of their load list. What this pin honestly guarantees is exactly that these word sequences exist in these four named files; it claims nothing about meaning. Residuals, stated plainly: (1) a meaning inversion that leaves the pinned bytes intact is invisible: surrounding prose that also lets GitHub review or a drone apply an in-round class fix, or that adds a script trigger elsewhere, stays green; (2) the doctrine pins are whole-file, so moving either pinned sentence out of the `## Root-Cluster` section stays green; (3) the local-reviewer pin carries the step-6 pointer only: its dispatch-start load list naming `Root-Cluster` and its record of the cluster's `root_class` on each fixed finding are unpinned here, and local-reviewer.md carries no repeat-finding sentence, the doctrine holding the repeat rule; (4) the step-9 young-surface reroute removed from `plugin/agents/local-reviewer.md` cannot be pinned as absent, because `absent: true` is scoped to YAML frontmatter and cannot assert body-prose absence, so re-adding that reroute stays green; (5) the 2-file bar and the Closed-by-Construction Acceptance Test are pinned only as named here, so loosening the bar or the test in its own section stays green; (6) the pin sees only the four files it names, and no fixture in this directory can detect a NEW remediation actor that applies an in-round class fix without pointing at the section at all, which is an absence defect per rule 7 of the pin-authoring contract.",
+  "source": {
+    "file": "plugin/governance/remediation-doctrine.md",
+    "pattern": "## Root-Cluster"
+  },
+  "consumers": [
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "Local review instead applies, in the same round and by judgment with no script trigger, a class fix within its 2-file bar that changes no architecture or contract and passes the **Closed-by-Construction Acceptance Test**."
+    },
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "A later finding on a construct it already class-fixed returns `root-cluster-suspected`."
+    },
+    {
+      "file": "plugin/agents/local-reviewer.md",
+      "pattern": "remediation-doctrine.md` (Root-Cluster) allows the in-round class fix"
+    },
+    {
+      "file": "plugin/agents/github-reviewer.md",
+      "pattern": "remediation-doctrine.md` (Root-Cluster, Same-Framing Test"
+    },
+    {
+      "file": "plugin/agents/drone.md",
+      "pattern": "remediation-doctrine.md` (Root-Cluster, Same-Framing Test"
+    }
+  ]
+}

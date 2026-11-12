@@ -696,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '57b8aa8619944c5b';
+const BUILD_ID = '3426acf3742a61e9';
 
 function supportedSchemaKeywords(){
 return[
@@ -2520,8 +2520,8 @@ return isTransientBlock(relay)?agent(buildPrompt(retryLabel),runnerOptions(retry
 function droneOptions(label,phaseTitle,schema){
 return{agentType:droneAgentType(),schema:toAgentSchema(schema),label:label,phase:phaseTitle};
 }
-function plannerCallOptions(label,phaseTitle,resultSchema){
-return{agentType:PLANNER_AGENT,schema:toAgentSchema(resultSchema),label:label,phase:phaseTitle};
+function plannerCallOptions(label,phaseTitle,resultSchema,model){
+return{agentType:PLANNER_AGENT,schema:toAgentSchema(resultSchema),label:label,phase:phaseTitle,...(model===undefined?{}:{model:model})};
 }
 function describeCommandStop(stepNoun,words,retryWords=[]){
 const problem=describeRunnerWordProblem(words.concat(retryWords));
@@ -3027,7 +3027,8 @@ const settledKinds=new Set();
 if(facts.head_state==='branch'&&facts.branch!==run.trunk&&!new RegExp(PLAN_SCHEMA.properties.branch.pattern,'u').test(facts.branch)){
 return stopDelivery([{problem:describeStartBranch(facts)+describeTaxonomyMiss()+'.'}],run,[],true);
 }
-let checked=await callCheckedPlanner(run,facts,{prompt:buildPlanPrompt(run.request,facts,scope,replan,listAnswerEntries(run)),label:'plan-'+run.pass,phaseTitle:'Plan',schema:resultSchema});
+const pass={model:replan===undefined||replan.review===undefined?undefined:'sonnet'};
+let checked=await callPassPlanner(run,facts,{prompt:buildPlanPrompt(run.request,facts,scope,replan,listAnswerEntries(run)),label:'plan-'+run.pass,phaseTitle:'Plan',schema:resultSchema},pass);
 for(;;){
 let{planResult,problem}=checked;
 if(problem!==undefined){
@@ -3072,7 +3073,7 @@ shownResult=planResult;
 shownEntry={question:questions,labels:listShownLabels(shownAsks),reply:reply};
 resultSchema=buildReviseResultSchema(shownAsks);
 const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:listAnswerEntries(run),plan:planResult.plan,questions:questions,reply:reply});
-checked=await callCheckedPlanner(run,facts,{prompt:revisePrompt,label:'revise-'+round,phaseTitle:'Revise',schema:resultSchema});
+checked=await callPassPlanner(run,facts,{prompt:revisePrompt,label:'revise-'+round,phaseTitle:'Revise',schema:resultSchema},pass);
 }
 }
 
@@ -3083,7 +3084,7 @@ async function callCheckedPlanner(run,facts,call){
 let attempt=call.prompt;
 for(let retry=0;;retry+=1){
 const label=retry===0?call.label:call.label+'-fix-'+retry;
-const result=normalizePlanTitle(await agent(addRelaySentence(attempt,run),plannerCallOptions(label,call.phaseTitle,call.schema)),call.schema);
+const result=normalizePlanTitle(await agent(addRelaySentence(attempt,run),plannerCallOptions(label,call.phaseTitle,call.schema,call.model)),call.schema);
 const planProblem=describePlanProblem(result,call.schema,facts,run.trunk,run.references);
 const problem=planProblem===undefined?describeQuestionProblem(result,run):planProblem;
 const isFixable=problem!==undefined&&isFixableResult(result,call.schema);
@@ -3092,6 +3093,14 @@ return{planResult:result,problem:problem,isExhausted:isFixable};
 }
 attempt=buildCheckFixPrompt(call.prompt,problem,validateSchema(call.schema,result).errors);
 }
+}
+async function callPassPlanner(run,facts,call,pass){
+const checked=await callCheckedPlanner(run,facts,{...call,model:pass.model});
+if(pass.model!=='sonnet'||checked.problem!==undefined||!checked.planResult.plan.remediation_gate.promotion_gate.architectural){
+return checked;
+}
+pass.model='opus';
+return callCheckedPlanner(run,facts,{...call,label:call.label+'-opus',model:pass.model});
 }
 
 function buildScopeItem(properties){
@@ -4781,6 +4790,9 @@ clean:[],
 blocked:['blocker','stage']
 };
 }
+function fixLedgerPath(){
+return'.hivemind/review-loop/fix-ledger.yaml';
+}
 function reviewQuestionKinds(){
 return{'user-input-required':REVIEW_QUESTION_KIND,'high-severity-rejection':HIGH_SEVERITY_REJECTION_KIND};
 }
@@ -4808,9 +4820,9 @@ inputs.answers=answers;
 if(answer!==undefined){
 inputs.user_answer=answer;
 }
-if(run.ledger){
-inputs.resume_from_ledger=run.ledger;
-run.ledger=undefined;
+if(run.resumeLedger){
+inputs.resume_from_ledger=fixLedgerPath();
+run.resumeLedger=false;
 }
 return[
 'Run your pre-PR local review loop once on the working branch as it is checked out, with the inputs in the inputs block below.',
@@ -4975,12 +4987,16 @@ const returned='Local review returned '+review.exit_reason;
 if(run.replans>=maxReplans()){
 return{draft:returned+' after '+maxReplans()+' replans.'};
 }
+if(run.reviewReplans>=maxReviewReplans()){
+return{draft:returned+' after '+describeCount(maxReviewReplans(),'review replan')+'.'};
+}
 const brief=buildReviewEscalationBrief(review);
 const decided=resolveTailDecision(brief.kind,brief,run);
 if(isRunEnd(decided)){
 return decided;
 }
 run.replans+=1;
+run.reviewReplans+=1;
 const reason=returned+', so plan the remediation of what the review block reports, from the fresh facts.';
 return{replan:{reason:reason,review:projectReplanReview(review)}};
 }
@@ -5007,13 +5023,14 @@ return{held:true,note:'clean'+describeHeldCounts(run)};
 case'diminishing':
 return resolveDiminishingReturns(review,run);
 case'replan':
+run.resumeLedger=true;
 return requestReviewReplan(review,run);
 case'question':
 return askReviewQuestion(review,run);
 case'draft':
 return{draft:describeReviewOpen(review,run.head,'')+'.'};
 case'stop_rerun':
-run.ledger=review.ledger_path;
+run.resumeLedger=true;
 if(review.retry_minutes>=1){
 return waitForService(review,run);
 }
@@ -5086,6 +5103,9 @@ const SCOPE_SCHEMA=buildScopeSchema();
 function maxReplans(){
 return 3;
 }
+function maxReviewReplans(){
+return 1;
+}
 function maxFixRounds(){
 return 3;
 }
@@ -5122,11 +5142,11 @@ return launchInputs;
 if(!isGitIdentifier(launchInputs.trunk)){
 return describeLaunchProblem('The trunk launch arg is not a safe git branch name');
 }
-const reviewInput=readLocalReview(argsObject);
+const reviewInput=readBooleanLaunchArg(argsObject,'local_review',true);
 if(reviewInput.problem!==undefined){
 return reviewInput;
 }
-const draftInput=readDraft(argsObject);
+const draftInput=readBooleanLaunchArg(argsObject,'draft',false);
 if(draftInput.problem!==undefined){
 return draftInput;
 }
@@ -5134,28 +5154,20 @@ const decisionsInput=readDecisions(argsObject);
 if(decisionsInput.problem!==undefined){
 return decisionsInput;
 }
-return{argsObject:argsObject,request:argsObject.request,trunk:launchInputs.trunk,references:launchInputs.references,localReview:reviewInput.localReview,draft:draftInput.draft,decisions:decisionsInput.decisions};
+return{argsObject:argsObject,request:argsObject.request,trunk:launchInputs.trunk,references:launchInputs.references,localReview:reviewInput.value,draft:draftInput.value,decisions:decisionsInput.decisions};
 }
 function describeLaunchProblem(reason){
 return{problem:reason+', so '+RUN_NAME+' did not start.'};
 }
-function readLocalReview(argsObject){
-if(argsObject.local_review===undefined){
-return{localReview:true};
+function readBooleanLaunchArg(argsObject,name,absentValue){
+const value=argsObject[name];
+if(value===undefined){
+return{value:absentValue};
 }
-if(argsObject.local_review===true||argsObject.local_review===false){
-return{localReview:argsObject.local_review};
+if(value===true||value===false){
+return{value:value};
 }
-return describeLaunchProblem('The local_review launch arg must be true or false');
-}
-function readDraft(argsObject){
-if(argsObject.draft===undefined){
-return{draft:false};
-}
-if(argsObject.draft===true||argsObject.draft===false){
-return{draft:argsObject.draft};
-}
-return describeLaunchProblem('The draft launch arg must be true or false');
+return describeLaunchProblem('The '+name+' launch arg must be true or false');
 }
 function isDecision(decision){
 return isNonEmptyString(decision)&&Array.from(decision).length<=maxDecisionLength();
@@ -5197,6 +5209,7 @@ notRunGates:[],
 waveCount:0,
 pass:0,
 replans:0,
+reviewReplans:0,
 branchSwitches:0,
 versionAnswer:undefined,
 factsStem:undefined,

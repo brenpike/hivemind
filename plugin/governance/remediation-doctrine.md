@@ -8,6 +8,8 @@ N or more review findings that share a root cause, surface, or fix-framing. It s
 
 A reviewer that detects one returns the `root-cluster-suspected` exit_reason with the cluster: the shared files or surface, the N thread URLs or finding IDs, the hypothesized root cause, and the same-framing rationale. The overlord routes it to a structural fix via cerebrate.
 
+Local review instead applies, in the same round and by judgment with no script trigger, a class fix within its 2-file bar that changes no architecture or contract and passes the **Closed-by-Construction Acceptance Test**. A later finding on a construct it already class-fixed returns `root-cluster-suspected`.
+
 Severity tunes N per **Severity as Sensitivity Modifier**.
 
 ## Same-Framing Test
@@ -19,7 +21,7 @@ Before any one-off fix, ask: would the next review comment be this same shape wi
 At the first non-trivial finding, before any fix is planned or applied, answer four questions. Triage keys on the first finding, never on a finding count.
 
 1. **Introduced or inherited.** Did this branch introduce the behavior, or inherit it from trunk? Either way, a found root cause is fixed at its source in the PR that found it, even outside the reviewed diff. Origin never licenses a deferral or a residual.
-2. **Root class and owning layer.** What is the root class, and which layer owns it? The fix lands in the layer that owns the root class, not at the symptom.
+2. **Root class and owning layer.** What is the root class, and which layer owns it? The fix lands in the layer that owns the root class, not at the symptom. Which other failure axes does the same construct have, each cited as `file:line_start..line_end`?
 3. **Remove before harden.** Can the surface be removed or retired instead of hardened? Prefer removing or retiring the surface over hardening it.
 4. **Threat model.** Is the attacker or failure the finding assumes inside the recorded threat model? When a recorded threat model excludes the assumed attacker or failure, reject the finding at the source by citing the record; do not harden. When none is recorded, recording one is a review call, asked or taken per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls), when a reviewer raises it, and a call for the user otherwise.
 
@@ -132,16 +134,16 @@ The bounded-tail condition of **Stop-and-Merge** applies only to a mature surfac
 
 ## Post-Fix Young-Tail Reroute Synthesis
 
-A reviewer's post-fix advisory step reads only the detector's `merge_advisory` and `diminishing_returns` blocks, never `cluster`. When **Bounded-Tail vs Recurring-Class Disambiguation** reroutes that advisory because the recurring surface is young, the step builds the cluster payload itself.
+The GitHub reviewer's post-fix advisory step reads only the detector's `merge_advisory` and `diminishing_returns` blocks, never `cluster`. When **Bounded-Tail vs Recurring-Class Disambiguation** reroutes that advisory because the recurring surface is young, the step builds the cluster payload itself.
 
-Neither the deterministic skeleton nor the detector output holds the youth call. The enrichment overlay each reviewer applies before its detector call (per **Skeleton-Enrichment Judgment Criteria** for the reconstructing reviewer, or over the persisted fix-ledger for the stateful reviewer) therefore produces the Gate-B judgment as agent prose:
+Neither the deterministic skeleton nor the detector output holds the youth call, so the **Skeleton-Enrichment Judgment Criteria** overlay produces the Gate-B judgment as agent prose:
 
 - **surface youth**: whether each recurring surface was introduced or heavily modified in this PR or initiative
 - **primitive-sharing**: whether the recurring findings patch the edges of one shared data-access, query, parse or serialization primitive
 
-A reroute gated on a youth call the overlay never produced is a contract violation. The reviewer carries the young-surface recurrence rationale (which iterations re-emitted, why the surface is young, the shared primitive) in the detector's existing `same_framing_rationale`; there is no new field.
+A reroute gated on a youth call the overlay never produced is a contract violation. The reviewer carries the young-surface recurrence rationale (which iterations re-emitted, why the surface is young, the shared primitive) in the detector's existing `same_framing_rationale`.
 
-A post-fix step that reroutes a young recurring surface returns `root-cluster-suspected` with the pre-fix cluster payload, given here by role. Each reviewer maps the roles onto its own Output Contract fields and sources them from its own state: the stateless reviewer from git ground truth and the fresh post-fix fetch, the stateful reviewer from its persisted fix-ledger.
+The reroute returns `root-cluster-suspected` with the pre-fix cluster payload by role, sourced from git ground truth and the fresh post-fix fetch.
 
 - **surface files**: the young recurring surface files from the enrichment overlay
 - **finding refs**: the unresolved thread URLs or finding IDs on that surface

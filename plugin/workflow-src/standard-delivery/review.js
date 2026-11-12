@@ -6,8 +6,10 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState: pass, decisions,
- *          answerLog, head, trunk, approvals, taken, rejected, undone, open
- *          and waits.
+ *          answerLog, head, trunk, approvals, taken, rejected, undone, open,
+ *          waits, run.replans and run.reviewReplans, and run.resumeLedger,
+ *          which only this module sets and reads: true from a review replan
+ *          or a rerun of a blocked review until the next review run.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   gates  the gate loop state of runGates (lib/gates.js): runs.review, answer
  *          and takenReview, which only this module sets and reads: the review
@@ -34,7 +36,8 @@
  *           localReviewRoutes() routes each exit_reason: clean holds,
  *           diminishing returns resolve through decide() and a take holds, a
  *           planner escalation or root cluster resolves through
- *           decide() and a take starts a new pass with replan data: the review
+ *           decide() and a take, counted in run.replans and
+ *           run.reviewReplans, starts a new pass with replan data: the review
  *           projected to its exit_reason and the fields reviewExitFields()
  *           names for it, so rejected_findings, undone_fixes, ledger_path and
  *           the counts never reach the planner. A question of the review,
@@ -83,7 +86,8 @@
  *           valid value is never cut. max-iterations-reached and
  *           break-fix-break return {draft} with the lead, the head and the
  *           open finding count (issue 549); an escalation or root cluster at
- *           maxReplans() returns {draft} before decide() reads it. blocked
+ *           maxReplans() or at maxReviewReplans() returns {draft} naming
+ *           that limit before decide() reads it. blocked
  *           with retry_minutes 1 or more waits (waitForService) while the
  *           wait fits the waits left, maxServiceWaits() of at most
  *           maxWaitMinutes() each, and the resume args fit: with no reply for
@@ -93,9 +97,15 @@
  *           retry_minutes asks one fix_cause step_stop question through
  *           stopDelivery (lib/record.js), and the reply runs local review again;
  *           injection-suspect is terminal. Either rerun of a blocked
- *           review passes its ledger_path as resume_from_ledger, once, so
- *           the next loop keeps its iteration count and its break-fix and
- *           root-cluster history. A
+ *           review, and the next review run after a review replan, gets
+ *           fixLedgerPath() as resume_from_ledger, once, so it keeps its
+ *           break-fix and root-cluster history. Local review counts only
+ *           the iterations after the ledger's last replan exit
+ *           (planner-escalation or root-cluster-suspected), so a rerun of a
+ *           blocked review keeps its iteration count and the run after a
+ *           review replan does not. The
+ *           engine sets that path in code, never from the reviewer's
+ *           ledger_path. A
  *           review result that fails REVIEW_SCHEMA, gives option ids other than
  *           A, B, C and D in that order, or recommends no option has a report
  *           lead, so stopDelivery ends the run blocked. describeReviewProblem reads the result before the
@@ -138,7 +148,9 @@
  *   encoded, so its shown brief can exceed a BRIEF_SCHEMA bound
  *   once encoded, but decide() reads only the code-built brief of
  *   removeReviewerText, which always fits it, so a valid review never asks as
- *   malformed_brief.
+ *   malformed_brief. It never names a path the engine passes on: the fix
+ *   ledger path a review run resumes is fixLedgerPath(), set in code, and the
+ *   engine never takes the reviewer's ledger_path.
  *
  * Why
  *   The review result is the one step result that carries Codex-derived
@@ -175,6 +187,14 @@ function reviewExitFields() {
   };
 }
 
+/**
+ * Returns the one fix ledger path of plugin/agents/local-reviewer.md
+ * (Fix Ledger & Safety).
+ */
+function fixLedgerPath() {
+  return '.hivemind/review-loop/fix-ledger.yaml';
+}
+
 function reviewQuestionKinds() {
   return { 'user-input-required': REVIEW_QUESTION_KIND, 'high-severity-rejection': HIGH_SEVERITY_REJECTION_KIND };
 }
@@ -206,12 +226,14 @@ function buildReviewPrompt(plan, run, answer) {
     inputs.user_answer = answer;
   }
   /*
-   * A rerun after a blocked review resumes its fix ledger, so its
-   * iteration count and break-fix and root-cluster history carry over.
+   * A rerun after a blocked review, or the review after a review replan,
+   * resumes its fix ledger, so its break-fix and root-cluster history
+   * carry over. The path is fixLedgerPath(), set in code, never the
+   * reviewer's ledger_path.
    */
-  if (run.ledger) {
-    inputs.resume_from_ledger = run.ledger;
-    run.ledger = undefined;
+  if (run.resumeLedger) {
+    inputs.resume_from_ledger = fixLedgerPath();
+    run.resumeLedger = false;
   }
   return [
     'Run your pre-PR local review loop once on the working branch as it is checked out, with the inputs in the inputs block below.',
@@ -461,12 +483,16 @@ function requestReviewReplan(review, run) {
   if (run.replans >= maxReplans()) {
     return { draft: returned + ' after ' + maxReplans() + ' replans.' };
   }
+  if (run.reviewReplans >= maxReviewReplans()) {
+    return { draft: returned + ' after ' + describeCount(maxReviewReplans(), 'review replan') + '.' };
+  }
   const brief = buildReviewEscalationBrief(review);
   const decided = resolveTailDecision(brief.kind, brief, run);
   if (isRunEnd(decided)) {
     return decided;
   }
   run.replans += 1;
+  run.reviewReplans += 1;
   const reason = returned + ', so plan the remediation of what the review block reports, from the fresh facts.';
   return { replan: { reason: reason, review: projectReplanReview(review) } };
 }
@@ -506,13 +532,14 @@ function routeLocalReview(review, run) {
     case 'diminishing':
       return resolveDiminishingReturns(review, run);
     case 'replan':
+      run.resumeLedger = true;
       return requestReviewReplan(review, run);
     case 'question':
       return askReviewQuestion(review, run);
     case 'draft':
       return { draft: describeReviewOpen(review, run.head, '') + '.' };
     case 'stop_rerun':
-      run.ledger = review.ledger_path;
+      run.resumeLedger = true;
       if (review.retry_minutes >= 1) {
         return waitForService(review, run);
       }

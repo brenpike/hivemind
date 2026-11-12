@@ -48,3 +48,12 @@ Reference: issue #273.
 - **The cross-iteration axis trips at N=2.** Gate A now holds at two distinct iterations with a fix between them, and the axis has no N=3 default. Sharing a data-access, query, parse or serialization primitive is now part of the cluster's same-framing rationale, not a separate threshold.
 
 Decisions 1 and 2 stand: youth is still a hard gate, and GitHub is still the recurrence ledger. Status remains accepted.
+
+## Amendment — 2026-11-11 (fix-ledger history across a replan, ADR-0041)
+
+See `docs/adr/0041-local-review-class-fix-in-round.md`, decision 2.
+
+- **The history survives a replan.** Recurrence checks do not start blind after one.
+- **No new local recurrence file.** GitHub stays the recurrence ledger of the GitHub loop.
+
+Decisions 1 and 2 stand. Status remains accepted.

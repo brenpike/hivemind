@@ -339,6 +339,10 @@ function maxReplans() {
   return 3;
 }
 
+function maxReviewReplans() {
+  return 1;
+}
+
 function maxFixRounds() {
   return 3;
 }
@@ -383,11 +387,11 @@ function readDeliveryLaunch(rawArgs) {
   if (!isGitIdentifier(launchInputs.trunk)) {
     return describeLaunchProblem('The trunk launch arg is not a safe git branch name');
   }
-  const reviewInput = readLocalReview(argsObject);
+  const reviewInput = readBooleanLaunchArg(argsObject, 'local_review', true);
   if (reviewInput.problem !== undefined) {
     return reviewInput;
   }
-  const draftInput = readDraft(argsObject);
+  const draftInput = readBooleanLaunchArg(argsObject, 'draft', false);
   if (draftInput.problem !== undefined) {
     return draftInput;
   }
@@ -395,31 +399,26 @@ function readDeliveryLaunch(rawArgs) {
   if (decisionsInput.problem !== undefined) {
     return decisionsInput;
   }
-  return { argsObject: argsObject, request: argsObject.request, trunk: launchInputs.trunk, references: launchInputs.references, localReview: reviewInput.localReview, draft: draftInput.draft, decisions: decisionsInput.decisions };
+  return { argsObject: argsObject, request: argsObject.request, trunk: launchInputs.trunk, references: launchInputs.references, localReview: reviewInput.value, draft: draftInput.value, decisions: decisionsInput.decisions };
 }
 
 function describeLaunchProblem(reason) {
   return { problem: reason + ', so ' + RUN_NAME + ' did not start.' };
 }
 
-function readLocalReview(argsObject) {
-  if (argsObject.local_review === undefined) {
-    return { localReview: true };
+/**
+ * Returns {value}, the boolean launch arg name, absentValue when it is
+ * undefined, or a launch problem for any other value, null included.
+ */
+function readBooleanLaunchArg(argsObject, name, absentValue) {
+  const value = argsObject[name];
+  if (value === undefined) {
+    return { value: absentValue };
   }
-  if (argsObject.local_review === true || argsObject.local_review === false) {
-    return { localReview: argsObject.local_review };
+  if (value === true || value === false) {
+    return { value: value };
   }
-  return describeLaunchProblem('The local_review launch arg must be true or false');
-}
-
-function readDraft(argsObject) {
-  if (argsObject.draft === undefined) {
-    return { draft: false };
-  }
-  if (argsObject.draft === true || argsObject.draft === false) {
-    return { draft: argsObject.draft };
-  }
-  return describeLaunchProblem('The draft launch arg must be true or false');
+  return describeLaunchProblem('The ' + name + ' launch arg must be true or false');
 }
 
 function isDecision(decision) {
@@ -468,6 +467,7 @@ function createRunState(launch) {
     waveCount: 0,
     pass: 0,
     replans: 0,
+    reviewReplans: 0,
     branchSwitches: 0,
     versionAnswer: undefined,
     factsStem: undefined,
