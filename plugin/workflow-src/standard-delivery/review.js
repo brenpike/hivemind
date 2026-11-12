@@ -28,11 +28,12 @@
  *           fixes. caller_validates true holds because a review that ends on a
  *           new commit sends the run back to the first gate, so validation runs
  *           again on that commit, and the reviewer checks only the files each
- *           fix touched. Then the commit runner runs with an empty file list,
- *           so any edit left behind stops it, and the gate holds on the commit
- *           it reports. localReviewRoutes() routes each exit_reason: clean
- *           holds, diminishing returns resolve through decide() and a take
- *           holds, a planner escalation or root cluster resolves through
+ *           fix touched. Then the commit runner runs with an empty file list
+ *           and the texts reviewCommitTexts() gives, so any edit left behind
+ *           stops it, and the gate holds on the commit it reports.
+ *           localReviewRoutes() routes each exit_reason: clean holds,
+ *           diminishing returns resolve through decide() and a take holds, a
+ *           planner escalation or root cluster resolves through
  *           decide() and a take starts a new pass with replan data: the review
  *           projected to its exit_reason and the fields reviewExitFields()
  *           names for it, so rejected_findings, undone_fixes, ledger_path and
@@ -523,6 +524,14 @@ function routeLocalReview(review, run) {
   }
 }
 
+/**
+ * Returns the commit texts of the local review commit, in the shape
+ * commitStepTexts (lib/commit.js) gives: purpose, noun and subject.
+ */
+function reviewCommitTexts() {
+  return { purpose: 'the local review that just ran, with an empty file list', noun: 'the local review', subject: 'apply the local review fixes' };
+}
+
 async function runReviewGate(run, plan, gates) {
   const count = gates.runs.review;
   const answer = gates.answer;
@@ -536,7 +545,7 @@ async function runReviewGate(run, plan, gates) {
   if (unusable === undefined) {
     keepReviewLists(run, review);
   }
-  const committed = await runCommitStep(run, plan, { files: [], label: gateLabel('review-commit', run, count), stepName: 'review' }, unusable === undefined ? [] : [unusable]);
+  const committed = await runCommitStep(run, plan, { files: [], label: gateLabel('review-commit', run, count), texts: reviewCommitTexts() }, unusable === undefined ? [] : [unusable]);
   if (committed.values === undefined) {
     return committed;
   }

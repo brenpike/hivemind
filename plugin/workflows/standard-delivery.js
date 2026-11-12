@@ -696,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '07a25ec81498b6b9';
+const BUILD_ID = '62d6589046f977db';
 
 function supportedSchemaKeywords(){
 return[
@@ -3772,10 +3772,8 @@ case'wave':
 return{purpose:'the wave of plan steps that just ran',noun:'the wave'};
 case'fix':
 return{purpose:'the validation fix round that just ran',noun:'the fix round',subject:'fix the failed validation'};
-case'review':
-return{purpose:'the local review that just ran, with an empty file list',noun:'the local review',subject:'apply the local review fixes'};
 case'head':
-return{purpose:'nothing: the empty file list makes it report the head of the working branch after the user replied to a stop',noun:'the head check',subject:'read the branch head'};
+return{purpose:'nothing: with no files it reports the working branch head after a reply to a stop',noun:'the head check',subject:'read the branch head'};
 default:
 throw new Error('commitStepTexts: no texts for step '+JSON.stringify(stepName));
 }
@@ -3801,9 +3799,9 @@ return isUsableSubject(subject)?subject:fallbackSubject;
 function listCommitWords(trunk,inputsPath){
 return['--trunk',trunk,'--inputs',inputsPath];
 }
-function buildCommitPrompt(files,plan,trunk,inputsPath,stepName,subject,pluginRoot){
+function buildCommitPrompt(files,plan,trunk,inputsPath,purpose,subject,pluginRoot){
 const content={type:commitTypeMap()[plan.classification],breaking:plan.breaking,subject:subject,files:files};
-return['Run the command below to commit '+commitStepTexts(stepName).purpose+'.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',listCommitWords(trunk,inputsPath),pluginRoot)),formatInputsFileBlock(inputsPath,content)].join('\n');
+return['Run the command below to commit '+purpose+'.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',listCommitWords(trunk,inputsPath),pluginRoot)),formatInputsFileBlock(inputsPath,content)].join('\n');
 }
 function readOutsidePath(payload){
 try{
@@ -3825,8 +3823,7 @@ return lead;
 const pathLines=outsideLines.map((line)=>'- '+quoteOrEmpty(readOutsidePath(line.slice('outside: '.length))));
 return[lead+' Dirty paths outside the files of '+stepNoun+':',...capItemLines(pathLines)].join('\n');
 }
-function checkCommitRelay(relay,plan,stepName){
-const stepNoun=commitStepTexts(stepName).noun;
+function checkCommitRelay(relay,plan,stepNoun){
 const stopped='so '+RUN_NAME+' stopped. Check the branch for a commit of '+stepNoun+'.';
 if(!validateSchema(RELAY_SCHEMA,relay).ok){
 return describeUnusableRelay(relay,'commit',stopped);
@@ -3843,15 +3840,15 @@ return{problem:'The commit step reported a branch other than the plan branch, '+
 }
 return{values:values};
 }
-function describeCommitEnd(commitValues,stepName){
-const noun=commitStepTexts(stepName).noun;
+function describeCommitEnd(commitValues,noun){
 return noun.charAt(0).toUpperCase()+noun.slice(1)+' was committed as '+commitValues.commit+', so that commit can hold partial edits.';
 }
 async function runCommitStep(run,plan,commit,stepCauses){
 if(!Array.isArray(stepCauses)){
 throw new Error('runCommitStep: stepCauses must be an array');
 }
-const subject=commit.subject??commitStepTexts(commit.stepName).subject;
+const texts=commit.texts??commitStepTexts(commit.stepName);
+const subject=commit.subject??texts.subject;
 const isReplan=commit.stepName==='wave';
 phase('Commit');
 const listWords=(label)=>listCommitWords(run.trunk,buildInputsPath(run,'molt',label));
@@ -3859,8 +3856,8 @@ const commandStop=describeCommandStop('commit',listWords(commit.label),listWords
 if(commandStop!==undefined){
 return stopDelivery(stepCauses.concat([commandStop]),run,[],isReplan);
 }
-const relay=await runRunnerRelay((label)=>addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,listWords(label)[3],commit.stepName,subject,run.pluginRoot),run),commit.label,'Commit');
-const checked=checkCommitRelay(relay,plan,commit.stepName);
+const relay=await runRunnerRelay((label)=>addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,listWords(label)[3],texts.purpose,subject,run.pluginRoot),run),commit.label,'Commit');
+const checked=checkCommitRelay(relay,plan,texts.noun);
 if(checked.problem!==undefined){
 return stopDelivery(stepCauses.concat([checked]),run,[],isReplan);
 }
@@ -3868,7 +3865,7 @@ observeHead(run,checked.values.commit,plan.branch);
 if(stepCauses.length===0){
 return{values:checked.values};
 }
-const endLines=checked.values.committed==='true'?[describeCommitEnd(checked.values,commit.stepName)]:[];
+const endLines=checked.values.committed==='true'?[describeCommitEnd(checked.values,texts.noun)]:[];
 return stopDelivery(stepCauses,run,endLines,isReplan);
 }
 
@@ -4423,8 +4420,14 @@ parts.push(neutralizePullRequestText(digest));
 parts.push(neutralizePullRequestText(renderStepLines(plan)),...renderPullRequestRecord(run,gates));
 return cleanPullRequestText(parts.join('\n\n'),true);
 }
+function describePullRequestCause(cause,end){
+return'The pull request '+cause+', so '+RUN_NAME+end;
+}
+function describeNoPush(){
+return' stopped. This step pushed nothing.';
+}
 function describePullRequestTextSize(noun,size){
-return'The pull request '+noun+' would be '+size+' characters, more than the limit of '+maxPullRequestTextLength()+', so '+RUN_NAME+' stopped before the pull request and pushed nothing.';
+return describePullRequestCause(noun+' would be '+size+' characters, over the limit of '+maxPullRequestTextLength(),describeNoPush());
 }
 function buildPullRequestTexts(run,plan,gates){
 const comment=buildPullRequestComment(run,gates);
@@ -4435,7 +4438,7 @@ return{problem:describePullRequestTextSize(longNoun,texts[longNoun].length)};
 }
 const attributedNoun=Object.keys(texts).find((noun)=>forbiddenSubjectTexts().some((forbidden)=>texts[noun].toLowerCase().includes(forbidden)));
 if(attributedNoun!==undefined){
-return{problem:'The pull request '+attributedNoun+' would hold an attribution string, so '+RUN_NAME+' stopped before the pull request and pushed nothing.'};
+return{problem:describePullRequestCause(attributedNoun+' would hold an attribution string',describeNoPush())};
 }
 return texts;
 }
@@ -4458,13 +4461,13 @@ return/^blocker: (?:(?:inputs?|title|body|draft|comment) |cannot read the inputs
 }
 function describeBlockedPush(stderr,head,isUnpushed,unseenPush){
 if(isUnpushed||/^pushed: no$/m.test(stderr)){
-return' stopped. This step pushed nothing.';
+return describeNoPush();
 }
 return/^pushed: yes$/m.test(stderr)?' stopped after this step pushed commit '+head+'.':unseenPush;
 }
 function describePullRequestBlocker(stderr,head,unseenPush){
 const isUnpushed=isGateDenial(stderr)||isInputsRefusal(stderr);
-const lead='The pull request step was blocked, so '+RUN_NAME+describeBlockedPush(stderr,head,isUnpushed,unseenPush);
+const lead=describePullRequestCause('step was blocked',describeBlockedPush(stderr,head,isUnpushed,unseenPush));
 return{problem:lead+' '+describeRelayBlocker(stderr,true),nextAction:readRelayAction(stderr,isUnpushed)};
 }
 function checkPullRequestRelay(relay,head,hasComment){
@@ -4481,7 +4484,7 @@ if(values===undefined||(values.commented!==undefined)!==hasComment||values.comme
 return describeUnusableRelay(relay,'pull request',stopped,true);
 }
 if(values.head_ref_oid!==head){
-return{problem:'The pull request step reported a head commit other than the commit every gate held on, '+stopped,terminal:true};
+return{problem:describePullRequestCause('step reported a head commit other than the commit every gate held on',unseenPush),terminal:true};
 }
 return{values:values};
 }
@@ -5015,6 +5018,9 @@ default:
 throw new Error('routeLocalReview: no route for exit reason '+JSON.stringify(review.exit_reason));
 }
 }
+function reviewCommitTexts(){
+return{purpose:'the local review that just ran, with an empty file list',noun:'the local review',subject:'apply the local review fixes'};
+}
 async function runReviewGate(run,plan,gates){
 const count=gates.runs.review;
 const answer=gates.answer;
@@ -5028,7 +5034,7 @@ const unusable=describeReviewProblem(review);
 if(unusable===undefined){
 keepReviewLists(run,review);
 }
-const committed=await runCommitStep(run,plan,{files:[],label:gateLabel('review-commit',run,count),stepName:'review'},unusable===undefined?[]:[unusable]);
+const committed=await runCommitStep(run,plan,{files:[],label:gateLabel('review-commit',run,count),texts:reviewCommitTexts()},unusable===undefined?[]:[unusable]);
 if(committed.values===undefined){
 return committed;
 }

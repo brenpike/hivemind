@@ -864,6 +864,8 @@ const ROW_TESTS = {
       assert.equal(validate.opts.schema.properties.version, undefined);
       assert.ok(!labelsOf(run).some((label) => label.startsWith('review')));
       assert.ok(!builtSource.includes('function runReviewGate('));
+      assert.ok(!builtSource.includes('the local review that just ran') && !builtSource.includes('apply the local review fixes') && !builtSource.includes('function reviewCommitTexts('), 'the draft carries no local review commit text');
+      assert.throws(() => main.commitStepTexts('review'), /no texts for step "review"/);
     });
     test('with version files the validation runs the version check', async () => {
       const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': versionedPlanResult(), 'validate-2-1': { outcome: 'passed', version: { outcome: 'ran', stdout: BUMP_MATCH } } }));

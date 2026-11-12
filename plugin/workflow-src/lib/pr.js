@@ -217,8 +217,20 @@ function buildPullRequestBody(run, plan, gates) {
   return cleanPullRequestText(parts.join('\n\n'), true);
 }
 
+/**
+ * Returns the stop sentence of a pull request cause: the cause, then the
+ * run name and end, what the run saw of the push.
+ */
+function describePullRequestCause(cause, end) {
+  return 'The pull request ' + cause + ', so ' + RUN_NAME + end;
+}
+
+function describeNoPush() {
+  return ' stopped. This step pushed nothing.';
+}
+
 function describePullRequestTextSize(noun, size) {
-  return 'The pull request ' + noun + ' would be ' + size + ' characters, more than the limit of ' + maxPullRequestTextLength() + ', so ' + RUN_NAME + ' stopped before the pull request and pushed nothing.';
+  return describePullRequestCause(noun + ' would be ' + size + ' characters, over the limit of ' + maxPullRequestTextLength(), describeNoPush());
 }
 
 /**
@@ -234,7 +246,7 @@ function buildPullRequestTexts(run, plan, gates) {
   }
   const attributedNoun = Object.keys(texts).find((noun) => forbiddenSubjectTexts().some((forbidden) => texts[noun].toLowerCase().includes(forbidden)));
   if (attributedNoun !== undefined) {
-    return { problem: 'The pull request ' + attributedNoun + ' would hold an attribution string, so ' + RUN_NAME + ' stopped before the pull request and pushed nothing.' };
+    return { problem: describePullRequestCause(attributedNoun + ' would hold an attribution string', describeNoPush()) };
   }
   return texts;
 }
@@ -271,14 +283,14 @@ function isInputsRefusal(stderr) {
  */
 function describeBlockedPush(stderr, head, isUnpushed, unseenPush) {
   if (isUnpushed || /^pushed: no$/m.test(stderr)) {
-    return ' stopped. This step pushed nothing.';
+    return describeNoPush();
   }
   return /^pushed: yes$/m.test(stderr) ? ' stopped after this step pushed commit ' + head + '.' : unseenPush;
 }
 
 function describePullRequestBlocker(stderr, head, unseenPush) {
   const isUnpushed = isGateDenial(stderr) || isInputsRefusal(stderr);
-  const lead = 'The pull request step was blocked, so ' + RUN_NAME + describeBlockedPush(stderr, head, isUnpushed, unseenPush);
+  const lead = describePullRequestCause('step was blocked', describeBlockedPush(stderr, head, isUnpushed, unseenPush));
   return { problem: lead + ' ' + describeRelayBlocker(stderr, true), nextAction: readRelayAction(stderr, isUnpushed) };
 }
 
@@ -300,7 +312,7 @@ function checkPullRequestRelay(relay, head, hasComment) {
     return describeUnusableRelay(relay, 'pull request', stopped, true);
   }
   if (values.head_ref_oid !== head) {
-    return { problem: 'The pull request step reported a head commit other than the commit every gate held on, ' + stopped, terminal: true };
+    return { problem: describePullRequestCause('step reported a head commit other than the commit every gate held on', unseenPush), terminal: true };
   }
   return { values: values };
 }

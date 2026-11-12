@@ -18,8 +18,10 @@
  *
  * Outputs
  *   runCommitStep(run, plan, commit, stepCauses)  commit is {files,
- *           label, stepName, subject?}, subject commitStepTexts(stepName)
- *           .subject when not given; stepCauses is the array of the step's
+ *           label, stepName?, subject?, texts?}, texts {purpose, noun,
+ *           subject} the caller's own step texts, commitStepTexts(stepName)
+ *           of wave, fix or head when not given, and subject texts.subject
+ *           when not given; stepCauses is the array of the step's
  *           own causes, or it throws. {values} when the commit held and
  *           stepCauses is empty, else what stopDelivery (lib/record.js)
  *           returns over stepCauses, then the commit cause when the commit
@@ -31,8 +33,8 @@
  *           relay (ADR-0037), else undefined: a --inputs command stop. The PR
  *           step also builds its --body-file path with it (standard-delivery
  *           pr.js).
- *   describeCommitEnd(commitValues, stepName)  one sentence: the commit
- *           the step's files went into.
+ *   describeCommitEnd(commitValues, noun)  one sentence: the commit the
+ *           files of the step noun names went into.
  *   toCommitSubject(text, fallbackSubject)  text made one line and cut by
  *           cutAtBoundary (lib/result.js) to maxSubjectLength() code points,
  *           or fallbackSubject when that line is blank, holds a breaking
@@ -44,7 +46,8 @@
  *   head check after a reply. Its checked commit goes to observeHead
  *   (lib/record.js), as the branch commit does at each pass start. Its
  *   inputs_file block carries a code-built subject: a wave's from its plan
- *   steps, and fixed ones for the fix and review commits.
+ *   steps, and fixed ones for the fix commit and the head check, and for
+ *   the local review commit those standard-delivery review.js passes.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -85,10 +88,8 @@ function commitStepTexts(stepName) {
       return { purpose: 'the wave of plan steps that just ran', noun: 'the wave' };
     case 'fix':
       return { purpose: 'the validation fix round that just ran', noun: 'the fix round', subject: 'fix the failed validation' };
-    case 'review':
-      return { purpose: 'the local review that just ran, with an empty file list', noun: 'the local review', subject: 'apply the local review fixes' };
     case 'head':
-      return { purpose: 'nothing: the empty file list makes it report the head of the working branch after the user replied to a stop', noun: 'the head check', subject: 'read the branch head' };
+      return { purpose: 'nothing: with no files it reports the working branch head after a reply to a stop', noun: 'the head check', subject: 'read the branch head' };
     default:
       throw new Error('commitStepTexts: no texts for step ' + JSON.stringify(stepName));
   }
@@ -120,9 +121,9 @@ function listCommitWords(trunk, inputsPath) {
   return ['--trunk', trunk, '--inputs', inputsPath];
 }
 
-function buildCommitPrompt(files, plan, trunk, inputsPath, stepName, subject, pluginRoot) {
+function buildCommitPrompt(files, plan, trunk, inputsPath, purpose, subject, pluginRoot) {
   const content = { type: commitTypeMap()[plan.classification], breaking: plan.breaking, subject: subject, files: files };
-  return ['Run the command below to commit ' + commitStepTexts(stepName).purpose + '.', dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('molt', listCommitWords(trunk, inputsPath), pluginRoot)), formatInputsFileBlock(inputsPath, content)].join('\n');
+  return ['Run the command below to commit ' + purpose + '.', dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('molt', listCommitWords(trunk, inputsPath), pluginRoot)), formatInputsFileBlock(inputsPath, content)].join('\n');
 }
 
 function readOutsidePath(payload) {
@@ -148,8 +149,7 @@ function describeCommitBlocker(stderr, stepNoun) {
   return [lead + ' Dirty paths outside the files of ' + stepNoun + ':', ...capItemLines(pathLines)].join('\n');
 }
 
-function checkCommitRelay(relay, plan, stepName) {
-  const stepNoun = commitStepTexts(stepName).noun;
+function checkCommitRelay(relay, plan, stepNoun) {
   const stopped = 'so ' + RUN_NAME + ' stopped. Check the branch for a commit of ' + stepNoun + '.';
   if (!validateSchema(RELAY_SCHEMA, relay).ok) {
     return describeUnusableRelay(relay, 'commit', stopped);
@@ -167,8 +167,7 @@ function checkCommitRelay(relay, plan, stepName) {
   return { values: values };
 }
 
-function describeCommitEnd(commitValues, stepName) {
-  const noun = commitStepTexts(stepName).noun;
+function describeCommitEnd(commitValues, noun) {
   return noun.charAt(0).toUpperCase() + noun.slice(1) + ' was committed as ' + commitValues.commit + ', so that commit can hold partial edits.';
 }
 
@@ -176,7 +175,8 @@ async function runCommitStep(run, plan, commit, stepCauses) {
   if (!Array.isArray(stepCauses)) {
     throw new Error('runCommitStep: stepCauses must be an array');
   }
-  const subject = commit.subject ?? commitStepTexts(commit.stepName).subject;
+  const texts = commit.texts ?? commitStepTexts(commit.stepName);
+  const subject = commit.subject ?? texts.subject;
   const isReplan = commit.stepName === 'wave';
   phase('Commit');
   const listWords = (label) => listCommitWords(run.trunk, buildInputsPath(run, 'molt', label));
@@ -184,8 +184,8 @@ async function runCommitStep(run, plan, commit, stepCauses) {
   if (commandStop !== undefined) {
     return stopDelivery(stepCauses.concat([commandStop]), run, [], isReplan);
   }
-  const relay = await runRunnerRelay((label) => addResumeNote(buildCommitPrompt(commit.files, plan, run.trunk, listWords(label)[3], commit.stepName, subject, run.pluginRoot), run), commit.label, 'Commit');
-  const checked = checkCommitRelay(relay, plan, commit.stepName);
+  const relay = await runRunnerRelay((label) => addResumeNote(buildCommitPrompt(commit.files, plan, run.trunk, listWords(label)[3], texts.purpose, subject, run.pluginRoot), run), commit.label, 'Commit');
+  const checked = checkCommitRelay(relay, plan, texts.noun);
   if (checked.problem !== undefined) {
     return stopDelivery(stepCauses.concat([checked]), run, [], isReplan);
   }
@@ -193,6 +193,6 @@ async function runCommitStep(run, plan, commit, stepCauses) {
   if (stepCauses.length === 0) {
     return { values: checked.values };
   }
-  const endLines = checked.values.committed === 'true' ? [describeCommitEnd(checked.values, commit.stepName)] : [];
+  const endLines = checked.values.committed === 'true' ? [describeCommitEnd(checked.values, texts.noun)] : [];
   return stopDelivery(stepCauses, run, endLines, isReplan);
 }

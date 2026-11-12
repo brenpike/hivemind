@@ -5601,7 +5601,7 @@ const ROW_TESTS = {
       const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js'], { outcome: 'P'.repeat(61000) })] });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan) }));
       assert.equal(run.result.outcome, 'blocked');
-      const match = run.result.message.match(/^The pull request body would be ([0-9]+) characters, more than the limit of 60000, so the delivery stopped before the pull request and pushed nothing\./);
+      const match = run.result.message.match(/^The pull request body would be ([0-9]+) characters, over the limit of 60000, so the delivery stopped\. This step pushed nothing\./);
       assert.ok(match, run.result.message.slice(0, 300));
       assert.ok(!run.result.message.includes('short form'), run.result.message.slice(0, 300));
       assert.equal(run.result.message.split('\n\n')[1], main.nextStepLine('report'));
@@ -5619,9 +5619,9 @@ const ROW_TESTS = {
       assert.ok(commentOverhead > bodyOverhead, 'the comment lead is longer than the steps block of the body');
       assert.equal(main.buildPullRequestTexts(runWith('P'.repeat(60000 - commentOverhead)), plan, gates).problem, undefined);
       const texts = main.buildPullRequestTexts(runWith('P'.repeat(60000 - commentOverhead + 1)), plan, gates);
-      assert.equal(texts.problem, 'The pull request comment would be 60001 characters, more than the limit of 60000, so the delivery stopped before the pull request and pushed nothing.');
+      assert.equal(texts.problem, 'The pull request comment would be 60001 characters, over the limit of 60000, so the delivery stopped. This step pushed nothing.');
     });
-    const attributionProblem = (noun) => 'The pull request ' + noun + ' would hold an attribution string, so the delivery stopped before the pull request and pushed nothing.';
+    const attributionProblem = (noun) => 'The pull request ' + noun + ' would hold an attribution string, so the delivery stopped. This step pushed nothing.';
     test('a title, body or comment that holds a forbiddenSubjectTexts() string in any case names that text, neutralized text included', () => {
       assert.deepEqual([...main.forbiddenSubjectTexts()], ['co-authored-by:', 'authored-by:', 'generated with', 'created with claude', '\u{1f916} generated']);
       const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, slow: [] };
@@ -7695,19 +7695,20 @@ const ROW_TESTS = {
       assert.equal(main.buildWaveSubject([makeStep('S1!', ['src/a.js']), makeStep('S2', ['src/b.js'])], 2), 'S1!, S2: Step S1! is done.');
       assert.equal(main.buildWaveSubject([makeStep('S1', ['src/a.js']), makeStep('S2!', ['src/b.js'])], 2), 'complete wave 2 of the delivery plan');
     });
-    test('the fix round and review commits and the head check have fixed subjects, the wave has none, and no step is named bump', () => {
+    test('the fix round and review commits and the head check have fixed subjects, the wave has none, the review texts are review.js own, and no step is named bump', () => {
       assert.throws(() => main.commitStepTexts('bump'), /no texts for step "bump"/);
+      assert.throws(() => main.commitStepTexts('review'), /no texts for step "review"/);
       assert.equal(main.commitStepTexts('fix').subject, 'fix the failed validation');
-      assert.equal(main.commitStepTexts('review').subject, 'apply the local review fixes');
+      assert.deepEqual({ ...main.reviewCommitTexts() }, { purpose: 'the local review that just ran, with an empty file list', noun: 'the local review', subject: 'apply the local review fixes' });
       assert.equal(main.commitStepTexts('head').subject, 'read the branch head');
       assert.equal(main.commitStepTexts('wave').subject, undefined);
     });
     test('every key of the commit inputs_file content is a field molt.sh takes', () => {
       const moltFields = readMoltInputFields();
       assert.ok(moltFields.includes('subject') && moltFields.includes('files'), moltFields.join(','));
-      for (const stepName of ['wave', 'fix', 'review', 'head']) {
-        const subject = main.commitStepTexts(stepName).subject || 'Step S1 is done.';
-        const content = readDataBlock(main.buildCommitPrompt(['src/a.js'], makePlan(), 'main', '.hivemind/molt-inputs-x.json', stepName, subject), 'inputs_file').content;
+      for (const [stepName, texts] of [...['wave', 'fix', 'head'].map((name) => [name, main.commitStepTexts(name)]), ['review', main.reviewCommitTexts()]]) {
+        const subject = texts.subject || 'Step S1 is done.';
+        const content = readDataBlock(main.buildCommitPrompt(['src/a.js'], makePlan(), 'main', '.hivemind/molt-inputs-x.json', texts.purpose, subject), 'inputs_file').content;
         assert.deepEqual(Object.keys(content), ['type', 'breaking', 'subject', 'files'], stepName);
         Object.keys(content).forEach((key) => assert.ok(moltFields.includes(key), stepName + ' ' + key));
       }
@@ -7716,7 +7717,8 @@ const ROW_TESTS = {
       const scratch = makeScratchRepo();
       const multiStep = [makeStep('S1', ['src/a.js'], { outcome: longOutcome }), makeStep('S2', ['src/b.js'])];
       const subjects = [
-        ...['fix', 'review', 'head'].map((stepName) => main.commitStepTexts(stepName).subject),
+        ...['fix', 'head'].map((stepName) => main.commitStepTexts(stepName).subject),
+        main.reviewCommitTexts().subject,
         main.buildWaveSubject([makeStep('S1', ['src/a.js'], { outcome: longOutcome })], 1),
         main.buildWaveSubject(multiStep, 1),
         main.buildWaveSubject([makeStep('S'.repeat(64), ['src/a.js']), makeStep('T'.repeat(64), ['src/b.js'])], 1),
@@ -8586,7 +8588,7 @@ const ROW_TESTS = {
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
       assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'pr-1-2']);
       const check = callOf(resumed, 'head-1-1');
-      assert.ok(check.prompt.startsWith('Run the command below to commit nothing: the empty file list makes it report the head of the working branch after the user replied to a stop.\n'), check.prompt);
+      assert.ok(check.prompt.startsWith('Run the command below to commit nothing: with no files it reports the working branch head after a reply to a stop.\n'), check.prompt);
       assert.deepEqual(readRunnerInputs(check.prompt), { files: [], type: 'feat', breaking: false, subject: 'read the branch head', trunk: 'main' });
       assert.equal(check.opts.phase, 'Commit');
       assert.deepEqual(readRunnerInputs(callOf(resumed, 'pr-1-2').prompt), readRunnerInputs(callOf(resumed, 'pr-1').prompt));
