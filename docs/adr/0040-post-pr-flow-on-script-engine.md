@@ -246,3 +246,19 @@ This amendment replaces the method of edge case (c). The edge case's text stays 
 ### Result
 
 pending
+
+## Amendment 2026-11-12: local review finding 4ffc2b81, the head-branch checkout keeps the loaded shell rule
+
+**The finding.** Local review finding 4ffc2b81 on the PR6 branch said the overlord checks out the PR head branch without an explicit gate. Its PR identity rule (`plugin/agents/overlord.md`, PR identity under the `pr_branch_preflight` decision), and the new Engine sentence where a request routed to `pr-feedback-remediation` first checks out the PR's head branch, do not say that the GitHub `headRefName` must pass the branch identifier gate, or be captured out-of-band in the same Bash call. So shell metacharacters in a branch name could run if pasted into model-authored Bash. It asked for the gate at both sites, a one-call capture used only quoted, and an overlord contract test with hostile branch names.
+
+**Decided 2026-11-12, run call: rejected.** The run took this call under `plugin/governance/decision-autonomy.md` (Review Calls), option A: keep both sites as they are. The recommendation was strong, and the pick is reversible and not architectural. It is listed in the pull request body for the user's veto before merge. This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). It is not a recorded residual, because no defect is left unfixed.
+
+**Reasons.**
+
+- `plugin/governance/security-policy.md` (Shell Identifier Discipline) covers every Bash command an agent authors, and names a branch read from GitHub. It already requires the out-of-band capture or the identifier gate the finding asks for.
+- The overlord loads that section at session start, in its governance load line. `tests/policy/safety-shell-identifier-discipline.json` pins the rule. So the checkout at both sites is bound by it with no site text.
+- A copy of the gate at each checkout site duplicates a single-home rule in runtime-loaded text (ADR-0041 decision 7), and a second copy can drift from the first. `plugin/agents/overlord.md` has 11 bytes of prose budget left, and no raise is approved for this PR.
+
+**Repeat findings.** A later finding that asks the overlord's head-branch checkout, at either site, to restate the identifier gate or the out-of-band capture is a repeat of this record. A finding that the overlord, or a script it runs, puts an unchecked branch name into Bash source in a form the loaded rule forbids is new.
+
+**Prose budgets.** No change under `plugin/`.
