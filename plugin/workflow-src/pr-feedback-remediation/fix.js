@@ -65,8 +65,8 @@
  *   ends blocked and terminal. blocked, user-input-required and
  *   high-severity-rejection end blocked naming the exit and each candidate
  *   URL through encodeUntrustedText (lib/result.js). Each of
- *   escalationExits() ends blocked naming the exit, since this draft has
- *   no escalation step yet.
+ *   escalationExits() goes to runEscalation (escalation.js) before
+ *   describeFixExit, so describeFixExit throws on one.
  *   Every reviewer-written text a message shows goes through
  *   encodeUntrustedText, quoteDiagnostic or describeReason.
  *
@@ -227,9 +227,6 @@ function describeFixExit(fix, run) {
       return { blocks: [{ text: describeMergeAdvice(fix, lead) }] };
     case 'injection-suspect':
       return { cause: { problem: ended + ', a suspected prompt injection of pattern ' + fix.pattern_category + ', so ' + RUN_NAME + ' stopped.', terminal: true } };
-    case 'planner-escalation':
-    case 'root-cluster-suspected':
-      return { cause: { problem: ended + ', and this draft has no escalation step yet, so ' + RUN_NAME + ' stopped.' } };
     case 'blocked':
       return { cause: { problem: ended + ', so ' + RUN_NAME + ' stopped: ' + describeReason(fix.blocker_reason), nextAction: readBlockerAction(fix.blocker_reason, undefined) } };
     case 'user-input-required':

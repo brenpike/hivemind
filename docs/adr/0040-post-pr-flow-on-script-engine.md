@@ -45,7 +45,7 @@ The user settled the calls below, in this session. This ADR records them as the 
 
 - **(a) Launch args and the stale relayed message.** The launch args carry only references `[pr]`. The relayed user message may be stale by the time the watch launches the workflow, so every agent prompt carries the ADR-0037 decision 24 fixed sentence from the first agent on, not only after a reply. Text: `plugin/workflow-src/pr-feedback-remediation/`. Lands in: PR4.
 - **(b) No cross-run counter.** The watch, workflow, watch chain has no counter across runs. Three bounds hold it: the GitHub-history recurrence detectors (ADR-0025), each run's caps, which open a draft, and the watch's idle window (ADR-0029).
-- **(c) GitHub writes from a workflow agent are untested.** Before go-live, PR6 runs a headless check, `claude -p --permission-mode default`, and reads `permission_denials`. If the check fails, go-live waits with the state machine's post-PR states in place, and this ADR is amended.
+- **(c) GitHub writes from a workflow agent are untested.** Before go-live, PR6 runs a headless check, `claude -p --permission-mode default`, and reads `permission_denials`. If the check fails, go-live waits with the state machine's post-PR states in place, and this ADR is amended. *(2026-11-12: the check is now one supervised run in auto mode. See Amendment 2026-11-12.)*
 - **(d) The decisions comment.** A remediation run posts one decisions comment through the reuse path, and only when it took a decision. This extends open-plan-pr's recorded residual R4 to at most one comment per such run. A resume by name does not post again.
 - **(e) Approval.** The new workflow needs its own one-time approval per project. No `Workflow(...)` rule is seeded (ADR-0037 decisions 8 and 19). A deny rule falls back to the state machine. A No at the approval prompt interrupts the turn, and the user then restarts the watch.
 - **(f) L3 (b).** L3 (b) is met by taking the whole post-PR flow off the state machine. The watch moves to the main-session skill on every path, and remediation moves to the script workflow. The watch cannot run on the script engine itself, because its Monitor wait needs the main session.
@@ -88,14 +88,14 @@ Until PR6 lands, both stand as written.
 | PR3 | D3: the `github-reviewer`'s read-only `hivemind:bump-type` check before its small-fix push, on every path | PR1 |
 | PR4 | `hivemind:pr-feedback-remediation` as a draft: the schema-checked fix pass, and on an escalation the facts, scan, remediation plan and Promotion Gate, with the decision 24 sentence from the first agent on | PR1 |
 | PR5 | The workflow's tail as a draft: waves with molt commits, `runGates`, the push through open-plan-pr's reuse path with `--expect-commit`, the one decisions comment, and `pr` in the result | PR4 |
-| PR6 | Go-live: build `plugin/workflows/pr-feedback-remediation.js`, the headless permission check (edge case c), the overlord's launch on `planner-escalation` and `root-cluster-suspected` and its watch restart on `pr`, and the state machine's post-PR states kept only as the refused-launch fallback | PR2, PR3, PR5 |
+| PR6 | Go-live: build `plugin/workflows/pr-feedback-remediation.js`, the headless permission check (edge case c), the overlord's launch on `planner-escalation` and `root-cluster-suspected` and its watch restart on `pr`, and the state machine's post-PR states kept only as the refused-launch fallback | PR2, PR3, PR5*(2026-11-12: the check is one supervised run in auto mode. See Amendment 2026-11-12.)* |
 
 PR2, PR3 and PR4 touch disjoint files and can proceed in parallel.
 
 ## Recorded residuals
 
 - **F1 stays a known limit (D1).** The overlord may still skip the workflow's `message` before the watch. The bounded impact ADR-0037 records stands: the user still sees the PR and the watch report.
-- **GitHub writes from a workflow agent are untested until PR6 (edge case c).** A failed check holds go-live and amends this ADR.
+- **GitHub writes from a workflow agent are untested until PR6 (edge case c).** A failed check holds go-live and amends this ADR. *(2026-11-12: the check is now one supervised run in auto mode. See Amendment 2026-11-12.)*
 - **R4 grows (edge case d).** open-plan-pr's R4 now covers at most one decisions comment per remediation run that took a decision.
 - **A No at the approval prompt ends the turn (edge case e).** Nothing falls back in that turn. The user restarts the watch.
 
@@ -223,3 +223,26 @@ Authored prompt text is the literal text of every `plugin/workflow-src` source e
 | `analysis-only` | 2,669 | 2,669 |
 
 `lib` grew because whole functions moved into it from `standard-delivery`. Together the two went from 37,815 to 36,167.
+
+## Amendment 2026-11-12: the go-live permission check is one supervised run in auto mode
+
+This amendment replaces the method of edge case (c). The edge case's text stays as written.
+
+**Decision.** The user chose A. The check is one supervised run of the built workflow in a normal interactive session, in auto mode (now the default for sessions), against a test PR. The test PR is PR6 itself. A throwaway draft PR to main is used only if the result is inconclusive.
+
+**Reason.** The user's rule: no `claude -p`, no Claude Agent SDK, no headless or API-billed run.
+
+**Method.** Run `/reload-plugins`. Then launch the workflow by name with references `[pr]` and `trunk`, with the user watching.
+
+**What is read.** Every prompt, denial, auto-mode block and hook deny, verbatim, plus the GitHub state afterwards.
+
+**Verdicts.**
+
+- Pass: every attempted git push, gh write and thread resolve completed with no denial or block.
+- Prompt: the user's call.
+- Inconclusive: no such write was attempted.
+- Fail: any denial or block. Go-live is held: restore the DRAFT marker, remove the built script, keep the state-machine hand-off.
+
+### Result
+
+pending

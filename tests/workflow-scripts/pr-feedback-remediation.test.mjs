@@ -1,13 +1,13 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { loadLibs, loadWorkflowSource } from './harness.mjs';
-import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, countProseCharacters, isDraftWorkflow, listDraftWorkflowIds, readDataConstant, readProseBudgets, runCli } from '../../tools/build_workflows.mjs';
+import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, countProseCharacters, isDraftWorkflow, readDataConstant, readProseBudgets, runCli } from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const WORKFLOW_ID = 'pr-feedback-remediation';
@@ -647,8 +647,7 @@ const ROW_TESTS = {
     test('planner-escalation routes to planning, taken at the default level and listed as decided', async () => {
       const run = await runWorkflow(LAUNCH, escalationResults());
       assert.deepEqual(run.result, completeResult(ESCALATION_ASK));
-      assert.ok(!run.result.message.includes('no escalation step yet'), run.result.message);
-    });
+      });
     test('root-cluster-suspected routes to planning with the root cluster kind', async () => {
       const run = await runWorkflow(LAUNCH, escalationResults('root-cluster-suspected'));
       assert.deepEqual(run.result, completeResult(CLUSTER_ASK));
@@ -995,20 +994,19 @@ for (const [rowId, defineTests] of Object.entries(ROW_TESTS)) {
   describe(rowId, defineTests);
 }
 
-describe('pr-feedback-remediation draft', () => {
-  test('a DRAFT regular file marks the workflow as a draft, so no built script exists', () => {
-    assert.ok(lstatSync(join(sourceDir, 'DRAFT')).isFile());
-    assert.equal(isDraftWorkflow(repoRoot, WORKFLOW_ID), true);
-    assert.ok(listDraftWorkflowIds(repoRoot).includes(WORKFLOW_ID));
-    assert.equal(existsSync(join(repoRoot, builtPathFor(WORKFLOW_ID))), false);
+describe('pr-feedback-remediation live', () => {
+  test('no DRAFT marker, so the committed built script equals a fresh build', () => {
+    assert.equal(existsSync(join(sourceDir, 'DRAFT')), false);
+    assert.equal(isDraftWorkflow(repoRoot, WORKFLOW_ID), false);
+    const builtPath = join(repoRoot, builtPathFor(WORKFLOW_ID));
+    assert.ok(existsSync(builtPath));
+    assert.equal(readText(builtPath), builtSource);
   });
-  test('--check builds the draft in memory and passes, and names no built script for it', () => {
+  test('--check passes and names no stale or missing built script', () => {
     let errText = '';
-    let outText = '';
-    const code = runCli(['--check'], { root: repoRoot, stdout: { write: (text) => { outText += text; } }, stderr: { write: (text) => { errText += text; } } });
+    const code = runCli(['--check'], { root: repoRoot, stdout: { write: () => {} }, stderr: { write: (text) => { errText += text; } } });
     assert.equal(code, 0, errText);
     assert.ok(!errText.includes(WORKFLOW_ID), errText);
-    assert.ok(!outText.includes('wrote ' + builtPathFor(WORKFLOW_ID)), outText);
   });
   test('each source file is at most 600 lines, ASCII, with no hash before a digit and no clock or randomness', () => {
     const files = readdirSync(sourceDir).filter((name) => name.endsWith('.js'));

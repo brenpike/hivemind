@@ -1,6 +1,6 @@
 /*
  * pr-feedback-remediation main.js: the body of the pr-feedback-remediation
- * workflow script, a draft (ADR-0040 decision 2). The pull request watch
+ * workflow script (ADR-0040 decision 2). The pull request watch
  * launches it when a watch ends on an escalation. It gathers the branch
  * facts, then runs one schema-checked hivemind:github-reviewer fix pass on
  * the pull request. On a planner escalation or a suspected root cluster it
