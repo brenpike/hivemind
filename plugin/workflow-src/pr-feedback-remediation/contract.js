@@ -50,6 +50,7 @@ function contractRows() {
     { id: 'PFR-24', step: 'Push', check: 'runPullRequestStep', rule: 'Once validation held on commit H, the pull request step runs open-plan-pr once, label pr-P, with --head the plan branch, --base the trunk and --expect-commit H, and head_ref_oid must equal H.' },
     { id: 'PFR-25', step: 'Comment', check: 'buildPullRequestComment', rule: 'The comment is a code-built lead naming H, then the run record parts, sent only when run.taken holds a decision isShownDecision shows; otherwise the inputs file carries no comment.' },
     { id: 'PFR-26', step: 'Decision', check: 'toPullRequestDecision', rule: 'The run record of the pull request texts shows each taken decision as it is, so the routing decision of the review fix pass keeps its own problem text and is never labeled local review.' },
-    { id: 'PFR-27', step: 'Result', check: 'finishDeliveryComplete', rule: 'The run ends complete through finishDeliveryComplete with pr {url, head_ref_oid, created}, and its message names the pull request and validation held on H.' }
+    { id: 'PFR-27', step: 'Result', check: 'finishDeliveryComplete', rule: 'The run ends complete through finishDeliveryComplete with pr {url, head_ref_oid, created}, and its message names the pull request and validation held on H.' },
+    { id: 'PFR-28', step: 'Plan', check: 'callPassPlanner', rule: 'Every planning pass of the draft plans from its review block, so its plan-P and revise-R calls and their -fix-N retries go to hivemind:cerebrate on model sonnet; a checked result that flags plan.remediation_gate.promotion_gate.architectural goes once more on model opus, label plan-P-opus or revise-R-opus, with the same prompt, and the rest of the pass runs on opus.' }
   ];
 }
