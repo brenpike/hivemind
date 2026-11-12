@@ -98,6 +98,7 @@ PR2, PR3 and PR4 touch disjoint files and can proceed in parallel.
 - **GitHub writes from a workflow agent are untested until PR6 (edge case c).** A failed check holds go-live and amends this ADR. *(2026-11-12: the check is now one supervised run in auto mode. See Amendment 2026-11-12.)* *(2026-11-12: the run passed. Push and PR comment completed; reply and resolve were not exercised. See Amendment 2026-11-12, Result.)*
 - **R4 grows (edge case d).** open-plan-pr's R4 now covers at most one decisions comment per remediation run that took a decision.
 - **A No at the approval prompt ends the turn (edge case e).** Nothing falls back in that turn. The user restarts the watch.
+- **The hand-off drops a non-default reviewer filter.** The fix pass uses `automated`. That is the same as the watch default, so the default path loses nothing. Only a watch started with a different filter (`all`, `codex-only`, or a named author) can miss the escalating thread. The fix pass may then end clean while that thread stays open. Workaround: ask for a one-shot fix on the PR that names the filter. User decision 2026-11-12. See Amendment 2026-11-12 (reviewer filter).
 
 ## References
 
@@ -324,3 +325,20 @@ This amendment replaces the method of edge case (c). The edge case's text stays 
 **Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks a path to restate the route, to end blocked on a question exit, or to cap the reruns contests this record and is a repeat.
 
 **Prose budgets.** `plugin/agents/overlord.md` is 39027 of its 39056-byte budget, CRs stripped. No budget raise.
+
+## Amendment 2026-11-12: the hand-off keeps the default reviewer filter
+
+**The finding.** Codex review thread discussion_r4556127276 on PR 566 (https://github.com/brenpike/hivemind/pull/566#discussion_r4556127276, `plugin/agents/overlord.md` line 29), priority P1, titled "Preserve the watch's reviewer filter across the hand-off". The direct watch hands a `planner-escalation` or `root-cluster-suspected` escalation to `pr-feedback-remediation` with launch args `references` and `trunk` only. The workflow's fix inputs (`listFixInputs`) carry no `reviewer_filter`, so the fix pass uses the default `automated`. This is the same surface as discussion_r4555707637: the closed launch-arg set. It is the second finding on that surface, so per #409 the approach went to the user.
+
+**Decision.** The user chose option A on 2026-11-12: a recorded residual, no change. The launch args stay `references` and `trunk`.
+
+**Bounded impact.** Nothing errors. Only a watch started with a non-default filter is affected, and the fix pass may end clean while the escalating thread stays open. The default path loses nothing, because `automated` is also the watch default. No watch is started with a wider filter by default today.
+
+**Rejected alternatives.**
+
+- Carrying `reviewer_filter` as a launch key. That grows the launch contract and `plugin/agents/overlord.md`, which has 29 bytes of headroom, and it still leaves the escalating thread uncarried.
+- Carrying the whole escalation, thread and filter. That is the largest contract change, and the PR grows again.
+
+**Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks the hand-off to carry the filter or the escalating thread contests this record and is a repeat.
+
+**Revisit.** When slice 5 retires the state machine, or when a watch with a non-default filter becomes common.
