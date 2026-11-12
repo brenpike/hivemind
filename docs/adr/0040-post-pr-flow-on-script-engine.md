@@ -262,3 +262,21 @@ pending
 **Repeat findings.** A later finding that asks the overlord's head-branch checkout, at either site, to restate the identifier gate or the out-of-band capture is a repeat of this record. A finding that the overlord, or a script it runs, puts an unchecked branch name into Bash source in a form the loaded rule forbids is new.
 
 **Prose budgets.** No change under `plugin/`.
+
+## Amendment 2026-11-12: a fix-pass exit that needs the user pauses and asks
+
+**The finding.** Codex review thread discussion_r4554133264 on PR 566, priority P1, said a fix pass that exits `user-input-required` or `high-severity-rejection` ends the `hivemind:pr-feedback-remediation` run without asking the user. The user's answer never reaches the reviewer as `user_answer`. It asked to route these exits back to the state machine's question gate.
+
+**Root cause.** The draft fix pass ended every `exit_reason` at one fixed end, and the run called the fix pass once. An exit that needed the user ended the run blocked, and the question was never asked. The same design had no way to carry an answer to the reviewer, no answer wording in the prompt, and one fix-pass label per run, so a rerun could not get a label of its own. The draft came from PR4 on trunk; go-live in this PR made it reachable, so it is fixed here at its source.
+
+**The fix.** Both exits pause through the pause contract the rest of the workflow uses, per decision 2. The user's reply is logged with the run's answers and reruns the fix pass with `user_answer` (`candidate_url`, `question`, `reply`). A rerun can end clean, merge-advised, blocked, injection-suspect or as an escalation, and a further question asks again. The first fix call keeps its label, and each rerun gets a new one, so a resume replays every earlier call.
+
+**Decided 2026-11-12: the run always asks.** The GitHub reviewer writes no recommendation, so each such exit is a question with no recommendation, which `plugin/governance/decision-autonomy.md` (Tier A — Always Surface) puts in the Ask Set. The question's brief is built in code with strength none and carries no reviewer text, so `decide()` asks at every autonomy level and never takes the call. The reviewer's text is shown to the user only in the pause lead, encoded as untrusted text. The rerun passes no `decided_by`: only the user decided.
+
+**No cap on rounds.** Each round needs a user reply, so the user bounds the loop and no round cap is added.
+
+**Rejected alternative.** Route these exits to the state machine's question gate, as the finding asked. That keeps a state-machine surface that slice 5 retires, and it contradicts decision 2, which the user settled.
+
+**Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks the workflow to take such a question itself, or to end blocked on it, contests this record and is a repeat.
+
+**Prose budgets.** The rebuilt `plugin/workflows/pr-feedback-remediation.js` is 175330 characters of the 190000 built length limit, and its prose is 38026 of the 38200 budget. No budget raise.
