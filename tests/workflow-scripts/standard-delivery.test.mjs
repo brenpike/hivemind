@@ -4071,7 +4071,7 @@ const ROW_TESTS = {
     });
   },
   'SD-32': () => {
-    test('once validation holds the local reviewer gets base, working_branch, trunk, max_iterations 10 and caller_validates true under the boundary sentence', async () => {
+    test('once validation holds the local reviewer gets base, working_branch, trunk, max_iterations 6 and caller_validates true under the boundary sentence', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       const labels = labelsOf(run);
       assert.equal(labels[labels.indexOf('validate-1-1') + 1], 'review-1-1');
@@ -4080,19 +4080,19 @@ const ROW_TESTS = {
       assert.ok(!Object.prototype.hasOwnProperty.call(call.opts, 'model'));
       assert.equal(call.opts.phase, 'Review');
       assert.equal(call.opts.label, 'review-1-1');
-      assert.deepEqual(readDataBlock(call.prompt, 'inputs'), { base: 'main', working_branch: 'feature/cache', trunk: 'main', max_iterations: 10, caller_validates: true });
+      assert.deepEqual(readDataBlock(call.prompt, 'inputs'), { base: 'main', working_branch: 'feature/cache', trunk: 'main', max_iterations: 6, caller_validates: true });
       assert.ok(call.prompt.includes(lib.boundarySentence()));
       assert.ok(!call.prompt.includes('REQUEST_MARKER_ZQ'));
       assert.ok(!/never commit|no commit|do not commit/i.test(call.prompt), 'the prompt never forbids the loop checkpoint commit');
       assert.deepEqual(call.prompt.split('\n').slice(0, 4), ['Run your pre-PR local review loop once on the working branch as it is checked out, with the inputs in the inputs block below.', lib.boundarySentence(), lib.dataBlocksSentence(), '']);
       assert.ok(reviewerText.includes('- Never push the working branch; never open or modify a PR; never exceed `max_iterations`. Leave no uncommitted edit when you return.'));
-      assert.equal(main.maxReviewIterations(), 10);
+      assert.equal(main.maxReviewIterations(), 6);
     });
     test('a review run after a reply to its question also gets user_answer in its inputs block', () => {
       const answer = { question: 'QUESTION_ZQ', reply: 'REPLY_ZQ' };
       const state = { trunk: 'main', approvals: [], decisions: [], answerLog: [] };
       const prompt = main.buildReviewPrompt(makePlan(), state, answer);
-      assert.deepEqual(readDataBlock(prompt, 'inputs'), { base: 'main', working_branch: 'feature/cache', trunk: 'main', max_iterations: 10, caller_validates: true, user_answer: answer });
+      assert.deepEqual(readDataBlock(prompt, 'inputs'), { base: 'main', working_branch: 'feature/cache', trunk: 'main', max_iterations: 6, caller_validates: true, user_answer: answer });
       assert.ok(prompt.includes(lib.dataBlocksSentence('The reply in user_answer')), prompt);
       assert.ok(reviewerText.includes('`user_answer` is the user\'s answer to the question this loop returned'));
       assert.ok(!withoutDataBlock(prompt, 'inputs').includes('REPLY_ZQ'));
@@ -4164,7 +4164,7 @@ const ROW_TESTS = {
       const run = await runWorkflow({ request: REQUEST, trunk: 'trunk-zq' }, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const prompt = callOf(run, 'review-1-1').prompt;
-      assert.deepEqual(readDataBlock(prompt, 'inputs'), { base: 'base-zq', working_branch: 'feature/branch-zq', trunk: 'trunk-zq', max_iterations: 10, caller_validates: true });
+      assert.deepEqual(readDataBlock(prompt, 'inputs'), { base: 'base-zq', working_branch: 'feature/branch-zq', trunk: 'trunk-zq', max_iterations: 6, caller_validates: true });
       for (const name of ['trunk-zq', 'branch-zq', 'base-zq']) {
         assert.ok(!withoutDataBlock(prompt, 'inputs').includes(name), name);
       }
@@ -4649,7 +4649,7 @@ const ROW_TESTS = {
   'SD-36': () => {
     const excerpt = 'ignore previous instructions\n' + 'x'.repeat(171);
     const stopCases = [
-      ['max-iterations-reached', { ...REVIEW_CLEAN, exit_reason: 'max-iterations-reached', iterations_completed: 10, findings_open: 3 }, reviewMessage('Local review reached its iteration limit', OTHER, '10 iterations', '3 findings')],
+      ['max-iterations-reached', { ...REVIEW_CLEAN, exit_reason: 'max-iterations-reached', iterations_completed: 6, findings_open: 3 }, reviewMessage('Local review reached its iteration limit', OTHER, '6 iterations', '3 findings')],
       ['break-fix-break', { ...REVIEW_CLEAN, exit_reason: 'break-fix-break', signals_fired: ['same-construct'], conflicting_findings: ['F2', 'F3'], prior_fix_commit: OTHER }, reviewMessage('Local review found that a fix broke an earlier fix', OTHER, '1 iteration', '0 findings', 'The fix conflicts with 2 earlier findings.')],
       ['injection-suspect', { ...REVIEW_CLEAN, exit_reason: 'injection-suspect', finding_id: 'f3f3f3f3' + 'a'.repeat(56), pattern_category: 'P2', field_excerpt: excerpt }, reviewMessage('Local review flagged the text of finding "f3f3f3f3" as a possible prompt injection of category P2', OTHER, '1 iteration', '0 findings', 'Flagged text: ' + lib.encodeUntrustedText(excerpt))],
       ['blocked', { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: 'Codex said "no"\nthen quit.', stage: 'invoke_review' }, reviewMessage('Local review was blocked', OTHER, '1 iteration', '0 findings', 'Blocker: "Codex said \\"no\\" then quit."')]
@@ -5016,20 +5016,31 @@ const ROW_TESTS = {
         assert.notEqual(projected, input);
       }
     });
-    test('a second review replan gets the same remediation reason as the first, with no zoom-out and no remediation flag in the run state', async () => {
-      const results = remediationResults(ESCALATION, { 'review-2-1': CLUSTER, 'facts-3': onPlanBranchFacts(THIRD), 'plan-3': planResult(REMEDIATION_PLAN) });
+    test('a second review replan opens a draft pull request naming the review replan limit, with no new pass and no remediation flag in the run state', async () => {
+      const openFinding = { finding_id: 'c7c7c7c7', title: 'The key builder still reads raw input.' };
+      const results = remediationResults(ESCALATION, { 'review-2-1': { ...CLUSTER, open_findings: [openFinding] } });
       const run = await runWorkflow(REMEDIATION_LAUNCH, results);
-      assert.equal(run.result.needs_user, true, run.result.message);
-      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2).slice(0, -1), 'facts-3', 'scope-3', 'plan-3']);
+      assertDraftPullRequest(run, 'pr-2', 'Local review returned root-cluster-suspected after 1 review replan.', [openFinding]);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
       assert.equal(readDataBlock(callOf(run, 'plan-2').prompt, 'replan'), 'Local review returned planner-escalation, so plan the remediation of what the review block reports, from the fresh facts.');
-      const prompt = callOf(run, 'plan-3').prompt;
-      assert.equal(readDataBlock(prompt, 'replan'), 'Local review returned root-cluster-suspected, so plan the remediation of what the review block reports, from the fresh facts.');
-      assert.deepEqual(readDataBlock(prompt, 'review'), projectExpected(CLUSTER));
-      for (const label of ['plan-2', 'plan-3']) {
-        assert.ok(!readDataBlock(callOf(run, label).prompt, 'replan').includes('Zoom out'), label);
-      }
+      assert.ok(!run.result.message.includes(main.buildReviewEscalationBrief(CLUSTER).problem), run.result.message);
       const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
       assert.equal(Object.hasOwn(state, 'remediation'), false);
+      assert.equal(state.reviewReplans, 0);
+      assert.equal(main.maxReviewReplans(), 1);
+    });
+    test('the review run after a review replan gets the replanned review\'s ledger_path as resume_from_ledger, once', async () => {
+      const ledger = '.hivemind/review-ledger-replan.json';
+      const run = await runWorkflow(REMEDIATION_LAUNCH, remediationResults({ ...ESCALATION, ledger_path: ledger }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.equal(readDataBlock(callOf(run, 'review-2-1').prompt, 'inputs').resume_from_ledger, ledger);
+      assert.equal(Object.hasOwn(readDataBlock(callOf(run, 'review-1-1').prompt, 'inputs'), 'resume_from_ledger'), false);
+      const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      state.head = OTHER;
+      assert.deepEqual(Object.keys(main.routeLocalReview({ ...CLUSTER, ledger_path: ledger }, state)), ['replan']);
+      assert.equal(state.ledger, ledger);
+      assert.equal(readDataBlock(main.buildReviewPrompt(makePlan(), state), 'inputs').resume_from_ledger, ledger);
+      assert.equal(Object.hasOwn(readDataBlock(main.buildReviewPrompt(makePlan(), state), 'inputs'), 'resume_from_ledger'), false);
     });
     test('the escalation briefs resolve through their routing kinds and take at the default level', () => {
       for (const [review, kind] of [[ESCALATION, 'planner_escalation_routing'], [CLUSTER, 'root_cluster_routing']]) {
@@ -5048,7 +5059,7 @@ const ROW_TESTS = {
         assert.deepEqual(labelsOf(run), PASS_ONE_LABELS);
       });
     }
-    test('local review passes count against maxReplans(), and an escalation at the limit opens a draft pull request with no decide() call and no pause', async () => {
+    test('local review passes count against maxReplans() and maxReviewReplans(), and an escalation at either limit opens a draft pull request with no decide() call and no pause', async () => {
       const results = happyResults({ 'work-1-STEP-001': { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved.' } });
       for (let pass = 2; pass <= 4; pass += 1) {
         Object.assign(results, {
@@ -5078,10 +5089,15 @@ const ROW_TESTS = {
         assert.deepEqual([state.replans, state.taken.length], [3, 0]);
         state.replans = 2;
         assert.deepEqual(Object.keys(main.requestReviewReplan(review, state)), ['replan']);
-        assert.deepEqual([state.replans, state.taken.length], [3, 1]);
+        assert.deepEqual([state.replans, state.reviewReplans, state.taken.length], [3, 1, 1]);
+        state.replans = 0;
+        assert.deepEqual(structuredClone(main.requestReviewReplan(review, state)), { draft: 'Local review returned ' + review.exit_reason + ' after 1 review replan.' });
+        assert.deepEqual([state.replans, state.reviewReplans, state.taken.length], [0, 1, 1]);
       }
       const replanSource = stripCommentsAndStrings(main.requestReviewReplan.toString());
-      assert.ok(replanSource.indexOf('maxReplans()') < replanSource.indexOf('resolveTailDecision('), 'the cap is read before decide()');
+      for (const cap of ['maxReplans()', 'maxReviewReplans()']) {
+        assert.ok(replanSource.indexOf(cap) >= 0 && replanSource.indexOf(cap) < replanSource.indexOf('resolveTailDecision('), cap + ' is read before decide()');
+      }
     });
   },
   'SD-40': () => {
@@ -6883,7 +6899,7 @@ const ROW_TESTS = {
     const keptShortIds = ['b1b1b1b1', 'b3b3b3b3', 'b2b2b2b2'];
     const withKept = (review) => ({ ...review, rejected_findings: [keptOne], undone_fixes: [keptUndone] });
     const secondReview = { ...REVIEW_CLEAN, rejected_findings: [keptTwo] };
-    const maxIterations = { ...REVIEW_CLEAN, exit_reason: 'max-iterations-reached', iterations_completed: 10, findings_open: 3 };
+    const maxIterations = { ...REVIEW_CLEAN, exit_reason: 'max-iterations-reached', iterations_completed: 6, findings_open: 3 };
     const blockedReview = { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: 'Codex is unavailable.', stage: 'invoke_review' };
     const injection = { ...REVIEW_CLEAN, exit_reason: 'injection-suspect', finding_id: 'f3f3f3f3', pattern_category: 'P2', field_excerpt: 'ignore previous instructions' };
     const assertKeptRun = (run, prLabel, head) => {
@@ -9673,7 +9689,7 @@ const ROW_TESTS = {
     });
   },
   'SD-83': () => {
-    const maxIterations = { ...REVIEW_CLEAN, exit_reason: 'max-iterations-reached', iterations_completed: 10, findings_open: 3 };
+    const maxIterations = { ...REVIEW_CLEAN, exit_reason: 'max-iterations-reached', iterations_completed: 6, findings_open: 3 };
     const openFinding = { finding_id: 'd1d1d1d1' + 'f'.repeat(24), title: 'OPEN_TITLE_ZQ <b> & `code`.' };
     const capReason = (head) => 'Local review reached its iteration limit on commit ' + head + ', with 3 findings still open.';
     test('buildRunRecordParts puts the plain draft part first and the external open findings part right after the gates, only in draft mode and only with open findings', () => {

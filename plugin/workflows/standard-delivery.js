@@ -696,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '57b8aa8619944c5b';
+const BUILD_ID = '48dabebe28702eb1';
 
 function supportedSchemaKeywords(){
 return[
@@ -4975,12 +4975,16 @@ const returned='Local review returned '+review.exit_reason;
 if(run.replans>=maxReplans()){
 return{draft:returned+' after '+maxReplans()+' replans.'};
 }
+if(run.reviewReplans>=maxReviewReplans()){
+return{draft:returned+' after '+describeCount(maxReviewReplans(),'review replan')+'.'};
+}
 const brief=buildReviewEscalationBrief(review);
 const decided=resolveTailDecision(brief.kind,brief,run);
 if(isRunEnd(decided)){
 return decided;
 }
 run.replans+=1;
+run.reviewReplans+=1;
 const reason=returned+', so plan the remediation of what the review block reports, from the fresh facts.';
 return{replan:{reason:reason,review:projectReplanReview(review)}};
 }
@@ -5007,6 +5011,7 @@ return{held:true,note:'clean'+describeHeldCounts(run)};
 case'diminishing':
 return resolveDiminishingReturns(review,run);
 case'replan':
+run.ledger=review.ledger_path;
 return requestReviewReplan(review,run);
 case'question':
 return askReviewQuestion(review,run);
@@ -5086,6 +5091,9 @@ const SCOPE_SCHEMA=buildScopeSchema();
 function maxReplans(){
 return 3;
 }
+function maxReviewReplans(){
+return 1;
+}
 function maxFixRounds(){
 return 3;
 }
@@ -5093,7 +5101,7 @@ function maxGateReruns(){
 return 4;
 }
 function maxReviewIterations(){
-return 10;
+return 6;
 }
 function maxServiceWaits(){
 return 6;
@@ -5197,6 +5205,7 @@ notRunGates:[],
 waveCount:0,
 pass:0,
 replans:0,
+reviewReplans:0,
 branchSwitches:0,
 versionAnswer:undefined,
 factsStem:undefined,

@@ -34,7 +34,8 @@
  *           localReviewRoutes() routes each exit_reason: clean holds,
  *           diminishing returns resolve through decide() and a take holds, a
  *           planner escalation or root cluster resolves through
- *           decide() and a take starts a new pass with replan data: the review
+ *           decide() and a take, counted in run.replans and
+ *           run.reviewReplans, starts a new pass with replan data: the review
  *           projected to its exit_reason and the fields reviewExitFields()
  *           names for it, so rejected_findings, undone_fixes, ledger_path and
  *           the counts never reach the planner. A question of the review,
@@ -83,7 +84,8 @@
  *           valid value is never cut. max-iterations-reached and
  *           break-fix-break return {draft} with the lead, the head and the
  *           open finding count (issue 549); an escalation or root cluster at
- *           maxReplans() returns {draft} before decide() reads it. blocked
+ *           maxReplans() or at maxReviewReplans() returns {draft} naming
+ *           that limit before decide() reads it. blocked
  *           with retry_minutes 1 or more waits (waitForService) while the
  *           wait fits the waits left, maxServiceWaits() of at most
  *           maxWaitMinutes() each, and the resume args fit: with no reply for
@@ -95,7 +97,9 @@
  *           injection-suspect is terminal. Either rerun of a blocked
  *           review passes its ledger_path as resume_from_ledger, once, so
  *           the next loop keeps its iteration count and its break-fix and
- *           root-cluster history. A
+ *           root-cluster history. The replan route keeps its ledger_path
+ *           the same way, so the next review run, in the new pass, gets it
+ *           as resume_from_ledger once and keeps that history. A
  *           review result that fails REVIEW_SCHEMA, gives option ids other than
  *           A, B, C and D in that order, or recommends no option has a report
  *           lead, so stopDelivery ends the run blocked. describeReviewProblem reads the result before the
@@ -206,8 +210,9 @@ function buildReviewPrompt(plan, run, answer) {
     inputs.user_answer = answer;
   }
   /*
-   * A rerun after a blocked review resumes its fix ledger, so its
-   * iteration count and break-fix and root-cluster history carry over.
+   * A rerun after a blocked review, or the review after a review replan,
+   * resumes its fix ledger, so its break-fix and root-cluster history
+   * carry over.
    */
   if (run.ledger) {
     inputs.resume_from_ledger = run.ledger;
@@ -461,12 +466,16 @@ function requestReviewReplan(review, run) {
   if (run.replans >= maxReplans()) {
     return { draft: returned + ' after ' + maxReplans() + ' replans.' };
   }
+  if (run.reviewReplans >= maxReviewReplans()) {
+    return { draft: returned + ' after ' + describeCount(maxReviewReplans(), 'review replan') + '.' };
+  }
   const brief = buildReviewEscalationBrief(review);
   const decided = resolveTailDecision(brief.kind, brief, run);
   if (isRunEnd(decided)) {
     return decided;
   }
   run.replans += 1;
+  run.reviewReplans += 1;
   const reason = returned + ', so plan the remediation of what the review block reports, from the fresh facts.';
   return { replan: { reason: reason, review: projectReplanReview(review) } };
 }
@@ -506,6 +515,7 @@ function routeLocalReview(review, run) {
     case 'diminishing':
       return resolveDiminishingReturns(review, run);
     case 'replan':
+      run.ledger = review.ledger_path;
       return requestReviewReplan(review, run);
     case 'question':
       return askReviewQuestion(review, run);

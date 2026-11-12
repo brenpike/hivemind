@@ -339,6 +339,10 @@ function maxReplans() {
   return 3;
 }
 
+function maxReviewReplans() {
+  return 1;
+}
+
 function maxFixRounds() {
   return 3;
 }
@@ -348,7 +352,7 @@ function maxGateReruns() {
 }
 
 function maxReviewIterations() {
-  return 10;
+  return 6;
 }
 
 function maxServiceWaits() {
@@ -468,6 +472,7 @@ function createRunState(launch) {
     waveCount: 0,
     pass: 0,
     replans: 0,
+    reviewReplans: 0,
     branchSwitches: 0,
     versionAnswer: undefined,
     factsStem: undefined,
