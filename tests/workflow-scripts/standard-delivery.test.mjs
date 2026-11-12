@@ -443,13 +443,42 @@ function isUnscriptedScopeLabel(results, label) {
 }
 
 /**
+ * Returns the label whose result an unscripted opus planner label
+ * (plan-P-opus or revise-R-opus, SD-85) reuses, else undefined.
+ */
+function opusSourceLabel(results, label) {
+  const match = typeof label === 'string' && !Object.prototype.hasOwnProperty.call(results, label) ? /^((?:plan|revise)-\d+)-opus$/.exec(label) : null;
+  return match === null ? undefined : match[1];
+}
+
+/**
+ * Returns the default result of an unscripted label: EMPTY_SCOPE for a
+ * scope-N or scope-N-R label, the result of the sonnet call for a
+ * plan-P-opus or revise-R-opus label, else undefined.
+ */
+function defaultResultOf(results, label) {
+  if (isUnscriptedScopeLabel(results, label)) {
+    return { value: EMPTY_SCOPE };
+  }
+  const sourceLabel = opusSourceLabel(results, label);
+  return sourceLabel === undefined ? undefined : { value: results[sourceLabel] };
+}
+
+/**
  * Returns results with EMPTY_SCOPE as the result of every scope-N and
- * scope-N-R label the test does not script.
+ * scope-N-R label the test does not script, and the result of plan-P or
+ * revise-R as the result of an unscripted plan-P-opus or revise-R-opus.
  */
 function withDefaultScopes(results) {
   return new Proxy(results, {
-    getOwnPropertyDescriptor: (target, label) => (isUnscriptedScopeLabel(target, label) ? { value: EMPTY_SCOPE, writable: true, enumerable: true, configurable: true } : Reflect.getOwnPropertyDescriptor(target, label)),
-    get: (target, label, receiver) => (isUnscriptedScopeLabel(target, label) ? EMPTY_SCOPE : Reflect.get(target, label, receiver))
+    getOwnPropertyDescriptor: (target, label) => {
+      const fallback = defaultResultOf(target, label);
+      return fallback === undefined ? Reflect.getOwnPropertyDescriptor(target, label) : { value: fallback.value, writable: true, enumerable: true, configurable: true };
+    },
+    get: (target, label, receiver) => {
+      const fallback = defaultResultOf(target, label);
+      return fallback === undefined ? Reflect.get(target, label, receiver) : fallback.value;
+    }
   });
 }
 
@@ -1611,7 +1640,7 @@ const ROW_TESTS = {
     test('a taken local review escalation starts a pass with the facts step of its own', async () => {
       const run = await runWorkflow(LAUNCH, remediationResults(ESCALATION));
       const labels = labelsOf(run);
-      assert.deepEqual(labels.slice(labels.indexOf('review-commit-1-1')), ['review-commit-1-1', 'facts-2', 'scope-2', 'plan-2']);
+      assert.deepEqual(labels.slice(labels.indexOf('review-commit-1-1')), ['review-commit-1-1', 'facts-2', 'scope-2', 'plan-2', 'plan-2-opus']);
       assert.equal(callOf(run, 'facts-2').opts.phase, 'Facts');
       assert.ok(contract.contractRows().find((row) => row.id === 'SD-07').rule.includes('after a taken local review escalation or root cluster'));
     });
@@ -4984,7 +5013,7 @@ const ROW_TESTS = {
       test(`a taken ${label} starts a new pass through the facts step with the projected review as replan data`, async () => {
         const run = await runWorkflow(LAUNCH, remediationResults(review));
         assert.equal(run.result.needs_user, true);
-        assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2']);
+        assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'plan-2-opus']);
         const prompt = callOf(run, 'plan-2').prompt;
         assert.equal(readDataBlock(prompt, 'replan'), 'Local review returned ' + label + ', so plan the remediation of what the review block reports, from the fresh facts.');
         const block = readDataBlock(prompt, 'review');
@@ -5021,7 +5050,7 @@ const ROW_TESTS = {
       const results = remediationResults(ESCALATION, { 'review-2-1': { ...CLUSTER, open_findings: [openFinding] } });
       const run = await runWorkflow(REMEDIATION_LAUNCH, results);
       assertDraftPullRequest(run, 'pr-2', 'Local review returned root-cluster-suspected after 1 review replan.', [openFinding]);
-      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'plan-2-opus', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
       assert.equal(readDataBlock(callOf(run, 'plan-2').prompt, 'replan'), 'Local review returned planner-escalation, so plan the remediation of what the review block reports, from the fresh facts.');
       assert.ok(!run.result.message.includes(main.buildReviewEscalationBrief(CLUSTER).problem), run.result.message);
       const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
@@ -5132,7 +5161,7 @@ const ROW_TESTS = {
         assert.ok(!message.includes(plan.summary) && !message.includes('per-agent results'), message);
         const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, run it.'), results);
         assert.equal(run.result.outcome, 'complete', run.result.message);
-        assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
+        assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', ...(flag === 'architectural' ? ['plan-2-opus'] : []), 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
         assert.equal(readDataBlock(callOf(run, 'revise-1').prompt, 'reply'), 'Yes, run it.');
         assert.ok(run.result.message.includes('\n\n' + HELD_ALL + THIRD + '.'), run.result.message);
         assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: main.buildReviewEscalationBrief(ESCALATION) }])), run.result.message);
@@ -5163,13 +5192,13 @@ const ROW_TESTS = {
       const rewritten = planResult({ ...REMEDIATION_PLAN, summary: REMEDIATION_PLAN.summary + ' The user accepted this plan.' });
       const run = await runWorkflow(REMEDIATION_LAUNCH, remediationResults(ESCALATION, { 'revise-1': reviseResult(rewritten, ['Q1']) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'plan-2-opus', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
       assert.ok(prBodyOf(run, 'pr-2').startsWith(bodyStart(REMEDIATION_PLAN) + '\n\n'), prBodyOf(run, 'pr-2'));
     });
     test('a settled remediation plan acceptance runs the shown plan, not the replacement plan the revise returned', async () => {
       const run = await runWorkflow(REMEDIATION_LAUNCH, remediationResults(ESCALATION, { 'revise-1': reviseResult(planResult(replacementPlan()), ['Q1']) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'plan-2-opus', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
       assert.ok(!run.result.message.includes('effect outside the repo'), run.result.message);
       assert.ok(prBodyOf(run, 'pr-2').startsWith(bodyStart(REMEDIATION_PLAN) + '\n\n'), prBodyOf(run, 'pr-2'));
     });
@@ -7167,7 +7196,7 @@ const ROW_TESTS = {
       const paused = await runWorkflow(LAUNCH, results);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reviewReply), results);
       assert.equal(run.result.needs_user, true, run.result.message);
-      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'review-1-2', 'review-commit-1-2', 'facts-2', 'scope-2', 'plan-2']);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'review-1-2', 'review-commit-1-2', 'facts-2', 'scope-2', 'plan-2', 'plan-2-opus']);
       const prompt = callOf(run, 'plan-2').prompt;
       assert.deepEqual(readDataBlock(prompt, 'review'), structuredClone(main.projectReplanReview(ESCALATION)));
       assert.deepEqual(readDataBlock(prompt, 'answers'), [{ question: reviewQuestionText(), settled: ['Q1'], reply: reviewReply }]);
@@ -7791,7 +7820,7 @@ const ROW_TESTS = {
     test('a review replan carries the answer log into the next plan prompt next to the review block', async () => {
       const run = await runWorkflow(answeredArgs({}), answeredResults({ 'review-1-1': ESCALATION, 'facts-2': onPlanBranchFacts(OTHER), 'plan-2': planResult(REMEDIATION_PLAN) }));
       assert.equal(run.result.needs_user, true, run.result.message);
-      assert.equal(labelsOf(run).at(-1), 'plan-2');
+      assert.equal(labelsOf(run).at(-1), 'plan-2-opus');
       const prompt = callOf(run, 'plan-2').prompt;
       assertSettledAnswers(prompt, [firstAnswerOf(run)]);
       assert.ok(prompt.indexOf('<review>') < prompt.indexOf('<answers>'));
@@ -7823,9 +7852,9 @@ const ROW_TESTS = {
       assert.ok(question.includes('Q1. GATED_PROBLEM') && question.includes('Q2. SECOND_PROBLEM'), question);
       return { question: question, settled: ['Q1'], reply: firstReply };
     }
-    function assertSecondAskedAgain(run, entries) {
+    function assertSecondAskedAgain(run, entries, lastLabel) {
       assert.equal(run.result.needs_user, true, run.result.message);
-      assert.equal(labelsOf(run).at(-1), 'plan-2');
+      assert.equal(labelsOf(run).at(-1), lastLabel);
       assert.ok(run.result.message.includes('Q1. SECOND_PROBLEM'), run.result.message);
       assert.ok(!run.result.message.includes('GATED_PROBLEM'), run.result.message);
       for (const label of ['scope-2', 'plan-2']) {
@@ -7835,14 +7864,14 @@ const ROW_TESTS = {
       }
     }
     const partlySettledReplans = [
-      ['branch', answeredArgs({}), happyResults({ 'plan-1': twoGated, 'revise-1': partlyRevised, ...branchReplan, 'plan-2': secondAgain }), []],
-      ['tail', answeredArgs({ 'round-2': TAIL_REPLY }), tailReplanResults({ 'plan-1': twoGated, 'revise-1': partlyRevised, 'plan-2': secondAgain }), [{ question: TAIL_LEAD + '\n\n' + lib.renderQuestions([tailAskOf()]), settled: [], reply: TAIL_REPLY }]],
-      ['review', answeredArgs({}), happyResults({ 'plan-1': twoGated, 'revise-1': partlyRevised, 'review-1-1': ESCALATION, 'facts-2': onPlanBranchFacts(OTHER), 'plan-2': planResult(REMEDIATION_PLAN, [secondBrief]) }), []]
+      ['branch', answeredArgs({}), happyResults({ 'plan-1': twoGated, 'revise-1': partlyRevised, ...branchReplan, 'plan-2': secondAgain }), [], 'plan-2'],
+      ['tail', answeredArgs({ 'round-2': TAIL_REPLY }), tailReplanResults({ 'plan-1': twoGated, 'revise-1': partlyRevised, 'plan-2': secondAgain }), [{ question: TAIL_LEAD + '\n\n' + lib.renderQuestions([tailAskOf()]), settled: [], reply: TAIL_REPLY }], 'plan-2'],
+      ['review', answeredArgs({}), happyResults({ 'plan-1': twoGated, 'revise-1': partlyRevised, 'review-1-1': ESCALATION, 'facts-2': onPlanBranchFacts(OTHER), 'plan-2': planResult(REMEDIATION_PLAN, [secondBrief]) }), [], 'plan-2-opus']
     ];
-    for (const [label, args, results, laterEntries] of partlySettledReplans) {
+    for (const [label, args, results, laterEntries, lastLabel] of partlySettledReplans) {
       test('a reply settling Q1 of Q1 and Q2 is logged with settled ["Q1"] through a ' + label + ' replan, which asks Q2 again', async () => {
         const run = await runWorkflow(args, results);
-        assertSecondAskedAgain(run, [partlySettledEntry(run), ...laterEntries]);
+        assertSecondAskedAgain(run, [partlySettledEntry(run), ...laterEntries], lastLabel);
       });
     }
     test('a second revise in the same pass carries the first round entry with its settled labels', async () => {
@@ -9896,6 +9925,46 @@ const ROW_TESTS = {
         assert.equal(readDataBlock(callOf(resumed, 'review-1-2').prompt, 'inputs').resume_from_ledger, LEDGER_PATH);
       });
     }
+  },
+  'SD-85': () => {
+    const IRREVERSIBLE_GATE = { promotion_gate: { irreversible: true, architectural: false, safety: false }, grows_surface: false, repeats_surface: false };
+    const IRREVERSIBLE_PLAN = { ...REMEDIATION_PLAN, remediation_gate: IRREVERSIBLE_GATE };
+    const OPUS_PLAN = { ...REMEDIATION_PLAN, summary: 'Key the cache by tenant before the auth check.' };
+    const modelsOf = (run, labels) => labels.map((label) => callOf(run, label).opts.model);
+    const passTwoLabels = (run) => labelsOf(run).slice(labelsOf(run).indexOf('scope-2') + 1, labelsOf(run).indexOf('branch-2'));
+    test('a pass with no review sets no planner model, and a review replan plans and revises on sonnet with no opus call while no result flags architectural', async () => {
+      const run = await runWorkflow(REMEDIATION_LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(IRREVERSIBLE_PLAN), 'revise-1': reviseResult(planResult(IRREVERSIBLE_PLAN), ['Q1']) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(Object.keys(callOf(run, 'plan-1').opts), ['agentType', 'schema', 'label', 'phase']);
+      assert.deepEqual(passTwoLabels(run), ['plan-2', 'revise-1']);
+      assert.deepEqual(modelsOf(run, ['plan-2', 'revise-1']), ['sonnet', 'sonnet']);
+      assert.deepEqual(Object.keys(callOf(run, 'plan-2').opts), ['agentType', 'schema', 'label', 'phase', 'model']);
+    });
+    test('a sonnet review replan plan that flags architectural goes once more on opus with the same prompt, the pass reads the opus plan, and its revise stays on opus', async () => {
+      const results = remediationResults(ESCALATION, { 'plan-2-opus': planResult(OPUS_PLAN), 'revise-1': reviseResult(planResult(OPUS_PLAN), ['Q1']) });
+      const run = await runWorkflow(REMEDIATION_LAUNCH, results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(passTwoLabels(run), ['plan-2', 'plan-2-opus', 'revise-1']);
+      assert.deepEqual(modelsOf(run, ['plan-2', 'plan-2-opus', 'revise-1']), ['sonnet', 'opus', 'opus']);
+      assert.equal(callOf(run, 'plan-2-opus').prompt, callOf(run, 'plan-2').prompt);
+      assert.deepEqual(readDataBlock(callOf(run, 'revise-1').prompt, 'earlier_plan'), OPUS_PLAN);
+    });
+    test('each -fix-N retry runs on the model of its call, and a sonnet result failing its check is never sent on opus', async () => {
+      const bad = planResult(makePlan({ steps: [] }));
+      const results = remediationResults(ESCALATION, { 'plan-2': bad, 'plan-2-fix-1': planResult(REMEDIATION_PLAN), 'plan-2-opus': bad, 'plan-2-opus-fix-1': planResult(CLEAN_REMEDIATION_PLAN) });
+      const run = await runWorkflow(LAUNCH, results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(passTwoLabels(run), ['plan-2', 'plan-2-fix-1', 'plan-2-opus', 'plan-2-opus-fix-1']);
+      assert.deepEqual(modelsOf(run, passTwoLabels(run)), ['sonnet', 'sonnet', 'opus', 'opus']);
+    });
+    test('a sonnet revise that flags architectural goes once more on opus as revise-R-opus with the same prompt', async () => {
+      const results = remediationResults(ESCALATION, { 'plan-2': planResult(IRREVERSIBLE_PLAN), 'revise-1': reviseResult(planResult(REMEDIATION_PLAN), ['Q1']) });
+      const run = await runWorkflow(REMEDIATION_LAUNCH, results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(passTwoLabels(run), ['plan-2', 'revise-1', 'revise-1-opus']);
+      assert.deepEqual(modelsOf(run, passTwoLabels(run)), ['sonnet', 'sonnet', 'opus']);
+      assert.equal(callOf(run, 'revise-1-opus').prompt, callOf(run, 'revise-1').prompt);
+    });
   }
 };
 

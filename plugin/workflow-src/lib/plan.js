@@ -58,9 +58,10 @@
  *   main.js: the build bundles this library into it, so a row can name a
  *   function of this library.
  *   Once local review sent the run back to planning, every later plan
- *   acceptance resolves through decide() kind
- *   remediation_plan_acceptance, with the brief of
- *   buildRemediationPlanBrief (briefs.js).
+ *   acceptance resolves through decide() kind remediation_plan_acceptance,
+ *   with the brief of buildRemediationPlanBrief (briefs.js).
+ *   A pass whose replan data carries a review plans on sonnet, and on opus
+ *   once a result flags architectural (callPassPlanner, lib/checks.js).
  *   Every decision resolves through decide() with its kind fixed here,
  *   never from brief.kind. Every question of a plan pass is keyed through
  *   questionKey by its kind, a scope its call site passes and the question
@@ -79,16 +80,15 @@
  *   runs, and a revise that only rewrites the summary to record the answer
  *   does not ask again (issue 433). The residual: a planner question raised
  *   again with other rendered text, a changed recommendation too, is a new
- *   question, asked again in the next pause. The planner's revise pass
- *   reads the reply. The revise result names in settled, by label like Q1,
- *   the shown questions the reply settled: only the keys of those questions
- *   count as answered and are not asked again, and every other question
- *   resolves again and goes in the next pause. A pause shows no decision
- *   made for you, so settled holds Q labels only. Which shown questions a
- *   reply settles is the planner's judgment, as its gate flags are
- *   (ADR-0037 decision 3). The impact is
- *   bounded: a question the planner does not name is asked again, the
- *   settled enum allows only the labels shown, and nothing runs while a
+ *   question, asked again in the next pause. The planner's revise pass reads
+ *   the reply. The revise result names in settled, by label like Q1, the
+ *   shown questions the reply settled: only the keys of those questions count
+ *   as answered and are not asked again, and every other question resolves
+ *   again and goes in the next pause. A pause shows no decision made for you,
+ *   so settled holds Q labels only. Which shown questions a reply settles is
+ *   the planner's judgment, as its gate flags are (ADR-0037 decision 3). The
+ *   impact is bounded: a question the planner does not name is asked again,
+ *   the settled enum allows only the labels shown, and nothing runs while a
  *   question is open. Rejected: a free-text reply has no code parse, and a
  *   pause per effect adds stops (review finding d5619285, option C).
  *   Every plan value at a field whose PLAN_SCHEMA description starts with
@@ -542,7 +542,8 @@ async function runPlanningPass(run, facts, passScope, replan) {
   if (facts.head_state === 'branch' && facts.branch !== run.trunk && !new RegExp(PLAN_SCHEMA.properties.branch.pattern, 'u').test(facts.branch)) {
     return stopDelivery([{ problem: describeStartBranch(facts) + describeTaxonomyMiss() + '.' }], run, [], true);
   }
-  let checked = await callCheckedPlanner(run, facts, { prompt: buildPlanPrompt(run.request, facts, scope, replan, listAnswerEntries(run)), label: 'plan-' + run.pass, phaseTitle: 'Plan', schema: resultSchema });
+  const pass = { model: replan === undefined || replan.review === undefined ? undefined : 'sonnet' };
+  let checked = await callPassPlanner(run, facts, { prompt: buildPlanPrompt(run.request, facts, scope, replan, listAnswerEntries(run)), label: 'plan-' + run.pass, phaseTitle: 'Plan', schema: resultSchema }, pass);
   for (;;) {
     let { planResult, problem } = checked;
     if (problem !== undefined) {
@@ -594,6 +595,6 @@ async function runPlanningPass(run, facts, passScope, replan) {
     shownEntry = { question: questions, labels: listShownLabels(shownAsks), reply: reply };
     resultSchema = buildReviseResultSchema(shownAsks);
     const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, answers: listAnswerEntries(run), plan: planResult.plan, questions: questions, reply: reply });
-    checked = await callCheckedPlanner(run, facts, { prompt: revisePrompt, label: 'revise-' + round, phaseTitle: 'Revise', schema: resultSchema });
+    checked = await callPassPlanner(run, facts, { prompt: revisePrompt, label: 'revise-' + round, phaseTitle: 'Revise', schema: resultSchema }, pass);
   }
 }

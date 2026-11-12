@@ -696,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '48dabebe28702eb1';
+const BUILD_ID = '2a5cb1b933bf2b15';
 
 function supportedSchemaKeywords(){
 return[
@@ -2520,8 +2520,8 @@ return isTransientBlock(relay)?agent(buildPrompt(retryLabel),runnerOptions(retry
 function droneOptions(label,phaseTitle,schema){
 return{agentType:droneAgentType(),schema:toAgentSchema(schema),label:label,phase:phaseTitle};
 }
-function plannerCallOptions(label,phaseTitle,resultSchema){
-return{agentType:PLANNER_AGENT,schema:toAgentSchema(resultSchema),label:label,phase:phaseTitle};
+function plannerCallOptions(label,phaseTitle,resultSchema,model){
+return{agentType:PLANNER_AGENT,schema:toAgentSchema(resultSchema),label:label,phase:phaseTitle,...(model===undefined?{}:{model:model})};
 }
 function describeCommandStop(stepNoun,words,retryWords=[]){
 const problem=describeRunnerWordProblem(words.concat(retryWords));
@@ -3027,7 +3027,8 @@ const settledKinds=new Set();
 if(facts.head_state==='branch'&&facts.branch!==run.trunk&&!new RegExp(PLAN_SCHEMA.properties.branch.pattern,'u').test(facts.branch)){
 return stopDelivery([{problem:describeStartBranch(facts)+describeTaxonomyMiss()+'.'}],run,[],true);
 }
-let checked=await callCheckedPlanner(run,facts,{prompt:buildPlanPrompt(run.request,facts,scope,replan,listAnswerEntries(run)),label:'plan-'+run.pass,phaseTitle:'Plan',schema:resultSchema});
+const pass={model:replan===undefined||replan.review===undefined?undefined:'sonnet'};
+let checked=await callPassPlanner(run,facts,{prompt:buildPlanPrompt(run.request,facts,scope,replan,listAnswerEntries(run)),label:'plan-'+run.pass,phaseTitle:'Plan',schema:resultSchema},pass);
 for(;;){
 let{planResult,problem}=checked;
 if(problem!==undefined){
@@ -3072,7 +3073,7 @@ shownResult=planResult;
 shownEntry={question:questions,labels:listShownLabels(shownAsks),reply:reply};
 resultSchema=buildReviseResultSchema(shownAsks);
 const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:listAnswerEntries(run),plan:planResult.plan,questions:questions,reply:reply});
-checked=await callCheckedPlanner(run,facts,{prompt:revisePrompt,label:'revise-'+round,phaseTitle:'Revise',schema:resultSchema});
+checked=await callPassPlanner(run,facts,{prompt:revisePrompt,label:'revise-'+round,phaseTitle:'Revise',schema:resultSchema},pass);
 }
 }
 
@@ -3083,7 +3084,7 @@ async function callCheckedPlanner(run,facts,call){
 let attempt=call.prompt;
 for(let retry=0;;retry+=1){
 const label=retry===0?call.label:call.label+'-fix-'+retry;
-const result=normalizePlanTitle(await agent(addRelaySentence(attempt,run),plannerCallOptions(label,call.phaseTitle,call.schema)),call.schema);
+const result=normalizePlanTitle(await agent(addRelaySentence(attempt,run),plannerCallOptions(label,call.phaseTitle,call.schema,call.model)),call.schema);
 const planProblem=describePlanProblem(result,call.schema,facts,run.trunk,run.references);
 const problem=planProblem===undefined?describeQuestionProblem(result,run):planProblem;
 const isFixable=problem!==undefined&&isFixableResult(result,call.schema);
@@ -3092,6 +3093,14 @@ return{planResult:result,problem:problem,isExhausted:isFixable};
 }
 attempt=buildCheckFixPrompt(call.prompt,problem,validateSchema(call.schema,result).errors);
 }
+}
+async function callPassPlanner(run,facts,call,pass){
+const checked=await callCheckedPlanner(run,facts,{...call,model:pass.model});
+if(pass.model!=='sonnet'||checked.problem!==undefined||!checked.planResult.plan.remediation_gate.promotion_gate.architectural){
+return checked;
+}
+pass.model='opus';
+return callCheckedPlanner(run,facts,{...call,label:call.label+'-opus',model:pass.model});
 }
 
 function buildScopeItem(properties){

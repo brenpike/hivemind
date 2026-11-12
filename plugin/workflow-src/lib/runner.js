@@ -43,6 +43,10 @@
  *   describeCommandStop(stepNoun, words, retryWords)  a terminal report
  *           cause when describeRunnerWordProblem finds a problem in the
  *           words, else undefined.
+ *   plannerCallOptions(label, phaseTitle, resultSchema, model)  the agent
+ *           options of a plan or revise call. model is optional: the options
+ *           hold a model key only when it is given, so a call with none
+ *           keeps the options it had before model existed.
  *   The options, relay checks and blocker quotes every other runner step
  *   uses. The steps:
  *   Facts   a haiku hivemind:synapse runner runs the gather-facts command
@@ -184,8 +188,8 @@ function droneOptions(label, phaseTitle, schema) {
   return { agentType: droneAgentType(), schema: toAgentSchema(schema), label: label, phase: phaseTitle };
 }
 
-function plannerCallOptions(label, phaseTitle, resultSchema) {
-  return { agentType: PLANNER_AGENT, schema: toAgentSchema(resultSchema), label: label, phase: phaseTitle };
+function plannerCallOptions(label, phaseTitle, resultSchema, model) {
+  return { agentType: PLANNER_AGENT, schema: toAgentSchema(resultSchema), label: label, phase: phaseTitle, ...(model === undefined ? {} : { model: model }) };
 }
 
 function describeCommandStop(stepNoun, words, retryWords = []) {
