@@ -6,7 +6,7 @@ Read this file when initializing or updating the fix ledger in Procedure step 3.
 {
   "branch": "string",
   "base": "string",
-  "max_iterations": 10,
+  "max_iterations": 6,
   "iterations": [
     {
       "iteration": 1,
