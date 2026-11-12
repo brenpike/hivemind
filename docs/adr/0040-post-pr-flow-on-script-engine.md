@@ -95,7 +95,7 @@ PR2, PR3 and PR4 touch disjoint files and can proceed in parallel.
 ## Recorded residuals
 
 - **F1 stays a known limit (D1).** The overlord may still skip the workflow's `message` before the watch. The bounded impact ADR-0037 records stands: the user still sees the PR and the watch report.
-- **GitHub writes from a workflow agent are untested until PR6 (edge case c).** A failed check holds go-live and amends this ADR. *(2026-11-12: the check is now one supervised run in auto mode. See Amendment 2026-11-12.)*
+- **GitHub writes from a workflow agent are untested until PR6 (edge case c).** A failed check holds go-live and amends this ADR. *(2026-11-12: the check is now one supervised run in auto mode. See Amendment 2026-11-12.)* *(2026-11-12: the run passed. Push and PR comment completed; reply and resolve were not exercised. See Amendment 2026-11-12, Result.)*
 - **R4 grows (edge case d).** open-plan-pr's R4 now covers at most one decisions comment per remediation run that took a decision.
 - **A No at the approval prompt ends the turn (edge case e).** Nothing falls back in that turn. The user restarts the watch.
 
@@ -245,7 +245,21 @@ This amendment replaces the method of edge case (c). The edge case's text stays 
 
 ### Result
 
-pending
+**Verdict: pass.** The user chose to count the run as a pass, with review-thread reply and resolve recorded as not exercised.
+
+**Run.** 2026-11-12, Claude Code 2.1.322, auto mode, a normal interactive session with the user watching. No `claude -p` and no headless or API-billed run. Test PR: https://github.com/brenpike/hivemind/pull/566 (PR6 itself). Run `wf_fe5b5a3b-c49`, launched with `{"references": [566], "trunk": "main"}`.
+
+**Input.** A Codex GitHub review P1 on `plugin/workflows/pr-feedback-remediation.js`: a one-shot fix returning `user-input-required` or `high-severity-rejection` ended blocked with no answer path.
+
+**Path.** The fix pass escalated to the planner. The autonomy table took D1 (re-plan from fresh facts). Waves ran, validation held, then the push and a PR comment. Outcome complete, 15 agents, about 25 minutes.
+
+**Writes attempted, both completed.** `git push` of commits `1d214b53` and `59675c20` through the push script (PR head `59675c20`). The `gh` PR comment carrying the decisions.
+
+**Not exercised.** Review-thread reply and resolve (`reply-resolve.sh`). The escalation path does not reply or resolve, so the Codex thread stayed unresolved for the watch.
+
+**Denials and blocks.** None: no permission prompt, no denial, no auto-mode block. One hook deny came from the plugin's own `synapse-gate` (the `bump-type.sh` exact-form rule) on a malformed call, which the agent corrected. It is a command-format guard, not a permission denial.
+
+**Residual.** Reply and resolve from a workflow agent in auto mode are unproven. If the auto-mode classifier blocks them, the thread stays unresolved and the run ends blocked with the denial shown. The opt-out is `Workflow(hivemind:pr-feedback-remediation)` in `permissions.deny`.
 
 ## Amendment 2026-11-12: local review finding 4ffc2b81, the head-branch checkout keeps the loaded shell rule
 
