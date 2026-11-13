@@ -412,7 +412,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = '827b280951d4183b';
+const BUILD_ID = '39b89329b805ca36';
 
 function supportedSchemaKeywords(){
 return[
@@ -1400,16 +1400,17 @@ return causes.slice().sort((first,second)=>rankCause(first)-rankCause(second));
 function maxBlockedLeadLength(){
 return 1000;
 }
+function buildLeadBlock(text,bound){
+const compact=cutAtBoundary(text,bound);
+return compact===text?{text:text}:{text:text,compact:compact};
+}
 function buildStopBlocks(causes){
 if(!Array.isArray(causes)||causes.length===0){
 throw new Error('buildStopBlocks: causes must be a non-empty array');
 }
-const orderedCauses=orderStopCauses(causes);
-const leadText=orderedCauses[0].problem;
-const compactLead=cutAtBoundary(leadText,maxBlockedLeadLength());
-const leadBlock=compactLead===leadText?{text:leadText}:{text:leadText,compact:compactLead};
-const laterBlocks=orderedCauses.slice(1).map((cause)=>({text:cause.problem}));
-return[leadBlock,{text:nextStepLine(orderedCauses[0].nextAction),whole:true}].concat(laterBlocks);
+const[leadCause,...laterCauses]=orderStopCauses(causes);
+const leadBlock=buildLeadBlock(leadCause.problem,maxBlockedLeadLength());
+return[leadBlock,{text:nextStepLine(leadCause.nextAction),whole:true},...laterCauses.map((cause)=>({text:cause.problem}))];
 }
 
 function readArgsObject(rawArgs){

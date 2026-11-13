@@ -3459,9 +3459,9 @@ const ROW_TESTS = {
     });
     test('every tail ask goes through askTail, an undecided one through buildUndecidedAsk with its kind, and no tail ask ends the run', () => {
       assert.ok(!moduleSource.includes('finishTailAsk') && !moduleSource.includes('before_pr'));
-      assert.ok(moduleSource.includes('function askTails(asks, run, lead) {\n  const leadText = lead === undefined ? describeTailLead(run) : lead;'));
-      assert.ok(moduleSource.includes('return { result: pauseDelivery({ asks: asks, taken: [] }, run, leadText) };'));
-      assert.ok(moduleSource.includes('function askTail(ask, run, lead) {\n  return askTails([ask], run, lead);\n}'));
+      assert.ok(moduleSource.includes('function askTails(asks, run, lead, pinned) {\n  const leadText = lead === undefined ? describeTailLead(run) : lead;'));
+      assert.ok(moduleSource.includes('return { result: pauseDelivery({ asks: asks, taken: [] }, run, leadText, pinned) };'));
+      assert.ok(moduleSource.includes('function askTail(ask, run, lead, pinned) {\n  return askTails([ask], run, lead, pinned);\n}'));
       assert.ok(moduleSource.includes('  return replanFromTailAsk(resolution.asks[0], run);\n}'));
       assert.equal((moduleSource.match(/replanFromTailAsk\(buildUndecidedAsk\(/g) || []).length, 1);
       assert.ok(moduleSource.includes('replanFromTailAsk(buildUndecidedAsk(VALIDATION_REMEDIATION_KIND, buildFixLimitBrief(run.head), run), run)'));
@@ -3485,6 +3485,111 @@ const ROW_TESTS = {
       assert.deepEqual(structuredClone(state.answerLog.map((entry) => entry.settled)), [['Q1'], ['Q1', 'Q2']]);
       assert.equal(state.answeredKeys.size, 0);
       assert.equal(asks.some((ask) => ask.key !== undefined), false);
+    });
+    function makeShownAsks(count) {
+      return Array.from({ length: count }, (unused, index) => surfacedAsk(makeMaxBrief(index)));
+    }
+    function buildPauseBlocks(asks, lead, pinned) {
+      const questionsBlock = { text: lib.renderQuestions(asks) };
+      if (asks.some((ask) => ask.exact === true || lib.hasDestructiveOption(ask))) {
+        questionsBlock.whole = true;
+      }
+      const bound = pinned === undefined ? lib.maxBlockedLeadLength() : lib.maxPinnedLeadLength();
+      const compactLead = lib.cutAtBoundary(lead, bound);
+      const leadBlock = compactLead === lead ? { text: lead } : { text: lead, compact: compactLead };
+      return [leadBlock, ...(pinned === undefined ? [] : [{ text: pinned, whole: true }]), questionsBlock];
+    }
+    function pauseByFormula(asks, run, lead, pinned) {
+      const resumeArgs = lib.buildResumeArgs(run.answerLog.map((entry) => entry.reply), BUILD_ID);
+      return lib.pauseForUser({ resumeArgs: resumeArgs, blocks: buildPauseBlocks(asks, lead, pinned) });
+    }
+    function makeEffectResolution(summaries) {
+      const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js'], { external_effects: summaries.map((summary) => ({ summary: summary, reversible: false })) })] });
+      const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      return { run: run, resolution: main.resolvePlanAsks(planResult(plan, [makeGatedBrief('GATED_PROBLEM')]), parsedFacts(), run, EMPTY_SCOPE) };
+    }
+    test('callers without pinned are byte-identical: a short lead, a lead past maxBlockedLeadLength(), an exact ask, replies past canCarry and an exact ask too long to show', () => {
+      const shortAsks = [surfacedAsk(makeGatedBrief('SHORT_PROBLEM'))];
+      const longLead = 'LONG_LEAD_ZQ ' + 'word '.repeat(400);
+      assert.ok(Array.from(longLead).length > lib.maxBlockedLeadLength());
+      const freshRun = () => main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      const manyAsks = makeShownAsks(15);
+      for (const [asks, lead] of [[shortAsks, 'SHORT_LEAD_ZQ.'], [shortAsks, longLead], [manyAsks, longLead], [manyAsks, 'SHORT_LEAD_ZQ.']]) {
+        const run = freshRun();
+        const paused = main.pauseDelivery({ asks: asks, taken: [] }, run, lead);
+        assert.equal(paused.needs_user, true);
+        assert.deepEqual(structuredClone(paused), structuredClone(pauseByFormula(asks, run, lead)));
+      }
+      const withCompactLead = main.pauseDelivery({ asks: manyAsks, taken: [] }, freshRun(), longLead);
+      assert.ok(withCompactLead.message.includes(lib.cutAtBoundary(longLead, lib.maxBlockedLeadLength())), withCompactLead.message.slice(0, 300));
+      const exact = makeEffectResolution(['Publish version 2 to the package registry.']);
+      assert.ok(exact.resolution.asks.some((ask) => ask.exact === true));
+      const exactPause = main.pauseDelivery(exact.resolution, exact.run, 'EXACT_LEAD_ZQ.');
+      assert.deepEqual(structuredClone(exactPause), structuredClone(pauseByFormula(exact.resolution.asks, exact.run, 'EXACT_LEAD_ZQ.')));
+      assert.ok(exactPause.message.includes('Word for word:\n'), exactPause.message);
+      const replySizeRun = freshRun();
+      replySizeRun.answerLog.push({ question: 'Q', settled: [], reply: 'x'.repeat(5000) });
+      const replySize = main.pauseDelivery({ asks: shortAsks, taken: [] }, replySizeRun, 'SHORT_LEAD_ZQ.');
+      assert.equal(replySize.outcome, 'blocked');
+      assert.deepEqual(structuredClone(replySize), structuredClone(main.finishOpenQuestions({ asks: shortAsks, taken: [] }, 'reply_size', replySizeRun)));
+      const tooLong = makeEffectResolution(Array.from({ length: 30 }, (unused, index) => ('Run migration ' + index + ': ').padEnd(300, 'M')));
+      const exactTooLong = main.pauseDelivery(tooLong.resolution, tooLong.run, 'SHORT_LEAD_ZQ.');
+      assert.equal(exactTooLong.outcome, 'blocked');
+      assert.deepEqual(structuredClone(exactTooLong), structuredClone(main.finishOpenQuestions(tooLong.resolution, 'exact_text_size', tooLong.run)));
+      const state = main.createRunState({ argsObject: { answers: {}, reply: TAIL_REPLY }, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      const asked = main.askTails(shortAsks, state, 'LEAD_ZQ');
+      assert.equal(asked.answer.question, 'LEAD_ZQ\n\n' + lib.renderQuestions(shortAsks));
+      assert.equal(state.answerLog[0].question, 'LEAD_ZQ\n\n' + lib.renderQuestions(shortAsks));
+    });
+    test('pauseDelivery with pinned shows the lead compact at maxPinnedLeadLength() code points, the pinned text whole, then the questions', () => {
+      assert.equal(lib.maxPinnedLeadLength(), 100);
+      const lead = 'PINNED_LEAD_ZQ ' + 'word '.repeat(60);
+      const pinned = 'PINNED_ZQ first line.\nPINNED_ZQ second line.';
+      const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      const asks = [surfacedAsk(makeGatedBrief('SHORT_PROBLEM'))];
+      const whole = main.pauseDelivery({ asks: asks, taken: [] }, run, lead, pinned);
+      assert.equal(whole.message, [lead, pinned, lib.renderQuestions(asks)].join('\n\n'));
+      const manyAsks = makeShownAsks(15);
+      const paused = main.pauseDelivery({ asks: manyAsks, taken: [] }, run, lead, pinned);
+      const compactLead = lib.cutAtBoundary(lead, 100);
+      assert.ok(Array.from(compactLead).length <= 100 && compactLead.length < lead.length);
+      assert.equal(paused.needs_user, true);
+      assert.ok(paused.message.includes([compactLead, pinned].join('\n\n') + '\n\n'), paused.message.slice(0, 400));
+      assert.ok(!paused.message.includes(lead), 'the lead shows only compact');
+      assert.deepEqual(structuredClone(paused), structuredClone(pauseByFormula(manyAsks, run, lead, pinned)));
+      const effects = makeEffectResolution(['Publish version 2 to the package registry.']);
+      const exact = main.pauseDelivery(effects.resolution, effects.run, lead, pinned);
+      assert.deepEqual(structuredClone(exact), structuredClone(pauseByFormula(effects.resolution.asks, effects.run, lead, pinned)));
+    });
+    test('finishDeliveryBlocked and finishOpenQuestions with pinned open their blocks with the pinned text whole', () => {
+      const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      const pinned = 'PINNED_ZQ ' + 'p'.repeat(1500);
+      const blocked = main.finishDeliveryBlocked([{ problem: 'CAUSE_ZQ.' }], run, ['END_ZQ'], pinned);
+      assert.deepEqual(blocked.message.split('\n\n').slice(0, 4), ['CAUSE_ZQ.', NEXT_STEP_LINE, pinned, 'END_ZQ']);
+      const crowded = main.finishDeliveryBlocked([{ problem: 'CAUSE_ZQ.' }], run, ['E'.repeat(20000)], pinned);
+      assert.ok(crowded.message.includes(pinned), crowded.message.slice(0, 300));
+      assert.ok(lib.noticeLength(crowded) <= lib.noticeBudget());
+      const unpinned = main.finishDeliveryBlocked([{ problem: 'CAUSE_ZQ.' }], run, ['END_ZQ']);
+      assert.deepEqual(unpinned.message.split('\n\n').slice(0, 3), ['CAUSE_ZQ.', NEXT_STEP_LINE, 'END_ZQ']);
+      const asks = [surfacedAsk(makeGatedBrief('SHORT_PROBLEM'))];
+      const replyRun = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      replyRun.answerLog.push({ question: 'Q', settled: [], reply: 'x'.repeat(5000) });
+      const open = main.pauseDelivery({ asks: asks, taken: [] }, replyRun, 'SHORT_LEAD_ZQ.', pinned);
+      assert.equal(open.outcome, 'blocked');
+      assert.deepEqual(open.message.split('\n\n').slice(0, 3), [OPEN_LEAD, RUN_AGAIN, pinned]);
+    });
+    test('askTails with pinned logs the question as the lead, the pinned text and the questions joined by blank lines, and pauses with the pinned text', () => {
+      const asks = [tailAskOf(), surfacedAsk(main.buildValidationRemediationBrief(OTHER, 1))];
+      const state = main.createRunState({ argsObject: { answers: {}, reply: TAIL_REPLY }, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      const question = ['LEAD_ZQ', 'PINNED_ZQ', lib.renderQuestions(asks)].join('\n\n');
+      const asked = main.askTails(asks, state, 'LEAD_ZQ', 'PINNED_ZQ');
+      assert.deepEqual(structuredClone(asked), { answer: { question: question, reply: TAIL_REPLY } });
+      assert.equal(state.answerLog[0].question, question);
+      const single = main.createRunState({ argsObject: { answers: {}, reply: TAIL_REPLY }, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      assert.equal(main.askTail(tailAskOf(), single, 'LEAD_ZQ', 'PINNED_ZQ').answer.question, ['LEAD_ZQ', 'PINNED_ZQ', lib.renderQuestions([tailAskOf()])].join('\n\n'));
+      const fresh = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      const paused = main.askTails(asks, fresh, 'LEAD_ZQ', 'PINNED_ZQ');
+      assert.equal(paused.result.message, question);
     });
     test('a tail round shares the round numbering with the planning rounds, and its resume replays every earlier agent', async () => {
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);

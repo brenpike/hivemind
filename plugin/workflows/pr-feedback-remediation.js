@@ -692,7 +692,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '871a236af5ba686a';
+const BUILD_ID = '3e01e25001861a49';
 
 function supportedSchemaKeywords(){
 return[
@@ -1718,16 +1718,20 @@ return causes.slice().sort((first,second)=>rankCause(first)-rankCause(second));
 function maxBlockedLeadLength(){
 return 1000;
 }
+function maxPinnedLeadLength(){
+return 100;
+}
+function buildLeadBlock(text,bound){
+const compact=cutAtBoundary(text,bound);
+return compact===text?{text:text}:{text:text,compact:compact};
+}
 function buildStopBlocks(causes){
 if(!Array.isArray(causes)||causes.length===0){
 throw new Error('buildStopBlocks: causes must be a non-empty array');
 }
-const orderedCauses=orderStopCauses(causes);
-const leadText=orderedCauses[0].problem;
-const compactLead=cutAtBoundary(leadText,maxBlockedLeadLength());
-const leadBlock=compactLead===leadText?{text:leadText}:{text:leadText,compact:compactLead};
-const laterBlocks=orderedCauses.slice(1).map((cause)=>({text:cause.problem}));
-return[leadBlock,{text:nextStepLine(orderedCauses[0].nextAction),whole:true}].concat(laterBlocks);
+const[leadCause,...laterCauses]=orderStopCauses(causes);
+const leadBlock=buildLeadBlock(leadCause.problem,maxBlockedLeadLength());
+return[leadBlock,{text:nextStepLine(leadCause.nextAction),whole:true},...laterCauses.map((cause)=>({text:cause.problem}))];
 }
 
 function computeWave(steps,doneIds){
@@ -3445,20 +3449,20 @@ return approvals.length===0?[]:[formatDataBlock('approvals',approvals)];
 function describeTailLead(run){
 return'Every plan step is committed on branch '+encodeUntrustedText(run.branch)+', with head '+run.head+'.';
 }
-function askTails(asks,run,lead){
+function askTails(asks,run,lead,pinned){
 const leadText=lead===undefined?describeTailLead(run):lead;
 const reply=takeNextReply(run,run.answerLog.length+1);
 if(reply===undefined){
-return{result:pauseDelivery({asks:asks,taken:[]},run,leadText)};
+return{result:pauseDelivery({asks:asks,taken:[]},run,leadText,pinned)};
 }
-const question=leadText+'\n\n'+renderQuestions(asks);
+const question=[leadText].concat(pinned??[],renderQuestions(asks)).join('\n\n');
 const choices=readReplyChoices(reply,asks);
 run.answerLog.push(buildAnswerEntry({question:question,labels:listShownLabels(asks),reply:reply,chosen:choices}));
 run.approvals=applyApprovalChoices(run.approvals,asks,choices);
 return{answer:{question:question,reply:reply}};
 }
-function askTail(ask,run,lead){
-return askTails([ask],run,lead);
+function askTail(ask,run,lead,pinned){
+return askTails([ask],run,lead,pinned);
 }
 function replanFromTailAsk(ask,run){
 const asked=askTail(ask,run);
@@ -3586,12 +3590,15 @@ blocks.push({text:renderDecisionsCompact(shown)});
 }
 return blocks;
 }
-function finishDeliveryBlocked(causes,run,endLines=[]){
-const blocks=endLines.map((line)=>({text:line}));
-if(run!==undefined&&run.waveCount>0){
+function listPinnedBlocks(pinned){
+return pinned===undefined?[]:[{text:pinned,whole:true}];
+}
+function finishDeliveryBlocked(causes,run,endLines=[],pinned){
+const blocks=listPinnedBlocks(pinned).concat(endLines.map((line)=>({text:line})));
+if(run!==undefined){
+if(run.waveCount>0){
 blocks.push({text:describeBranchLine(run)});
 }
-if(run!==undefined){
 blocks.push(...buildRecordTailBlocks(run,run.taken));
 }
 return finish({outcome:'blocked',causes:causes,blocks:blocks});
@@ -3620,9 +3627,9 @@ blocks.push(buildRejectedFindingsBlock(gates.notes.review??'did not hold',run.re
 blocks.push(...buildRecordTailBlocks(run,run.taken));
 return finish({outcome:'complete',blocks:blocks,pr:pr});
 }
-function finishOpenQuestions(resolution,stopReason,run){
+function finishOpenQuestions(resolution,stopReason,run,pinned){
 const cause={problem:'The delivery stopped: questions are still open.',nextAction:'answer'};
-return finishDeliveryBlocked([cause],{...run,taken:run.taken.concat(resolution.taken)},[renderOpenQuestions(resolution.asks,stopReason)]);
+return finishDeliveryBlocked([cause],{...run,taken:run.taken.concat(resolution.taken)},[renderOpenQuestions(resolution.asks,stopReason)],pinned);
 }
 function checkPauseAsk(ask){
 const isBadStop=ask.kind===STEP_STOP_KIND&&!stopAskActions().includes(ask.stop);
@@ -3630,26 +3637,24 @@ if(isBadStop||!askReasons().includes(ask.reason)){
 throw new Error('pauseDelivery: ask '+ask.kind+' '+ask.reason);
 }
 }
-function pauseDelivery(resolution,run,lead){
+function pauseDelivery(resolution,run,lead,pinned){
 resolution.asks.forEach(checkPauseAsk);
 const resumeArgs=buildResumeArgs(run.answerLog.map((entry)=>entry.reply),BUILD_ID);
 if(!canCarry(resumeArgs)){
-return finishOpenQuestions(resolution,'reply_size',run);
+return finishOpenQuestions(resolution,'reply_size',run,pinned);
 }
 const questionsBlock={text:renderQuestions(resolution.asks)};
 if(resolution.asks.some((ask)=>ask.exact===true||hasDestructiveOption(ask))){
 questionsBlock.whole=true;
 }
-const compactLead=cutAtBoundary(lead,maxBlockedLeadLength());
-const blocks=[compactLead===lead?{text:lead}:{text:lead,compact:compactLead},questionsBlock];
+const blocks=[buildLeadBlock(lead,pinned===undefined?maxBlockedLeadLength():maxPinnedLeadLength()),...listPinnedBlocks(pinned),questionsBlock];
 if(!canShowWhole({resumeArgs:resumeArgs,blocks:blocks})){
-return finishOpenQuestions(resolution,'exact_text_size',run);
+return finishOpenQuestions(resolution,'exact_text_size',run,pinned);
 }
 return pauseForUser({resumeArgs:resumeArgs,blocks:blocks});
 }
 function describeStopLead(causes,endLines){
-const causeTexts=buildStopBlocks(causes).filter((block)=>block.whole!==true).map((block)=>block.text);
-return causeTexts.concat(endLines).join('\n');
+return buildStopBlocks(causes).filter((block)=>block.whole!==true).map((block)=>block.text).concat(endLines).join('\n');
 }
 function stopAskActions(){
 return['approve','fix_cause'];
@@ -4716,15 +4721,18 @@ why:describeOnlyYou('settle this finding')
 });
 }
 function describeReviewerText(verb,text){
-return' The reviewer '+verb+' '+encodeUntrustedText(text)+'.';
+return'The reviewer '+verb+' '+encodeUntrustedText(text)+'.';
 }
 function describeFixQuestionLead(fix,run){
-const says=fix.rationale_text===undefined?'':describeReviewerText('says',fix.rationale_text);
-return describeFixLead(run)+' ended '+fix.exit_reason+describeFixCandidates(fix)+'.'+says+describeReviewerText('asks',fix.question);
+const says=fix.rationale_text===undefined?'':' '+describeReviewerText('says',fix.rationale_text);
+return describeFixLead(run)+' ended '+fix.exit_reason+describeFixCandidates(fix)+'.'+says;
+}
+function describeFixQuestion(fix){
+return describeReviewerText('asks',fix.question);
 }
 function askFixQuestion(fix,run){
 const brief=buildFixQuestionBrief(fix);
-const asked=askTail(buildUndecidedAsk(brief.kind,brief,run),run,describeFixQuestionLead(fix,run));
+const asked=askTail(buildUndecidedAsk(brief.kind,brief,run),run,describeFixQuestionLead(fix,run),describeFixQuestion(fix));
 if(asked.answer===undefined){
 return asked;
 }

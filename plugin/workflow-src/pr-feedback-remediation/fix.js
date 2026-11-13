@@ -55,7 +55,9 @@
  *          strength none, with no reviewer text.
  *   describeFixQuestionLead(fix, run)  the pause lead: the exit and the
  *          encoded candidate URL, then for high-severity-rejection the
- *          encoded rationale_text, then the encoded question.
+ *          encoded rationale_text.
+ *   describeFixQuestion(fix)  the pinned part of the pause: the reviewer
+ *          asks the encoded question.
  *   askFixQuestion(fix, run)  {result}, the pause, or {answer:
  *          {candidate_url, question, reply}} once the user replied.
  *
@@ -87,7 +89,10 @@
  *   A question exit is never taken: askFixQuestion resolves it through
  *   buildUndecidedAsk (lib/tails.js) on a brief with strength none, which
  *   decide() asks no_recommendation, or table_surface at level low, and
- *   pauses through askTail. Its reply logs in run.answerLog and reruns the
+ *   pauses through askTail. The question never rides in the lead, which
+ *   the pause may cut: describeFixQuestion passes it to askTail as pinned,
+ *   shown whole in the pause and in its reply_size and exact_text_size
+ *   ends. Its reply logs in run.answerLog and reruns the
  *   fix pass with user_answer and no decided_by: the GitHub reviewer writes
  *   no recommendation, so only the user decides.
  *   Each fix pass label is unique: fix-<pass> for the first call, and
@@ -283,12 +288,16 @@ function buildFixQuestionBrief(fix) {
 }
 
 function describeReviewerText(verb, text) {
-  return ' The reviewer ' + verb + ' ' + encodeUntrustedText(text) + '.';
+  return 'The reviewer ' + verb + ' ' + encodeUntrustedText(text) + '.';
 }
 
 function describeFixQuestionLead(fix, run) {
-  const says = fix.rationale_text === undefined ? '' : describeReviewerText('says', fix.rationale_text);
-  return describeFixLead(run) + ' ended ' + fix.exit_reason + describeFixCandidates(fix) + '.' + says + describeReviewerText('asks', fix.question);
+  const says = fix.rationale_text === undefined ? '' : ' ' + describeReviewerText('says', fix.rationale_text);
+  return describeFixLead(run) + ' ended ' + fix.exit_reason + describeFixCandidates(fix) + '.' + says;
+}
+
+function describeFixQuestion(fix) {
+  return describeReviewerText('asks', fix.question);
 }
 
 /**
@@ -299,7 +308,7 @@ function describeFixQuestionLead(fix, run) {
  */
 function askFixQuestion(fix, run) {
   const brief = buildFixQuestionBrief(fix);
-  const asked = askTail(buildUndecidedAsk(brief.kind, brief, run), run, describeFixQuestionLead(fix, run));
+  const asked = askTail(buildUndecidedAsk(brief.kind, brief, run), run, describeFixQuestionLead(fix, run), describeFixQuestion(fix));
   if (asked.answer === undefined) {
     return asked;
   }
