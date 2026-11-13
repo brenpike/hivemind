@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [8.0.1] - 2026-11-13
+
+### Fixed
+
+- The synapse gate and the `hivemind:molt` and `hivemind:open-plan-pr` scripts now share one inputs-file rule, `hivemind_inputs_path_problem` in `plugin/skills/_shared/containment.sh`, anchored on the working directory (#561). A synapse inputs Write is allowed when `.hivemind` does not exist yet or the session's working folder is not the checkout top. A denial names the failed check. From a subfolder, an inputs file outside the working folder's `.hivemind` is read and kept rather than deleted. Native Windows drive-letter working folders stay denied. No workflow script was rebuilt.
+
 ## [8.0.0] - 2026-11-12
 
 ### Added
