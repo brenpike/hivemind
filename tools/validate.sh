@@ -361,9 +361,10 @@ run_suites() {
 #     plugin/skills/_shared/{allowlist,containment,git-refusals}.sh
 #                                      -> test_open_plan_pr (push-branch runs as a real child; it
 #                                         keeps its test_push_branch route by union)
-#   plugin/hooks/*, plugin/skills/_shared/allowlist.sh
+#   plugin/hooks/*, plugin/skills/_shared/{allowlist,containment}.sh
 #                                      -> test_synapse_gate (hooks.json ALSO -> json-manifests;
-#                                         synapse-gate.sh ALSO -> test_workflow_scripts)
+#                                         synapse-gate.sh ALSO -> test_workflow_scripts; the
+#                                         _shared libs keep their other routes by union)
 #   plugin/**/*.sh                     -> test_script_bootstrap (engine bootstrap/self-location contract)
 #   plugin/workflow-src/**, plugin/workflows/*.js, plugin/workflows/*.json,
 #     plugin/skills/route-workflow/SKILL.md,
@@ -690,15 +691,17 @@ map_path() {
   fi
 
   # test_synapse_gate: the plugin hooks (plugin/hooks/synapse-gate.sh, the PreToolUse runner gate,
-  # and plugin/hooks/hooks.json, its exec-form registration) and the shared allowlist lib the hook
-  # sources for its per-flag value classes (_shared/allowlist.sh). All are ALSO plugin/* files
-  # (policy_check prose-lints them via the wholesale rule below), but policy_check NEVER EXECUTES
-  # bash, so without this rule a hook edit would only be prose-linted, never behaviorally exercised.
-  # hooks.json keeps its json-manifests route, synapse-gate.sh its test_workflow_scripts route and
-  # allowlist.sh its other routes, by union. (tools/test_synapse_gate.sh itself is covered by the
-  # tools/** full-suite leg.)
+  # and plugin/hooks/hooks.json, its exec-form registration) and the shared libs the hook sources:
+  # _shared/allowlist.sh for its per-flag value classes and _shared/containment.sh for the inputs
+  # leaf rule and the synapse Write path rule (hivemind_inputs_path_problem). All are ALSO plugin/*
+  # files (policy_check prose-lints them via the wholesale rule below), but policy_check NEVER
+  # EXECUTES bash, so without this rule a hook edit would only be prose-linted, never behaviorally
+  # exercised. hooks.json keeps its json-manifests route, synapse-gate.sh its test_workflow_scripts
+  # route and the _shared libs their other routes, by union. (tools/test_synapse_gate.sh itself is
+  # covered by the tools/** full-suite leg.)
   if [[ "$p" == plugin/hooks/* \
-     || "$p" == plugin/skills/_shared/allowlist.sh ]]; then
+     || "$p" == plugin/skills/_shared/allowlist.sh \
+     || "$p" == plugin/skills/_shared/containment.sh ]]; then
     add_selected "$SUITE_TEST_SYNAPSE_GATE" "$p (synapse runner gate hook/shared lib)"
     matched=1
   fi
@@ -1570,6 +1573,7 @@ self_test() {
     "plugin/skills/push-branch/scripts/push-branch.sh|$SUITE_TEST_OPEN_PLAN_PR" \
     "plugin/skills/open-plan-pr/SKILL.md|$SUITE_TEST_OPEN_PLAN_PR" \
     "plugin/skills/_shared/allowlist.sh|$SUITE_TEST_SYNAPSE_GATE" \
+    "plugin/skills/_shared/containment.sh|$SUITE_TEST_SYNAPSE_GATE" \
     "plugin/hooks/hooks.json|$SUITE_JSON_MANIFESTS" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_BROOD" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_RC_BROOD" \

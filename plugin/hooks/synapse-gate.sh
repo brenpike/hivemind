@@ -11,11 +11,18 @@
 #   Bash, any agent, names a runner script file, not exact          deny; the reason gives the
 #                                                                   exact form and points to Read
 #   Bash, agent type hivemind:synapse, anything else                deny
-#   Write, agent type hivemind:synapse, .hivemind/molt-inputs-<token>.json or
-#     .hivemind/pr-inputs-<token>.json, relative or under the input cwd, the parent resolving
-#     to <cwd>/.hivemind and the leaf not a symlink                 allow
-#   Write, agent type hivemind:synapse, anything else               deny
+#   Write, agent type hivemind:synapse, a path that
+#     hivemind_inputs_path_problem <cwd> <path> molt pr allows      allow
+#   Write, agent type hivemind:synapse, anything else               deny; the reason ends with
+#                                                                   the failed condition word
 #   anything else                                                   no decision
+#
+# WRITE RULE: the one inputs-path rule in skills/_shared/containment.sh, anchored on the input cwd,
+# the working folder synapse runs in, never the checkout top. The path is
+# .hivemind/<molt|pr>-inputs-<token>.json, relative to the cwd or absolute with its folder above
+# .hivemind resolving to the cwd. That .hivemind may be absent before the Write; when present it
+# must be a real folder, and the leaf must not be a symlink or a non-regular file. The deny reason
+# names the condition word the rule printed and never echoes the path.
 #
 # EXACT RUNNER COMMAND: `bash`, one space, the script path, then flag/value pairs, every part
 # separated by one space. The script path is "<root>/skills/<s>/scripts/<s>.sh", always one
@@ -28,21 +35,24 @@
 # --version-file; required flags must be present; bump-type's positional base comes first. Values
 # pass their class: names hivemind_assert_identifier (skills/_shared/allowlist.sh), refs digits,
 # commit 40 or 64 lowercase hex, the enums the scripts define, inputs and open-plan-pr's body file
-# .hivemind/<molt|pr>-inputs-<token>.json with <token> 1 to 64 of [A-Za-z0-9-]. A tab, newline or
-# other control byte, any other quoting, a redirection or anything appended is not exact.
+# .hivemind/<leaf> where the leaf passes hivemind_check_inputs_leaf (skills/_shared/containment.sh)
+# for the flag's kind, molt or pr: <kind>-inputs-<token>.json with <token> 1 to 64 of
+# [A-Za-z0-9-]. A tab, newline or other control byte, any other quoting, a redirection or anything
+# appended is not exact.
 #
 # LOOKALIKE: the command text names <s>.sh (ASCII case ignored) with no [A-Za-z0-9._-] byte
 # directly before or after it.
 #
 # FAIL OPEN, NEVER TOWARD AN ALLOW OF ITS OWN: missing jq, an empty or non-absolute CLAUDE_PLUGIN_ROOT,
-# a missing allowlist.sh, or malformed input prints nothing and exits 0, so the normal permission
-# flow applies. A settings allow rule that covers the call then applies with none of these checks;
+# a missing or unparseable allowlist.sh or containment.sh, or malformed input prints nothing and
+# exits 0, so the normal permission flow applies. A settings allow rule that covers the call then applies with none of these checks;
 # the seeded inputs-file rules do so for synapse's Write (security-policy.md, Synapse Runner Gate). The EXIT trap turns any other non-zero exit into 1. This hook never exits 2, because
 # exit 2 blocks the tool call. A decision is printed only as the last step.
 #
 # Reads CLAUDE_PLUGIN_ROOT from the hook environment, unchanged, and never BASH_SOURCE. An absolute
 # root starts with `/`, or with a drive letter and colon followed by `/` or a backslash; it sources
-# allowlist.sh from "<root>/skills/_shared/allowlist.sh". bash 3.2 compatible
+# allowlist.sh from "<root>/skills/_shared/allowlist.sh" and containment.sh from
+# "<root>/skills/_shared/containment.sh". bash 3.2 compatible
 # (no mapfile, associative arrays or ${var,,}).
 
 set -euo pipefail
@@ -123,28 +133,6 @@ set_flag_rule() {
   esac
 }
 
-# check_inputs_token <token>
-#   Succeeds when <token> is 1 to 64 bytes of [A-Za-z0-9-].
-check_inputs_token() {
-  [ "${#1}" -ge 1 ] && [ "${#1}" -le 64 ] || return 1
-  case "$1" in
-    *[!A-Za-z0-9-]*) return 1 ;;
-  esac
-}
-
-# check_inputs_leaf <kind> <leaf>
-#   Succeeds when <leaf> is <kind>-inputs-<token>.json.
-check_inputs_leaf() {
-  local leaf_token
-  case "$2" in
-    "$1-inputs-"*.json) ;;
-    *) return 1 ;;
-  esac
-  leaf_token="${2#"$1-inputs-"}"
-  leaf_token="${leaf_token%.json}"
-  check_inputs_token "$leaf_token"
-}
-
 # check_value_class <class> <value>
 #   Succeeds when <value> belongs to <class>.
 check_value_class() {
@@ -181,7 +169,7 @@ check_value_class() {
       ;;
     molt_inputs | pr_inputs)
       case "$2" in
-        .hivemind/*) check_inputs_leaf "${1%_inputs}" "${2#.hivemind/}" ;;
+        .hivemind/*) hivemind_check_inputs_leaf "${2#.hivemind/}" "${1%_inputs}" ;;
         *) return 1 ;;
       esac
       ;;
@@ -301,34 +289,6 @@ find_named_script() {
   return 1
 }
 
-# check_inputs_write <file-path> <cwd>
-#   Succeeds when <file-path> is a synapse inputs file inside <cwd>/.hivemind, that folder resolves
-#   to itself and the leaf is not a symlink or a non-regular file.
-check_inputs_write() {
-  local file_path="$1" work_dir="$2" leaf_name canonical_dir canonical_parent
-  case "$file_path$work_dir" in
-    *[[:cntrl:]]*) return 1 ;;
-  esac
-  case "$work_dir" in
-    /*) ;;
-    *) return 1 ;;
-  esac
-  case "$file_path" in
-    .hivemind/*) leaf_name="${file_path#.hivemind/}" ;;
-    "$work_dir/.hivemind/"*) leaf_name="${file_path#"$work_dir/.hivemind/"}" ;;
-    *) return 1 ;;
-  esac
-  check_inputs_leaf molt "$leaf_name" || check_inputs_leaf pr "$leaf_name" || return 1
-  [ ! -L "$work_dir/.hivemind" ] || return 1
-  canonical_dir="$(cd -P -- "$work_dir" 2>/dev/null && pwd -P)" || return 1
-  canonical_parent="$(cd -P -- "$work_dir/.hivemind" 2>/dev/null && pwd -P)" || return 1
-  [ "$canonical_parent" = "$canonical_dir/.hivemind" ] || return 1
-  [ ! -L "$work_dir/.hivemind/$leaf_name" ] || return 1
-  if [ -e "$work_dir/.hivemind/$leaf_name" ] && [ ! -f "$work_dir/.hivemind/$leaf_name" ]; then
-    return 1
-  fi
-}
-
 # read_input_fields
 #   Sets tool_name, agent_type, first_value and second_value from the hook input in one jq run:
 #   Bash gives the command and an empty second value, Write gives file_path and cwd, any other
@@ -365,6 +325,8 @@ case "$plugin_root" in
 esac
 [ -f "$plugin_root/skills/_shared/allowlist.sh" ] || exit 0
 . "$plugin_root/skills/_shared/allowlist.sh" || exit 0
+[ -f "$plugin_root/skills/_shared/containment.sh" ] || exit 0
+. "$plugin_root/skills/_shared/containment.sh" || exit 0
 
 quoted_path_allowed=yes
 case "$plugin_root" in
@@ -403,10 +365,10 @@ case "$tool_name" in
     ;;
   Write)
     [ "$agent_type" = "$gate_agent_type" ] || exit 0
-    if check_inputs_write "$first_value" "$second_value"; then
+    if write_problem="$(hivemind_inputs_path_problem "$second_value" "$first_value" molt pr)"; then
       emit_decision allow "synapse-gate: inputs file write for $gate_agent_type"
     else
-      emit_decision deny "synapse-gate: $gate_agent_type may Write only .hivemind/molt-inputs-<token>.json or .hivemind/pr-inputs-<token>.json in the working directory, where .hivemind is a real folder and the file is not a symlink"
+      emit_decision deny "synapse-gate: $gate_agent_type may Write only .hivemind/molt-inputs-<token>.json or .hivemind/pr-inputs-<token>.json in the working directory's own .hivemind, which is absent or a real folder, where the file is not a symlink; failed condition: $write_problem"
     fi
     ;;
 esac
