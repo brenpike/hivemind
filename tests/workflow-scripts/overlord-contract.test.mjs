@@ -390,7 +390,7 @@ describe('overlord workflow definition reads', () => {
     assert.notEqual(questionGateParagraph, '', '## Workflow State Execution has no paragraph starting **Question gate.**');
   });
   test('the Question gate paragraph routes to the question user gate and asks the user', () => {
-    for (const phrase of ['routes to the `question` user gate', 'record that result', 'ask the user the question in plain words, with its options and a recommendation, and wait']) {
+    for (const phrase of ['routes to the `question` user gate', 'record that result', 'ask the user the question in plain words, with its options and any recommendation it carries, and wait']) {
       assert.ok(questionGateParagraph.includes(phrase), `Question gate paragraph lacks ${phrase}`);
     }
   });
