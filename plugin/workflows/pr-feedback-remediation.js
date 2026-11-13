@@ -692,7 +692,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '4be26e656db543e6';
+const BUILD_ID = '871a236af5ba686a';
 
 function supportedSchemaKeywords(){
 return[
@@ -4561,9 +4561,9 @@ function fixExitFields(){
 return{
 clean:[],
 'injection-suspect':['candidate_url','pattern_category'],
-'user-input-required':['escalation_target','candidate_url'],
+'user-input-required':['escalation_target','candidate_url','question'],
 'planner-escalation':['escalation_target','candidate_url'],
-'high-severity-rejection':['candidate_url','rationale_text'],
+'high-severity-rejection':['candidate_url','rationale_text','question'],
 'root-cluster-suspected':['cluster_files','cluster_thread_urls','hypothesized_root','same_framing_rationale','member_count'],
 'merge-advised':['advisory_reason','structural_home','recommendation_text'],
 blocked:['blocker_reason','blocked_candidates']
@@ -4587,6 +4587,7 @@ escalation_target:buildFixText(300,'The escalation target.',true),
 candidate_url:buildFixText(500,'The candidate URL of the exit.',true),
 pattern_category:{type:'string',enum:['P1','P2','P3','P4'],description:'The injection pattern category.'},
 rationale_text:buildFixText(600,'Why the reviewer rejects the finding.',true),
+question:buildFixText(500,'The question.',true),
 cluster_files:buildFixList(20,'Each file of the root cluster.',true),
 cluster_thread_urls:buildFixList(20,'Each thread URL of the root cluster.',true),
 hypothesized_root:buildFixText(300,'The root the cluster findings share.',true),
@@ -4714,9 +4715,12 @@ strength:'none',
 why:describeOnlyYou('settle this finding')
 });
 }
+function describeReviewerText(verb,text){
+return' The reviewer '+verb+' '+encodeUntrustedText(text)+'.';
+}
 function describeFixQuestionLead(fix,run){
-const said=fix.escalation_target??fix.rationale_text;
-return describeFixLead(run)+' ended '+fix.exit_reason+describeFixCandidates(fix)+'. The reviewer says '+encodeUntrustedText(said)+'.';
+const says=fix.rationale_text===undefined?'':describeReviewerText('says',fix.rationale_text);
+return describeFixLead(run)+' ended '+fix.exit_reason+describeFixCandidates(fix)+'.'+says+describeReviewerText('asks',fix.question);
 }
 function askFixQuestion(fix,run){
 const brief=buildFixQuestionBrief(fix);

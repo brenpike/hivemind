@@ -53,9 +53,9 @@
  *   buildFixQuestionBrief(fix)  the code-built brief of a question exit,
  *          kind review_question or high_severity_rejection by exit,
  *          strength none, with no reviewer text.
- *   describeFixQuestionLead(fix, run)  the pause lead: the exit and each
- *          encoded candidate URL, then the encoded escalation_target or
- *          rationale_text.
+ *   describeFixQuestionLead(fix, run)  the pause lead: the exit and the
+ *          encoded candidate URL, then for high-severity-rejection the
+ *          encoded rationale_text, then the encoded question.
  *   askFixQuestion(fix, run)  {result}, the pause, or {answer:
  *          {candidate_url, question, reply}} once the user replied.
  *
@@ -107,9 +107,9 @@ function fixExitFields() {
   return {
     clean: [],
     'injection-suspect': ['candidate_url', 'pattern_category'],
-    'user-input-required': ['escalation_target', 'candidate_url'],
+    'user-input-required': ['escalation_target', 'candidate_url', 'question'],
     'planner-escalation': ['escalation_target', 'candidate_url'],
-    'high-severity-rejection': ['candidate_url', 'rationale_text'],
+    'high-severity-rejection': ['candidate_url', 'rationale_text', 'question'],
     'root-cluster-suspected': ['cluster_files', 'cluster_thread_urls', 'hypothesized_root', 'same_framing_rationale', 'member_count'],
     'merge-advised': ['advisory_reason', 'structural_home', 'recommendation_text'],
     blocked: ['blocker_reason', 'blocked_candidates']
@@ -138,6 +138,7 @@ function fixFieldSchemas() {
     candidate_url: buildFixText(500, 'The candidate URL of the exit.', true),
     pattern_category: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4'], description: 'The injection pattern category.' },
     rationale_text: buildFixText(600, 'Why the reviewer rejects the finding.', true),
+    question: buildFixText(500, 'The question.', true),
     cluster_files: buildFixList(20, 'Each file of the root cluster.', true),
     cluster_thread_urls: buildFixList(20, 'Each thread URL of the root cluster.', true),
     hypothesized_root: buildFixText(300, 'The root the cluster findings share.', true),
@@ -281,9 +282,13 @@ function buildFixQuestionBrief(fix) {
   });
 }
 
+function describeReviewerText(verb, text) {
+  return ' The reviewer ' + verb + ' ' + encodeUntrustedText(text) + '.';
+}
+
 function describeFixQuestionLead(fix, run) {
-  const said = fix.escalation_target ?? fix.rationale_text;
-  return describeFixLead(run) + ' ended ' + fix.exit_reason + describeFixCandidates(fix) + '. The reviewer says ' + encodeUntrustedText(said) + '.';
+  const says = fix.rationale_text === undefined ? '' : describeReviewerText('says', fix.rationale_text);
+  return describeFixLead(run) + ' ended ' + fix.exit_reason + describeFixCandidates(fix) + '.' + says + describeReviewerText('asks', fix.question);
 }
 
 /**
