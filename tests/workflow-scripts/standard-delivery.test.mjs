@@ -1,9 +1,9 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { loadLibs, loadWorkflowSource } from './harness.mjs';
@@ -676,19 +676,59 @@ const UNREAD_WRITE_ERROR = 'File has not been read yet. Read it first before wri
  * command with bash -c, as the Bash tool does, so the double-quoted script
  * path stays one word. Like the Write tool, it refuses a file path that
  * already exists, which it never read: blocked with UNREAD_WRITE_ERROR.
+ * Each Write and the command run from cwd, the checkout top by default.
+ * askGate(call) is asked first for each Write and Bash call, {tool_name,
+ * tool_input}, and a denial text it returns is the stderr of a blocked
+ * relay; the default asks nothing.
  */
-function runCommandBlock(scratch, prompt) {
+function runCommandBlock(scratch, prompt, cwd = scratch.repo, askGate = () => undefined) {
   for (const name of ['inputs_file', 'body_file'].filter((blockName) => hasDataBlock(prompt, blockName))) {
     const file = readDataBlock(prompt, name);
-    if (existsSync(join(scratch.repo, file.path))) {
+    const content = typeof file.content === 'string' ? file.content : JSON.stringify(file.content);
+    const writeDenial = askGate({ tool_name: 'Write', tool_input: { file_path: file.path, content: content } });
+    if (writeDenial !== undefined) {
+      return { outcome: 'blocked', stderr: writeDenial };
+    }
+    const target = resolve(cwd, file.path);
+    if (existsSync(target)) {
       return { outcome: 'blocked', stderr: UNREAD_WRITE_ERROR };
     }
-    writeRepoFile(scratch, file.path, typeof file.content === 'string' ? file.content : JSON.stringify(file.content));
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, content);
   }
   const command = readDataBlock(prompt, 'command').split('{plugin-root}').join(pluginRoot);
   assert.ok(command.startsWith('bash '), command);
-  const run = spawnSync('bash', ['-c', command], { cwd: scratch.repo, env: scratch.env, encoding: 'utf8' });
+  const bashDenial = askGate({ tool_name: 'Bash', tool_input: { command: command } });
+  if (bashDenial !== undefined) {
+    return { outcome: 'blocked', stderr: bashDenial };
+  }
+  const run = spawnSync('bash', ['-c', command], { cwd: cwd, env: { ...scratch.env, PWD: cwd }, encoding: 'utf8' });
   return run.status === 0 ? { outcome: 'ran', stdout: run.stdout } : { outcome: 'blocked', stderr: run.stderr };
+}
+
+/**
+ * Returns an askGate for runCommandBlock that runs the real synapse gate
+ * hook on each call as hivemind:synapse with cwd, as Claude Code does
+ * before the tool runs: an allow is no denial, and a deny, or no decision,
+ * is the hook error text carrying the hook's reason.
+ */
+function askSynapseGate(scratch, cwd) {
+  return (call) => {
+    const output = readGateOutput(scratch, { ...call, agent_type: 'hivemind:synapse', cwd: cwd });
+    if (output !== undefined && output.permissionDecision === 'allow') {
+      return undefined;
+    }
+    const reason = output === undefined ? 'synapse-gate gave no decision' : output.permissionDecisionReason;
+    return 'PreToolUse:' + call.tool_name + ' hook error: ' + reason + '\n';
+  };
+}
+
+/**
+ * A synapse runner stand-in that runs its command block from cwd with every
+ * Write and Bash call first put through the real synapse gate hook.
+ */
+function makeGatedSynapseRunner(scratch, cwd) {
+  return (prompt) => runCommandBlock(scratch, prompt, cwd, askSynapseGate(scratch, cwd));
 }
 
 function realFactsRunner(scratch) {
@@ -8913,9 +8953,11 @@ const ROW_TESTS = {
         assertPassStopEnd(run, MALFORMED_FACTS, 'facts-1', 'report');
       }
     });
-    test('every command the engine builds gets an allow from the real synapse gate hook for hivemind:synapse only, and its inputs and body file Writes an allow', async () => {
+    test('every command the engine builds gets an allow from the real synapse gate hook for hivemind:synapse only, and its inputs and body file Writes an allow from the checkout top and from a subfolder with no .hivemind', async () => {
       const scratch = makeScratchRepo();
       mkdirSync(join(scratch.repo, '.hivemind'));
+      const subfolder = join(scratch.repo, 'src/deep');
+      mkdirSync(subfolder, { recursive: true });
       const fresh = await runWorkflow({ request: REQUEST, references: [5, 12] }, fixFlowResults());
       const stale = await runWorkflow(LAUNCH, happyResults({ 'facts-1': factsRelay({ trunk_freshness: 'behind', trunk_behind: '1' }), 'plan-1': planResult(makePlan({ trunk_freshness: 'behind' })), 'branch-1': branchRelay({ warning: main.branchWarningTexts().stale }) }));
       assert.equal(stale.result.outcome, 'complete', stale.result.message);
@@ -8934,10 +8976,13 @@ const ROW_TESTS = {
         assert.equal(readGateDecision(scratch, { tool_name: 'Bash', agent_type: 'hivemind:drone', tool_input: { command: command } }), 'none', call.opts.label);
         for (const name of ['inputs_file', 'body_file'].filter((blockName) => hasDataBlock(call.prompt, blockName))) {
           const filePath = readDataBlock(call.prompt, name).path;
-          assert.equal(readGateDecision(scratch, { tool_name: 'Write', agent_type: 'hivemind:synapse', cwd: scratch.repo, tool_input: { file_path: filePath, content: '{}' } }), 'allow', call.opts.label + ': ' + filePath);
+          for (const cwd of [scratch.repo, subfolder]) {
+            assert.equal(readGateDecision(scratch, { tool_name: 'Write', agent_type: 'hivemind:synapse', cwd: cwd, tool_input: { file_path: filePath, content: '{}' } }), 'allow', call.opts.label + ' from ' + cwd + ': ' + filePath);
+          }
         }
         assert.equal(hasDataBlock(call.prompt, 'body_file'), /open-plan-pr/.test(builtCommand), call.opts.label);
       }
+      assert.equal(existsSync(join(subfolder, '.hivemind')), false);
     });
     test('every runner inputs path is the stem of its pass facts file and the call label, and no two calls of a run share one', async () => {
       const transientBlock = { outcome: 'blocked', stderr: 'fatal: unable to access the remote: Could not resolve host: github.com\n' };
@@ -9016,6 +9061,39 @@ const ROW_TESTS = {
       assert.equal(sentPaths.length, 3);
       assert.ok(sentPaths.every((path) => !stalePaths.includes(path) && !path.includes(staleStem)), JSON.stringify(sentPaths));
     });
+    for (const [place, readCwd] of [
+      ['the checkout top, whose .hivemind only the real gather-facts makes', (scratch) => scratch.repo],
+      ['a subfolder with no .hivemind', (scratch) => {
+        const subfolder = join(scratch.repo, 'src/deep');
+        mkdirSync(subfolder, { recursive: true });
+        return subfolder;
+      }],
+      ['a symlinked path to the checkout', (scratch) => {
+        const link = join(dirname(scratch.repo), 'checkout-link');
+        symlinkSync(scratch.repo, link);
+        return link;
+      }]
+    ]) {
+      test(`issue 561: a real run whose synapse runners go through the real gate hook from ${place} completes, commits and leaves no inputs file`, async () => {
+        const scratch = makeScratchRepo();
+        const origin = addBareOrigin(scratch);
+        writeCreatePathGh(scratch, origin);
+        const cwd = readCwd(scratch);
+        assert.equal(existsSync(join(scratch.repo, '.hivemind')), false);
+        assert.equal(existsSync(join(cwd, '.hivemind')), false);
+        const runner = makeGatedSynapseRunner(scratch, cwd);
+        const run = await runWorkflow(LAUNCH, realResults(scratch, { 'facts-1': runner, 'plan-1': planResult(makePlan()), 'branch-1': runner, 'commit-1-1': runner, 'review-commit-1-1': runner, 'pr-1': runner }));
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
+        const head = runGitIn(scratch, ['rev-parse', 'HEAD']);
+        assert.equal(runGitIn(scratch, ['symbolic-ref', '--short', 'HEAD']), 'feature/cache');
+        assert.equal(runGitIn(scratch, ['log', '-1', '--format=%s']), 'feat: Step STEP-001 is done.');
+        assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: head, created: true });
+        assert.ok(existsSync(join(scratch.repo, '.hivemind/facts')));
+        assert.ok(existsSync(join(cwd, '.hivemind')));
+        assert.deepEqual(listInputsFiles(scratch.repo), []);
+      });
+    }
     test('describeRunnerWordProblem refuses a word outside its value class, naming the flag and never the value', () => {
       const good = [['--trunk', 'release/2026-10'], ['--base', 'main'], ['--branch', 'feature/cache'], ['--head', 'feature/cache'], ['--ref', '12'], ['--expect-commit', HEAD], ['--expect-commit', 'a'.repeat(64)], ['--classification', 'hotfix'], ['--trunk-freshness', 'skipped'], ['--inputs', '.hivemind/molt-inputs-' + FACTS_STEM + '-commit-1-1.json'], ['--inputs', '.hivemind/pr-inputs-' + FACTS_STEM + '-pr-1-2-retry.json'], ['--inputs', '.hivemind/molt-inputs-' + 'a'.repeat(64) + '.json'], ['--inputs', '.hivemind/molt-inputs-x.json']];
       for (const words of good) {
@@ -10140,14 +10218,31 @@ function pairInputsPaths(run, results) {
 }
 
 /**
+ * Lists the path of every molt or pr inputs file under root, relative to
+ * root, outside .git.
+ */
+function listInputsFiles(root) {
+  return readdirSync(root, { recursive: true }).filter((path) => !path.startsWith('.git/') && /(?:^|\/)(?:molt|pr)-inputs-[^/]*$/.test(path)).sort();
+}
+
+/**
  * Runs the real synapse gate hook on a PreToolUse input and returns its
  * permissionDecision, or none when it prints nothing.
  */
 function readGateDecision(scratch, input) {
+  const output = readGateOutput(scratch, input);
+  return output === undefined ? 'none' : output.permissionDecision;
+}
+
+/**
+ * Runs the real synapse gate hook on a PreToolUse input and returns its
+ * hookSpecificOutput, or undefined when it prints nothing.
+ */
+function readGateOutput(scratch, input) {
   const hookPath = join(pluginRoot, 'hooks/synapse-gate.sh');
   const run = spawnSync('bash', [hookPath], { cwd: scratch.repo, env: { ...scratch.env, CLAUDE_PLUGIN_ROOT: pluginRoot }, input: JSON.stringify(input), encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr);
-  return run.stdout.trim() === '' ? 'none' : JSON.parse(run.stdout).hookSpecificOutput.permissionDecision;
+  return run.stdout.trim() === '' ? undefined : JSON.parse(run.stdout).hookSpecificOutput;
 }
 
 /**

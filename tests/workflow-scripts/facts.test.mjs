@@ -498,10 +498,24 @@ describe('synapse runner commands and blocks', () => {
     return command.split('{plugin-root}').join(root);
   }
   function askGate(command, agentType, root = pluginRoot) {
-    const input = JSON.stringify({ tool_name: 'Bash', agent_type: agentType, tool_input: { command: command }, cwd: gitRoot });
-    const run = spawnSync('bash', [repoRoot + 'plugin/hooks/synapse-gate.sh'], { input: input, env: { ...process.env, CLAUDE_PLUGIN_ROOT: root }, encoding: 'utf8' });
+    return askGateTool({ tool_name: 'Bash', agent_type: agentType, tool_input: { command: command }, cwd: gitRoot }, root);
+  }
+  function askGateTool(input, root = pluginRoot) {
+    const run = spawnSync('bash', [repoRoot + 'plugin/hooks/synapse-gate.sh'], { input: JSON.stringify(input), env: { ...process.env, CLAUDE_PLUGIN_ROOT: root }, encoding: 'utf8' });
     assert.equal(run.status, 0, run.stderr);
     return run.stdout === '' ? 'none' : JSON.parse(run.stdout).hookSpecificOutput.permissionDecision;
+  }
+  /**
+   * Returns the exact-form runner commands that put value in the flag's
+   * slot: the molt and open-plan-pr commands for --inputs, the open-plan-pr
+   * command for --body-file.
+   */
+  function listFlagCommands(flag, value) {
+    const prWords = (inputs, body) => ['--head', 'feature/cache', '--base', 'main', '--expect-commit', 'a'.repeat(40), '--inputs', inputs, '--body-file', body];
+    if (flag === '--body-file') {
+      return [resolveCommand(lib.buildRunnerCommand('open-plan-pr', prWords('.hivemind/pr-inputs-x.json', value)))];
+    }
+    return [resolveCommand(lib.buildRunnerCommand('molt', ['--trunk', 'main', '--inputs', value])), resolveCommand(lib.buildRunnerCommand('open-plan-pr', prWords(value, '.hivemind/pr-inputs-x-body.json')))];
   }
   test('synapse is the runner agent type of a command block, and the scan drone is droneAgentType', () => {
     assert.equal(lib.synapseAgentType(), 'hivemind:synapse');
@@ -524,6 +538,32 @@ describe('synapse runner commands and blocks', () => {
     for (const value of ['.hivemind/molt-inputs-x-body.json', '.hivemind/pr-inputs-' + 'a'.repeat(65) + '.json', '.hivemind/pr-inputs-x.md', 'pr-inputs-x.json', undefined]) {
       assert.equal(lib.describeRunnerWordProblem(['--body-file', value]), 'its --body-file value is not one the script takes', String(value));
     }
+  });
+  test('describeRunnerWordProblem takes an --inputs or --body-file value exactly when the real gate allows synapse both a runner command with it and a Write of it from the checkout', { skip: !hasJq && 'jq is not installed' }, () => {
+    const token64 = 'a'.repeat(64);
+    const corpus = [
+      '.hivemind/molt-inputs-x.json', '.hivemind/pr-inputs-x.json', '.hivemind/pr-inputs-x-body.json', '.hivemind/molt-inputs--.json',
+      '.hivemind/molt-inputs-' + token64 + '.json', '.hivemind/pr-inputs-' + token64 + '.json', '.hivemind/pr-inputs-' + 'a'.repeat(59) + '-body.json',
+      '.hivemind/molt-inputs-' + token64 + 'a.json', '.hivemind/pr-inputs-' + 'a'.repeat(60) + '-body.json',
+      '.hivemind/molt-inputs-.json', '.hivemind/molt-inputs-a_b.json', '.hivemind/molt-inputs-a.b.json', '.hivemind/molt-inputs-{token}.json',
+      '.hivemind/molt-inputs-x.json.bak', '.hivemind/molt-inputs-x.JSON', '.hivemind/MOLT-inputs-x.json', '.hivemind/other-inputs-x.json',
+      '.hivemind/molt-inputs-x', '.hivemind/molt-inputs-a b.json', '.hivemind/molt-inputs-\u00e9.json', '.hivemind/molt-inputs-x.json;touch y',
+      '.hivemind/molt-inputs-x.json ', '.hivemind/molt-inputs-x.json\t', '.hivemind/molt-inputs-x.json\n',
+      'molt-inputs-x.json', 'hivemind/molt-inputs-x.json', './.hivemind/molt-inputs-x.json', '../molt-inputs-x.json',
+      '.hivemind/../molt-inputs-x.json', '.hivemind//molt-inputs-x.json', '.hivemind/sub/molt-inputs-x.json', '.hivemind/molt-inputs-a/b.json',
+      '.hivemind/./molt-inputs-x.json', 'sub/.hivemind/molt-inputs-x.json', gitRoot + '/.hivemind/molt-inputs-x.json', gitRoot + '/.hivemind/pr-inputs-x.json'
+    ];
+    let accepted = 0;
+    for (const flag of ['--inputs', '--body-file']) {
+      for (const value of corpus) {
+        const wordAccepted = lib.describeRunnerWordProblem([flag, value]) === undefined;
+        const bashAllowed = listFlagCommands(flag, value).some((command) => askGate(command, 'hivemind:synapse') === 'allow');
+        const writeAllowed = askGateTool({ tool_name: 'Write', agent_type: 'hivemind:synapse', cwd: gitRoot, tool_input: { file_path: value, content: '{}' } }) === 'allow';
+        assert.equal(wordAccepted, bashAllowed && writeAllowed, flag + ' ' + JSON.stringify(value) + ' bash ' + bashAllowed + ' write ' + writeAllowed);
+        accepted += wordAccepted ? 1 : 0;
+      }
+    }
+    assert.equal(accepted, 11);
   });
   test('a runner command is bash, the script path under {plugin-root} as one double-quoted word, then its words, one space apart', () => {
     assert.equal(lib.buildRunnerCommand('molt', ['--trunk', 'main']), 'bash "{plugin-root}/skills/molt/scripts/molt.sh" --trunk main');
