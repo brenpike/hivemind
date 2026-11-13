@@ -45,9 +45,11 @@
 # jq read into the private copy, whether or not that read succeeded, and before the `inputs file
 # is not valid JSON` blocker and every later check (hivemind_remove_inputs_file in
 # _shared/containment.sh; ADR-0037). Only a leaf named `molt-inputs-<token>.json`, <token> 1 to 64
-# characters of [A-Za-z0-9-], directly under a real `.hivemind` folder at the top of the work tree
-# is deleted, from inside that folder and never through a symlink. Any other inputs path is read
-# and kept. A failed delete leaves the file and does not stop the run: its result and output are
+# characters of [A-Za-z0-9-], directly under a real `.hivemind` folder in the folder the script was
+# started in is deleted (hivemind_inputs_path_problem, anchored on that start folder), from inside
+# that folder and never through a symlink. The path is `.hivemind/<leaf>`, or an absolute path whose
+# folder above `.hivemind` resolves to the start folder. Any other inputs path, `../.hivemind/<leaf>`
+# from a subfolder included, is read and kept. A failed delete leaves the file and does not stop the run: its result and output are
 # discarded, so stdout, stderr and the exit contract are unchanged. A refusal before the read
 # (usage, the trunk gate, a missing tool, not a checkout, `inputs file not found`, `inputs file
 # resolves outside the checkout`) leaves the file. A rerun must write the file again. Deleting
@@ -267,9 +269,10 @@ done
 [ -n "$inputs_arg" ] || blocker "$usage_reason"
 hivemind_assert_identifier "$trunk_name" || blocker "trunk contains characters outside the safe allowlist"
 
+start_dir="$PWD"
 case "$inputs_arg" in
   /*) INPUTS_FILE="$inputs_arg" ;;
-  *) INPUTS_FILE="$PWD/$inputs_arg" ;;
+  *) INPUTS_FILE="$start_dir/$inputs_arg" ;;
 esac
 
 command -v git >/dev/null 2>&1 || blocker "git not found on PATH"
@@ -304,7 +307,7 @@ hivemind_assert_inputs_contained "$work_tree_top" "$INPUTS_FILE" >/dev/null 2>&1
 inputs_read_rc=0
 jq -c -s 'if length == 1 then .[0] else error("not one JSON value") end' "$INPUTS_FILE" >"$inputs_copy" 2>/dev/null \
   || inputs_read_rc=$?
-hivemind_remove_inputs_file "$work_tree_top" "$INPUTS_FILE" molt >/dev/null 2>&1 || :
+hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$inputs_arg" molt >/dev/null 2>&1 || :
 [ "$inputs_read_rc" = 0 ] || blocker "inputs file is not valid JSON"
 
 # The field rules from the header, in order. Prints the fixed reason of the first rule the

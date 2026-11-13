@@ -1725,7 +1725,8 @@ else
 fi
 
 # ── 7e. hivemind_remove_inputs_file — delete an engine's own inputs file ─────────
-# Every case asserts the return code, the file state after the call, and an empty stdout.
+# Every case asserts the return code, the file state after the call, and an empty stdout. The
+# call runs from $WORKDIR, so a relative path resolves from <start_dir>, never from the cwd.
 
 # path_state <path>
 #   Echoes present when <path> exists or is a symlink (live or dangling), absent otherwise.
@@ -1737,13 +1738,13 @@ path_state() {
   fi
 }
 
-# check_remove_inputs <case> <expected_rc> <expected_state> <probe_path> <call_dir> <raw_root> <inputs_path> <kind>
-#   Runs hivemind_remove_inputs_file from <call_dir>, then asserts its return code, the state of
-#   <probe_path>, and that it printed nothing on stdout.
+# check_remove_inputs <case> <expected_rc> <expected_state> <probe_path> <start_dir> <raw_root> <inputs_path> <kind>
+#   Runs hivemind_remove_inputs_file with <start_dir> from $WORKDIR, then asserts its return
+#   code, the state of <probe_path>, and that it printed nothing on stdout.
 check_remove_inputs() {
-  local case_name="$1" expected_rc="$2" expected_state="$3" probe_path="$4" call_dir="$5"
+  local case_name="$1" expected_rc="$2" expected_state="$3" probe_path="$4" start_dir="$5"
   local remove_stdout remove_rc
-  remove_stdout="$(cd "$call_dir" && hivemind_remove_inputs_file "$6" "$7" "$8" 2>/dev/null)"
+  remove_stdout="$(cd "$WORKDIR" && hivemind_remove_inputs_file "$6" "$start_dir" "$7" "$8" 2>/dev/null)"
   remove_rc=$?
   assert_eq "$case_name-rc" "$expected_rc" "$remove_rc" "remove: return code"
   assert_eq "$case_name-state" "$expected_state" "$(path_state "$probe_path")" "remove: file state after the call"
@@ -1753,7 +1754,8 @@ check_remove_inputs() {
 c7e="$WORKDIR/c7e/checkout"
 c7e_hm="$c7e/.hivemind"
 c7e_link="$WORKDIR/c7e/checkout-link"
-mkdir -p "$c7e_hm/sub" "$c7e/.hivemind-x" "$WORKDIR/c7e/external"
+c7e_sub="$c7e/sub2"
+mkdir -p "$c7e_hm/sub" "$c7e/.hivemind-x" "$WORKDIR/c7e/external/.hivemind" "$c7e_sub/.hivemind" "$c7e/sub3"
 git init -q "$c7e"
 ln -s "$c7e" "$c7e_link"
 c7e_token64="$(printf '%64s' '' | tr ' ' a)"
@@ -1762,68 +1764,98 @@ c7e_token65="${c7e_token64}b"
 # Deleted: matching molt and pr leaves, absolute and relative, direct and through a symlinked root.
 : > "$c7e_hm/molt-inputs-abs1.json"
 check_remove_inputs "c7e:molt-absolute" 0 absent "$c7e_hm/molt-inputs-abs1.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-abs1.json" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-abs1.json" molt
 : > "$c7e_hm/pr-inputs-Abs-2.json"
 check_remove_inputs "c7e:pr-absolute" 0 absent "$c7e_hm/pr-inputs-Abs-2.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/pr-inputs-Abs-2.json" pr
+  "$c7e" "$c7e" "$c7e_hm/pr-inputs-Abs-2.json" pr
 : > "$c7e_hm/molt-inputs-rel1.json"
 check_remove_inputs "c7e:molt-relative" 0 absent "$c7e_hm/molt-inputs-rel1.json" \
   "$c7e" "$c7e" ".hivemind/molt-inputs-rel1.json" molt
 : > "$c7e_hm/pr-inputs-rel2.json"
 check_remove_inputs "c7e:pr-relative" 0 absent "$c7e_hm/pr-inputs-rel2.json" \
   "$c7e" "$c7e" ".hivemind/pr-inputs-rel2.json" pr
-: > "$c7e_hm/molt-inputs-bare.json"
-check_remove_inputs "c7e:molt-bare-leaf" 0 absent "$c7e_hm/molt-inputs-bare.json" \
-  "$c7e_hm" "$c7e" "molt-inputs-bare.json" molt
+: > "$c7e_hm/pr-inputs-rel2-body.json"
+check_remove_inputs "c7e:pr-body-relative" 0 absent "$c7e_hm/pr-inputs-rel2-body.json" \
+  "$c7e" "$c7e" ".hivemind/pr-inputs-rel2-body.json" pr
 : > "$c7e_hm/molt-inputs-link1.json"
-check_remove_inputs "c7e:molt-symlinked-root-absolute" 0 absent "$c7e_hm/molt-inputs-link1.json" \
-  "$WORKDIR" "$c7e_link" "$c7e_link/.hivemind/molt-inputs-link1.json" molt
+check_remove_inputs "c7e:molt-symlinked-path-prefix" 0 absent "$c7e_hm/molt-inputs-link1.json" \
+  "$c7e" "$c7e_link" "$c7e_link/.hivemind/molt-inputs-link1.json" molt
+: > "$c7e_hm/molt-inputs-link3.json"
+check_remove_inputs "c7e:molt-symlinked-start" 0 absent "$c7e_hm/molt-inputs-link3.json" \
+  "$c7e_link" "$c7e" "$c7e_hm/molt-inputs-link3.json" molt
 : > "$c7e_hm/pr-inputs-link2.json"
 check_remove_inputs "c7e:pr-symlinked-root-relative" 0 absent "$c7e_hm/pr-inputs-link2.json" \
   "$c7e_link" "$c7e_link" ".hivemind/pr-inputs-link2.json" pr
 : > "$c7e_hm/molt-inputs-x.json"
 check_remove_inputs "c7e:token-1-char" 0 absent "$c7e_hm/molt-inputs-x.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-x.json" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-x.json" molt
 : > "$c7e_hm/molt-inputs-$c7e_token64.json"
 check_remove_inputs "c7e:token-64-chars" 0 absent "$c7e_hm/molt-inputs-$c7e_token64.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-$c7e_token64.json" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-$c7e_token64.json" molt
+
+# Deleted: a start folder below the checkout top, its own .hivemind, relative and absolute.
+: > "$c7e_sub/.hivemind/molt-inputs-sub-rel.json"
+check_remove_inputs "c7e:subfolder-relative" 0 absent "$c7e_sub/.hivemind/molt-inputs-sub-rel.json" \
+  "$c7e_sub" "$c7e" ".hivemind/molt-inputs-sub-rel.json" molt
+: > "$c7e_sub/.hivemind/pr-inputs-sub-abs.json"
+check_remove_inputs "c7e:subfolder-absolute" 0 absent "$c7e_sub/.hivemind/pr-inputs-sub-abs.json" \
+  "$c7e_sub" "$c7e" "$c7e_sub/.hivemind/pr-inputs-sub-abs.json" pr
+
+# Kept, return 1: the path is not anchored on the start folder.
+: > "$c7e_hm/molt-inputs-up.json"
+check_remove_inputs "c7e:subfolder-parent-relative" 1 present "$c7e_hm/molt-inputs-up.json" \
+  "$c7e_sub" "$c7e" "../.hivemind/molt-inputs-up.json" molt
+check_remove_inputs "c7e:subfolder-top-absolute" 1 present "$c7e_hm/molt-inputs-up.json" \
+  "$c7e_sub" "$c7e" "$c7e_hm/molt-inputs-up.json" molt
+: > "$c7e_hm/molt-inputs-bare.json"
+check_remove_inputs "c7e:bare-leaf" 1 present "$c7e_hm/molt-inputs-bare.json" \
+  "$c7e_hm" "$c7e" "molt-inputs-bare.json" molt
+check_remove_inputs "c7e:dot-prefix" 1 present "$c7e_hm/molt-inputs-bare.json" \
+  "$c7e" "$c7e" "./.hivemind/molt-inputs-bare.json" molt
+: > "$WORKDIR/c7e/external/.hivemind/molt-inputs-ext.json"
+check_remove_inputs "c7e:start-outside-checkout" 1 present "$WORKDIR/c7e/external/.hivemind/molt-inputs-ext.json" \
+  "$WORKDIR/c7e/external" "$c7e" ".hivemind/molt-inputs-ext.json" molt
+check_remove_inputs "c7e:start-missing-hivemind" 1 absent "$c7e/sub3/.hivemind/molt-inputs-none.json" \
+  "$c7e/sub3" "$c7e" ".hivemind/molt-inputs-none.json" molt
+check_remove_inputs "c7e:start-relative" 1 present "$c7e_hm/molt-inputs-bare.json" \
+  "checkout" "$c7e" ".hivemind/molt-inputs-bare.json" molt
 
 # Kept, return 1: the leaf name does not match <kind>-inputs-<token>.json.
 : > "$c7e_hm/molt-inputs-kind.json"
 check_remove_inputs "c7e:wrong-kind" 1 present "$c7e_hm/molt-inputs-kind.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-kind.json" pr
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-kind.json" pr
 : > "$c7e_hm/spawn-inputs-kind.json"
 check_remove_inputs "c7e:unknown-kind" 1 present "$c7e_hm/spawn-inputs-kind.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/spawn-inputs-kind.json" spawn
+  "$c7e" "$c7e" "$c7e_hm/spawn-inputs-kind.json" spawn
 : > "$c7e_hm/molt-inputs-.json"
 check_remove_inputs "c7e:token-empty" 1 present "$c7e_hm/molt-inputs-.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-.json" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-.json" molt
 : > "$c7e_hm/molt-inputs-$c7e_token65.json"
 check_remove_inputs "c7e:token-65-chars" 1 present "$c7e_hm/molt-inputs-$c7e_token65.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-$c7e_token65.json" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-$c7e_token65.json" molt
 : > "$c7e_hm/molt-inputs-a_b.json"
 check_remove_inputs "c7e:token-underscore" 1 present "$c7e_hm/molt-inputs-a_b.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-a_b.json" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-a_b.json" molt
 : > "$c7e_hm/pr-inputs-a.b.json"
 check_remove_inputs "c7e:token-dot" 1 present "$c7e_hm/pr-inputs-a.b.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/pr-inputs-a.b.json" pr
+  "$c7e" "$c7e" "$c7e_hm/pr-inputs-a.b.json" pr
 : > "$c7e_hm/molt-inputs-ext.txt"
 check_remove_inputs "c7e:not-json" 1 present "$c7e_hm/molt-inputs-ext.txt" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-ext.txt" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-ext.txt" molt
 : > "$c7e_hm/molt-inputs-ext.json.bak"
 check_remove_inputs "c7e:json-not-last" 1 present "$c7e_hm/molt-inputs-ext.json.bak" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-ext.json.bak" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-ext.json.bak" molt
 
-# Kept, return 1: the leaf is not directly under <canonical root>/.hivemind.
+# Kept, return 1: the leaf is not directly under <start>/.hivemind.
 : > "$c7e_hm/sub/molt-inputs-sub.json"
 check_remove_inputs "c7e:nested-folder" 1 present "$c7e_hm/sub/molt-inputs-sub.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/sub/molt-inputs-sub.json" molt
+  "$c7e" "$c7e" "$c7e_hm/sub/molt-inputs-sub.json" molt
 : > "$c7e/molt-inputs-top.json"
 check_remove_inputs "c7e:checkout-top" 1 present "$c7e/molt-inputs-top.json" \
-  "$WORKDIR" "$c7e" "$c7e/molt-inputs-top.json" molt
+  "$c7e" "$c7e" "$c7e/molt-inputs-top.json" molt
 : > "$c7e/.hivemind-x/molt-inputs-sib.json"
 check_remove_inputs "c7e:sibling-folder" 1 present "$c7e/.hivemind-x/molt-inputs-sib.json" \
-  "$WORKDIR" "$c7e" "$c7e/.hivemind-x/molt-inputs-sib.json" molt
+  "$c7e" "$c7e" "$c7e/.hivemind-x/molt-inputs-sib.json" molt
 
 # Kept, return 1: .hivemind itself is a symlink, to a folder inside the checkout and outside it.
 c7e_in="$WORKDIR/c7e-in/checkout"
@@ -1831,7 +1863,7 @@ mkdir -p "$c7e_in/real-hivemind"
 ln -s "$c7e_in/real-hivemind" "$c7e_in/.hivemind"
 : > "$c7e_in/real-hivemind/molt-inputs-in.json"
 check_remove_inputs "c7e:hivemind-symlink-inside" 1 present "$c7e_in/real-hivemind/molt-inputs-in.json" \
-  "$WORKDIR" "$c7e_in" "$c7e_in/.hivemind/molt-inputs-in.json" molt
+  "$c7e_in" "$c7e_in" "$c7e_in/.hivemind/molt-inputs-in.json" molt
 c7e_out="$WORKDIR/c7e-out/checkout"
 mkdir -p "$c7e_out" "$WORKDIR/c7e-out/external"
 ln -s "$WORKDIR/c7e-out/external" "$c7e_out/.hivemind"
@@ -1843,57 +1875,62 @@ check_remove_inputs "c7e:hivemind-symlink-outside" 1 present "$WORKDIR/c7e-out/e
 : > "$WORKDIR/c7e/external/target.json"
 ln -s "$WORKDIR/c7e/external/target.json" "$c7e_hm/molt-inputs-live.json"
 check_remove_inputs "c7e:symlink-leaf-live" 1 present "$c7e_hm/molt-inputs-live.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-live.json" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-live.json" molt
 assert_eq "c7e:symlink-leaf-live-target" "present" "$(path_state "$WORKDIR/c7e/external/target.json")" \
   "remove: live symlink target kept"
 ln -s "$WORKDIR/c7e/external/missing.json" "$c7e_hm/molt-inputs-dangling.json"
 check_remove_inputs "c7e:symlink-leaf-dangling" 1 present "$c7e_hm/molt-inputs-dangling.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-dangling.json" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-dangling.json" molt
 assert_eq "c7e:symlink-leaf-dangling-target" "absent" "$(path_state "$WORKDIR/c7e/external/missing.json")" \
   "remove: dangling symlink target not created"
 
 # Kept, return 1: the leaf is a directory, a FIFO, or missing.
 mkdir -p "$c7e_hm/molt-inputs-dir.json"
 check_remove_inputs "c7e:directory-leaf" 1 present "$c7e_hm/molt-inputs-dir.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-dir.json" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-dir.json" molt
 if command -v mkfifo >/dev/null 2>&1; then
   mkfifo "$c7e_hm/pr-inputs-fifo.json"
   check_remove_inputs "c7e:fifo-leaf" 1 present "$c7e_hm/pr-inputs-fifo.json" \
-    "$WORKDIR" "$c7e" "$c7e_hm/pr-inputs-fifo.json" pr
+    "$c7e" "$c7e" "$c7e_hm/pr-inputs-fifo.json" pr
 else
   pass "c7e:fifo-leaf" "remove: FIFO leaf test skipped (mkfifo absent)"
 fi
 check_remove_inputs "c7e:missing-leaf" 1 absent "$c7e_hm/molt-inputs-missing.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-missing.json" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-missing.json" molt
 
 # Kept, return 1: git lists the leaf in the index (staged, committed, or committed and then
-# modified), or git cannot answer because the root is not a checkout.
+# modified, at the top or in a subfolder start), or git cannot answer because the root is not a
+# checkout.
 printf '{}\n' > "$c7e_hm/molt-inputs-staged.json"
 git -C "$c7e" add -f -- .hivemind/molt-inputs-staged.json
 check_remove_inputs "c7e:staged-leaf" 1 present "$c7e_hm/molt-inputs-staged.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-staged.json" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-staged.json" molt
+printf '{}\n' > "$c7e_sub/.hivemind/pr-inputs-staged.json"
+git -C "$c7e" add -f -- sub2/.hivemind/pr-inputs-staged.json
+check_remove_inputs "c7e:subfolder-staged-leaf" 1 present "$c7e_sub/.hivemind/pr-inputs-staged.json" \
+  "$c7e_sub" "$c7e" ".hivemind/pr-inputs-staged.json" pr
 printf '{}\n' > "$c7e_hm/pr-inputs-committed.json"
 git -C "$c7e" add -f -- .hivemind/pr-inputs-committed.json
 git -C "$c7e" -c user.name=t -c user.email=t@example.invalid commit -q -m tracked -- \
-  .hivemind/molt-inputs-staged.json .hivemind/pr-inputs-committed.json
+  .hivemind/molt-inputs-staged.json .hivemind/pr-inputs-committed.json sub2/.hivemind/pr-inputs-staged.json
 check_remove_inputs "c7e:committed-leaf" 1 present "$c7e_hm/pr-inputs-committed.json" \
   "$c7e" "$c7e" ".hivemind/pr-inputs-committed.json" pr
 assert_eq "c7e:committed-leaf-clean" "" "$(git -C "$c7e" status --porcelain -- .hivemind/pr-inputs-committed.json)" \
   "remove: a committed leaf stays unmodified"
 printf 'not json\n' > "$c7e_hm/molt-inputs-staged.json"
 check_remove_inputs "c7e:committed-modified-leaf" 1 present "$c7e_hm/molt-inputs-staged.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-staged.json" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-staged.json" molt
 # Deleted: an ignored leaf in the same checkout is untracked.
 printf '.hivemind/\n' > "$c7e/.gitignore"
 : > "$c7e_hm/molt-inputs-ignored.json"
 check_remove_inputs "c7e:ignored-leaf" 0 absent "$c7e_hm/molt-inputs-ignored.json" \
-  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-ignored.json" molt
+  "$c7e" "$c7e" "$c7e_hm/molt-inputs-ignored.json" molt
 c7e_nogit="$WORKDIR/c7e-nogit/checkout"
 mkdir -p "$c7e_nogit/.hivemind"
 : > "$c7e_nogit/.hivemind/molt-inputs-nogit.json"
 # The ceiling stops git from finding a checkout above the temp folder.
 GIT_CEILING_DIRECTORIES="$(cd "$WORKDIR/c7e-nogit" && pwd -P)" check_remove_inputs "c7e:not-a-checkout" 1 present "$c7e_nogit/.hivemind/molt-inputs-nogit.json" \
-  "$WORKDIR" "$c7e_nogit" "$c7e_nogit/.hivemind/molt-inputs-nogit.json" molt
+  "$c7e_nogit" "$c7e_nogit" "$c7e_nogit/.hivemind/molt-inputs-nogit.json" molt
 
 # Kept, return 2: the delete itself fails (a read-only .hivemind; skipped as root, which ignores it).
 if [ "$(id -u)" -ne 0 ]; then
@@ -1903,10 +1940,134 @@ if [ "$(id -u)" -ne 0 ]; then
   : > "$c7e_ro/.hivemind/molt-inputs-ro.json"
   chmod a-w "$c7e_ro/.hivemind"
   check_remove_inputs "c7e:delete-fails" 2 present "$c7e_ro/.hivemind/molt-inputs-ro.json" \
-    "$WORKDIR" "$c7e_ro" "$c7e_ro/.hivemind/molt-inputs-ro.json" molt
+    "$c7e_ro" "$c7e_ro" "$c7e_ro/.hivemind/molt-inputs-ro.json" molt
   chmod u+w "$c7e_ro/.hivemind"
 else
   pass "c7e:delete-fails" "remove: read-only folder test skipped (running as root)"
+fi
+
+# ── 7f. hivemind_inputs_path_problem — the one inputs-path rule ──────────────────
+# Each case asserts the return code and the exact stdout: nothing on success, one condition word
+# on failure. The call runs from $WORKDIR, so a relative path resolves from <base_dir>.
+
+# check_path_problem <case> <expected word or empty> <base_dir> <path> <kind>...
+check_path_problem() {
+  local case_name="$1" expected_word="$2" expected_rc=1 problem_word problem_rc
+  shift 2
+  [ -n "$expected_word" ] || expected_rc=0
+  problem_word="$(cd "$WORKDIR" && hivemind_inputs_path_problem "$@")"
+  problem_rc=$?
+  assert_eq "$case_name-rc" "$expected_rc" "$problem_rc" "path rule: return code"
+  assert_eq "$case_name-word" "$expected_word" "$problem_word" "path rule: printed word"
+}
+
+c7f="$WORKDIR/c7f"
+c7f_base="$c7f/base"
+c7f_link="$c7f/base-link"
+c7f_nohm="$c7f/no-hivemind"
+mkdir -p "$c7f_base/.hivemind" "$c7f_nohm" "$c7f/hm-target" "$c7f/hm-link" "$c7f/hm-file" "$c7f/other/.hivemind"
+ln -s "$c7f_base" "$c7f_link"
+ln -s "$c7f/hm-target" "$c7f/hm-link/.hivemind"
+: > "$c7f/hm-file/.hivemind"
+c7f_token64="$(printf '%64s' '' | tr ' ' a)"
+
+# Allowed: relative and absolute, molt and pr, the pr body form, several kinds, a 64-character
+# token, a present regular-file leaf, a missing .hivemind, and a symlinked prefix both ways.
+check_path_problem "c7f:molt-relative" "" "$c7f_base" ".hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:pr-relative" "" "$c7f_base" ".hivemind/pr-inputs-a.json" pr
+check_path_problem "c7f:pr-body-relative" "" "$c7f_base" ".hivemind/pr-inputs-a-body.json" pr
+check_path_problem "c7f:two-kinds" "" "$c7f_base" ".hivemind/pr-inputs-a.json" molt pr
+check_path_problem "c7f:molt-absolute" "" "$c7f_base" "$c7f_base/.hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:token-64" "" "$c7f_base" ".hivemind/molt-inputs-$c7f_token64.json" molt
+: > "$c7f_base/.hivemind/molt-inputs-present.json"
+check_path_problem "c7f:leaf-present-file" "" "$c7f_base" ".hivemind/molt-inputs-present.json" molt
+check_path_problem "c7f:hivemind-missing-relative" "" "$c7f_nohm" ".hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:hivemind-missing-absolute" "" "$c7f_nohm" "$c7f_nohm/.hivemind/pr-inputs-a.json" pr
+check_path_problem "c7f:symlinked-path-prefix" "" "$c7f_base" "$c7f_link/.hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:symlinked-base" "" "$c7f_link" "$c7f_base/.hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:symlinked-base-relative" "" "$c7f_link" ".hivemind/molt-inputs-a.json" molt
+c7f_errexit="$(set -e; if hivemind_inputs_path_problem "$c7f_base" "../x" molt >/dev/null; then :; fi; printf 'survived')"
+assert_eq "c7f:errexit-condition" "survived" "$c7f_errexit" "path rule: safe under set -e in a condition"
+
+# control-byte: a control byte in the base or the path (\001 stands in for NUL, as the hook maps it).
+check_path_problem "c7f:control-base-newline" control-byte "$(printf '%s\nx' "$c7f_base")" ".hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:control-path-tab" control-byte "$c7f_base" "$(printf '.hivemind/molt-inputs-a\t.json')" molt
+check_path_problem "c7f:control-path-soh" control-byte "$c7f_base" "$(printf '.hivemind/molt-inputs-a\001.json')" molt
+check_path_problem "c7f:control-path-del" control-byte "$c7f_base" "$(printf '.hivemind/molt-inputs-a\177.json')" molt
+
+# dir-not-absolute: a relative, empty or drive-letter base.
+check_path_problem "c7f:base-relative" dir-not-absolute "base" ".hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:base-empty" dir-not-absolute "" ".hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:base-drive-backslash" dir-not-absolute 'C:\x' ".hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:base-drive-slash" dir-not-absolute "C:/x" ".hivemind/molt-inputs-a.json" molt
+
+# dir-unreadable: the base does not exist, or is a file.
+check_path_problem "c7f:base-missing" dir-unreadable "$c7f/missing" ".hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:base-file" dir-unreadable "$c7f/hm-file/.hivemind" ".hivemind/molt-inputs-a.json" molt
+
+# path-form: not .hivemind/<leaf> or <abs>/.hivemind/<leaf>, or an empty, . or .. component.
+check_path_problem "c7f:form-empty" path-form "$c7f_base" "" molt
+check_path_problem "c7f:form-dot-prefix" path-form "$c7f_base" "./.hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:form-dotdot" path-form "$c7f_base" ".." molt
+check_path_problem "c7f:form-double-slash" path-form "$c7f_base" "//" molt
+check_path_problem "c7f:form-root" path-form "$c7f_base" "/" molt
+check_path_problem "c7f:form-inner-double-slash" path-form "$c7f_base" ".hivemind//molt-inputs-a.json" molt
+check_path_problem "c7f:form-trailing-slash" path-form "$c7f_base" ".hivemind/molt-inputs-a.json/" molt
+check_path_problem "c7f:form-bare-leaf" path-form "$c7f_base" "molt-inputs-a.json" molt
+check_path_problem "c7f:form-folder-only" path-form "$c7f_base" ".hivemind" molt
+check_path_problem "c7f:form-nested" path-form "$c7f_base" ".hivemind/sub/molt-inputs-a.json" molt
+check_path_problem "c7f:form-deeper-relative" path-form "$c7f_base" "sub/.hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:form-parent-relative" path-form "$c7f_base/.hivemind" "../.hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:form-absolute-dot" path-form "$c7f_base" "$c7f_base/./.hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:form-absolute-dotdot" path-form "$c7f_base" "$c7f_base/../base/.hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:form-absolute-double-slash" path-form "$c7f_base" "$c7f_base//.hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:form-absolute-no-hivemind" path-form "$c7f_base" "$c7f_base/molt-inputs-a.json" molt
+check_path_problem "c7f:form-absolute-sibling" path-form "$c7f_base" "$c7f_base/.hivemind-x/molt-inputs-a.json" molt
+
+# leaf-name: the leaf is not <kind>-inputs-<token>.json for any given kind.
+check_path_problem "c7f:leaf-wrong-kind" leaf-name "$c7f_base" ".hivemind/molt-inputs-a.json" pr
+check_path_problem "c7f:leaf-no-kind" leaf-name "$c7f_base" ".hivemind/molt-inputs-a.json"
+check_path_problem "c7f:leaf-other-name" leaf-name "$c7f_base" ".hivemind/in.json" molt pr
+check_path_problem "c7f:leaf-token-empty" leaf-name "$c7f_base" ".hivemind/molt-inputs-.json" molt
+check_path_problem "c7f:leaf-token-65" leaf-name "$c7f_base" ".hivemind/molt-inputs-${c7f_token64}b.json" molt
+check_path_problem "c7f:leaf-token-underscore" leaf-name "$c7f_base" ".hivemind/molt-inputs-a_b.json" molt
+check_path_problem "c7f:leaf-token-dot" leaf-name "$c7f_base" ".hivemind/pr-inputs-a.b.json" pr
+check_path_problem "c7f:leaf-not-json" leaf-name "$c7f_base" ".hivemind/molt-inputs-a.txt" molt
+
+# outside-dir: the folder above .hivemind of an absolute path is not the base.
+check_path_problem "c7f:outside-other" outside-dir "$c7f_base" "$c7f/other/.hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:outside-missing" outside-dir "$c7f_base" "$c7f/nowhere/.hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:outside-subfolder-start" outside-dir "$c7f_base/.hivemind" "$c7f_base/.hivemind/molt-inputs-a.json" molt
+
+# folder-symlink, folder-not-directory: .hivemind is a symlink or a file.
+check_path_problem "c7f:folder-symlink" folder-symlink "$c7f/hm-link" ".hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:folder-symlink-absolute" folder-symlink "$c7f/hm-link" "$c7f/hm-link/.hivemind/molt-inputs-a.json" molt
+check_path_problem "c7f:folder-file" folder-not-directory "$c7f/hm-file" ".hivemind/molt-inputs-a.json" molt
+
+# folder-elsewhere: .hivemind does not canonicalize to itself (here it cannot be entered; skipped
+# as root, which enters it anyway).
+if [ "$(id -u)" -ne 0 ]; then
+  mkdir -p "$c7f/hm-closed/.hivemind"
+  chmod 000 "$c7f/hm-closed/.hivemind"
+  check_path_problem "c7f:folder-elsewhere" folder-elsewhere "$c7f/hm-closed" ".hivemind/molt-inputs-a.json" molt
+  chmod 700 "$c7f/hm-closed/.hivemind"
+else
+  pass "c7f:folder-elsewhere" "path rule: closed folder test skipped (running as root)"
+fi
+
+# leaf-symlink, leaf-not-file: the leaf is a symlink (live or dangling), a folder or a FIFO.
+: > "$c7f/target.json"
+ln -s "$c7f/target.json" "$c7f_base/.hivemind/molt-inputs-live.json"
+check_path_problem "c7f:leaf-symlink-live" leaf-symlink "$c7f_base" ".hivemind/molt-inputs-live.json" molt
+ln -s "$c7f/missing.json" "$c7f_base/.hivemind/molt-inputs-dangling.json"
+check_path_problem "c7f:leaf-symlink-dangling" leaf-symlink "$c7f_base" "$c7f_base/.hivemind/molt-inputs-dangling.json" molt
+mkdir -p "$c7f_base/.hivemind/molt-inputs-dir.json"
+check_path_problem "c7f:leaf-directory" leaf-not-file "$c7f_base" ".hivemind/molt-inputs-dir.json" molt
+if command -v mkfifo >/dev/null 2>&1; then
+  mkfifo "$c7f_base/.hivemind/pr-inputs-fifo.json"
+  check_path_problem "c7f:leaf-fifo" leaf-not-file "$c7f_base" ".hivemind/pr-inputs-fifo.json" pr
+else
+  pass "c7f:leaf-fifo" "path rule: FIFO leaf test skipped (mkfifo absent)"
 fi
 
 # ── Section 8: ledger-reconstruct-parse.sh — git_log_to_findings (PURE parse) ────

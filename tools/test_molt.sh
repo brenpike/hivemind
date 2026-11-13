@@ -6,7 +6,7 @@
 # The engine takes REQUIRED `--trunk <branch> --inputs <path>`. It gates trunk as an identifier,
 # moves to the top of the work tree, reads the inputs file once (after the containment read-guard),
 # deletes it when it is a .hivemind/molt-inputs-<token>.json leaf directly under a real .hivemind
-# folder (read or not as JSON), and checks its fields, then refuses an in-progress operation, unmerged paths, a detached or
+# folder in the folder it was started in (read or not as JSON), and checks its fields, then refuses an in-progress operation, unmerged paths, a detached or
 # unborn HEAD, a branch name that fails the identifier gate, a trunk that names the current
 # branch, and an unreadable trunk. Trunk names the current branch only by ref identity: one of
 # git's six lookup candidates for it, or the end a candidate resolves to, is refs/heads/<b> or
@@ -925,6 +925,8 @@ test_messages() {
     assert_committed message-72-unicode "$(printf 'M\tf.txt')" "chore: $(printf 'é%.0s' $(seq 1 72))"
 }
 
+# A subfolder run reads a relative inputs path from the subfolder. The subfolder's own
+# .hivemind/<leaf> is deleted after the read; ../.hivemind/<leaf>, the top's file, is read and kept.
 test_subfolder_invocation() {
     create_world subfolder
     printf 'changed\n' >"$WORK_TREE/sub/keep.txt"
@@ -932,7 +934,32 @@ test_subfolder_invocation() {
     write_basic_inputs '["sub/keep.txt","f.txt"]'
     assert_commit_run subfolder "$WORK_TREE/sub" "../$INPUTS_REL"
     assert_committed subfolder "$(printf 'M\tf.txt\nM\tsub/keep.txt')" 'feat(core): add thing'
-    assert_path_gone subfolder-inputs-deleted "$INPUTS_PATH"
+    assert_path_kept subfolder-parent-inputs-kept "$INPUTS_PATH"
+
+    create_world subfolder-own-hivemind
+    printf 'changed\n' >"$WORK_TREE/sub/keep.txt"
+    INPUTS_PATH="$WORK_TREE/sub/$INPUTS_REL"
+    mkdir -p "$WORK_TREE/sub/.hivemind"
+    write_basic_inputs '["sub/keep.txt"]'
+    assert_commit_run subfolder-own-hivemind "$WORK_TREE/sub" "$INPUTS_REL"
+    assert_committed subfolder-own-hivemind "$(printf 'M\tsub/keep.txt')" 'feat(core): add thing'
+    assert_path_gone subfolder-own-hivemind-deleted "$INPUTS_PATH"
+
+    create_world subfolder-own-hivemind-absolute
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    INPUTS_PATH="$WORK_TREE/sub/$INPUTS_REL"
+    mkdir -p "$WORK_TREE/sub/.hivemind"
+    write_basic_inputs '["f.txt"]'
+    assert_commit_run subfolder-own-hivemind-absolute "$WORK_TREE/sub" "$INPUTS_PATH"
+    assert_committed subfolder-own-hivemind-absolute "$(printf 'M\tf.txt')" 'feat(core): add thing'
+    assert_path_gone subfolder-own-hivemind-absolute-deleted "$INPUTS_PATH"
+
+    create_world subfolder-top-absolute
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_commit_run subfolder-top-absolute "$WORK_TREE/sub" "$INPUTS_PATH"
+    assert_committed subfolder-top-absolute "$(printf 'M\tf.txt')" 'feat(core): add thing'
+    assert_path_kept subfolder-top-absolute-kept "$INPUTS_PATH"
 
     create_world subfolder-relative-missing
     printf 'changed\n' >"$WORK_TREE/f.txt"

@@ -53,10 +53,12 @@
 # the private body, each whether or not its read succeeded, and both before the `inputs file is
 # not valid JSON` blocker and every later check (hivemind_remove_inputs_file in
 # _shared/containment.sh; ADR-0037). Only a leaf named `pr-inputs-<token>.json`, <token> 1 to 64
-# characters of [A-Za-z0-9-], directly under a real `.hivemind` folder at the top of the work tree
-# is deleted, from inside that folder and never through a symlink. For the body file the token is
+# characters of [A-Za-z0-9-], directly under a real `.hivemind` folder in the folder the script was
+# started in is deleted (hivemind_inputs_path_problem, anchored on that start folder), from inside
+# that folder and never through a symlink. The path is `.hivemind/<leaf>`, or an absolute path whose
+# folder above `.hivemind` resolves to the start folder. For the body file the token is
 # `<token>-body`, so the caller's <token> must be at most 59 characters for the body file to be
-# deleted. Any other path is read and kept. A failed delete leaves the file and does not stop the
+# deleted. Any other path, `../.hivemind/<leaf>` from a subfolder included, is read and kept. A failed delete leaves the file and does not stop the
 # run: its result and output are discarded, so stdout, stderr and the exit contract are
 # unchanged. A refusal before the reads (usage, the identifier gates, the expect-commit format,
 # the delay, a missing tool, not a checkout, a file not found, a file that resolves outside the
@@ -416,13 +418,14 @@ case "$reread_delay" in
   ''|*[!0-9]*) blocker "HIVEMIND_OPEN_PLAN_PR_REREAD_DELAY must be a whole number of seconds" ;;
 esac
 
+start_dir="$PWD"
 case "$inputs_arg" in
   /*) INPUTS_FILE="$inputs_arg" ;;
-  *) INPUTS_FILE="$PWD/$inputs_arg" ;;
+  *) INPUTS_FILE="$start_dir/$inputs_arg" ;;
 esac
 case "$body_file_arg" in
   /*) BODY_INPUT_FILE="$body_file_arg" ;;
-  *) BODY_INPUT_FILE="$PWD/$body_file_arg" ;;
+  *) BODY_INPUT_FILE="$start_dir/$body_file_arg" ;;
 esac
 
 command -v git >/dev/null 2>&1 || blocker "git not found on PATH"
@@ -462,10 +465,10 @@ hivemind_assert_inputs_contained "$work_tree_top" "$BODY_INPUT_FILE" >/dev/null 
 inputs_read_rc=0
 jq -c -s 'if length == 1 then .[0] else error("not one JSON value") end' "$INPUTS_FILE" >"$inputs_copy" 2>/dev/null \
   || inputs_read_rc=$?
-hivemind_remove_inputs_file "$work_tree_top" "$INPUTS_FILE" pr >/dev/null 2>&1 || :
+hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$inputs_arg" pr >/dev/null 2>&1 || :
 body_read_rc=0
 jq -R -s -j '.' "$BODY_INPUT_FILE" >"$body_file" 2>/dev/null || body_read_rc=$?
-hivemind_remove_inputs_file "$work_tree_top" "$BODY_INPUT_FILE" pr >/dev/null 2>&1 || :
+hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$body_file_arg" pr >/dev/null 2>&1 || :
 [ "$inputs_read_rc" = 0 ] || blocker "inputs file is not valid JSON"
 [ "$body_read_rc" = 0 ] || blocker "body file cannot be read"
 
