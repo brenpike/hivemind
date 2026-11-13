@@ -1197,11 +1197,13 @@ const ROW_TESTS = {
     });
   },
   'PFR-30': () => {
-    test('the fix result schema takes a 500 code point question and rejects 501', () => {
+    test('the fix result schema takes a 500 code point question and rejects 501, an empty one and a blank one', () => {
       for (const exitReason of QUESTION_EXITS) {
         const fix = worstQuestionFix(exitReason, ASTRAL);
         assert.ok(lib.validateSchema(main.buildFixResultSchema(), fix).ok, exitReason);
-        assert.equal(lib.validateSchema(main.buildFixResultSchema(), { ...fix, question: ASTRAL.repeat(501) }).ok, false, exitReason);
+        for (const question of [ASTRAL.repeat(501), '', ' ', '\n\t ']) {
+          assert.equal(lib.validateSchema(main.buildFixResultSchema(), { ...fix, question: question }).ok, false, exitReason + ' ' + JSON.stringify(question));
+        }
       }
     });
     test('with no replies, the worst-case question pauses with the question and the options whole', () => {
