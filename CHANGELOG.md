@@ -17,10 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `plugin/workflows/pr-feedback-remediation.js`, the built `hivemind:pr-feedback-remediation` workflow script. The `DRAFT` marker is gone. Built length 175546 of 190000, prose 38075 of the 38200 budget.
+- `plugin/workflows/pr-feedback-remediation.js`, the built `hivemind:pr-feedback-remediation` workflow script. The `DRAFT` marker is gone. Built length 175807 of 190000, prose 38077 of the 38200 budget.
 - ADR-0040 Amendment 2026-11-12: the go-live permission check is one supervised run of the built workflow in auto mode, with no headless or API-billed run. The result is a pass: the push and the PR comment completed with no denial or block, and review-thread reply and resolve were not exercised.
 - `hivemind:pr-feedback-remediation`: a fix pass that exits `user-input-required` or `high-severity-rejection` pauses through the pause contract and asks the user, with no recommendation, instead of ending the run blocked. The reply reruns the fix pass with `user_answer`, and a further question asks again. ADR-0040 Amendment 2026-11-12 records the call.
-- The GitHub reviewer's `user-input-required` and `high-severity-rejection` exits carry a `question`, which the fix-pass pause shows and the rerun passes back in `user_answer`. ADR-0040 Amendment 2026-11-12, the reviewer's question reaches the pause, records the fix.
+- The GitHub reviewer's `user-input-required` and `high-severity-rejection` exits carry a `question`, which the fix-pass pause shows in a never-cut pinned part and the rerun passes back in `user_answer`. ADR-0040 Amendment 2026-11-12, the reviewer's question reaches the pause, records the fix, and Amendment 2026-11-12, the reviewer's question is never cut, records where it is shown.
+- The shared pause (`record.js`, `tails.js`, `stop.js`) takes an optional `pinned` part: must-read caller text shown as a whole block that is never cut, after the lead and before the questions. With `pinned` the lead compacts to 100 code points, and the `reply_size` and `exact_text_size` ends also show `pinned` whole. Callers without `pinned` are byte-identical. The fix pass passes the reviewer's question as `pinned`. Contract row PFR-30 pins it. All three workflow scripts are rebuilt, so a run paused on an old build cannot resume. Built `standard-delivery.js` measures 189856 of 190000. ADR-0040 Amendment 2026-11-12, the reviewer's question is never cut, records the call.
 
 ### Changed
 

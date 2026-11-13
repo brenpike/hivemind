@@ -358,3 +358,31 @@ This amendment replaces the method of edge case (c). The edge case's text stays 
 **Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks the brief to carry reviewer text contests "Decided ... the run always asks" in the fix-pass amendment and is a repeat.
 
 **Prose budgets.** Built prose is 38075 of the 38200 budget, up from 38026. Built length is 175546 of 190000. `plugin/agents/github-reviewer.md` is 17322 of its 17333-byte budget. No budget raise.
+
+Superseded in part by Amendment 2026-11-12: the reviewer's question is never cut.
+
+## Amendment 2026-11-12: the reviewer's question is never cut
+
+**The finding.** Codex P1 on PR 566, discussion_r4558411817, "Protect the reviewer question from pause-lead truncation". Cluster members: discussion_r4554133264 and local finding 64861e9c. The root: the reviewer's question rode in the pause lead, the one part the shared pause may cut. `pauseDelivery` compacts the lead to `maxBlockedLeadLength()`, 1000 code points, and the `reply_size` and `exact_text_size` ends drop the lead. Non-ASCII text costs up to 14 notice characters per astral code point, so a long question could be cut or dropped.
+
+**User decision.** Option B, reply "B", 2026-11-12: give the question its own spot that is never cut. When the message is too long, cut the other parts, the long explanation and the link text, and keep the question whole. It changes the shared pause code that all workflows use.
+
+**Rejected alternatives.**
+
+- A: a 56-code-point question bound. Real questions are long, so nearly every pause would end blocked.
+- C: the question in the brief. That contests the record that the brief carries no reviewer text.
+- D: a recorded residual. A found root cause is never a residual.
+
+**The fix.** The shared lib (`record.js`, `tails.js`, `stop.js`) takes an optional `pinned` part: must-read caller text shown as a whole block that is never cut, after the lead and before the questions. With `pinned` the lead compacts to `maxPinnedLeadLength()`, 100 code points. The `reply_size` and `exact_text_size` ends also show `pinned` whole. Callers without `pinned` are byte-identical, and a test pins that. In `fix.js` the lead holds the exit, the encoded candidate URL and, for `high-severity-rejection`, the encoded rationale. `describeFixQuestion` gives "The reviewer asks <encoded question>." and passes it as `pinned`. The rerun's `user_answer.question` carries the lead, the pinned question and the questions.
+
+**The bound.** The question stays 500 code points. This is a run decision, open to veto. The planner proposed 204, which would also guarantee that the options block always fits. Measured worst case: a 500 astral-code-point question, a 500 astral URL, a 600 astral rationale and `noticeBudget` 7744. The empty-answers pause measures 7568 of 7572 with the question and the options whole. At the limit of `canCarry` the run ends `exact_text_size` at 7394 with the question whole, and the `reply_size` end measures 7407, a margin of 337. No path throws. Only in that worst case may the options block be dropped. The question is always whole. Contract row PFR-30 and tests pin this for every exit and character class.
+
+**Closed by construction.** `fitMessage` never cuts a whole block, and both blocked ends show `pinned`, so pinned text is never cut. The question can no longer ride in the lead.
+
+**Surface account.** Added: an optional `pinned` parameter through five lib signatures, `maxPinnedLeadLength()`, `buildLeadBlock`, `describeFixQuestion`, contract row PFR-30 and tests. Removed: the question from the cuttable lead. Accepted by reply B.
+
+**Supersedes.** The lead placement in the amendment "the reviewer's question reaches the pause": the pause lead no longer reads "The reviewer asks <encoded question>." The question is the pinned part. The rest of that amendment stands.
+
+**Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks to cut, truncate or move the pinned question back into the lead, or to put it in the brief, contests this record and is a repeat.
+
+**Prose budgets and builds.** Built `pr-feedback-remediation.js` length is 175807 of 190000, prose 38077 of the 38200 budget. Built `standard-delivery.js` length is 189856 of 190000, prose 41810. `analysis-only.js` is rebuilt, with a new `BUILD_ID` and the lib refactor. All three `BUILD_ID` values change, so a run paused on an old build cannot resume. No budget raise.
