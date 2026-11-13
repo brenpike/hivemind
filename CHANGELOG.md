@@ -17,9 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `plugin/workflows/pr-feedback-remediation.js`, the built `hivemind:pr-feedback-remediation` workflow script. The `DRAFT` marker is gone. Built length 175330 of 190000, prose 38026 of the 38200 budget.
+- `plugin/workflows/pr-feedback-remediation.js`, the built `hivemind:pr-feedback-remediation` workflow script. The `DRAFT` marker is gone. Built length 175546 of 190000, prose 38075 of the 38200 budget.
 - ADR-0040 Amendment 2026-11-12: the go-live permission check is one supervised run of the built workflow in auto mode, with no headless or API-billed run. The result is a pass: the push and the PR comment completed with no denial or block, and review-thread reply and resolve were not exercised.
 - `hivemind:pr-feedback-remediation`: a fix pass that exits `user-input-required` or `high-severity-rejection` pauses through the pause contract and asks the user, with no recommendation, instead of ending the run blocked. The reply reruns the fix pass with `user_answer`, and a further question asks again. ADR-0040 Amendment 2026-11-12 records the call.
+- The GitHub reviewer's `user-input-required` and `high-severity-rejection` exits carry a `question`, which the fix-pass pause shows and the rerun passes back in `user_answer`. ADR-0040 Amendment 2026-11-12, the reviewer's question reaches the pause, records the fix.
 
 ### Changed
 

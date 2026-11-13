@@ -342,3 +342,19 @@ This amendment replaces the method of edge case (c). The edge case's text stays 
 **Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks the hand-off to carry the filter or the escalating thread contests this record and is a repeat.
 
 **Revisit.** When slice 5 retires the state machine, or when a watch with a non-default filter becomes common.
+
+## Amendment 2026-11-12: the reviewer's question reaches the pause
+
+**The finding.** Local Codex review finding 64861e9c, severity high. The fix-pass pause showed a canned question and a link. The GitHub reviewer's `user-input-required` and `high-severity-rejection` exits had no field for the question, and the script engine reads only schema fields. On the intent paths the overlord read the reviewer's prose, so the gap hid. Go-live made the script path the normal experience, and with it the gap.
+
+**User decision.** Option B, 2026-11-12: fix it in this PR.
+
+**The fix.** The GitHub reviewer's Output Contract lists `question` on both exits: `user-input-required` (`escalation_target`, `candidate_url`, `question`) and `high-severity-rejection` (`candidate_url`, `rationale_text`, `question`). `fix.js` requires it, at most 500 characters, as external content. The pause lead reads "<lead> ended <exit> on candidate <encoded url>. [ The reviewer says <encoded rationale>.] The reviewer asks <encoded question>." `escalation_target` is no longer shown. The brief is unchanged and holds no reviewer text. The rerun's `user_answer.question` carries the lead as shown. A question exit that omits `question` fails the schema and ends blocked.
+
+**Closed by construction.** The schema requires the field, so every consumer gets the question, the script path and the intent paths alike.
+
+**Surface account.** Added: one contract field on two exits, one schema property, one lead sentence. Removed: `escalation_target` from the lead.
+
+**Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks the brief to carry reviewer text contests "Decided ... the run always asks" in the fix-pass amendment and is a repeat.
+
+**Prose budgets.** Built prose is 38075 of the 38200 budget, up from 38026. Built length is 175546 of 190000. `plugin/agents/github-reviewer.md` is 17322 of its 17333-byte budget. No budget raise.
