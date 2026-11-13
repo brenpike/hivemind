@@ -59,6 +59,8 @@ const DELIVERY_MODULES = ['gates.js', 'pr.js', 'relay.js', 'review-schema.js', '
 const proseBudgets = readProseBudgets(repoRoot);
 const MAX_PROSE_MARGIN = 1000;
 const CEREBRATE_SENTENCE = 'You do not write or edit code.';
+const SEEDED_PLAN_WORKFLOW_IDS = ['pr-feedback-remediation', 'standard-delivery'];
+const SEEDED_PLAN_FIRST_ID = SEEDED_PLAN_WORKFLOW_IDS[0];
 const PLAN_PROMPT_OPENING = '\'Plan the delivery of the user request below in this repository, as one plan on one working branch.';
 const ACORN_PATH = 'tools/vendor/acorn/acorn.mjs';
 const ACORN_SHA256 = '76254fc76529713b4dfd2532972d17a991ffd9aafeebb1f977445b5506b9fb0b';
@@ -194,15 +196,19 @@ function findOwnPlainSentence(path) {
 
 /**
  * Seeds text into the plan prompt of a scratch copy and asserts that the
- * build and --check fail, naming the script, path and sentence.
+ * build of each workflow bundling lib/plan.js fails, and that the CLI and
+ * --check fail on the first of them in name order, each naming the script,
+ * path and sentence.
  */
 function assertSeededCopyFails(text, path, sentence) {
   const scratchRoot = makeScratchCopy();
   seedPlanPromptSentence(scratchRoot, text);
-  const prefix = 'Error: standard-delivery: a literal of plugin/workflows/standard-delivery.js repeats a sentence of ' + path + ': ' + JSON.stringify(sentence) + '.';
-  assert.throws(() => buildWorkflow(scratchRoot, 'standard-delivery'), (error) => String(error).startsWith(prefix), text);
+  const prefixFor = (id) => 'Error: ' + id + ': a literal of plugin/workflows/' + id + '.js repeats a sentence of ' + path + ': ' + JSON.stringify(sentence) + '.';
+  for (const id of SEEDED_PLAN_WORKFLOW_IDS) {
+    assert.throws(() => buildWorkflow(scratchRoot, id), (error) => String(error).startsWith(prefixFor(id)), id + ': ' + text);
+  }
   for (const argv of [[], ['--check']]) {
-    assert.throws(() => runCliIn(scratchRoot, argv), (error) => String(error).startsWith(prefix), text);
+    assert.throws(() => runCliIn(scratchRoot, argv), (error) => String(error).startsWith(prefixFor(SEEDED_PLAN_FIRST_ID)), text);
   }
 }
 
@@ -1336,13 +1342,15 @@ describe('build_workflows prose guards', () => {
   });
   test('a cerebrate.md sentence seeded into the plan prompt fails the build and --check, naming the script, the file and the sentence', () => {
     assert.ok(splitProseSentences(readFileSync(join(repoRoot, 'plugin/agents/cerebrate.md'), 'utf8')).includes(CEREBRATE_SENTENCE));
-    const pattern = /^Error: standard-delivery: a literal of plugin\/workflows\/standard-delivery\.js repeats a sentence of plugin\/agents\/cerebrate\.md: "You do not write or edit code\."/;
+    const patternFor = (id) => new RegExp('^Error: ' + id + ': a literal of plugin/workflows/' + id + '\\.js repeats a sentence of plugin/agents/cerebrate\\.md: "You do not write or edit code\\."');
     for (const seeded of [CEREBRATE_SENTENCE, 'You do not  write or\\n  edit code.']) {
       const scratchRoot = makeScratchCopy();
       seedPlanPromptSentence(scratchRoot, seeded);
-      assert.throws(() => buildWorkflow(scratchRoot, 'standard-delivery'), (error) => pattern.test(String(error)), seeded);
+      for (const id of SEEDED_PLAN_WORKFLOW_IDS) {
+        assert.throws(() => buildWorkflow(scratchRoot, id), (error) => patternFor(id).test(String(error)), id + ': ' + seeded);
+      }
       for (const argv of [[], ['--check']]) {
-        assert.throws(() => runCliIn(scratchRoot, argv), (error) => pattern.test(String(error)), seeded);
+        assert.throws(() => runCliIn(scratchRoot, argv), (error) => patternFor(SEEDED_PLAN_FIRST_ID).test(String(error)), seeded);
       }
     }
   });

@@ -45,7 +45,7 @@ The user settled the calls below, in this session. This ADR records them as the 
 
 - **(a) Launch args and the stale relayed message.** The launch args carry only references `[pr]`. The relayed user message may be stale by the time the watch launches the workflow, so every agent prompt carries the ADR-0037 decision 24 fixed sentence from the first agent on, not only after a reply. Text: `plugin/workflow-src/pr-feedback-remediation/`. Lands in: PR4.
 - **(b) No cross-run counter.** The watch, workflow, watch chain has no counter across runs. Three bounds hold it: the GitHub-history recurrence detectors (ADR-0025), each run's caps, which open a draft, and the watch's idle window (ADR-0029).
-- **(c) GitHub writes from a workflow agent are untested.** Before go-live, PR6 runs a headless check, `claude -p --permission-mode default`, and reads `permission_denials`. If the check fails, go-live waits with the state machine's post-PR states in place, and this ADR is amended.
+- **(c) GitHub writes from a workflow agent are untested.** Before go-live, PR6 runs a headless check, `claude -p --permission-mode default`, and reads `permission_denials`. If the check fails, go-live waits with the state machine's post-PR states in place, and this ADR is amended. *(2026-11-12: the check is now one supervised run in auto mode. See Amendment 2026-11-12.)*
 - **(d) The decisions comment.** A remediation run posts one decisions comment through the reuse path, and only when it took a decision. This extends open-plan-pr's recorded residual R4 to at most one comment per such run. A resume by name does not post again.
 - **(e) Approval.** The new workflow needs its own one-time approval per project. No `Workflow(...)` rule is seeded (ADR-0037 decisions 8 and 19). A deny rule falls back to the state machine. A No at the approval prompt interrupts the turn, and the user then restarts the watch.
 - **(f) L3 (b).** L3 (b) is met by taking the whole post-PR flow off the state machine. The watch moves to the main-session skill on every path, and remediation moves to the script workflow. The watch cannot run on the script engine itself, because its Monitor wait needs the main session.
@@ -88,16 +88,17 @@ Until PR6 lands, both stand as written.
 | PR3 | D3: the `github-reviewer`'s read-only `hivemind:bump-type` check before its small-fix push, on every path | PR1 |
 | PR4 | `hivemind:pr-feedback-remediation` as a draft: the schema-checked fix pass, and on an escalation the facts, scan, remediation plan and Promotion Gate, with the decision 24 sentence from the first agent on | PR1 |
 | PR5 | The workflow's tail as a draft: waves with molt commits, `runGates`, the push through open-plan-pr's reuse path with `--expect-commit`, the one decisions comment, and `pr` in the result | PR4 |
-| PR6 | Go-live: build `plugin/workflows/pr-feedback-remediation.js`, the headless permission check (edge case c), the overlord's launch on `planner-escalation` and `root-cluster-suspected` and its watch restart on `pr`, and the state machine's post-PR states kept only as the refused-launch fallback | PR2, PR3, PR5 |
+| PR6 | Go-live: build `plugin/workflows/pr-feedback-remediation.js`, the headless permission check (edge case c), the overlord's launch on `planner-escalation` and `root-cluster-suspected` and its watch restart on `pr`, and the state machine's post-PR states kept only as the refused-launch fallback | PR2, PR3, PR5*(2026-11-12: the check is one supervised run in auto mode. See Amendment 2026-11-12.)* |
 
 PR2, PR3 and PR4 touch disjoint files and can proceed in parallel.
 
 ## Recorded residuals
 
 - **F1 stays a known limit (D1).** The overlord may still skip the workflow's `message` before the watch. The bounded impact ADR-0037 records stands: the user still sees the PR and the watch report.
-- **GitHub writes from a workflow agent are untested until PR6 (edge case c).** A failed check holds go-live and amends this ADR.
+- **GitHub writes from a workflow agent are untested until PR6 (edge case c).** A failed check holds go-live and amends this ADR. *(2026-11-12: the check is now one supervised run in auto mode. See Amendment 2026-11-12.)* *(2026-11-12: the run passed. Push and PR comment completed; reply and resolve were not exercised. See Amendment 2026-11-12, Result.)*
 - **R4 grows (edge case d).** open-plan-pr's R4 now covers at most one decisions comment per remediation run that took a decision.
 - **A No at the approval prompt ends the turn (edge case e).** Nothing falls back in that turn. The user restarts the watch.
+- **The hand-off drops a non-default reviewer filter.** The fix pass uses `automated`. That is the same as the watch default, so the default path loses nothing. Only a watch started with a different filter (`all`, `codex-only`, or a named author) can miss the escalating thread. The fix pass may then end clean while that thread stays open. Workaround: ask for a one-shot fix on the PR that names the filter. User decision 2026-11-12. See Amendment 2026-11-12 (reviewer filter).
 
 ## References
 
@@ -223,3 +224,165 @@ Authored prompt text is the literal text of every `plugin/workflow-src` source e
 | `analysis-only` | 2,669 | 2,669 |
 
 `lib` grew because whole functions moved into it from `standard-delivery`. Together the two went from 37,815 to 36,167.
+
+## Amendment 2026-11-12: the go-live permission check is one supervised run in auto mode
+
+This amendment replaces the method of edge case (c). The edge case's text stays as written.
+
+**Decision.** The user chose A. The check is one supervised run of the built workflow in a normal interactive session, in auto mode (now the default for sessions), against a test PR. The test PR is PR6 itself. A throwaway draft PR to main is used only if the result is inconclusive.
+
+**Reason.** The user's rule: no `claude -p`, no Claude Agent SDK, no headless or API-billed run.
+
+**Method.** Run `/reload-plugins`. Then launch the workflow by name with references `[pr]` and `trunk`, with the user watching.
+
+**What is read.** Every prompt, denial, auto-mode block and hook deny, verbatim, plus the GitHub state afterwards.
+
+**Verdicts.**
+
+- Pass: every attempted git push, gh write and thread resolve completed with no denial or block.
+- Prompt: the user's call.
+- Inconclusive: no such write was attempted.
+- Fail: any denial or block. Go-live is held: restore the DRAFT marker, remove the built script, keep the state-machine hand-off.
+
+### Result
+
+**Verdict: pass.** The user chose to count the run as a pass, with review-thread reply and resolve recorded as not exercised.
+
+**Run.** 2026-11-12, Claude Code 2.1.322, auto mode, a normal interactive session with the user watching. No `claude -p` and no headless or API-billed run. Test PR: https://github.com/brenpike/hivemind/pull/566 (PR6 itself). Run `wf_fe5b5a3b-c49`, launched with `{"references": [566], "trunk": "main"}`.
+
+**Input.** A Codex GitHub review P1 on `plugin/workflows/pr-feedback-remediation.js`: a one-shot fix returning `user-input-required` or `high-severity-rejection` ended blocked with no answer path.
+
+**Path.** The fix pass escalated to the planner. The autonomy table took D1 (re-plan from fresh facts). Waves ran, validation held, then the push and a PR comment. Outcome complete, 15 agents, about 25 minutes.
+
+**Writes attempted, both completed.** `git push` of commits `1d214b53` and `59675c20` through the push script (PR head `59675c20`). The `gh` PR comment carrying the decisions.
+
+**Not exercised.** Review-thread reply and resolve (`reply-resolve.sh`). The escalation path does not reply or resolve, so the Codex thread stayed unresolved for the watch.
+
+**Denials and blocks.** None: no permission prompt, no denial, no auto-mode block. One hook deny came from the plugin's own `synapse-gate` (the `bump-type.sh` exact-form rule) on a malformed call, which the agent corrected. It is a command-format guard, not a permission denial.
+
+**Residual.** Reply and resolve from a workflow agent in auto mode are unproven. If the auto-mode classifier blocks them, the thread stays unresolved and the run ends blocked with the denial shown. The opt-out is `Workflow(hivemind:pr-feedback-remediation)` in `permissions.deny`.
+
+## Amendment 2026-11-12: local review finding 4ffc2b81, the head-branch checkout keeps the loaded shell rule
+
+**The finding.** Local review finding 4ffc2b81 on the PR6 branch said the overlord checks out the PR head branch without an explicit gate. Its PR identity rule (`plugin/agents/overlord.md`, PR identity under the `pr_branch_preflight` decision), and the new Engine sentence where a request routed to `pr-feedback-remediation` first checks out the PR's head branch, do not say that the GitHub `headRefName` must pass the branch identifier gate, or be captured out-of-band in the same Bash call. So shell metacharacters in a branch name could run if pasted into model-authored Bash. It asked for the gate at both sites, a one-call capture used only quoted, and an overlord contract test with hostile branch names.
+
+**Decided 2026-11-12, run call: rejected.** The run took this call under `plugin/governance/decision-autonomy.md` (Review Calls), option A: keep both sites as they are. The recommendation was strong, and the pick is reversible and not architectural. It is listed in the pull request body for the user's veto before merge. This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). It is not a recorded residual, because no defect is left unfixed.
+
+**Reasons.**
+
+- `plugin/governance/security-policy.md` (Shell Identifier Discipline) covers every Bash command an agent authors, and names a branch read from GitHub. It already requires the out-of-band capture or the identifier gate the finding asks for.
+- The overlord loads that section at session start, in its governance load line. `tests/policy/safety-shell-identifier-discipline.json` pins the rule. So the checkout at both sites is bound by it with no site text.
+- A copy of the gate at each checkout site duplicates a single-home rule in runtime-loaded text (ADR-0041 decision 7), and a second copy can drift from the first. `plugin/agents/overlord.md` has 11 bytes of prose budget left, and no raise is approved for this PR.
+
+**Repeat findings.** A later finding that asks the overlord's head-branch checkout, at either site, to restate the identifier gate or the out-of-band capture is a repeat of this record. A finding that the overlord, or a script it runs, puts an unchecked branch name into Bash source in a form the loaded rule forbids is new.
+
+**Prose budgets.** No change under `plugin/`.
+
+## Amendment 2026-11-12: a fix-pass exit that needs the user pauses and asks
+
+**The finding.** Codex review thread discussion_r4554133264 on PR 566, priority P1, said a fix pass that exits `user-input-required` or `high-severity-rejection` ends the `hivemind:pr-feedback-remediation` run without asking the user. The user's answer never reaches the reviewer as `user_answer`. It asked to route these exits back to the state machine's question gate.
+
+**Root cause.** The draft fix pass ended every `exit_reason` at one fixed end, and the run called the fix pass once. An exit that needed the user ended the run blocked, and the question was never asked. The same design had no way to carry an answer to the reviewer, no answer wording in the prompt, and one fix-pass label per run, so a rerun could not get a label of its own. The draft came from PR4 on trunk; go-live in this PR made it reachable, so it is fixed here at its source.
+
+**The fix.** Both exits pause through the pause contract the rest of the workflow uses, per decision 2. The user's reply is logged with the run's answers and reruns the fix pass with `user_answer` (`candidate_url`, `question`, `reply`). A rerun can end clean, merge-advised, blocked, injection-suspect or as an escalation, and a further question asks again. The first fix call keeps its label, and each rerun gets a new one, so a resume replays every earlier call.
+
+**Decided 2026-11-12: the run always asks.** The GitHub reviewer writes no recommendation, so each such exit is a question with no recommendation, which `plugin/governance/decision-autonomy.md` (Tier A — Always Surface) puts in the Ask Set. The question's brief is built in code with strength none and carries no reviewer text, so `decide()` asks at every autonomy level and never takes the call. The reviewer's text is shown to the user only in the pause lead, encoded as untrusted text. The rerun passes no `decided_by`: only the user decided.
+
+**No cap on rounds.** Each round needs a user reply, so the user bounds the loop and no round cap is added.
+
+**Rejected alternative.** Route these exits to the state machine's question gate, as the finding asked. That keeps a state-machine surface that slice 5 retires, and it contradicts decision 2, which the user settled.
+
+**Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks the workflow to take such a question itself, or to end blocked on it, contests this record and is a repeat.
+
+**Prose budgets.** The rebuilt `plugin/workflows/pr-feedback-remediation.js` is 175330 characters of the 190000 built length limit, and its prose is 38026 of the 38200 budget. No budget raise.
+
+## Amendment 2026-11-12: a question exit takes the Question gate on every path
+
+**The findings.** Codex review threads discussion_r4554133264 (the workflow fix pass had no answer path) and discussion_r4555707637 (`plugin/agents/overlord.md` line 29, the direct watch had no route for question exits) on PR 566, both priority P1. Returned together, they are one root cluster.
+
+**Root cause.** The route from a question exit (`user-input-required`, `high-severity-rejection`) back to the asker's `user_answer` was keyed on a path, the state machine's `question` gate, not on the exit. Go-live moved the engine-path watch and the direct watch request off the state machine. Reflex and Instinct asked under Stop Conditions with no stated route for the reply.
+
+**The fix.** One sentence in the overlord's Question gate takes either exit on any path as the state that asked. A contract test fails if either token appears anywhere else in `plugin/agents/overlord.md`. Commit 1181ce9b.
+
+**Closed by construction.** The key is the exit token, which every path receives, so a future path inherits the route.
+
+**Decision 3 stands.** Instinct still never hands an escalation to the workflow, and the gate is not a hand-off.
+
+**The workflow half.** Closed by the fix-pass amendment above. Inside a run, the overlord sees `needs_user` and resumes per `## Engine`.
+
+**Known consequence.** An answered rerun that escalates launches with references and trunk only, so the fix pass may ask again. This is bounded: every ask needs a user reply, and nothing is lost.
+
+**No cap on reruns.** GitHub reviewer questions carry no recommendation, so each rerun needs a user reply.
+
+**Rejected alternatives.**
+
+- Adding the exits to the `## Engine` escalation paragraph. That is a per-path copy of the route.
+- The skill asking and rerunning itself. That is more surface.
+- Routing to the state machine. Slice 5 retires it.
+
+**Slice 5.** The rule stays when the state machine retires.
+
+**Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks a path to restate the route, to end blocked on a question exit, or to cap the reruns contests this record and is a repeat.
+
+**Prose budgets.** `plugin/agents/overlord.md` is 39027 of its 39056-byte budget, CRs stripped. No budget raise.
+
+## Amendment 2026-11-12: the hand-off keeps the default reviewer filter
+
+**The finding.** Codex review thread discussion_r4556127276 on PR 566 (https://github.com/brenpike/hivemind/pull/566#discussion_r4556127276, `plugin/agents/overlord.md` line 29), priority P1, titled "Preserve the watch's reviewer filter across the hand-off". The direct watch hands a `planner-escalation` or `root-cluster-suspected` escalation to `pr-feedback-remediation` with launch args `references` and `trunk` only. The workflow's fix inputs (`listFixInputs`) carry no `reviewer_filter`, so the fix pass uses the default `automated`. This is the same surface as discussion_r4555707637: the closed launch-arg set. It is the second finding on that surface, so per #409 the approach went to the user.
+
+**Decision.** The user chose option A on 2026-11-12: a recorded residual, no change. The launch args stay `references` and `trunk`.
+
+**Bounded impact.** Nothing errors. Only a watch started with a non-default filter is affected, and the fix pass may end clean while the escalating thread stays open. The default path loses nothing, because `automated` is also the watch default. No watch is started with a wider filter by default today.
+
+**Rejected alternatives.**
+
+- Carrying `reviewer_filter` as a launch key. That grows the launch contract and `plugin/agents/overlord.md`, which has 29 bytes of headroom, and it still leaves the escalating thread uncarried.
+- Carrying the whole escalation, thread and filter. That is the largest contract change, and the PR grows again.
+
+**Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks the hand-off to carry the filter or the escalating thread contests this record and is a repeat.
+
+**Revisit.** When slice 5 retires the state machine, or when a watch with a non-default filter becomes common.
+
+## Amendment 2026-11-12: the reviewer's question reaches the pause
+
+**The finding.** Local Codex review finding 64861e9c, severity high. The fix-pass pause showed a canned question and a link. The GitHub reviewer's `user-input-required` and `high-severity-rejection` exits had no field for the question, and the script engine reads only schema fields. On the intent paths the overlord read the reviewer's prose, so the gap hid. Go-live made the script path the normal experience, and with it the gap.
+
+**User decision.** Option B, 2026-11-12: fix it in this PR.
+
+**The fix.** The GitHub reviewer's Output Contract lists `question` on both exits: `user-input-required` (`escalation_target`, `candidate_url`, `question`) and `high-severity-rejection` (`candidate_url`, `rationale_text`, `question`). `fix.js` requires it, at most 500 characters, as external content. The pause lead reads "<lead> ended <exit> on candidate <encoded url>. [ The reviewer says <encoded rationale>.] The reviewer asks <encoded question>." `escalation_target` is no longer shown. The brief is unchanged and holds no reviewer text. The rerun's `user_answer.question` carries the lead as shown. A question exit that omits `question` fails the schema and ends blocked.
+
+**Closed by construction.** The schema requires the field, so every consumer gets the question, the script path and the intent paths alike.
+
+**Surface account.** Added: one contract field on two exits, one schema property, one lead sentence. Removed: `escalation_target` from the lead.
+
+**Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks the brief to carry reviewer text contests "Decided ... the run always asks" in the fix-pass amendment and is a repeat.
+
+**Prose budgets.** Built prose is 38075 of the 38200 budget, up from 38026. Built length is 175546 of 190000. `plugin/agents/github-reviewer.md` is 17322 of its 17333-byte budget. No budget raise.
+
+Superseded in part by Amendment 2026-11-12: the reviewer's question is never cut.
+
+## Amendment 2026-11-12: the reviewer's question is never cut
+
+**The finding.** Codex P1 on PR 566, discussion_r4558411817, "Protect the reviewer question from pause-lead truncation". Cluster members: discussion_r4554133264 and local finding 64861e9c. The root: the reviewer's question rode in the pause lead, the one part the shared pause may cut. `pauseDelivery` compacts the lead to `maxBlockedLeadLength()`, 1000 code points, and the `reply_size` and `exact_text_size` ends drop the lead. Non-ASCII text costs up to 14 notice characters per astral code point, so a long question could be cut or dropped.
+
+**User decision.** Option B, reply "B", 2026-11-12: give the question its own spot that is never cut. When the message is too long, cut the other parts, the long explanation and the link text, and keep the question whole. It changes the shared pause code that all workflows use.
+
+**Rejected alternatives.**
+
+- A: a 56-code-point question bound. Real questions are long, so nearly every pause would end blocked.
+- C: the question in the brief. That contests the record that the brief carries no reviewer text.
+- D: a recorded residual. A found root cause is never a residual.
+
+**The fix.** The shared lib (`record.js`, `tails.js`, `stop.js`) takes an optional `pinned` part: must-read caller text shown as a whole block that is never cut, after the lead and before the questions. With `pinned` the lead compacts to `maxPinnedLeadLength()`, 100 code points. The `reply_size` and `exact_text_size` ends also show `pinned` whole. Callers without `pinned` are byte-identical, and a test pins that. In `fix.js` the lead holds the exit, the encoded candidate URL and, for `high-severity-rejection`, the encoded rationale. `describeFixQuestion` gives "The reviewer asks <encoded question>." and passes it as `pinned`. The rerun's `user_answer.question` carries the lead, the pinned question and the questions.
+
+**The bound.** The question stays 500 code points. This is a run decision, open to veto. The planner proposed 204, which would also guarantee that the options block always fits. Measured worst case: a 500 astral-code-point question, a 500 astral URL, a 600 astral rationale and `noticeBudget` 7744. The empty-answers pause measures 7568 of 7572 with the question and the options whole. At the limit of `canCarry` the run ends `exact_text_size` at 7394 with the question whole, and the `reply_size` end measures 7407, a margin of 337. No path throws. Only in that worst case may the options block be dropped. The question is always whole. Contract row PFR-30 and tests pin this for every exit and character class.
+
+**Closed by construction.** `fitMessage` never cuts a whole block, and both blocked ends show `pinned`, so pinned text is never cut. The question can no longer ride in the lead.
+
+**Surface account.** Added: an optional `pinned` parameter through five lib signatures, `maxPinnedLeadLength()`, `buildLeadBlock`, `describeFixQuestion`, contract row PFR-30 and tests. Removed: the question from the cuttable lead. Accepted by reply B.
+
+**Supersedes.** The lead placement in the amendment "the reviewer's question reaches the pause": the pause lead no longer reads "The reviewer asks <encoded question>." The question is the pinned part. The rest of that amendment stands.
+
+**Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks to cut, truncate or move the pinned question back into the lead, or to put it in the brief, contests this record and is a repeat.
+
+**Prose budgets and builds.** Built `pr-feedback-remediation.js` length is 175807 of 190000, prose 38077 of the 38200 budget. Built `standard-delivery.js` length is 189856 of 190000, prose 41810. `analysis-only.js` is rebuilt, with a new `BUILD_ID` and the lib refactor. All three `BUILD_ID` values change, so a run paused on an old build cannot resume. No budget raise.

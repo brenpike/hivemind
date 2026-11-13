@@ -10,6 +10,7 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const overlordText = readFileSync(repoRoot + 'plugin/agents/overlord.md', 'utf8').replace(/\r/g, '');
 const resultLib = loadLibs([repoRoot + 'plugin/workflow-src/lib/result.js']);
 const DELIVERY_ID = 'standard-delivery';
+const REMEDIATION_ID = 'pr-feedback-remediation';
 const DELIVERY_ARGS_LEAD = 'When `<id>` is `standard-delivery`, the launch args also hold ';
 const DELIVERY_ARGS_SENTENCE = DELIVERY_ARGS_LEAD + '`local_review` and `draft`, and `decisions` only when the user settled a decision for this request before launch.';
 const DECISIONS_ENTRY_SENTENCE = 'Each `decisions` entry is one reply of the user\'s that settled one, word for word, after the question it answers, word for word, when it answers one; never your summary.';
@@ -17,16 +18,16 @@ const VALID_LAUNCH_VALUES = { request: 'Add a cache to the facts step', trunk: '
 const INVALID_LAUNCH_VALUES = { request: '   ', trunk: '-main', references: ['twelve'], local_review: 'yes', draft: 'no', decisions: ['   '] };
 
 /**
- * Builds standard-delivery in memory and runs it without its last
- * statement, so its top-level functions can be called directly.
+ * Builds a workflow in memory and runs it without its last statement, the
+ * call of runFunctionName, so its top-level functions can be called directly.
  */
-function loadDeliveryFunctions() {
-  const source = buildWorkflow(repoRoot, DELIVERY_ID);
-  const lastStatement = '\nreturn await runDelivery(args);\n';
-  assert.ok(source.endsWith(lastStatement), 'standard-delivery main.js ends with the runDelivery call');
+function loadWorkflowFunctions(workflowId, runFunctionName) {
+  const source = buildWorkflow(repoRoot, workflowId);
+  const lastStatement = '\nreturn await ' + runFunctionName + '(args);\n';
+  assert.ok(source.endsWith(lastStatement), `${workflowId} main.js ends with the ${runFunctionName} call`);
   const body = source.replace(/^export const meta\b/, 'const meta').slice(0, -lastStatement.length + 1);
   const context = vm.createContext({});
-  vm.runInContext(body, context, { filename: DELIVERY_ID + ' functions' });
+  vm.runInContext(body, context, { filename: workflowId + ' functions' });
   return context;
 }
 
@@ -81,6 +82,7 @@ const engineSentences = engineSection.split(/(?<=[.!?])\s+/);
 const handOffParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('After you show `message`, when the result carries `pr`,')) ?? '';
 const stopParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('When the user asks to stop a launched run')) ?? '';
 const waitParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('When the result carries `retry_minutes`,')) ?? '';
+const escalationParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('Outside `## Instinct` and outside a state-machine run,')) ?? '';
 
 function readDeliveryLaunchArgNames() {
   const template = engineSection.match(/only these args: `(\{[^`]*\})`/);
@@ -209,7 +211,7 @@ describe('overlord Engine section', () => {
 });
 
 describe('overlord standard-delivery launch args', () => {
-  const deliveryFunctions = loadDeliveryFunctions();
+  const deliveryFunctions = loadWorkflowFunctions(DELIVERY_ID, 'runDelivery');
   const launchArgNames = readDeliveryLaunchArgNames();
   test('Engine names local_review and draft for standard-delivery', () => {
     assert.ok(launchArgNames.includes('local_review'), `launch args are ${JSON.stringify(launchArgNames)}`);
@@ -241,11 +243,20 @@ describe('overlord standard-delivery launch args', () => {
 });
 
 describe('overlord pull request hand-off and opt-in', () => {
-  test('the pr hand-off names the watch pointer, pr-feedback-remediation and intake watch', () => {
+  test('the pr hand-off names the watch pointer and runs hivemind:github-review-loop for the watch', () => {
     assert.notEqual(handOffParagraph, '', '## Engine has a paragraph starting After you show `message`, when the result carries `pr`,');
-    for (const phrase of ['`## Review Remediation Posture` (Default post-PR watch)', '`HIVEMIND_SKIP_PR_WATCH`', 'run `pr-feedback-remediation` on the workflow state machine', 'with its intake outcome `watch`', 'as the Reflex tail does', 'With no `pr`, there is no watch.']) {
+    for (const phrase of ['`## Review Remediation Posture` (Default post-PR watch)', '`HIVEMIND_SKIP_PR_WATCH`', 'When the rule calls for a watch, run `hivemind:github-review-loop` for that pull request.', 'as the Reflex tail does', 'With no `pr`, there is no watch.']) {
       assert.ok(handOffParagraph.includes(phrase), `pr hand-off paragraph lacks ${phrase}`);
     }
+  });
+  test('the pr hand-off no longer hands the watch to the state machine', () => {
+    for (const phrase of ['state machine', 'run ledger', 'intake outcome `watch`']) {
+      assert.ok(!handOffParagraph.includes(phrase), `pr hand-off paragraph still names ${phrase}`);
+    }
+  });
+  test('Engine defines pr for any launched run', () => {
+    assert.ok(relayParagraph.includes('`pr`, when present, is the run\'s pull request.'), 'relay paragraph lacks the pr definition');
+    assert.ok(!relayParagraph.includes('a delivery run opened or reused'), 'relay paragraph still limits pr to a delivery run');
   });
   test('the pr hand-off does not restate the watch predicate', () => {
     for (const phrase of ['if and only if', '`not_requested`', '`watch_requested`']) {
@@ -259,14 +270,51 @@ describe('overlord pull request hand-off and opt-in', () => {
       assert.ok(!reflexSection.includes(phrase), `## Reflex (Ledger-Skip) restates the watch predicate: ${phrase}`);
     }
   });
-  test('the never-enter rule covers only the launched request', () => {
+  test('Engine never enters the state machine for the launched request', () => {
     assert.ok(engineSection.includes('Do not enter the workflow state machine or create a run ledger for the launched request.'));
-    assert.ok(handOffParagraph.includes('covers only the launched request'));
   });
   test('Engine states the approval prompt opt-in, that a No interrupts the turn, and the permissions.deny opt-out', () => {
     for (const phrase of ['The `Workflow` tool\'s approval prompt is the only opt-in to a workflow.', 'A No there interrupts the turn: nothing runs and nothing falls back.', 'A `Workflow(hivemind:<id>)` entry in `permissions.deny` is the opt-out: it denies the launch, which falls back as stated next']) {
       assert.ok(engineSection.includes(phrase), `## Engine lacks ${phrase}`);
     }
+  });
+});
+
+describe('overlord watch escalation to pr-feedback-remediation', () => {
+  const remediationFunctions = loadWorkflowFunctions(REMEDIATION_ID, 'runRemediation');
+  test('Engine has the escalation paragraph', () => {
+    assert.notEqual(escalationParagraph, '', '## Engine has no paragraph starting Outside `## Instinct` and outside a state-machine run,');
+  });
+  test('the escalation paragraph launches pr-feedback-remediation by name on both watch exits', () => {
+    for (const phrase of ['a watch ending `planner-escalation` or `root-cluster-suspected` launches `pr-feedback-remediation` by name', 'and no other key.']) {
+      assert.ok(escalationParagraph.includes(phrase), `escalation paragraph lacks ${phrase}`);
+    }
+  });
+  test('the escalation paragraph excludes Instinct and state-machine runs, and Instinct does not name the workflow', () => {
+    assert.ok(escalationParagraph.startsWith('Outside `## Instinct` and outside a state-machine run,'), 'escalation paragraph lacks the Instinct and state-machine exclusion');
+    assert.ok(!readSection(body, '## Instinct').includes('pr-feedback-remediation'), '## Instinct names pr-feedback-remediation');
+  });
+  test('the escalation paragraph falls back to the state machine with intake fix', () => {
+    assert.ok(escalationParagraph.includes('A refused or blocked launch takes the state machine with intake outcome `fix`.'), 'escalation paragraph lacks the fix-intake fallback');
+  });
+  test('the escalation paragraph checks out the PR head branch for a routed request, then watches or launches', () => {
+    for (const phrase of ['A request routed to `pr-feedback-remediation` first checks out the PR\'s head branch', 'then runs the watch', 'or for a one-shot fix launches as above.']) {
+      assert.ok(escalationParagraph.includes(phrase), `escalation paragraph lacks ${phrase}`);
+    }
+  });
+  test('Engine keeps pr-feedback-remediation off the generic routed launch', () => {
+    for (const phrase of ['for `pr-feedback-remediation`, only as stated below.', 'Launch no workflow this section does not name, and write no workflow script.']) {
+      assert.ok(engineSection.includes(phrase), `## Engine lacks ${phrase}`);
+    }
+    assert.ok(!engineSection.includes('Launch no other workflow'), '## Engine still forbids every other launch');
+  });
+  test('the escalation args template, filled, passes readRemediationLaunch', () => {
+    const template = escalationParagraph.match(/with args `(\{[^`]*\})` and no other key/);
+    assert.ok(template, 'escalation paragraph has an args template');
+    const filled = template[1].replace('<the pull request number>', '42').replace('<the resolved trunk>', 'main');
+    const launch = remediationFunctions.readRemediationLaunch(JSON.parse(filled));
+    assert.equal(launch.problem, undefined, `readRemediationLaunch refused ${filled}: ${launch.problem}`);
+    assert.deepEqual(structuredClone(launch), { trunk: 'main', pr: '42' });
   });
 });
 
@@ -342,7 +390,7 @@ describe('overlord workflow definition reads', () => {
     assert.notEqual(questionGateParagraph, '', '## Workflow State Execution has no paragraph starting **Question gate.**');
   });
   test('the Question gate paragraph routes to the question user gate and asks the user', () => {
-    for (const phrase of ['routes to the `question` user gate', 'record that result', 'ask the user the question in plain words, with its options and a recommendation, and wait']) {
+    for (const phrase of ['routes to the `question` user gate', 'record that result', 'ask the user the question in plain words, with its options and any recommendation it carries, and wait']) {
       assert.ok(questionGateParagraph.includes(phrase), `Question gate paragraph lacks ${phrase}`);
     }
   });
@@ -367,6 +415,21 @@ describe('overlord workflow definition reads', () => {
     for (const phrase of ['On `## Resume On Start` at `question`, the reply is not in the ledger', 'run that state again without an answer, so it asks again']) {
       assert.ok(questionGateParagraph.includes(phrase), `Question gate paragraph lacks ${phrase}`);
     }
+  });
+  test('the Question gate takes a pausing exit on any path as the state that asked', () => {
+    assert.ok(questionGateParagraph.includes('exit on any path takes this gate as the state that asked'), 'Question gate paragraph lacks the pausing-exit sentence');
+  });
+  test('each pausing exit token has its single home in the Question gate', () => {
+    for (const token of ['`user-input-required`', '`high-severity-rejection`']) {
+      assert.equal(body.split(token).length - 1, 1, `overlord body names ${token} other than exactly once`);
+      assert.ok(questionGateParagraph.includes(token), `Question gate paragraph lacks ${token}`);
+    }
+  });
+  test('a path with no run ledger sends every run-ledger write, the Question gate\'s included, to the final report', () => {
+    const rule = 'Without a run ledger, each run-ledger write goes to the final report.';
+    assert.equal(body.split(rule).length - 1, 1, 'overlord body states the no-ledger rule other than exactly once');
+    assert.ok(readSection(body, '## Continuous Execution').includes(rule), '## Continuous Execution lacks the no-ledger rule');
+    assert.ok(!readSection(body, '## Instinct').includes('run-ledger write'), '## Instinct keeps its own copy of the no-ledger rule');
   });
   test('Workflow State Execution sends the scan rule to the gather-facts consumer rules', () => {
     assert.ok(stateExecutionSection.includes('the scan its consumer rules require does not pass'), '## Workflow State Execution does not defer the scan rule to the skill consumer rules');

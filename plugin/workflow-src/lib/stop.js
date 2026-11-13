@@ -44,10 +44,15 @@
  *   orderStopCauses  causes stably ordered by next action: approve,
  *                 fix_cause or absent, answer, report, run_again.
  *   maxBlockedLeadLength  1000, the code points of a compact lead.
+ *   maxPinnedLeadLength  100, the code points of the compact lead of a
+ *                 pause with a pinned part (pauseDelivery, lib/record.js),
+ *                 which shows that part whole.
+ *   buildLeadBlock(text, bound)  {text}, plus compact
+ *                 cutAtBoundary(text, bound) when that is shorter.
  *   buildStopBlocks  the lead, then its Next line as a whole block, then a
  *                 block per later cause, in orderStopCauses order; the
- *                 first cause leads. The lead compact is
- *                 cutAtBoundary(problem, maxBlockedLeadLength()) if shorter.
+ *                 first cause leads. The lead is
+ *                 buildLeadBlock(problem, maxBlockedLeadLength()).
  *
  * Invariants
  *   A null result is an agent failure: agent() returns null on an agent API
@@ -129,14 +134,20 @@ function maxBlockedLeadLength() {
   return 1000;
 }
 
+function maxPinnedLeadLength() {
+  return 100;
+}
+
+function buildLeadBlock(text, bound) {
+  const compact = cutAtBoundary(text, bound);
+  return compact === text ? { text: text } : { text: text, compact: compact };
+}
+
 function buildStopBlocks(causes) {
   if (!Array.isArray(causes) || causes.length === 0) {
     throw new Error('buildStopBlocks: causes must be a non-empty array');
   }
-  const orderedCauses = orderStopCauses(causes);
-  const leadText = orderedCauses[0].problem;
-  const compactLead = cutAtBoundary(leadText, maxBlockedLeadLength());
-  const leadBlock = compactLead === leadText ? { text: leadText } : { text: leadText, compact: compactLead };
-  const laterBlocks = orderedCauses.slice(1).map((cause) => ({ text: cause.problem }));
-  return [leadBlock, { text: nextStepLine(orderedCauses[0].nextAction), whole: true }].concat(laterBlocks);
+  const [leadCause, ...laterCauses] = orderStopCauses(causes);
+  const leadBlock = buildLeadBlock(leadCause.problem, maxBlockedLeadLength());
+  return [leadBlock, { text: nextStepLine(leadCause.nextAction), whole: true }, ...laterCauses.map((cause) => ({ text: cause.problem }))];
 }

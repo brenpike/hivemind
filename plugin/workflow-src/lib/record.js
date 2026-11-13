@@ -19,6 +19,8 @@
  *           empty.
  *   endLines  lines a stop shows after its causes, such as a commit end,
  *           [] when left out.
+ *   pinned  must-read caller text a pause or its blocked end shows whole,
+ *           never cut, or undefined when left out.
  *   commit, branch  a head read from a checked relay: the commit line of
  *           a molt relay or of a branch relay, and the plan branch.
  *   isReplan  true when a reply to a stop plans again from fresh facts,
@@ -86,15 +88,19 @@
  *
  * Message shape (issue 460)
  *   Every chat message has one shape, built here:
- *   pauseDelivery(resolution, run, lead)  the lead, then
+ *   pauseDelivery(resolution, run, lead, pinned)  the lead, then pinned
+ *           as a whole block when it is given, then
  *           renderQuestions(resolution.asks), a whole block when an ask is
  *           exact or has a destructive option (hasDestructiveOption,
  *           lib/approvals.js), so no destructive item is ever cut: a block
  *           that cannot show whole ends through finishOpenQuestions,
  *           exact_text_size. The reply line is the last line. No commit, gate line,
  *           taken decision or detail block. A lead longer than
- *           maxBlockedLeadLength() code points has the cutAtBoundary prefix
- *           of at most those code points as its compact form. It throws
+ *           maxBlockedLeadLength() code points, maxPinnedLeadLength() when
+ *           pinned is given, has the cutAtBoundary prefix of at most those
+ *           code points as its compact form (buildLeadBlock, lib/stop.js).
+ *           Its reply_size and exact_text_size ends pass pinned on to
+ *           finishOpenQuestions(resolution, stopReason, run, pinned). It throws
  *           first on an ask whose reason is not in askReasons()
  *           (lib/decide.js), or a step_stop ask whose stop is not in
  *           stopAskActions(), so no other question reaches the user.
@@ -114,11 +120,13 @@
  *           lines, one per line.
  *   finishOpenQuestions  finishDeliveryBlocked over one cause, the fixed
  *           lead with next action answer, with the open questions as its
- *           end line and the round's taken decisions added to the run's.
- *   finishDeliveryBlocked(causes, run, endLines)  finish({outcome:
+ *           end line, its pinned passed on and the round's taken decisions
+ *           added to the run's.
+ *   finishDeliveryBlocked(causes, run, endLines, pinned)  finish({outcome:
  *           'blocked', causes, blocks}) (lib/result.js), which leads with
  *           buildStopBlocks(causes): the lead, the Next line as a whole
- *           block and one block per later cause. The blocks are one per end
+ *           block and one block per later cause. The blocks open with
+ *           pinned as a whole block when it is given, then one per end
  *           line (the open questions, or the commit end runCommitStep
  *           passes), one line naming the encoded branch and its head
  *           only once a wave ran, then the
@@ -314,12 +322,16 @@ function buildRecordTailBlocks(run, taken) {
   return blocks;
 }
 
-function finishDeliveryBlocked(causes, run, endLines = []) {
-  const blocks = endLines.map((line) => ({ text: line }));
-  if (run !== undefined && run.waveCount > 0) {
-    blocks.push({ text: describeBranchLine(run) });
-  }
+function listPinnedBlocks(pinned) {
+  return pinned === undefined ? [] : [{ text: pinned, whole: true }];
+}
+
+function finishDeliveryBlocked(causes, run, endLines = [], pinned) {
+  const blocks = listPinnedBlocks(pinned).concat(endLines.map((line) => ({ text: line })));
   if (run !== undefined) {
+    if (run.waveCount > 0) {
+      blocks.push({ text: describeBranchLine(run) });
+    }
     blocks.push(...buildRecordTailBlocks(run, run.taken));
   }
   return finish({ outcome: 'blocked', causes: causes, blocks: blocks });
@@ -352,9 +364,9 @@ function finishDeliveryComplete(run, plan, prValues, gates) {
   return finish({ outcome: 'complete', blocks: blocks, pr: pr });
 }
 
-function finishOpenQuestions(resolution, stopReason, run) {
+function finishOpenQuestions(resolution, stopReason, run, pinned) {
   const cause = { problem: 'The delivery stopped: questions are still open.', nextAction: 'answer' };
-  return finishDeliveryBlocked([cause], { ...run, taken: run.taken.concat(resolution.taken) }, [renderOpenQuestions(resolution.asks, stopReason)]);
+  return finishDeliveryBlocked([cause], { ...run, taken: run.taken.concat(resolution.taken) }, [renderOpenQuestions(resolution.asks, stopReason)], pinned);
 }
 
 function checkPauseAsk(ask) {
@@ -364,27 +376,25 @@ function checkPauseAsk(ask) {
   }
 }
 
-function pauseDelivery(resolution, run, lead) {
+function pauseDelivery(resolution, run, lead, pinned) {
   resolution.asks.forEach(checkPauseAsk);
   const resumeArgs = buildResumeArgs(run.answerLog.map((entry) => entry.reply), BUILD_ID);
   if (!canCarry(resumeArgs)) {
-    return finishOpenQuestions(resolution, 'reply_size', run);
+    return finishOpenQuestions(resolution, 'reply_size', run, pinned);
   }
   const questionsBlock = { text: renderQuestions(resolution.asks) };
   if (resolution.asks.some((ask) => ask.exact === true || hasDestructiveOption(ask))) {
     questionsBlock.whole = true;
   }
-  const compactLead = cutAtBoundary(lead, maxBlockedLeadLength());
-  const blocks = [compactLead === lead ? { text: lead } : { text: lead, compact: compactLead }, questionsBlock];
+  const blocks = [buildLeadBlock(lead, pinned === undefined ? maxBlockedLeadLength() : maxPinnedLeadLength()), ...listPinnedBlocks(pinned), questionsBlock];
   if (!canShowWhole({ resumeArgs: resumeArgs, blocks: blocks })) {
-    return finishOpenQuestions(resolution, 'exact_text_size', run);
+    return finishOpenQuestions(resolution, 'exact_text_size', run, pinned);
   }
   return pauseForUser({ resumeArgs: resumeArgs, blocks: blocks });
 }
 
 function describeStopLead(causes, endLines) {
-  const causeTexts = buildStopBlocks(causes).filter((block) => block.whole !== true).map((block) => block.text);
-  return causeTexts.concat(endLines).join('\n');
+  return buildStopBlocks(causes).filter((block) => block.whole !== true).map((block) => block.text).concat(endLines).join('\n');
 }
 
 /**

@@ -157,7 +157,7 @@ pending seed in the next arm's first poll or in the QUIET-EXIT CHECK. A
 **6. Reviewer-return handling.** `clean` → keep watching. `planner-escalation` |
 `blocked` | `injection-suspect` | `high-severity-rejection` | `user-input-required`
 → hard stop; one terminal with the matching `exit_reason` and the
-escalation-conditional fields. `root-cluster-suspected` → hard stop; one terminal
+reviewer's conditional fields. `root-cluster-suspected` → hard stop; one terminal
 with the reviewer's cluster payload; the caller routes it to cerebrate zoom-out, and
 the loop only propagates it. `merge-advised` → hard stop; one `merge-advised` terminal
 with `advisory_reason` + `structural_home` + `recommendation_text`; advisory only, and
@@ -227,7 +227,7 @@ Author Filtering), and `user_answer` only per step 3. Omit `target`: an absent t
 is the full pass over unresolved feedback. Returns `exit_reason ∈ {clean,
 injection-suspect, user-input-required, planner-escalation, high-severity-rejection,
 root-cluster-suspected, merge-advised, blocked}` plus `findings_resolved` /
-`findings_open` and escalation-conditional fields. The skill consumes the return and
+`findings_open` and its Output Contract's conditional fields. The skill consumes the return and
 never re-fetches or re-classifies.
 
 ## Termination guard set
@@ -265,7 +265,7 @@ Target); `Watch` (Mode: Monitor | Monitoring: stopped | Parser: gh --jq | Cycles
 Seen comments | New actionable comments); `Routed: github-reviewer: <count>`;
 `Stopped because: <exit_reason> — <explanation>`; `Next action`; `Issues`.
 
-`exit_reason` drawn from: `clean | pr-merged | pr-closed | max-cycles-reached | watch-window-elapsed | planner-escalation | root-cluster-suspected | merge-advised | blocked | injection-suspect | high-severity-rejection | user-input-required`. For `root-cluster-suspected`: cluster payload under `Issues`; cerebrate zoom-out under `Next action`. For `merge-advised`: `advisory_reason` + `structural_home` + `recommendation_text` under `Issues`. For escalation/blocked: escalation-conditional fields under `Issues`. `Cycles` = `cycles_completed`; `New actionable comments` = `findings_resolved`; restate `findings_open` in `Issues` when non-zero.
+`exit_reason` drawn from: `clean | pr-merged | pr-closed | max-cycles-reached | watch-window-elapsed | planner-escalation | root-cluster-suspected | merge-advised | blocked | injection-suspect | high-severity-rejection | user-input-required`. For `root-cluster-suspected`: cluster payload under `Issues`; cerebrate zoom-out under `Next action`. For `merge-advised`: `advisory_reason` + `structural_home` + `recommendation_text` under `Issues`. For escalation/blocked: the reviewer's conditional fields under `Issues`. `Cycles` = `cycles_completed`; `New actionable comments` = `findings_resolved`; restate `findings_open` in `Issues` when non-zero.
 
 ## Safety
 

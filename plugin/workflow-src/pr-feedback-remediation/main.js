@@ -1,9 +1,10 @@
 /*
  * pr-feedback-remediation main.js: the body of the pr-feedback-remediation
- * workflow script, a draft (ADR-0040 decision 2). The pull request watch
+ * workflow script (ADR-0040 decision 2). The pull request watch
  * launches it when a watch ends on an escalation. It gathers the branch
  * facts, then runs one schema-checked hivemind:github-reviewer fix pass on
- * the pull request. On a planner escalation or a suspected root cluster it
+ * the pull request. A question exit asks the user and reruns the fix pass
+ * with the reply. On a planner escalation or a suspected root cluster it
  * plans the remediation (escalation.js), then runs its tail (tail.js): the
  * waves, validation as the one gate, and one push to the pull request.
  * Otherwise it ends on that pass's exit.
@@ -37,11 +38,12 @@
  * Outputs
  *   finish({outcome: 'complete', blocks}) or finish({outcome: 'blocked',
  *   causes}) (lib/result.js) on the fix pass's own exit. That complete end
- *   carries no pr. Once an escalation was routed, every end goes through
- *   lib/record.js: pauseDelivery when a question needs the user,
- *   finishDeliveryComplete with pr {url, head_ref_oid, created} once the
- *   pull request step ran, else finishDeliveryBlocked, which also lists
- *   the taken decisions.
+ *   carries no pr. A question exit of the fix pass pauses through askTail
+ *   (lib/tails.js) and pauseDelivery (lib/record.js). Once an escalation
+ *   was routed, every end goes through lib/record.js: pauseDelivery when
+ *   a question needs the user, finishDeliveryComplete with pr {url,
+ *   head_ref_oid, created} once the pull request step ran, else
+ *   finishDeliveryBlocked, which also lists the taken decisions.
  *
  * Invariants
  *   Relayed message (ADR-0040 edge case a): the harness relays the user
@@ -58,8 +60,12 @@
  *   scan stop ends the run blocked.
  *   The fix pass runs only once the facts show a branch other than the
  *   trunk (fix.js describeHeadStop). runFixCall reads the fix result only
- *   once it fits FIX_RESULT_SCHEMA, and each of escalationExits() goes to
- *   runEscalation (escalation.js) before describeFixExit reads it.
+ *   once it fits FIX_RESULT_SCHEMA. runFixRounds asks each of
+ *   fixQuestionExits() through askFixQuestion (fix.js), never taken, and
+ *   reruns the fix pass with the reply as user_answer until it ends on
+ *   another exit or pauses; each round needs a reply, so no cap applies.
+ *   Each of escalationExits() goes to runEscalation (escalation.js), and no
+ *   question exit reaches describeFixExit.
  *   run.level is the table's default_level: no launch key sets it.
  *   Every blocked end passes its causes to finish, which builds the lead
  *   and the Next line (lib/stop.js).
@@ -77,7 +83,8 @@
  *
  * Why
  *   The watch stays in the main session (ADR-0040 decision 1), so the
- *   remediation it hands off runs as a script with checked steps.
+ *   remediation it hands off runs as a script with checked steps, and a
+ *   fix pass question pauses for the user rather than ending the run.
  */
 
 const RUN_NOUN = 'remediation';
@@ -97,6 +104,8 @@ const REMEDIATION_PLAN_ACCEPTANCE_KIND = 'remediation_plan_acceptance';
 const VALIDATION_REMEDIATION_KIND = 'validation_remediation';
 const VERSION_BUMP_INDETERMINABLE_KIND = 'version_bump_indeterminable';
 const STEP_STOP_KIND = 'step_stop';
+const REVIEW_QUESTION_KIND = 'review_question';
+const HIGH_SEVERITY_REJECTION_KIND = 'high_severity_rejection';
 const RELAY_SCHEMA = buildRelaySchema();
 const WORKER_SCHEMA = buildWorkerSchema();
 const FIX_SCHEMA = buildGateEditSchema();
@@ -189,20 +198,41 @@ function createRunState(launch, argsObject = {}) {
 }
 
 /**
- * Runs the fix pass call of fix.js on the checked facts and returns {fix},
- * a result that fits FIX_RESULT_SCHEMA, or {cause}, an input stop or an
- * unusable result.
+ * Runs the fix pass call of fix.js on the checked facts, with answer as its
+ * user_answer when given, and returns {fix}, a result that fits
+ * FIX_RESULT_SCHEMA, or {cause}, an input stop or an unusable result.
  */
-async function runFixCall(run, facts) {
-  const fixInputs = listFixInputs(run, facts);
+async function runFixCall(run, facts, answer) {
+  const fixInputs = listFixInputs(run, facts, answer);
   const inputStop = describeFixInputStop(fixInputs);
   if (inputStop !== undefined) {
     return { cause: inputStop };
   }
   phase('Fix');
-  const fix = await agent(addResumeNote(buildFixPassPrompt(fixInputs), run), fixOptions(run));
+  const fix = await agent(addResumeNote(buildFixPassPrompt(fixInputs), run), fixOptions(run, answer));
   const resultProblem = describeFixResultProblem(fix);
   return resultProblem === undefined ? { fix: fix } : { cause: resultProblem };
+}
+
+/**
+ * Runs the fix pass until it ends on no exit of fixQuestionExits(): each
+ * question is asked through askFixQuestion (fix.js), and its reply reruns
+ * the fix pass with user_answer. Returns {fix}, {cause} or {result}, the
+ * pause of a question with no stored reply.
+ */
+async function runFixRounds(run, facts) {
+  let answer;
+  for (;;) {
+    const fixed = await runFixCall(run, facts, answer);
+    if (fixed.cause !== undefined || !fixQuestionExits().includes(fixed.fix.exit_reason)) {
+      return fixed;
+    }
+    const asked = askFixQuestion(fixed.fix, run);
+    if (asked.result !== undefined) {
+      return asked;
+    }
+    answer = asked.answer;
+  }
 }
 
 function finishBlocked(causes) {
@@ -223,7 +253,10 @@ async function runRemediation(rawArgs) {
   if (headStop !== undefined) {
     return finishBlocked([headStop]);
   }
-  const fixed = await runFixCall(run, checked.facts);
+  const fixed = await runFixRounds(run, checked.facts);
+  if (fixed.result !== undefined) {
+    return fixed.result;
+  }
   if (fixed.cause !== undefined) {
     return finishBlocked([fixed.cause]);
   }

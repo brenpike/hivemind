@@ -45,8 +45,8 @@ findings_open: <int>
 # Conditional fields per exit_reason:
 # planner-escalation: escalation_target, candidate_url
 # injection-suspect: candidate_url, pattern_category
-# user-input-required: escalation_target, candidate_url
-# high-severity-rejection: candidate_url, rationale_text
+# user-input-required: escalation_target, candidate_url, question
+# high-severity-rejection: candidate_url, rationale_text, question
 # root-cluster-suspected: cluster_files, cluster_thread_urls, hypothesized_root, same_framing_rationale, member_count
 # merge-advised: advisory_reason (bounded-tail | diminishing-returns | structural-home), structural_home, recommendation_text  # sourced verbatim from the detector's merge_advisory block
 # blocked: blocker_reason, blocked_candidates

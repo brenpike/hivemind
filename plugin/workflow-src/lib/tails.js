@@ -11,14 +11,16 @@
  *   asks   the asks one pause shows, in shown order.
  *   kind, brief  a decide() kind and its code-built brief.
  *   lead   the lead string of the pause, or undefined.
+ *   pinned  must-read text the pause shows whole after the lead, never
+ *          cut (pauseDelivery), or undefined.
  *   It reads no constant of the workflow's main.js and no workflow
  *   function: pauseDelivery is lib/record.js, takeNextReply,
  *   resolveDecision and acceptResolution lib/plan.js.
  *
  * Outputs
- *   askTails(asks, run, lead)  {result}, the pause, or {answer: {question,
- *          reply}} once the user replied.
- *   askTail(ask, run, lead)  askTails([ask], run, lead).
+ *   askTails(asks, run, lead, pinned)  {result}, the pause, or {answer:
+ *          {question, reply}} once the user replied.
+ *   askTail(ask, run, lead, pinned)  askTails([ask], run, lead, pinned).
  *   replanFromTailAsk(ask, run)  the pause, or {replan} once the user
  *          replied.
  *   buildReplyReplan(asked)  the {replan} of a reply to what asked names,
@@ -40,8 +42,9 @@
  *   numbering with planning rounds, so a resume replays every earlier agent
  *   from cache and takes the reply at the ask. At reply time askTails adds
  *   the {question, settled, reply} entry buildAnswerEntry (lib/brief.js)
- *   builds to run.answerLog, the question being that lead and the questions,
- *   so every later plan prompt shows it in the answers block; it returns
+ *   builds to run.answerLog, the question being that lead, pinned when
+ *   given and the questions, joined by blank lines in shown order, so
+ *   every later plan prompt shows it in the answers block; it returns
  *   {question, reply} as the answer. No revise reads a tail reply, so its
  *   settled holds only the shown labels readReplyChoices (lib/brief.js)
  *   reads from it: a letter reply settles its label, and a reply in the
@@ -65,21 +68,21 @@ function describeTailLead(run) {
   return 'Every plan step is committed on branch ' + encodeUntrustedText(run.branch) + ', with head ' + run.head + '.';
 }
 
-function askTails(asks, run, lead) {
+function askTails(asks, run, lead, pinned) {
   const leadText = lead === undefined ? describeTailLead(run) : lead;
   const reply = takeNextReply(run, run.answerLog.length + 1);
   if (reply === undefined) {
-    return { result: pauseDelivery({ asks: asks, taken: [] }, run, leadText) };
+    return { result: pauseDelivery({ asks: asks, taken: [] }, run, leadText, pinned) };
   }
-  const question = leadText + '\n\n' + renderQuestions(asks);
+  const question = [leadText].concat(pinned ?? [], renderQuestions(asks)).join('\n\n');
   const choices = readReplyChoices(reply, asks);
   run.answerLog.push(buildAnswerEntry({ question: question, labels: listShownLabels(asks), reply: reply, chosen: choices }));
   run.approvals = applyApprovalChoices(run.approvals, asks, choices);
   return { answer: { question: question, reply: reply } };
 }
 
-function askTail(ask, run, lead) {
-  return askTails([ask], run, lead);
+function askTail(ask, run, lead, pinned) {
+  return askTails([ask], run, lead, pinned);
 }
 
 function replanFromTailAsk(ask, run) {
