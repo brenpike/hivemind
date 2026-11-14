@@ -333,7 +333,7 @@ This amendment records the permission posture for the `github-reviewer`'s GitHub
 
 **Decision (user choice, Q1 option B, 2026-11-13).**
 
-- The README documents the per-machine allow rules, one per script, in the form `Bash(bash "<plugin root>/skills/github-review-loop/scripts/<script>.sh" *)`, for `permissions.allow` in the gitignored `.claude/settings.local.json`.
+- The README documents the per-machine allow rules, one per script, in the form `Bash(bash "<plugin root>/skills/<skill>/scripts/<script>.sh" *)` with each script's own path (`github-review-loop` for `reply-resolve.sh` and `react-marker.sh`, `push-branch` for `push-branch.sh`), for `permissions.allow` in the gitignored `.claude/settings.local.json`.
 - A refusal asks. The reviewer returns `user-input-required` with `escalation_target: permission` and a question that names the exact rule (ADR-0040, Amendment 2026-11-13; `plugin/agents/github-reviewer.md`, step 8).
 - The plugin ships no allow for these calls.
 
@@ -361,7 +361,7 @@ This amendment records the permission posture for the `github-reviewer`'s GitHub
 - The rule's path holds the plugin version, so it goes stale after each plugin update. A stale rule matches nothing, and the call goes back to the classifier. A `*` in place of the version keeps the rule current, but it also matches a path that climbs out with `..`.
 - A settings edit made mid-session may need a reload before it applies. Not verified.
 - A call blocked with no classifier verdict has no **Recently blocked** row, so it cannot be approved there.
-- The reviewer's `push-branch.sh` call still goes through the classifier unless the user adds its rule. A refusal now asks.
+- Each of the three calls, the `push-branch.sh` push included, still goes through the classifier unless the user adds its rule. A refusal now asks.
 - The question text is written by the reviewer, so compare the rule it names with the README's exact rules before adding it.
 - With `autoMode.classifyAllShell: true`, the rules have no effect in auto mode.
 - Not verified live: the settings rule's match for a call from a subagent or a workflow agent.
