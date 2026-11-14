@@ -167,7 +167,8 @@
 #   6. missing-summary         both modes
 # Steps 2-4 are reached only under --defer and step 5 only without it, so the FIX
 # path's observable order (missing-thread-id -> missing-fix-sha ->
-# missing-summary) is byte-for-byte unchanged.
+# missing-summary) is byte-for-byte unchanged. The PR binding (§4) runs once,
+# after all six guards pass and before the reply.
 #
 # All six guards are SURFACE-SCOPED (see the validation note that follows the
 # positional binding): they live inside the thread) branch, so a
@@ -240,6 +241,34 @@
 #     (non-blocking, still exit 0). Only stdout is captured for the check — gh's
 #     own stderr chatter never reaches the body. The capture seam (§5) is upstream
 #     of the live call and is unaffected.
+#   - PR BINDING (every live write): on the thread surface, after the six input
+#     guards (§3) and before the reply, the script proves THREAD_ID is a review
+#     thread of the PR of the current branch, so a reply or resolve can never land
+#     on another PR. react-marker.sh carries the same binding for its reactions.
+#     The steps, in order:
+#       (1) the branch is `git symbolic-ref --quiet HEAD`, which must start with
+#           refs/heads/ (stripped); otherwise pr-binding-no-branch.
+#       (2) `git remote get-url --push --all origin` must print exactly one URL
+#           that starts with https:// holding no @, or ssh://, or git@.
+#       (3) `gh repo view --json id -- <url>` must exit 0 and print one object
+#           whose id matches ^[A-Za-z0-9_=+/-]+$ (the origin repository id).
+#       (4) one `gh api graphql` lookup of node(id:), the thread id passed as a
+#           variable and never spliced into the query text, selects __typename
+#           and, on PullRequestReviewThread,
+#           pullRequest { state headRefName headRepository { id } }; it must exit
+#           0 and pass hivemind_graphql_response_check.
+#       Any failure in (2)-(4) is pr-binding-lookup-failed.
+#       (5) the reply proceeds only when the node is a PullRequestReviewThread
+#           whose PR is OPEN with headRefName equal to the branch and
+#           headRepository.id equal to the origin id. Anything else (a null node,
+#           a null pullRequest, a null headRepository included) is
+#           pr-binding-refused.
+#     Every binding failure prints its token on stdout, exits 1 and sends no
+#     mutation. The gh calls use the timeout wrapper below. Resolve is not bound
+#     separately: it reuses the bound THREAD_ID after the bound reply. The binding
+#     is skipped when the capture seam (§5) is active, because that seam sends
+#     nothing to GitHub. The toplevel and review surfaces never run it and make no
+#     git or gh call.
 #   - Missing `timeout` / `gtimeout` -> degrade gracefully with a loud stderr
 #     warning and run the gh calls UNGUARDED (mirrors fetch-normalize.sh).
 #
@@ -280,12 +309,14 @@
 #                               (default 0). Non-zero -> non-blocking-failure path
 #                               (logs, still exits 0).
 # All four are INERT in production (unset -> real gh). The seam is checked ONLY
-# inside run_mutation, and requires BOTH TEST_MODE=1 and CAPTURE_FILE to engage.
+# through capture_seam_active, used by run_mutation and the PR binding (§4), and
+# requires BOTH TEST_MODE=1 and CAPTURE_FILE to engage. While it is engaged the
+# PR binding is skipped, so a capture-mode run makes no git or gh call.
 #
 # Markers / exit posture:
 #   - exit 0 on success (reply posted; resolve issued-or-skipped-or-failed).
 #   - REPLYRESOLVE_ERROR=<reason> on stdout + exit 1 on a HARD failure (bad input,
-#     a bootstrap failure, or a failed REPLY — including an exit-0 REPLY response
+#     a bootstrap failure, a PR binding failure (§4), or a failed REPLY — including an exit-0 REPLY response
 #     the shared GraphQL response check rejects or that lacks a comment id, §4).
 #   - REPLYRESOLVE_RESOLVE_FAILED on stderr + exit 0 on a failed (non-blocking)
 #     resolve, including an exit-0 RESOLVE response the check rejects or that does
@@ -295,7 +326,8 @@
 #   missing-thread-id | missing-fix-sha | missing-summary | unmapped-surface |
 #   reply-failed | missing-tracked-home | invalid-tracked-home |
 #   conflicting-reply-mode | cannot-self-locate | missing-graphql-check |
-#   unparseable-graphql-check
+#   unparseable-graphql-check | pr-binding-no-branch | pr-binding-lookup-failed |
+#   pr-binding-refused
 # missing-tracked-home | invalid-tracked-home | conflicting-reply-mode are
 # DEFER-mode-only and fire ONLY on the thread surface; each is a hard failure (no
 # mutation issued, REPLYRESOLVE_ERROR=<token> on stdout, exit 1). Their firing
@@ -305,6 +337,9 @@
 # BOOTSTRAP tokens: the script cannot resolve its own directory, or the shared
 # GraphQL response validator is absent or fails to source. They fire after the
 # positional binding and before any surface dispatch, on EVERY surface, with no
+# mutation issued (REPLYRESOLVE_ERROR=<token> on stdout, exit 1).
+# pr-binding-no-branch | pr-binding-lookup-failed | pr-binding-refused are PR
+# binding tokens (§4): thread surface only, after the six input guards, with no
 # mutation issued (REPLYRESOLVE_ERROR=<token> on stdout, exit 1).
 #
 # P18 FLOOR EXCEPTION (ADR-0020 / CHECK13 allowlisted): `set -u` only — `set -e`/`pipefail`
@@ -418,6 +453,75 @@ mutation($threadId: ID!) {
     thread { id isResolved }
   }
 }'
+# The PR binding lookup (§4). The thread id is a variable, never spliced into the
+# query text.
+BINDING_QUERY='
+query($threadId: ID!) {
+  node(id: $threadId) {
+    __typename
+    ... on PullRequestReviewThread {
+      pullRequest { state headRefName headRepository { id } }
+    }
+  }
+}'
+# Null-safe binding predicate over a body that passed the envelope check: every
+# hop is type-checked before it is read, so a null node, pullRequest or
+# headRepository is a refusal, never a match.
+BINDING_PREDICATE='
+.data.node as $thread_node
+| ($thread_node | type) == "object"
+  and $thread_node.__typename == "PullRequestReviewThread"
+  and ($thread_node.pullRequest | type) == "object"
+  and $thread_node.pullRequest.state == "OPEN"
+  and $thread_node.pullRequest.headRefName == $branch
+  and ($thread_node.pullRequest.headRepository | type) == "object"
+  and $thread_node.pullRequest.headRepository.id == $repo_id'
+
+# capture_seam_active: succeed when the offline capture seam (§5) is engaged, i.e.
+# REPLYRESOLVE_TEST_MODE is exactly "1" AND REPLYRESOLVE_CAPTURE_FILE is set and
+# non-empty. A stray REPLYRESOLVE_CAPTURE_FILE alone NEVER engages it (fail-closed
+# to live gh). The single gate shared by run_mutation and bind_thread_to_current_pr.
+capture_seam_active() {
+  [ "${REPLYRESOLVE_TEST_MODE:-}" = "1" ] && [ -n "${REPLYRESOLVE_CAPTURE_FILE:-}" ]
+}
+
+# bind_thread_to_current_pr: prove THREAD_ID is a review thread of the open PR of
+# the current branch in the origin repository (§4 PR BINDING), or fail via
+# replyresolve_fail with pr-binding-no-branch | pr-binding-lookup-failed |
+# pr-binding-refused. Returns 0 without any git or gh call when the capture seam is
+# active. Runs in the main shell so replyresolve_fail exits the script.
+bind_thread_to_current_pr() {
+  local head_ref branch_name push_url_text repo_view_output origin_repo_id binding_output
+  if capture_seam_active; then
+    return 0
+  fi
+  head_ref="$(git symbolic-ref --quiet HEAD 2>/dev/null)" || replyresolve_fail "pr-binding-no-branch"
+  case "$head_ref" in
+    refs/heads/?*) branch_name="${head_ref#refs/heads/}" ;;
+    *) replyresolve_fail "pr-binding-no-branch" ;;
+  esac
+  push_url_text="$(git remote get-url --push --all origin 2>/dev/null)" || replyresolve_fail "pr-binding-lookup-failed"
+  case "$push_url_text" in
+    ''|*$'\n'*) replyresolve_fail "pr-binding-lookup-failed" ;;
+  esac
+  case "$push_url_text" in
+    https://*@*) replyresolve_fail "pr-binding-lookup-failed" ;;
+    https://*|ssh://*|git@*) : ;;
+    *) replyresolve_fail "pr-binding-lookup-failed" ;;
+  esac
+  repo_view_output="$("${GH_TIMEOUT[@]}" gh repo view --json id -- "$push_url_text" </dev/null 2>/dev/null)" \
+    || replyresolve_fail "pr-binding-lookup-failed"
+  origin_repo_id="$(printf '%s' "$repo_view_output" | jq -r -s 'if length == 1 and (.[0] | type) == "object"
+    and (.[0].id | type) == "string" and (.[0].id | test("\\A[A-Za-z0-9_=+/-]+\\z")) then .[0].id
+    else error("not a repository id") end' 2>/dev/null)" || replyresolve_fail "pr-binding-lookup-failed"
+  binding_output="$("${GH_TIMEOUT[@]}" gh api graphql \
+    -f threadId="$THREAD_ID" \
+    -f query="$BINDING_QUERY" </dev/null 2>/dev/null)" || replyresolve_fail "pr-binding-lookup-failed"
+  hivemind_graphql_response_check "$binding_output" >/dev/null || replyresolve_fail "pr-binding-lookup-failed"
+  printf '%s' "$binding_output" \
+    | jq -e --arg branch "$branch_name" --arg repo_id "$origin_repo_id" "$BINDING_PREDICATE" >/dev/null 2>&1 \
+    || replyresolve_fail "pr-binding-refused"
+}
 
 # run_mutation <kind> <thread_id> [body]: issue ONE mutation. kind is "reply" or
 # "resolve". The single indirection point for both the live gh call AND the
@@ -433,7 +537,7 @@ run_mutation() {
   # TEST SEAM GATE (§5): capture seam activates ONLY when the dedicated test-mode
   # flag is the exact opt-in value AND the capture file is set+non-empty. A stray
   # REPLYRESOLVE_CAPTURE_FILE alone NEVER diverts — fail-closed to live gh.
-  if [ "${REPLYRESOLVE_TEST_MODE:-}" = "1" ] && [ -n "${REPLYRESOLVE_CAPTURE_FILE:-}" ]; then
+  if capture_seam_active; then
     case "$kind" in
       reply)
         printf 'REPLY thread=%s body=%s\n' "$thread_id" "$body" >> "$REPLYRESOLVE_CAPTURE_FILE"
@@ -507,6 +611,9 @@ case "$SURFACE" in
       [ -n "$FIX_SHA" ] || replyresolve_fail "missing-fix-sha"
     fi
     [ -n "$SUMMARY" ] || replyresolve_fail "missing-summary"
+    # PR BINDING (§4): once, after the input guards and before the reply. The
+    # resolve below reuses the bound THREAD_ID, so it is not bound separately.
+    bind_thread_to_current_pr
     # (a) REPLY — always, before any resolve. A reply failure is a HARD failure:
     # resolving a thread whose reply never posted would orphan the resolve. The
     # body is one of the EXACTLY TWO sanctioned literals (§4); the interpolated

@@ -10,15 +10,19 @@
 # (line format: REACT node=<NODE_ID> content=EYES) and the script's own exit status / REACTMARKER_ERROR
 # reason token, so each case is deterministic and offline.
 #
-# The live-path cases (#393) leave the capture seam unset and put a stub `gh` first on PATH that prints
-# a canned GraphQL response body. They lock the single definition of live success — gh exit 0, the
-# shared response check passing, AND .data.addReaction.reaction.content == EYES — and assert every
-# other response (error envelopes, already-reacted wording, a null payload, a different content, a
-# non-zero exit) is REACTMARKER_ERROR=react-failed.
+# The live-path cases (#393) leave the capture seam unset, run from a scratch git repo under the tmpdir
+# (branch bugfix/fixture-branch, a fake https GitHub origin) and put a stub `gh` first on PATH that
+# answers `gh repo view`, the PR binding lookup and the addReaction mutation with canned bodies. They
+# lock the single definition of live success — gh exit 0, the shared response check passing, AND
+# .data.addReaction.reaction.content == EYES — and assert every other response (error envelopes,
+# already-reacted wording, a null payload, a different content, a non-zero exit) is
+# REACTMARKER_ERROR=react-failed. The PR binding cases assert a node outside the current open PR is
+# pr-binding-refused, a failed lookup is pr-binding-lookup-failed, and a detached HEAD is
+# pr-binding-no-branch, each with no reaction sent.
 #
 # Mirrors tools/test_reply_resolve.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any
-# -fail convention. Read-only: the only writes are scratch capture files in a disposable tmpdir
-# removed on EXIT.
+# -fail convention. Read-only: the only writes are scratch capture files, scratch repos and shim
+# files in a disposable tmpdir removed on EXIT.
 #
 # Production-shaped node ids are used deliberately (IC_... for toplevel IssueComment, PRR_... for a
 # review PullRequestReview) — NOT fake placeholder ids — so validation-order bugs cannot hide behind
@@ -142,34 +146,167 @@ else
   failed "reactfail:react-failed" "status=$status out=$out cap=$(cat "$cap")"
 fi
 
+
+# ── Live-path fixtures: scratch git repo + gh shim ──────────────────────────────────
+# Every live-path case runs from a scratch git repo under the tmpdir, never from the hivemind checkout
+# (CI checks PRs out at a detached HEAD, so the checkout's own branch and remotes are unusable). Git
+# runs with GIT_DIR and GIT_WORK_TREE unset, HOME and XDG_CONFIG_HOME pointed at an empty scratch home
+# and GIT_CONFIG_NOSYSTEM=1, so no user or system config (url rewrites included) reaches the binding.
+#
+# The gh shim tells apart its three calls: `gh repo view` (the origin repository id), the binding
+# `gh api graphql` lookup, and the addReaction mutation (a query= argument naming addReaction). Each
+# call records a <part>-reached marker and its arguments under the case dir named by
+# FIXTURE_GH_CASE_DIR, prints <part>.body on stdout, writes an unrelated line on stderr and exits
+# <part>.status. live_reached means the MUTATION was reached.
+FIXTURE_BRANCH="bugfix/fixture-branch"
+FIXTURE_ORIGIN_URL="https://github.com/fixture-owner/fixture-repo.git"
+FIXTURE_REPO_ID="R_kgDOFixture1"
+FIXTURE_HOME="$TMPDIR_TEST/home"
+mkdir -p "$FIXTURE_HOME/.config"
+
+# fixture_git <args...>: run git with the scratch home and no system config, GIT_DIR/GIT_WORK_TREE unset.
+fixture_git() {
+  env -u GIT_DIR -u GIT_WORK_TREE HOME="$FIXTURE_HOME" XDG_CONFIG_HOME="$FIXTURE_HOME/.config" \
+    GIT_CONFIG_NOSYSTEM=1 git "$@"
+}
+
+# make_fixture_repo <name>: init a scratch repo on branch bugfix/fixture-branch with no remote. Prints
+# its path.
+make_fixture_repo() {
+  local repo_dir="$TMPDIR_TEST/repo-$1"
+  fixture_git init -q "$repo_dir" >/dev/null 2>&1
+  fixture_git -C "$repo_dir" symbolic-ref HEAD "refs/heads/$FIXTURE_BRANCH"
+  printf '%s' "$repo_dir"
+}
+
+BOUND_REPO="$(make_fixture_repo bound)"
+fixture_git -C "$BOUND_REPO" remote add origin "$FIXTURE_ORIGIN_URL"
+
+NO_ORIGIN_REPO="$(make_fixture_repo no-origin)"
+
+AT_ORIGIN_REPO="$(make_fixture_repo at-origin)"
+fixture_git -C "$AT_ORIGIN_REPO" remote add origin "https://token@github.com/fixture-owner/fixture-repo.git"
+
+TWO_PUSH_REPO="$(make_fixture_repo two-push)"
+fixture_git -C "$TWO_PUSH_REPO" remote add origin "$FIXTURE_ORIGIN_URL"
+fixture_git -C "$TWO_PUSH_REPO" remote set-url --add --push origin "$FIXTURE_ORIGIN_URL"
+fixture_git -C "$TWO_PUSH_REPO" remote set-url --add --push origin "https://github.com/fixture-owner/other-repo.git"
+
+DETACHED_REPO="$(make_fixture_repo detached)"
+fixture_git -C "$DETACHED_REPO" remote add origin "$FIXTURE_ORIGIN_URL"
+fixture_git -C "$DETACHED_REPO" -c user.name=fixture -c user.email=fixture@example.invalid \
+  -c commit.gpgsign=false commit -q --allow-empty -m fixture
+fixture_git -C "$DETACHED_REPO" checkout -q --detach
+
+NON_GIT_DIR="$TMPDIR_TEST/non-git"
+mkdir -p "$NON_GIT_DIR"
+
+GH_SHIM_DIR="$TMPDIR_TEST/gh-shim-bin"
+mkdir -p "$GH_SHIM_DIR"
+cat > "$GH_SHIM_DIR/gh" <<'SHIM'
+#!/usr/bin/env bash
+case_dir="$FIXTURE_GH_CASE_DIR"
+if [ "${1:-}" = repo ] && [ "${2:-}" = view ]; then
+  part=repo
+elif [ "${1:-}" = api ] && [ "${2:-}" = graphql ]; then
+  part=binding
+  for arg in "$@"; do
+    case "$arg" in
+      query=*addReaction*) part=react ;;
+    esac
+  done
+else
+  printf '%s\n' "$*" > "$case_dir/unexpected-reached"
+  exit 99
+fi
+printf reached > "$case_dir/$part-reached"
+printf '%s\n' "$@" > "$case_dir/$part.args"
+cat "$case_dir/$part.body"
+echo "gh: stub stderr line" >&2
+exit "$(cat "$case_dir/$part.status")"
+SHIM
+chmod +x "$GH_SHIM_DIR/gh"
+
+GIT_SHIM_DIR="$TMPDIR_TEST/git-shim-bin"
+mkdir -p "$GIT_SHIM_DIR"
+cat > "$GIT_SHIM_DIR/git" <<'SHIM'
+#!/usr/bin/env bash
+printf reached > "$FIXTURE_GH_CASE_DIR/git-reached"
+exit 99
+SHIM
+chmod +x "$GIT_SHIM_DIR/git"
+
+# bound_node_body <typename>: a binding response whose node is <typename> on the OPEN fixture PR.
+bound_node_body() {
+  printf '{"data":{"node":{"__typename":"%s","pullRequest":{"state":"OPEN","headRefName":"%s","headRepository":{"id":"%s"}}}}}' \
+    "$1" "$FIXTURE_BRANCH" "$FIXTURE_REPO_ID"
+}
+
+# set_gh_part <part> <exit status> <body>: set one shim response (repo | binding | react) for the
+# current case dir.
+set_gh_part() {
+  printf '%s' "$3" > "$case_dir/$1.body"
+  printf '%s' "$2" > "$case_dir/$1.status"
+}
+
+# new_gh_case <name> <surface>: create a fresh case dir whose repo view and binding match the fixture
+# repo for <surface> (toplevel IssueComment, review PullRequestReview) and whose reaction is a clean
+# EYES success. Sets case_dir.
+new_gh_case() {
+  local node_type="IssueComment"
+  [ "$2" = review ] && node_type="PullRequestReview"
+  case_dir="$TMPDIR_TEST/case-$1"
+  mkdir -p "$case_dir"
+  set_gh_part repo 0 "{\"id\":\"$FIXTURE_REPO_ID\"}"
+  set_gh_part binding 0 "$(bound_node_body "$node_type")"
+  set_gh_part react 0 '{"data":{"addReaction":{"reaction":{"content":"EYES"}}}}'
+}
+
+# reached_flag <part>: print yes when the shim recorded <part>-reached in the current case dir, else no.
+reached_flag() {
+  if [ -f "$case_dir/$1-reached" ]; then printf yes; else printf no; fi
+}
+
+# run_bound_case <repo dir> <node id> <surface> [env assignments...]: run react-marker on the live path
+# from <repo dir> against the gh shim of the current case dir. Sets live_status, live_stdout,
+# live_stderr, live_reached (the mutation), repo_reached, binding_reached.
+run_bound_case() {
+  local repo_dir="$1" node_id="$2" surface="$3"
+  shift 3
+  (
+    cd "$repo_dir" || exit 98
+    env -u GIT_DIR -u GIT_WORK_TREE -u REACTMARKER_TEST_MODE -u REACTMARKER_CAPTURE_FILE \
+      HOME="$FIXTURE_HOME" XDG_CONFIG_HOME="$FIXTURE_HOME/.config" GIT_CONFIG_NOSYSTEM=1 \
+      PATH="$GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" "$@" \
+      bash "$REACT_MARKER" "$node_id" "$surface" "https://github.com/fixture-owner/fixture-repo/pull/5"
+  ) > "$case_dir/run.stdout" 2> "$case_dir/run.stderr"
+  live_status=$?
+  live_stdout="$(cat "$case_dir/run.stdout")"
+  live_stderr="$(cat "$case_dir/run.stderr")"
+  live_reached="$(reached_flag react)"
+  repo_reached="$(reached_flag repo)"
+  binding_reached="$(reached_flag binding)"
+}
+
 # ── Fail-closed gate lock: CAPTURE_FILE WITHOUT TEST_MODE does NOT divert ────────────
 # The capture seam requires BOTH REACTMARKER_TEST_MODE=1 AND REACTMARKER_CAPTURE_FILE. A stray
 # CAPTURE_FILE ALONE must NOT divert — the mutation goes LIVE to gh. We assert the gate's observable
 # contract: with TEST_MODE absent the capture file is NEVER written (the seam stayed inactive and the
 # code fell through to the live path). NOTE: TEST_MODE is deliberately UNSET here.
 #
-# OFFLINE INVARIANT: with TEST_MODE unset, run_reaction falls through to the LIVE `gh api graphql`
-# path. Without a stub that would invoke the REAL gh CLI when present (network call / 45s timeout)
-# despite this suite being offline. We prepend a stub `gh` to PATH that records it was reached
-# (proving the code went live) and exits non-zero, so no real CLI runs. Asserting the stub was
-# reached AND the capture file stayed empty locks BOTH halves of the contract: the seam did NOT
-# divert (cap empty) and the live path WAS taken (stub reached).
+# OFFLINE INVARIANT: with TEST_MODE unset, the script takes the LIVE path: the PR binding, then
+# `gh api graphql`. It runs from the bound scratch repo against the gh shim, whose binding matches and
+# whose mutation exits non-zero, so no real CLI runs. Asserting the mutation was reached AND the
+# capture file stayed empty locks BOTH halves of the contract: the seam did NOT divert (cap empty) and
+# the live path WAS taken (mutation reached).
 cap="$(fresh_capture nodivert)"
-gh_stub_dir="$TMPDIR_TEST/nodivert-stubbin"
-gh_stub_marker="$TMPDIR_TEST/nodivert-gh-reached"
-mkdir -p "$gh_stub_dir"
-{
-  printf '%s\n' '#!/usr/bin/env bash'
-  printf 'printf reached > %q\n' "$gh_stub_marker"
-  printf '%s\n' 'exit 1'
-} > "$gh_stub_dir/gh"
-chmod +x "$gh_stub_dir/gh"
-PATH="$gh_stub_dir:$PATH" REACTMARKER_CAPTURE_FILE="$cap" \
-  bash "$REACT_MARKER" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" >/dev/null 2>&1
-if [ ! -s "$cap" ] && [ -f "$gh_stub_marker" ]; then
-  pass "failclosed:capture-without-testmode-no-divert" "CAPTURE_FILE alone did NOT divert (cap empty); live gh path reached (stub invoked)"
+new_gh_case nodivert toplevel
+set_gh_part react 1 ''
+run_bound_case "$BOUND_REPO" "$TOPLEVEL_NODE" toplevel REACTMARKER_CAPTURE_FILE="$cap"
+if [ ! -s "$cap" ] && [ "$live_reached" = yes ]; then
+  pass "failclosed:capture-without-testmode-no-divert" "CAPTURE_FILE alone did NOT divert (cap empty); live mutation reached"
 else
-  failed "failclosed:capture-without-testmode-no-divert" "diverted or live-path-not-reached — cap=$(cat "$cap") stub_reached=$([ -f "$gh_stub_marker" ] && echo yes || echo no)"
+  failed "failclosed:capture-without-testmode-no-divert" "diverted or live-path-not-reached — cap=$(cat "$cap") mutation_reached=$live_reached stderr=$live_stderr"
 fi
 
 # ── Capture-append failure is a HARD failure, NOT a false success (#265 regression) ──
@@ -177,78 +314,48 @@ fi
 # fails. With set -e deliberately omitted (P18 floor), an UNGUARDED append would be silently ignored
 # and run_reaction would still return the default-0 simulated status — reporting marker SUCCESS while
 # NOTHING was captured and the live gh mutation was bypassed. The `|| return 1` guard converts that
-# into react-failed. Assert: exit non-zero, REACTMARKER_ERROR=react-failed, and the live gh path is
-# NOT reached (a stub gh on PATH must stay un-invoked — the seam stayed engaged and hard-failed on
-# the append, never falling through to live). REACTMARKER_REACT_STATUS is left at its default 0 so
-# the ONLY failure source under test is the append itself.
+# into react-failed. Assert: exit non-zero, REACTMARKER_ERROR=react-failed, and gh is NEVER reached
+# (the active seam skips the PR binding and hard-fails on the append, never falling through to live).
+# REACTMARKER_REACT_STATUS is left at its default 0 so the ONLY failure source under test is the
+# append itself.
 #
 # The write must fail INDEPENDENT of permissions: `chmod 000` does not stop root (the validation
 # suite runs as root in the container), so a permission-based unwritable dir would let the append
 # SUCCEED and silently invert this assertion. Instead point the capture file under a NONEXISTENT
 # parent — the `>>` redirect then fails with ENOENT for every user, root included.
 bad_cap="$TMPDIR_TEST/nonexistent-parent-dir/cap.log"
-gh_stub_dir2="$TMPDIR_TEST/capfail-stubbin"
-gh_stub_marker2="$TMPDIR_TEST/capfail-gh-reached"
-mkdir -p "$gh_stub_dir2"
-{
-  printf '%s\n' '#!/usr/bin/env bash'
-  printf 'printf reached > %q\n' "$gh_stub_marker2"
-  printf '%s\n' 'exit 0'
-} > "$gh_stub_dir2/gh"
-chmod +x "$gh_stub_dir2/gh"
-out="$(PATH="$gh_stub_dir2:$PATH" REACTMARKER_TEST_MODE=1 REACTMARKER_CAPTURE_FILE="$bad_cap" \
+new_gh_case capfail toplevel
+out="$(PATH="$GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" REACTMARKER_TEST_MODE=1 \
+  REACTMARKER_CAPTURE_FILE="$bad_cap" \
   bash "$REACT_MARKER" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
 status=$?
 if [ "$status" -ne 0 ] && printf '%s\n' "$out" | grep -qx 'REACTMARKER_ERROR=react-failed' \
-   && [ ! -f "$gh_stub_marker2" ]; then
-  pass "capfail:append-failure-hard-fails" "unwritable capture -> exit=$status REACTMARKER_ERROR=react-failed, live gh NOT reached"
+   && [ "$(reached_flag repo)" = no ] && [ "$(reached_flag binding)" = no ] \
+   && [ "$(reached_flag react)" = no ]; then
+  pass "capfail:append-failure-hard-fails" "unwritable capture -> exit=$status REACTMARKER_ERROR=react-failed, gh NOT reached"
 else
-  failed "capfail:append-failure-hard-fails" "status=$status out=$out gh_reached=$([ -f "$gh_stub_marker2" ] && echo yes || echo no)"
+  failed "capfail:append-failure-hard-fails" "status=$status out=$out repo=$(reached_flag repo) binding=$(reached_flag binding) react=$(reached_flag react)"
 fi
 
 # ── LIVE path: positive proof is the ONLY definition of success (#393) ──────────
-# These cases drive the LIVE run_reaction body (TEST_MODE and CAPTURE_FILE UNSET) against a PATH-shim
-# `gh` that prints a canned response body on stdout and exits with a chosen status. Success requires
-# ALL of: gh exit 0, the shared response check accepting the envelope, AND
-# .data.addReaction.reaction.content equal to the requested EYES. Nothing text-matches a response, so a
-# body whose error message mentions an existing reaction is react-failed like any other error. Each
-# case asserts the shim was reached, so a case can never pass without the live path.
+# These cases drive the LIVE run_reaction body (TEST_MODE and CAPTURE_FILE UNSET) from the bound
+# scratch repo against the gh shim, with a binding that matches the fixture PR. The mutation prints a
+# canned response body on stdout and exits with a chosen status. Success requires ALL of: gh exit 0,
+# the shared response check accepting the envelope, AND .data.addReaction.reaction.content equal to
+# the requested EYES. Nothing text-matches a response, so a body whose error message mentions an
+# existing reaction is react-failed like any other error. Each case asserts the mutation was reached,
+# so a case can never pass without the live path.
 
-# make_live_gh_shim <name> <exit status> <body>: write a stub gh under the tmpdir that records it was
-# reached, prints <body> on stdout, writes an unrelated line on stderr, and exits <exit status>.
-# Prints the stub's bin dir.
-make_live_gh_shim() {
-  local shim_dir="$TMPDIR_TEST/$1-stubbin"
-  local body_file="$TMPDIR_TEST/$1-body.json"
-  mkdir -p "$shim_dir"
-  printf '%s' "$3" > "$body_file"
-  {
-    printf '%s\n' '#!/usr/bin/env bash'
-    printf 'printf reached > %q\n' "$TMPDIR_TEST/$1-gh-reached"
-    printf 'cat %q\n' "$body_file"
-    printf '%s\n' 'echo "gh: stub stderr line" >&2'
-    printf 'exit %d\n' "$2"
-  } > "$shim_dir/gh"
-  chmod +x "$shim_dir/gh"
-  printf '%s' "$shim_dir"
-}
-
-# run_live_case <name> <exit status> <body>: run react-marker over a toplevel node on the live path
-# against the shim. Sets live_status, live_stdout, live_stderr, live_reached (yes|no).
+# run_live_case <name> <exit status> <body>: run react-marker over a bound toplevel node on the live
+# path, the mutation answering <body> with <exit status>.
 run_live_case() {
-  local shim_dir
-  shim_dir="$(make_live_gh_shim "$1" "$2" "$3")"
-  PATH="$shim_dir:$PATH" env -u REACTMARKER_TEST_MODE -u REACTMARKER_CAPTURE_FILE \
-    bash "$REACT_MARKER" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" \
-    > "$TMPDIR_TEST/$1.stdout" 2> "$TMPDIR_TEST/$1.stderr"
-  live_status=$?
-  live_stdout="$(cat "$TMPDIR_TEST/$1.stdout")"
-  live_stderr="$(cat "$TMPDIR_TEST/$1.stderr")"
-  if [ -f "$TMPDIR_TEST/$1-gh-reached" ]; then live_reached=yes; else live_reached=no; fi
+  new_gh_case "$1" toplevel
+  set_gh_part react "$2" "$3"
+  run_bound_case "$BOUND_REPO" "$TOPLEVEL_NODE" toplevel
 }
 
 # assert_live_react_failed <name> <label>: the live case exited 1 with exactly the react-failed
-# token on stderr and the shim reached.
+# token on stderr and the mutation reached.
 assert_live_react_failed() {
   if [ "$live_status" -eq 1 ] && [ "$live_reached" = yes ] \
      && printf '%s\n' "$live_stderr" | grep -qx 'REACTMARKER_ERROR=react-failed'; then
@@ -259,7 +366,7 @@ assert_live_react_failed() {
 }
 
 # assert_live_success <name> <label>: the live case exited 0, silent on stdout, no error token on
-# stderr, and the shim reached.
+# stderr, and the mutation reached.
 assert_live_success() {
   if [ "$live_status" -eq 0 ] && [ "$live_reached" = yes ] && [ -z "$live_stdout" ] \
      && ! printf '%s\n' "$live_stderr" | grep -q 'REACTMARKER_ERROR='; then
@@ -281,6 +388,15 @@ assert_live_react_failed "live:exit0-errors-empty-object" "exit 0 + errors[{}] -
 # exit 0 + a clean success envelope naming the requested content -> success, silent on stdout.
 run_live_case live-clean 0 '{"data":{"addReaction":{"reaction":{"content":"EYES"}}}}'
 assert_live_success "live:exit0-clean" "exit 0 + clean data envelope with reaction.content EYES -> exit 0, empty stdout"
+
+# The binding lookup passes the node id as a variable argument, never inside the query text.
+if [ -f "$case_dir/binding.args" ] && grep -qx "id=$TOPLEVEL_NODE" "$case_dir/binding.args" \
+   && grep -qF 'node(id: $id)' "$case_dir/binding.args" \
+   && ! grep -vx "id=$TOPLEVEL_NODE" "$case_dir/binding.args" | grep -qF "$TOPLEVEL_NODE"; then
+  pass "live:binding-node-id-is-variable" "binding query passes id=<node> as a variable, query text never holds it"
+else
+  failed "live:binding-node-id-is-variable" "args=$(cat "$case_dir/binding.args" 2>/dev/null)"
+fi
 
 # exit 0 + errors array naming an already-present reaction -> react-failed (no text-match success path).
 run_live_case live-errors-already 0 \
@@ -309,6 +425,130 @@ assert_live_react_failed "live:exit0-wrong-content" "exit 0 + reaction.content H
 # exit 1 + a clean EYES payload on stdout -> react-failed: the gh exit status is checked first.
 run_live_case live-exit1-clean 1 '{"data":{"addReaction":{"reaction":{"content":"EYES"}}}}'
 assert_live_react_failed "live:exit1-clean-payload" "exit 1 + clean EYES payload -> exit 1 REACTMARKER_ERROR=react-failed"
+
+# A review candidate bound to a PullRequestReview on the fixture PR reacts like a toplevel one.
+new_gh_case live-review-clean review
+run_bound_case "$BOUND_REPO" "$REVIEW_NODE" review
+assert_live_success "live:review-bound-clean" "review node bound to the open fixture PR -> exit 0, empty stdout"
+
+# ── PR BINDING: no live reaction outside the current PR ─────────────────────────────
+# Each case runs the live path with a clean EYES mutation answer, so only the binding can stop the
+# reaction. Every failure asserts exit 1, exactly its token on stderr, and the mutation NOT reached.
+
+# assert_binding_token <name> <token> <label>: the case exited 1 with exactly REACTMARKER_ERROR=<token>
+# on stderr and the mutation not reached.
+assert_binding_token() {
+  if [ "$live_status" -eq 1 ] && [ "$live_reached" = no ] \
+     && [ "$live_stderr" = "REACTMARKER_ERROR=$2" ]; then
+    pass "$1" "$3"
+  else
+    failed "$1" "status=$live_status mutation_reached=$live_reached stdout=$live_stdout stderr=$live_stderr"
+  fi
+}
+
+# run_refused_case <name> <surface> <binding body>: run a bound live case whose binding answers
+# <binding body> with exit 0, from the bound repo, over the surface's node id.
+run_refused_case() {
+  local node_id="$TOPLEVEL_NODE"
+  [ "$2" = review ] && node_id="$REVIEW_NODE"
+  new_gh_case "$1" "$2"
+  set_gh_part binding 0 "$3"
+  run_bound_case "$BOUND_REPO" "$node_id" "$2"
+}
+
+run_refused_case refused-other-pr toplevel \
+  "{\"data\":{\"node\":{\"__typename\":\"IssueComment\",\"pullRequest\":{\"state\":\"OPEN\",\"headRefName\":\"feature/other-branch\",\"headRepository\":{\"id\":\"$FIXTURE_REPO_ID\"}}}}}"
+assert_binding_token "binding:refused-other-pr" pr-binding-refused "node on another PR (other head branch) -> pr-binding-refused"
+
+run_refused_case refused-same-branch-other-repo toplevel \
+  "{\"data\":{\"node\":{\"__typename\":\"IssueComment\",\"pullRequest\":{\"state\":\"OPEN\",\"headRefName\":\"$FIXTURE_BRANCH\",\"headRepository\":{\"id\":\"R_kgDOForkRepo9\"}}}}}"
+assert_binding_token "binding:refused-same-branch-other-repo" pr-binding-refused "PR head has the same branch name in another repo -> pr-binding-refused"
+
+run_refused_case refused-closed toplevel \
+  "{\"data\":{\"node\":{\"__typename\":\"IssueComment\",\"pullRequest\":{\"state\":\"CLOSED\",\"headRefName\":\"$FIXTURE_BRANCH\",\"headRepository\":{\"id\":\"$FIXTURE_REPO_ID\"}}}}}"
+assert_binding_token "binding:refused-closed-pr" pr-binding-refused "CLOSED PR -> pr-binding-refused"
+
+run_refused_case refused-merged toplevel \
+  "{\"data\":{\"node\":{\"__typename\":\"IssueComment\",\"pullRequest\":{\"state\":\"MERGED\",\"headRefName\":\"$FIXTURE_BRANCH\",\"headRepository\":{\"id\":\"$FIXTURE_REPO_ID\"}}}}}"
+assert_binding_token "binding:refused-merged-pr" pr-binding-refused "MERGED PR -> pr-binding-refused"
+
+run_refused_case refused-toplevel-is-review toplevel "$(bound_node_body PullRequestReview)"
+assert_binding_token "binding:refused-toplevel-node-is-review" pr-binding-refused "toplevel candidate whose node is a PullRequestReview -> pr-binding-refused"
+
+run_refused_case refused-review-is-comment review "$(bound_node_body IssueComment)"
+assert_binding_token "binding:refused-review-node-is-comment" pr-binding-refused "review candidate whose node is an IssueComment -> pr-binding-refused"
+
+run_refused_case refused-null-pr toplevel '{"data":{"node":{"__typename":"IssueComment","pullRequest":null}}}'
+assert_binding_token "binding:refused-null-pull-request" pr-binding-refused "IssueComment with null pullRequest -> pr-binding-refused"
+
+run_refused_case refused-null-node toplevel '{"data":{"node":null}}'
+assert_binding_token "binding:refused-null-node" pr-binding-refused "null node -> pr-binding-refused"
+
+run_refused_case refused-null-head-repo toplevel \
+  "{\"data\":{\"node\":{\"__typename\":\"IssueComment\",\"pullRequest\":{\"state\":\"OPEN\",\"headRefName\":\"$FIXTURE_BRANCH\",\"headRepository\":null}}}}"
+assert_binding_token "binding:refused-null-head-repository" pr-binding-refused "null headRepository -> pr-binding-refused"
+
+# Lookup failures: the binding query, the repo view, or the origin push URL.
+new_gh_case lookup-binding-exit1 toplevel
+set_gh_part binding 1 "$(bound_node_body IssueComment)"
+run_bound_case "$BOUND_REPO" "$TOPLEVEL_NODE" toplevel
+assert_binding_token "binding:lookup-binding-nonzero-exit" pr-binding-lookup-failed "non-zero gh exit on the binding query -> pr-binding-lookup-failed"
+
+new_gh_case lookup-not-found toplevel
+set_gh_part binding 0 \
+  '{"data":{"node":null},"errors":[{"type":"NOT_FOUND","path":["node"],"message":"Could not resolve to a node with the global id of '"'"'IC_kwDOABCDEF4AbCdEf'"'"'"}]}'
+run_bound_case "$BOUND_REPO" "$TOPLEVEL_NODE" toplevel
+assert_binding_token "binding:lookup-not-found-envelope" pr-binding-lookup-failed "exit-0 NOT_FOUND errors envelope -> pr-binding-lookup-failed"
+
+new_gh_case lookup-non-json toplevel
+set_gh_part binding 0 'not json at all'
+run_bound_case "$BOUND_REPO" "$TOPLEVEL_NODE" toplevel
+assert_binding_token "binding:lookup-non-json-body" pr-binding-lookup-failed "non-JSON binding body -> pr-binding-lookup-failed"
+
+new_gh_case lookup-repo-view-fails toplevel
+set_gh_part repo 1 ''
+run_bound_case "$BOUND_REPO" "$TOPLEVEL_NODE" toplevel
+assert_binding_token "binding:lookup-repo-view-fails" pr-binding-lookup-failed "failed gh repo view -> pr-binding-lookup-failed"
+
+new_gh_case lookup-no-origin toplevel
+run_bound_case "$NO_ORIGIN_REPO" "$TOPLEVEL_NODE" toplevel
+assert_binding_token "binding:lookup-no-origin" pr-binding-lookup-failed "no origin remote -> pr-binding-lookup-failed"
+
+new_gh_case lookup-at-origin toplevel
+run_bound_case "$AT_ORIGIN_REPO" "$TOPLEVEL_NODE" toplevel
+assert_binding_token "binding:lookup-https-origin-with-at" pr-binding-lookup-failed "https origin URL holding @ -> pr-binding-lookup-failed"
+
+new_gh_case lookup-two-push toplevel
+run_bound_case "$TWO_PUSH_REPO" "$TOPLEVEL_NODE" toplevel
+assert_binding_token "binding:lookup-two-push-urls" pr-binding-lookup-failed "two origin push URLs -> pr-binding-lookup-failed"
+
+# A detached HEAD has no branch to bind: pr-binding-no-branch before any gh call.
+new_gh_case no-branch-detached toplevel
+run_bound_case "$DETACHED_REPO" "$TOPLEVEL_NODE" toplevel
+if [ "$repo_reached" = no ] && [ "$binding_reached" = no ] && [ ! -f "$case_dir/unexpected-reached" ]; then
+  assert_binding_token "binding:no-branch-detached-head" pr-binding-no-branch "detached HEAD -> pr-binding-no-branch, gh never reached"
+else
+  failed "binding:no-branch-detached-head" "gh reached: repo=$repo_reached binding=$binding_reached stderr=$live_stderr"
+fi
+
+# ── thread surface from a non-git directory stays a silent no-op ─────────────────────
+# The thread surface never runs the binding: from a directory outside any repository, with shim git
+# and gh first on PATH, it exits 0 silently and neither git nor gh is reached.
+new_gh_case thread-non-git toplevel
+(
+  cd "$NON_GIT_DIR" || exit 98
+  env -u GIT_DIR -u GIT_WORK_TREE -u REACTMARKER_TEST_MODE -u REACTMARKER_CAPTURE_FILE \
+    PATH="$GIT_SHIM_DIR:$GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" \
+    bash "$REACT_MARKER" "$TOPLEVEL_NODE" thread "https://github.com/o/r/pull/5#discussion_r1"
+) > "$case_dir/run.out" 2>&1
+status=$?
+if [ "$status" -eq 0 ] && [ ! -s "$case_dir/run.out" ] && [ "$(reached_flag git)" = no ] \
+   && [ "$(reached_flag repo)" = no ] && [ "$(reached_flag binding)" = no ] \
+   && [ "$(reached_flag react)" = no ] && [ ! -f "$case_dir/unexpected-reached" ]; then
+  pass "thread:non-git-silent-no-op" "thread surface outside a repo -> exit 0, no output, no git or gh call"
+else
+  failed "thread:non-git-silent-no-op" "status=$status out=$(cat "$case_dir/run.out") git=$(reached_flag git)"
+fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
 echo

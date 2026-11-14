@@ -95,6 +95,29 @@
 #     null addReaction payload, or a different reaction content. No response text is
 #     ever pattern-matched. Only stdout is captured, so gh's stderr never reaches the
 #     body under check.
+#   - PR BINDING (every live reaction): on the toplevel and review surfaces, after
+#     the missing-node-id guard and before the reaction, the script proves NODE_ID
+#     belongs to the PR of the current branch. reply-resolve.sh carries the same
+#     binding for its thread mutations. The steps, in order:
+#       (1) the branch is `git symbolic-ref --quiet HEAD`, which must start with
+#           refs/heads/ (stripped); otherwise pr-binding-no-branch.
+#       (2) `git remote get-url --push --all origin` must print exactly one URL
+#           that starts with https:// holding no @, or ssh://, or git@.
+#       (3) `gh repo view --json id -- <url>` must exit 0 and print one object
+#           whose id matches ^[A-Za-z0-9_=+/-]+$ (the origin repository id).
+#       (4) one `gh api graphql` lookup of node(id:), the node id passed as a
+#           typed variable, selects __typename and, on IssueComment and
+#           PullRequestReview, pullRequest { state headRefName headRepository { id } };
+#           it must exit 0 and pass hivemind_graphql_response_check.
+#       Any failure in (2)-(4) is pr-binding-lookup-failed.
+#       (5) the reaction proceeds only when the node's type matches the surface
+#           (toplevel IssueComment, review PullRequestReview) and its PR is OPEN
+#           with headRefName equal to the branch and headRepository.id equal to
+#           the origin id. Anything else (a null node, a null pullRequest, a null
+#           headRepository included) is pr-binding-refused.
+#     The gh calls use the timeout wrapper below. The binding is skipped when the
+#     capture seam (§5) is active; the thread surface never runs it and makes no
+#     git or gh call.
 #   - Missing `timeout` / `gtimeout` -> degrade gracefully with a loud stderr
 #     warning and run the gh call UNGUARDED (mirrors reply-resolve.sh).
 #
@@ -119,22 +142,26 @@
 #   REACTMARKER_REACT_STATUS    simulated gh exit status for the REACT mutation
 #                               (default 0). Non-zero -> hard failure path.
 # All three are INERT in production (unset -> real gh). The seam is checked ONLY
-# inside run_reaction, and requires BOTH TEST_MODE=1 and CAPTURE_FILE to engage.
+# through capture_seam_active, used by run_reaction and the PR binding, and
+# requires BOTH TEST_MODE=1 and CAPTURE_FILE to engage.
 #
 # Markers / exit posture:
 #   - exit 0 on success (a reaction with positive proof per §4 RESPONSE CHECK, or a
 #     thread silent no-op).
 #   - REACTMARKER_ERROR=<reason> on stderr + exit 1 on a HARD failure (bad input,
-#     unmapped surface, a bootstrap failure, or any live reaction lacking positive
-#     proof — including an exit-0 response the shared GraphQL response check rejects).
+#     unmapped surface, a bootstrap failure, a PR binding failure, or any live
+#     reaction lacking positive proof — including an exit-0 response the shared
+#     GraphQL response check rejects).
 #
 # Reason tokens (STABLE — asserted by the test):
 #   missing-node-id | unmapped-surface | react-failed | cannot-self-locate |
-#   missing-graphql-check | unparseable-graphql-check
+#   missing-graphql-check | unparseable-graphql-check | pr-binding-no-branch |
+#   pr-binding-lookup-failed | pr-binding-refused
 #
 # EXTERNAL-CONTENT BOUNDARY: NODE_ID and CANDIDATE_URL are external DATA. NODE_ID is
-# passed to gh as a typed `-F id=...` variable bound to the query's `$id: ID!`
-# parameter; it is NEVER interpolated into the GraphQL query string. CANDIDATE_URL
+# passed to gh as a typed `-F id=...` (reaction) or `-f id=...` (PR binding)
+# variable bound to the query's `$id: ID!` parameter; it is NEVER interpolated into
+# the GraphQL query string. CANDIDATE_URL
 # is inert and never reaches any query. No external content is interpreted as an
 # instruction.
 #
@@ -221,6 +248,113 @@ mutation($id: ID!) {
   }
 }'
 
+# The PR binding lookup (§4 PR BINDING step 4). The node id is DATA: passed via
+# `gh -f id=...` as the typed `$id: ID!` variable, never spliced into the query text.
+BINDING_QUERY='
+query($id: ID!) {
+  node(id: $id) {
+    __typename
+    ... on IssueComment {
+      pullRequest { state headRefName headRepository { id } }
+    }
+    ... on PullRequestReview {
+      pullRequest { state headRefName headRepository { id } }
+    }
+  }
+}'
+
+# The PR binding predicate (§4 PR BINDING step 5), null-safe: any missing, null or
+# non-object link on the path to the PR makes it false, never a jq error.
+BINDING_PREDICATE='
+  try (
+    .data.node as $node
+    | ($node | type) == "object"
+      and $node.__typename == $node_type
+      and ($node.pullRequest | type) == "object"
+      and $node.pullRequest.state == "OPEN"
+      and $node.pullRequest.headRefName == $branch
+      and ($node.pullRequest.headRepository | type) == "object"
+      and $node.pullRequest.headRepository.id == $repo_id
+  ) catch false'
+
+# capture_seam_active: succeeds when the offline capture seam (§5) is engaged, i.e.
+# the dedicated test-mode flag is the exact opt-in value AND the capture file is
+# set+non-empty. A stray REACTMARKER_CAPTURE_FILE alone NEVER engages it.
+capture_seam_active() {
+  [ "${REACTMARKER_TEST_MODE:-}" = "1" ] && [ -n "${REACTMARKER_CAPTURE_FILE:-}" ]
+}
+
+# read_current_branch: set current_branch from `git symbolic-ref --quiet HEAD`
+# with refs/heads/ stripped. Fails with pr-binding-no-branch on a detached HEAD, a
+# non-branch ref, or no repository. Runs in the main shell so the failure exits it.
+current_branch=""
+read_current_branch() {
+  local head_ref
+  head_ref="$(git symbolic-ref --quiet HEAD 2>/dev/null)" || react_marker_fail "pr-binding-no-branch"
+  case "$head_ref" in
+    refs/heads/?*) current_branch="${head_ref#refs/heads/}" ;;
+    *) react_marker_fail "pr-binding-no-branch" ;;
+  esac
+}
+
+# read_origin_repository_id: set origin_repo_id to the GitHub node id of the
+# origin push URL. Fails with pr-binding-lookup-failed unless origin has exactly
+# one https (no @), ssh:// or git@ push URL and gh reads it as one object with a
+# safe string id. Runs in the main shell so the failure exits it.
+origin_repo_id=""
+read_origin_repository_id() {
+  local push_url_text repo_view_output
+  push_url_text="$(git remote get-url --push --all origin 2>/dev/null)" || react_marker_fail "pr-binding-lookup-failed"
+  case "$push_url_text" in
+    ''|*$'\n'*) react_marker_fail "pr-binding-lookup-failed" ;;
+  esac
+  case "$push_url_text" in
+    https://*@*) react_marker_fail "pr-binding-lookup-failed" ;;
+    https://*|ssh://*|git@*) ;;
+    *) react_marker_fail "pr-binding-lookup-failed" ;;
+  esac
+  repo_view_output="$("${GH_TIMEOUT[@]}" gh repo view --json id -- "$push_url_text" </dev/null 2>/dev/null)" \
+    || react_marker_fail "pr-binding-lookup-failed"
+  origin_repo_id="$(printf '%s' "$repo_view_output" | jq -r -s 'if length == 1 and (.[0] | type) == "object" and (.[0].id | type) == "string"
+    and (.[0].id | test("\\A[A-Za-z0-9_=+/-]+\\z")) then .[0].id else error("not a repository id") end' 2>/dev/null)" \
+    || react_marker_fail "pr-binding-lookup-failed"
+}
+
+# read_binding_node <node_id>: set binding_body to the BINDING_QUERY response for
+# <node_id>. Fails with pr-binding-lookup-failed unless gh exits 0 and the shared
+# GraphQL response check accepts the body. Runs in the main shell so the failure
+# exits it.
+binding_body=""
+read_binding_node() {
+  binding_body="$("${GH_TIMEOUT[@]}" gh api graphql \
+    -f id="$1" \
+    -f query="$BINDING_QUERY" </dev/null 2>/dev/null)" || react_marker_fail "pr-binding-lookup-failed"
+  hivemind_graphql_response_check "$binding_body" >/dev/null || react_marker_fail "pr-binding-lookup-failed"
+}
+
+# bind_node_to_current_pr <node_id> <surface>: the §4 PR BINDING. Returns 0 only
+# when <node_id> is the surface's node type on the OPEN PR whose head is the
+# current branch in the origin repository; otherwise exits through
+# react_marker_fail with a pr-binding-* token. Makes no call while the capture
+# seam is active.
+bind_node_to_current_pr() {
+  local node_type
+  capture_seam_active && return 0
+  case "$2" in
+    toplevel) node_type="IssueComment" ;;
+    review) node_type="PullRequestReview" ;;
+    *) react_marker_fail "unmapped-surface" ;;
+  esac
+  read_current_branch
+  read_origin_repository_id
+  read_binding_node "$1"
+  printf '%s' "$binding_body" | jq -e \
+    --arg node_type "$node_type" \
+    --arg branch "$current_branch" \
+    --arg repo_id "$origin_repo_id" \
+    "$BINDING_PREDICATE" >/dev/null 2>&1 || react_marker_fail "pr-binding-refused"
+}
+
 # run_reaction <node_id>: issue the EYES reaction over NODE_ID. The single
 # indirection point for both the live gh call AND the offline CAPTURE seam (§5).
 # On the live path returns 0 ONLY on positive proof (gh exit 0, the shared GraphQL
@@ -233,7 +367,7 @@ run_reaction() {
   # TEST SEAM GATE (§5): capture seam activates ONLY when the dedicated test-mode
   # flag is the exact opt-in value AND the capture file is set+non-empty. A stray
   # REACTMARKER_CAPTURE_FILE alone NEVER diverts — fail-closed to live gh.
-  if [ "${REACTMARKER_TEST_MODE:-}" = "1" ] && [ -n "${REACTMARKER_CAPTURE_FILE:-}" ]; then
+  if capture_seam_active; then
     # FAIL-CLOSED on capture: with set -e deliberately omitted (P18 floor exception),
     # an unguarded append failure (unwritable/stale capture path) would be SILENTLY
     # ignored and the function would still return the default-0 simulated status —
@@ -272,6 +406,7 @@ case "$SURFACE" in
     # above). The reaction subject is NODE_ID, so it is REQUIRED here and fails
     # closed with its stable reason token. The no-op surface never reaches this gate.
     [ -n "$NODE_ID" ] || react_marker_fail "missing-node-id"
+    bind_node_to_current_pr "$NODE_ID" "$SURFACE"
     if ! run_reaction "$NODE_ID"; then
       react_marker_fail "react-failed"
     fi
