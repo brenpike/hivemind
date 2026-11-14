@@ -1,0 +1,42 @@
+{
+  "rule": "Review-writes skill grants exactly push-branch.sh, reply-resolve.sh and react-marker.sh by plugin-root path, runs no command, and the GitHub reviewer invokes it right before its first such call",
+  "description": "plugin/skills/review-writes/SKILL.md is the model-only skill whose allowed-tools pre-approve the review loop's three GitHub-writing scripts for the rest of the turn that invokes it. The source pin holds the grant claim: its allowed-tools pre-approve exactly three scripts, each by its plugin-root path, for the rest of the turn that invokes it. Three consumer pins in the same file hold the rest of the rule: the skill runs no command; the timing obligation, invoke it right before the first such call, after any other skill call; and the ban on any other skill invocation between the grant and the writes. The consumer pin in plugin/agents/github-reviewer.md holds the sentence that makes the reviewer invoke hivemind:review-writes right before a dispatch's first push-branch.sh, reply-resolve.sh or react-marker.sh call. The set_check reads the top-level allowed-tools key with extract_frontmatter_key, which runs check16_collect_entries, the frontmatter reader CHECK 16 uses in tools/policy_check.sh, and requires, in equal mode with expected_counts, exactly the three Bash entries, each once and each in the double-quoted plugin-root form. An added or widened grant fails as an extra, a dropped grant fails as missing, and a duplicated grant fails its count. set_check is used because an added grant is the threat, and a presence pin can only notice deletion. What this fixture does not check: (a) the presence pins are whole-file, not section-scoped, so a pinned sentence that moves out of its section, such as the reviewer sentence leaving Fix Mode Lifecycle, stays green; (b) a new GitHub-writing script call that the skill does not grant is an absence defect no presence pin can find; (c) the pins prove nothing about runtime grant behavior, such as whether Claude Code honors the skill's allowed-tools for the rest of the turn, or whether a deny or ask rule overrides them; (d) files is a literal list that names only the review-writes skill and is blind to grants in any other skill or settings file; (e) surrounding prose can invert the meaning of a pinned sentence while its words stay intact, because a pin claims word-sequence presence, never meaning.",
+  "source": {
+    "file": "plugin/skills/review-writes/SKILL.md",
+    "pattern": "Its allowed-tools pre-approve exactly three scripts, each by its plugin-root path, for the rest of the turn that invokes it"
+  },
+  "consumers": [
+    {
+      "file": "plugin/skills/review-writes/SKILL.md",
+      "pattern": "This skill runs no command."
+    },
+    {
+      "file": "plugin/skills/review-writes/SKILL.md",
+      "pattern": "Invoke it right before the first such call, after any other skill call."
+    },
+    {
+      "file": "plugin/skills/review-writes/SKILL.md",
+      "pattern": "No other skill invocation may come between the grant and the writes."
+    },
+    {
+      "file": "plugin/agents/github-reviewer.md",
+      "pattern": "Right before a dispatch's first `push-branch.sh`, `reply-resolve.sh` or `react-marker.sh` call, invoke `hivemind:review-writes` (Skill tool)."
+    }
+  ],
+  "set_check": {
+    "extract_frontmatter_key": "allowed-tools",
+    "expected_set": [
+      "Bash(bash \"${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh\" *)",
+      "Bash(bash \"${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reply-resolve.sh\" *)",
+      "Bash(bash \"${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/react-marker.sh\" *)"
+    ],
+    "expected_counts": {
+      "Bash(bash \"${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh\" *)": 1,
+      "Bash(bash \"${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reply-resolve.sh\" *)": 1,
+      "Bash(bash \"${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/react-marker.sh\" *)": 1
+    },
+    "files": [
+      { "path": "plugin/skills/review-writes/SKILL.md", "mode": "equal" }
+    ]
+  }
+}

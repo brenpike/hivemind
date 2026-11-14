@@ -91,6 +91,10 @@
       "pattern": "returns control to whatever invoked it"
     },
     {
+      "file": "plugin/skills/review-writes/SKILL.md",
+      "pattern": "returns control to whatever invoked it"
+    },
+    {
       "file": "plugin/skills/brood-status/SKILL.md",
       "pattern": "the caller then continues from the point at which it invoked this skill"
     },
@@ -112,6 +116,10 @@
     },
     {
       "file": "plugin/skills/route-workflow/SKILL.md",
+      "pattern": "the caller then continues from the point at which it invoked this skill"
+    },
+    {
+      "file": "plugin/skills/review-writes/SKILL.md",
       "pattern": "the caller then continues from the point at which it invoked this skill"
     }
   ]
