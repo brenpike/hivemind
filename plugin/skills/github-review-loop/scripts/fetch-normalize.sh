@@ -49,12 +49,18 @@
 #   comments(last: 50) {               # top-level (issue) PR comments
 #     totalCount                       # connection-level tripwire (read below)
 #     nodes[] { id author { login __typename } body url    # id = IC_... issue comment id
-#               reactionGroups { content viewerHasReacted } } # EYES marker -> classifier handled
+#               reactionGroups { content viewerHasReacted } # EYES marker -> classifier handled
+#               lastEditedAt                  # edit time; mark counts only if unedited since
+#               reactions(content: EYES, last: 20) {         # self EYES createdAt = mark time
+#                 nodes { content createdAt user { login __typename } } } }
 #   }
 #   reviews(last: 50) {                # review summaries
 #     totalCount                       # connection-level tripwire (read below)
 #     nodes[] { id author { login __typename } body state url # id = PRR_... review id
-#               reactionGroups { content viewerHasReacted } } # EYES marker -> classifier handled
+#               reactionGroups { content viewerHasReacted } # EYES marker -> classifier handled
+#               lastEditedAt                  # edit time; mark counts only if unedited since
+#               reactions(content: EYES, last: 20) {         # self EYES createdAt = mark time
+#                 nodes { content createdAt user { login __typename } } } }
 #   }
 #
 # Three connection-level `totalCount` TRIPWIRE reads (reviewThreads / comments /
@@ -413,11 +419,11 @@ query($owner: String!, $repo: String!, $pr: Int!) {
     pullRequest(number: $pr) {
       comments(last: 50) {
         totalCount
-        nodes { id author { login __typename } body url reactionGroups { content viewerHasReacted } }
+        nodes { id author { login __typename } body url reactionGroups { content viewerHasReacted } lastEditedAt reactions(content: EYES, last: 20) { nodes { content createdAt user { login __typename } } } }
       }
       reviews(last: 50) {
         totalCount
-        nodes { id author { login __typename } body state url reactionGroups { content viewerHasReacted } }
+        nodes { id author { login __typename } body state url reactionGroups { content viewerHasReacted } lastEditedAt reactions(content: EYES, last: 20) { nodes { content createdAt user { login __typename } } } }
       }
       reviewThreads(first: 50) {
         totalCount

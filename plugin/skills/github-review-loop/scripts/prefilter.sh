@@ -114,6 +114,12 @@
 #     viewerHasReacted }` selection on the `comments(last: 50)` and
 #     `reviews(last: 50)` pages; the >50 fail-open at the bash layer covers the
 #     case where a reacted-handled candidate has been pushed off the page.
+#     The same node selections request `lastEditedAt` and
+#     `reactions(content: EYES, last: 20) { nodes { content createdAt user {
+#     login __typename } } }`: the filter counts the mark only while the node is
+#     unedited since our latest self EYES `createdAt`, so a node edited after
+#     the mark, or missing these fields, reads actionable. A self EYES reaction
+#     outside the last 20 is not seen and the node reads actionable (fail-open).
 #
 # Markers emitted (one labeled line):
 #   PREFILTER_SKIP            silently update baseline; do NOT dispatch
@@ -226,11 +232,11 @@ query($owner: String!, $repo: String!, $pr: Int!) {
     pullRequest(number: $pr) {
       comments(last: 50) {
         totalCount
-        nodes { author { login __typename } body url reactionGroups { content viewerHasReacted } }
+        nodes { author { login __typename } body url reactionGroups { content viewerHasReacted } lastEditedAt reactions(content: EYES, last: 20) { nodes { content createdAt user { login __typename } } } }
       }
       reviews(last: 50) {
         totalCount
-        nodes { author { login __typename } body state url reactionGroups { content viewerHasReacted } }
+        nodes { author { login __typename } body state url reactionGroups { content viewerHasReacted } lastEditedAt reactions(content: EYES, last: 20) { nodes { content createdAt user { login __typename } } } }
       }
       reviewThreads(first: 50) {
         totalCount

@@ -1,13 +1,18 @@
 {
-  "rule": "react-marker.sh non-zero for non-thread candidate must fail closed to blocked marker-write-failed",
+  "rule": "react-marker.sh non-zero for a fixed or deferred non-thread mark must fail closed to blocked marker-write-failed; a noise mark's non-zero exit leaves the candidate unmarked and never returns blocked",
+  "description": "plugin/agents/github-reviewer.md step 8 marks a fixed, deferred or noise-skipped toplevel or review candidate with react-marker.sh. The source pin holds the discriminating condition, narrowed to fixed or deferred marks, together with the non-zero exit trigger. The first consumer pin holds the obligation that condition triggers: return blocked at once with marker-write-failed. The second consumer pin holds the noise exception: a noise mark's non-zero exit, a refusal included, leaves the candidate unmarked and never returns blocked. The third consumer pin holds the step-9 pointer naming the step-8 fail-closed clause as the complement of the failed-resolve honesty gate. What this fixture does not check: (a) the pins are whole-file, so a pinned sentence that moves out of step 8 or step 9 stays green; (b) surrounding prose can invert the meaning of a pinned sentence while its words stay intact, because a pin claims word-sequence presence, never meaning; (c) the pins prove nothing about what react-marker.sh does at runtime, such as which authors its noise mode refuses; (d) the react-marker.sh command and the placement of its --noise flag are not pinned.",
   "source": {
     "file": "plugin/agents/github-reviewer.md",
-    "pattern": "if `react-marker.sh` exits non-zero for a `toplevel` or `review` candidate"
+    "pattern": "**Fail-closed:** for a fixed or deferred mark, if `react-marker.sh` exits non-zero for a `toplevel` or `review` candidate"
   },
   "consumers": [
     {
       "file": "plugin/agents/github-reviewer.md",
       "pattern": "return `blocked` immediately with `blocker_reason: marker-write-failed`"
+    },
+    {
+      "file": "plugin/agents/github-reviewer.md",
+      "pattern": "A noise mark's non-zero exit, a refusal included, leaves the candidate unmarked, never `blocked`."
     },
     {
       "file": "plugin/agents/github-reviewer.md",
