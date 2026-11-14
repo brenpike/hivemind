@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [8.0.3] - 2026-11-14
+
+### Fixed
+
+- The GitHub reviewer's push, reply/resolve and `EYES` writes are now pre-approved by a grant that ships with the plugin. The model-only `hivemind:review-writes` skill grants exactly `push-branch.sh`, `reply-resolve.sh` and `react-marker.sh` by their `${CLAUDE_PLUGIN_ROOT}` path, and the reviewer invokes it right before its first such call. The README no longer asks for per-machine allow rules; the permission-refused question stays as the fallback. ADR-0010 and ADR-0040 record the decision. The live auto-mode check is pending (#574). The reply and reaction scripts now refuse any target not on an open PR whose head is the current branch in origin, and refuse when that lookup fails. No workflow script was rebuilt.
+
 ## [8.0.2] - 2026-11-14
 
 ### Fixed

@@ -400,7 +400,7 @@ This amendment updates the Result of the go-live permission check (Amendment 202
 **This PR's fixes.**
 
 - **A refused write asks (issue 567).** When Claude Code refuses the reviewer's Bash call of `push-branch.sh`, `reply-resolve.sh` or `react-marker.sh` (a permission or auto-mode denial, so the script never ran), the reviewer makes no further GitHub write that pass. It returns `user-input-required` with `escalation_target: permission` and a question opening `Permission refused:`. The question names the fix SHA, if any, and the rule `Bash(bash "<the script's full path>" *)` to add to `permissions.allow` in `.claude/settings.local.json`. A retry reply reruns the refused call and the step-8 calls still owed. A declining reply returns `blocked`. The overlord's Question gate and the script engine's fix-pass pause already pause on this exit (the 2026-11-12 amendments above), so no workflow is rebuilt. Text: `plugin/agents/github-reviewer.md`, step 8. Pin: `tests/policy/safety-review-permission-question.json`.
-- **Allow rules stay per machine.** The README documents one allow rule per script for the user's `.claude/settings.local.json`. The plugin ships no allow for these calls. The decision and its reasons are in ADR-0010 (`docs/adr/0010-permission-allowlist-posture.md`, Amendment 2026-11-13).
+- **Allow rules stay per machine.** The README documents one allow rule per script for the user's `.claude/settings.local.json`. The plugin ships no allow for these calls. The decision and its reasons are in ADR-0010 (`docs/adr/0010-permission-allowlist-posture.md`, Amendment 2026-11-13). *(2026-11-14: superseded, see ADR-0010, Amendment 2026-11-14.)*
 
 Commit 326bf2fd.
 
@@ -413,3 +413,13 @@ Commit 326bf2fd.
 **User decision 2026-11-14: #568 split out.** The local review found that the Codex-only noise mark relied on the reviewer's judgment (finding 2de1114ad7e8397adb25bc5b05bbc223901880279cc4202b06e763bf56dd1cd3): candidate records carry no author, so no script checked it. An earlier finding (c5014a5e110eee6be7bd3e6f369bd1ab90b14a9ee044c807719eaa2025a0ca95) was on the same surface. Under the #409 rule (same surface twice: stop and rethink), the user chose to ship #567 alone. This PR makes no noise-marking change. #568 stays open, to be redesigned in its own PR with a script-enforced author check.
 
 **Not changed.** Edge case (c), the Result's verdict and its other paragraphs stand as written.
+
+## Amendment 2026-11-14: the reviewer's GitHub writes get a plugin skill grant (issue 574)
+
+This amendment supersedes the bullet "Allow rules stay per machine" of Amendment 2026-11-13. The decision and its reasons are in ADR-0010 (`docs/adr/0010-permission-allowlist-posture.md`, Amendment 2026-11-14). https://github.com/brenpike/hivemind/issues/574.
+
+- The reviewer invokes `hivemind:review-writes` right before its first `push-branch.sh`, `reply-resolve.sh` or `react-marker.sh` call. The skill's `allowed-tools` pre-approves those three scripts by their plugin-root paths. Text: `plugin/agents/github-reviewer.md`.
+- The README per-machine allow rules are removed.
+- The refusal route is unchanged. A refused write still asks, as in Amendment 2026-11-13. It is now the fallback.
+- No workflow script is rebuilt.
+- Verification is pending, per ADR-0010, Amendment 2026-11-14.

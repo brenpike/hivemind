@@ -22,9 +22,15 @@
 # a canned response body and exit status, recording every call in a call log. A live mutation succeeds
 # only when gh exits 0 AND the shared validator hivemind_graphql_response_check accepts the body.
 #
+# Every live write is bound to the current PR first (reply-resolve.sh §4 PR BINDING). Each live-path
+# case therefore runs from a scratch git repo under the tmpdir (branch bugfix/fixture-branch, a fake
+# https GitHub origin), never from this checkout, whose branch and remotes vary (CI checks out PRs at
+# detached HEAD). The same shim answers `gh repo view` and the binding query; the binding cases assert
+# each refusal and lookup failure exits 1 with its token and sends no reply or resolve.
+#
 # Mirrors tools/test_fetch_normalize.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any
-# -fail convention. Read-only: the only writes are scratch capture files in a disposable tmpdir
-# removed on EXIT.
+# -fail convention. Read-only: the only writes are scratch capture files and scratch git repos in a
+# disposable tmpdir removed on EXIT.
 #
 # Usage:
 #   ./tools/test_reply_resolve.sh
@@ -51,6 +57,110 @@ fresh_capture() {
   local f="$TMPDIR_TEST/$1.log"
   : > "$f"
   printf '%s' "$f"
+}
+
+# ── Live-path fixtures: scratch git repos + gh shim (PR binding, reply-resolve.sh §4) ──
+# Git runs with GIT_DIR / GIT_WORK_TREE / XDG_CONFIG_HOME unset, HOME pointed at a scratch dir and the
+# system config off, so no user or system git config (an insteadOf rewrite included) reaches a case.
+GIT_ISOLATION_HOME="$TMPDIR_TEST/step001b-home"
+mkdir -p "$GIT_ISOLATION_HOME"
+FIXTURE_BRANCH="bugfix/fixture-branch"
+FIXTURE_ORIGIN_URL="https://github.com/fixture-owner/fixture-repo.git"
+FIXTURE_REPO_ID="R_fixtureRepo1"
+LIVE_REPO_VIEW_CLEAN="{\"id\":\"$FIXTURE_REPO_ID\"}"
+LIVE_REPLY_CLEAN='{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"PRRC_l1","url":"https://github.com/o/r/pull/5#discussion_r1"}}}}'
+LIVE_RESOLVE_CLEAN='{"data":{"resolveReviewThread":{"thread":{"id":"PRRT_l1","isResolved":true}}}}'
+
+# run_isolated_git <arg>...: run git under the isolation environment above.
+run_isolated_git() {
+  env -u GIT_DIR -u GIT_WORK_TREE -u XDG_CONFIG_HOME HOME="$GIT_ISOLATION_HOME" GIT_CONFIG_NOSYSTEM=1 git "$@"
+}
+
+# make_scratch_repo <name> <origin url, empty for none> [second push url]: create a scratch repo whose
+# HEAD is $FIXTURE_BRANCH with one empty commit, and print its path. A second push url gives origin two
+# push URLs.
+make_scratch_repo() {
+  local repo_dir="$TMPDIR_TEST/step001b-repo-$1"
+  run_isolated_git init -q "$repo_dir" \
+    && run_isolated_git -C "$repo_dir" symbolic-ref HEAD "refs/heads/$FIXTURE_BRANCH" \
+    && run_isolated_git -C "$repo_dir" -c commit.gpgsign=false -c user.name=fixture \
+      -c user.email=fixture@example.invalid commit -q --allow-empty -m fixture \
+    || return 1
+  if [ -n "$2" ]; then
+    run_isolated_git -C "$repo_dir" remote add origin "$2" || return 1
+  fi
+  if [ -n "${3:-}" ]; then
+    run_isolated_git -C "$repo_dir" remote set-url --add --push origin "$2" \
+      && run_isolated_git -C "$repo_dir" remote set-url --add --push origin "$3" \
+      || return 1
+  fi
+  printf '%s' "$repo_dir"
+}
+
+FIXTURE_REPO="$(make_scratch_repo main "$FIXTURE_ORIGIN_URL")" \
+  || { echo "FAIL: cannot create the scratch git repo fixture" >&2; exit 2; }
+
+# pr_thread_binding <state> <headRefName> <headRepository json>: print a binding-query response body
+# for a PullRequestReviewThread node.
+pr_thread_binding() {
+  printf '{"data":{"node":{"__typename":"PullRequestReviewThread","pullRequest":{"state":"%s","headRefName":"%s","headRepository":%s}}}}' \
+    "$1" "$2" "$3"
+}
+LIVE_BINDING_MATCH="$(pr_thread_binding OPEN "$FIXTURE_BRANCH" "{\"id\":\"$FIXTURE_REPO_ID\"}")"
+
+# make_live_gh_shim <name> <repo-view status> <repo-view body> <binding status> <binding body>
+#   <reply status> <reply body> <resolve status> <resolve body>: write a stub gh under the tmpdir that
+# answers `gh repo view`, the binding query (`node(id:`), the reply and the resolve, each with its own
+# canned stdout body and exit status, writes an unrelated stderr line, and appends the call kind to
+# <name>-calls.log. The repo-view and binding argv are saved NUL-separated to <name>-<kind>.args.
+# Prints the stub's bin dir.
+make_live_gh_shim() {
+  local shim_name="$1"
+  local shim_dir="$TMPDIR_TEST/$shim_name-stubbin"
+  mkdir -p "$shim_dir"
+  printf '%s' "$3" > "$TMPDIR_TEST/$shim_name-repo-view-body.json"
+  printf '%s' "$5" > "$TMPDIR_TEST/$shim_name-binding-body.json"
+  printf '%s' "$7" > "$TMPDIR_TEST/$shim_name-reply-body.json"
+  printf '%s' "$9" > "$TMPDIR_TEST/$shim_name-resolve-body.json"
+  {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' 'call_kind=unknown'
+    printf '%s\n' 'if [ "${1:-}" = repo ] && [ "${2:-}" = view ]; then call_kind=repo-view; fi'
+    printf '%s\n' 'for call_arg in "$@"; do'
+    printf '%s\n' '  case "$call_arg" in'
+    printf '%s\n' '    query=*addPullRequestReviewThreadReply*) call_kind=reply ;;'
+    printf '%s\n' '    query=*resolveReviewThread*) call_kind=resolve ;;'
+    printf '%s\n' '    query=*"node(id:"*) call_kind=binding ;;'
+    printf '%s\n' '  esac'
+    printf '%s\n' 'done'
+    printf 'printf "%%s\\n" "$call_kind" >> %q\n' "$TMPDIR_TEST/$shim_name-calls.log"
+    printf 'printf "%%s\\0" "$@" > %q-"$call_kind".args\n' "$TMPDIR_TEST/$shim_name"
+    printf '%s\n' 'echo "gh: stub stderr line" >&2'
+    printf '%s\n' 'case "$call_kind" in'
+    printf '  repo-view) cat %q; exit %d ;;\n' "$TMPDIR_TEST/$shim_name-repo-view-body.json" "$2"
+    printf '  binding) cat %q; exit %d ;;\n' "$TMPDIR_TEST/$shim_name-binding-body.json" "$4"
+    printf '  reply) cat %q; exit %d ;;\n' "$TMPDIR_TEST/$shim_name-reply-body.json" "$6"
+    printf '  resolve) cat %q; exit %d ;;\n' "$TMPDIR_TEST/$shim_name-resolve-body.json" "$8"
+    printf '%s\n' 'esac'
+    printf '%s\n' 'exit 97'
+  } > "$shim_dir/gh"
+  chmod +x "$shim_dir/gh"
+  printf '%s' "$shim_dir"
+}
+
+# run_reply_resolve_in_repo <repo dir> <shim dir> <capture file, empty for none> <script arg>...: run
+# reply-resolve.sh from <repo dir> with the shim first on PATH, the git isolation environment, and
+# REPLYRESOLVE_TEST_MODE / _REPLY_STATUS / _RESOLVE_STATUS unset. REPLYRESOLVE_CAPTURE_FILE is unset
+# too unless a capture file is given.
+run_reply_resolve_in_repo() {
+  local repo_dir="$1" shim_dir="$2" capture_file="$3"
+  shift 3
+  local capture_env=(-u REPLYRESOLVE_CAPTURE_FILE)
+  [ -z "$capture_file" ] || capture_env=("REPLYRESOLVE_CAPTURE_FILE=$capture_file")
+  (cd "$repo_dir" && env -u REPLYRESOLVE_TEST_MODE -u REPLYRESOLVE_REPLY_STATUS -u REPLYRESOLVE_RESOLVE_STATUS \
+    -u GIT_DIR -u GIT_WORK_TREE -u XDG_CONFIG_HOME "${capture_env[@]}" \
+    PATH="$shim_dir:$PATH" HOME="$GIT_ISOLATION_HOME" GIT_CONFIG_NOSYSTEM=1 \
+    bash "$REPLY_RESOLVE" "$@")
 }
 
 # ── reply-then-resolve happy path (ordering) ───────────────────────────────────────
@@ -218,29 +328,45 @@ fi
 # fell through to the live path). NOTE: TEST_MODE is deliberately UNSET here — the
 # whole point of the case.
 #
-# OFFLINE INVARIANT: with TEST_MODE unset and otherwise-valid inputs, run_mutation
-# falls through to the LIVE `gh api graphql` path. Without a stub that would invoke
-# the REAL gh CLI when present (network call / 45s timeout) despite this suite being
-# offline. We prepend a stub `gh` to PATH that records it was reached (proving the
-# code went live) and exits non-zero, so no real CLI runs. Asserting the stub was
-# reached AND the capture file stayed empty locks BOTH halves of the contract:
-# the seam did NOT divert (cap empty) and the live path WAS taken (stub reached).
+# OFFLINE INVARIANT: with TEST_MODE unset and otherwise-valid inputs, the script takes
+# the LIVE path: the PR binding (reply-resolve.sh §4), then `gh api graphql` mutations.
+# Without a stub that would invoke the REAL gh CLI when present (network call / 45s
+# timeout) despite this suite being offline. The case runs from the scratch repo with
+# the shim gh answering a matching binding, so the live reply and resolve are reached.
+# Asserting the shim saw the binding, reply and resolve AND the capture file stayed
+# empty locks BOTH halves of the contract: the seam did NOT divert (cap empty) and the
+# live path WAS taken (mutations sent to the shim).
 cap="$(fresh_capture nodivert)"
-gh_stub_dir="$TMPDIR_TEST/nodivert-stubbin"
-gh_stub_marker="$TMPDIR_TEST/nodivert-gh-reached"
-mkdir -p "$gh_stub_dir"
-{
-  printf '%s\n' '#!/usr/bin/env bash'
-  printf 'printf reached > %q\n' "$gh_stub_marker"
-  printf '%s\n' 'exit 1'
-} > "$gh_stub_dir/gh"
-chmod +x "$gh_stub_dir/gh"
-PATH="$gh_stub_dir:$PATH" REPLYRESOLVE_CAPTURE_FILE="$cap" \
-  bash "$REPLY_RESOLVE" --resolve-eligible -- PRRT_iii xyz789 "No test mode" thread "" >/dev/null 2>&1
-if [ ! -s "$cap" ] && [ -f "$gh_stub_marker" ]; then
-  pass "failclosed:capture-without-testmode-no-divert" "CAPTURE_FILE alone did NOT divert (cap empty); live gh path reached (stub invoked)"
+nodivert_shim="$(make_live_gh_shim nodivert 0 "$LIVE_REPO_VIEW_CLEAN" 0 "$LIVE_BINDING_MATCH" \
+  0 "$LIVE_REPLY_CLEAN" 0 "$LIVE_RESOLVE_CLEAN")"
+run_reply_resolve_in_repo "$FIXTURE_REPO" "$nodivert_shim" "$cap" \
+  --resolve-eligible -- PRRT_iii xyz789 "No test mode" thread "" >/dev/null 2>&1
+nodivert_calls="$(tr '\n' ',' 2>/dev/null < "$TMPDIR_TEST/nodivert-calls.log")"
+if [ ! -s "$cap" ] && [ "$nodivert_calls" = "repo-view,binding,reply,resolve," ]; then
+  pass "failclosed:capture-without-testmode-no-divert" "CAPTURE_FILE alone did NOT divert (cap empty); live binding, reply and resolve reached the shim"
 else
-  failed "failclosed:capture-without-testmode-no-divert" "diverted or live-path-not-reached — cap=$(cat "$cap") stub_reached=$([ -f "$gh_stub_marker" ] && echo yes || echo no)"
+  failed "failclosed:capture-without-testmode-no-divert" "diverted or live-path-not-reached — cap=$(cat "$cap") calls=$nodivert_calls"
+fi
+
+# ── Capture mode makes no git call: a run from a non-git directory still captures ──
+# The PR binding is skipped while the capture seam is engaged (reply-resolve.sh §5), so a capture-mode
+# run needs no git repository and reaches no gh. GIT_CEILING_DIRECTORIES stops git discovery at the
+# tmpdir, so the directory is non-git whatever lies above it.
+nongit_dir="$TMPDIR_TEST/step001b-nongit"
+mkdir -p "$nongit_dir"
+cap="$(fresh_capture nongit)"
+nongit_shim="$(make_live_gh_shim nongit 0 "$LIVE_REPO_VIEW_CLEAN" 0 "$LIVE_BINDING_MATCH" \
+  0 "$LIVE_REPLY_CLEAN" 0 "$LIVE_RESOLVE_CLEAN")"
+out="$(cd "$nongit_dir" && env -u GIT_DIR -u GIT_WORK_TREE GIT_CEILING_DIRECTORIES="$TMPDIR_TEST" \
+  PATH="$nongit_shim:$PATH" REPLYRESOLVE_TEST_MODE=1 REPLYRESOLVE_CAPTURE_FILE="$cap" \
+  bash "$REPLY_RESOLVE" --resolve-eligible -- PRRT_ng abc123 "Non-git capture" thread "" 2>&1)"
+status=$?
+expected_nongit_cap="$(printf 'REPLY thread=PRRT_ng body=Fixed in abc123. Non-git capture.\nRESOLVE thread=PRRT_ng')"
+if [ "$status" -eq 0 ] && [ -z "$out" ] && [ "$(cat "$cap")" = "$expected_nongit_cap" ] \
+   && [ ! -e "$TMPDIR_TEST/nongit-calls.log" ]; then
+  pass "capture:non-git-dir-captures" "capture mode from a non-git dir captured reply then resolve, no gh call, exit 0"
+else
+  failed "capture:non-git-dir-captures" "status=$status out=$out cap=$(cat "$cap") calls=$(cat "$TMPDIR_TEST/nongit-calls.log" 2>/dev/null)"
 fi
 
 # ── FIX mode STILL requires a fix SHA (regression lock for the DEFER split) ─────────
@@ -471,61 +597,36 @@ else
 fi
 
 # ── LIVE path: shared GraphQL response check over both mutations (#393) ───────────
-# These cases drive the LIVE run_mutation body (every REPLYRESOLVE_* test env var UNSET) against a
-# PATH-shim `gh`. The shim classifies each call by its `query=` argument (the reply mutation names
-# addPullRequestReviewThreadReply, the resolve mutation names resolveReviewThread), appends the kind to
-# a call log, prints that kind's canned body on stdout, writes an unrelated line on stderr, and exits
-# with that kind's status. gh exits 0 on several GraphQL error envelopes, so success must require BOTH
-# exit 0 AND the shared response check passing. The call log proves which mutations went live and in
-# what order, so no case can pass without reaching the live path.
-LIVE_REPLY_CLEAN='{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"PRRC_l1","url":"https://github.com/o/r/pull/5#discussion_r1"}}}}'
-LIVE_RESOLVE_CLEAN='{"data":{"resolveReviewThread":{"thread":{"id":"PRRT_l1","isResolved":true}}}}'
+# These cases drive the LIVE run_mutation body (every REPLYRESOLVE_* test env var UNSET) from the
+# scratch repo against the PATH-shim `gh` (make_live_gh_shim above). The shim classifies each call
+# (repo view, binding query, reply, resolve), appends the kind to a call log, prints that kind's canned
+# body on stdout, writes an unrelated line on stderr, and exits with that kind's status. gh exits 0 on
+# several GraphQL error envelopes, so success must require BOTH exit 0 AND the shared response check
+# passing. The call log proves which mutations went live and in what order, so no case can pass
+# without reaching the live path.
 
-# make_live_gh_shim <name> <reply status> <reply body> <resolve status> <resolve body>: write a stub
-# gh under the tmpdir that answers per mutation kind and logs each call. Prints the stub's bin dir.
-make_live_gh_shim() {
-  local shim_dir="$TMPDIR_TEST/$1-stubbin"
-  local reply_body_file="$TMPDIR_TEST/$1-reply-body.json"
-  local resolve_body_file="$TMPDIR_TEST/$1-resolve-body.json"
-  mkdir -p "$shim_dir"
-  printf '%s' "$3" > "$reply_body_file"
-  printf '%s' "$5" > "$resolve_body_file"
-  {
-    printf '%s\n' '#!/usr/bin/env bash'
-    printf '%s\n' 'call_kind=unknown'
-    printf '%s\n' 'for call_arg in "$@"; do'
-    printf '%s\n' '  case "$call_arg" in'
-    printf '%s\n' '    query=*addPullRequestReviewThreadReply*) call_kind=reply ;;'
-    printf '%s\n' '    query=*resolveReviewThread*) call_kind=resolve ;;'
-    printf '%s\n' '  esac'
-    printf '%s\n' 'done'
-    printf 'printf "%%s\\n" "$call_kind" >> %q\n' "$TMPDIR_TEST/$1-calls.log"
-    printf '%s\n' 'echo "gh: stub stderr line" >&2'
-    printf '%s\n' 'case "$call_kind" in'
-    printf '  reply) cat %q; exit %d ;;\n' "$reply_body_file" "$2"
-    printf '  resolve) cat %q; exit %d ;;\n' "$resolve_body_file" "$4"
-    printf '%s\n' 'esac'
-    printf '%s\n' 'exit 97'
-  } > "$shim_dir/gh"
-  chmod +x "$shim_dir/gh"
-  printf '%s' "$shim_dir"
+# run_bound_case <name> <repo dir> <repo-view status> <repo-view body> <binding status> <binding body>
+#   <reply status> <reply body> <resolve status> <resolve body>: run reply-resolve over a
+# resolve-eligible thread candidate (PRRT_l1) from <repo dir> on the live path against a fresh shim.
+# Sets live_status, live_stdout, live_stderr, live_all_calls (every gh call kind, comma-joined) and
+# live_calls (the reply / resolve mutation kinds only, one per line; empty when none was sent).
+run_bound_case() {
+  local case_name="$1" repo_dir="$2" shim_dir
+  shift 2
+  shim_dir="$(make_live_gh_shim "$case_name" "$@")"
+  run_reply_resolve_in_repo "$repo_dir" "$shim_dir" "" --resolve-eligible -- PRRT_l1 abc123 "Live fix" thread "" \
+    > "$TMPDIR_TEST/$case_name.stdout" 2> "$TMPDIR_TEST/$case_name.stderr"
+  live_status=$?
+  live_stdout="$(cat "$TMPDIR_TEST/$case_name.stdout")"
+  live_stderr="$(cat "$TMPDIR_TEST/$case_name.stderr")"
+  live_all_calls="$(tr '\n' ',' 2>/dev/null < "$TMPDIR_TEST/$case_name-calls.log")"
+  live_calls="$(grep -E '^(reply|resolve)$' "$TMPDIR_TEST/$case_name-calls.log" 2>/dev/null)"
 }
 
-# run_live_case <name> <reply status> <reply body> <resolve status> <resolve body>: run reply-resolve
-# over a resolve-eligible thread candidate on the live path against the shim, with every REPLYRESOLVE_*
-# test env var unset. Sets live_status, live_stdout, live_stderr, live_calls (the call log, one kind
-# per line; empty when the shim was never reached).
+# run_live_case <name> <reply status> <reply body> <resolve status> <resolve body>: run_bound_case
+# from the fixture repo with a matching PR binding, so the case exercises the mutations alone.
 run_live_case() {
-  local shim_dir
-  shim_dir="$(make_live_gh_shim "$@")"
-  PATH="$shim_dir:$PATH" env -u REPLYRESOLVE_TEST_MODE -u REPLYRESOLVE_CAPTURE_FILE \
-    -u REPLYRESOLVE_REPLY_STATUS -u REPLYRESOLVE_RESOLVE_STATUS \
-    bash "$REPLY_RESOLVE" --resolve-eligible -- PRRT_l1 abc123 "Live fix" thread "" \
-    > "$TMPDIR_TEST/$1.stdout" 2> "$TMPDIR_TEST/$1.stderr"
-  live_status=$?
-  live_stdout="$(cat "$TMPDIR_TEST/$1.stdout")"
-  live_stderr="$(cat "$TMPDIR_TEST/$1.stderr")"
-  live_calls="$(cat "$TMPDIR_TEST/$1-calls.log" 2>/dev/null)"
+  run_bound_case "$1" "$FIXTURE_REPO" 0 "$LIVE_REPO_VIEW_CLEAN" 0 "$LIVE_BINDING_MATCH" "$2" "$3" "$4" "$5"
 }
 
 # assert_live_reply_failed <name> <label>: the live case exited 1 with exactly the reply-failed token
@@ -606,6 +707,134 @@ if [ "$live_status" -eq 0 ] && [ -z "$live_stdout" ] && [ "$live_calls" = "$(pri
   pass "live:both-clean" "clean reply + clean resolve -> exit 0, empty stdout, no RESOLVE_FAILED, reply then resolve"
 else
   failed "live:both-clean" "status=$live_status stdout=$live_stdout calls=$(printf '%s' "$live_calls" | tr '\n' ',') stderr=$live_stderr"
+fi
+
+# The binding lookups the both-clean case sent: `gh repo view` read the origin push URL, and the binding
+# query carried the thread id ONLY as the threadId variable, never spliced into the query text.
+both_clean_repo_view_args="$(tr '\0' ' ' 2>/dev/null < "$TMPDIR_TEST/live-both-clean-repo-view.args")"
+both_clean_binding_args="$(tr '\0' '\n' 2>/dev/null < "$TMPDIR_TEST/live-both-clean-binding.args")"
+if [ "$live_all_calls" = "repo-view,binding,reply,resolve," ] \
+   && [ "$both_clean_repo_view_args" = "repo view --json id -- $FIXTURE_ORIGIN_URL " ] \
+   && printf '%s\n' "$both_clean_binding_args" | grep -qx 'threadId=PRRT_l1' \
+   && [ "$(printf '%s\n' "$both_clean_binding_args" | grep -c 'PRRT_l1')" -eq 1 ]; then
+  pass "binding:lookups-before-mutations" "repo view then binding query before reply and resolve; origin URL passed; thread id only as a variable"
+else
+  failed "binding:lookups-before-mutations" "calls=$live_all_calls repo_view_args=$both_clean_repo_view_args binding_args=$both_clean_binding_args"
+fi
+
+# ── LIVE path: PR binding (reply-resolve.sh §4 PR BINDING) ────────────────────────
+# Each case runs from a scratch repo on bugfix/fixture-branch with clean reply and resolve bodies, so
+# only the binding decides. A failure must exit 1 with its exact token on stdout and send NO reply or
+# resolve; the full call log shows how far the binding got.
+
+# run_binding_case <name> <repo dir> <repo-view status> <repo-view body> <binding status> <binding body>
+run_binding_case() {
+  run_bound_case "$1" "$2" "$3" "$4" "$5" "$6" 0 "$LIVE_REPLY_CLEAN" 0 "$LIVE_RESOLVE_CLEAN"
+}
+
+# assert_binding_fail <name> <token> <expected gh calls, comma-joined> <label>: the binding case exited
+# 1 with exactly REPLYRESOLVE_ERROR=<token> on stdout, sent no reply or resolve, and made exactly the
+# expected gh calls.
+assert_binding_fail() {
+  if [ "$live_status" -eq 1 ] && [ "$live_stdout" = "REPLYRESOLVE_ERROR=$2" ] && [ -z "$live_calls" ] \
+     && [ "$live_all_calls" = "$3" ]; then
+    pass "$1" "$4"
+  else
+    failed "$1" "status=$live_status stdout=$live_stdout calls=$live_all_calls stderr=$live_stderr"
+  fi
+}
+
+# pr-binding-refused: the lookup succeeded but the thread is not on the current branch's open PR.
+run_binding_case binding-other-pr "$FIXTURE_REPO" 0 "$LIVE_REPO_VIEW_CLEAN" \
+  0 "$(pr_thread_binding OPEN feature/other-branch "{\"id\":\"$FIXTURE_REPO_ID\"}")"
+assert_binding_fail "binding:refused-other-pr-same-repo" pr-binding-refused "repo-view,binding," \
+  "thread on another PR of the same repo -> exit 1 pr-binding-refused, no reply or resolve"
+
+run_binding_case binding-other-repo "$FIXTURE_REPO" 0 "$LIVE_REPO_VIEW_CLEAN" \
+  0 "$(pr_thread_binding OPEN "$FIXTURE_BRANCH" '{"id":"R_forkRepo9"}')"
+assert_binding_fail "binding:refused-same-branch-other-repo" pr-binding-refused "repo-view,binding," \
+  "PR head has the same branch name in another repo -> exit 1 pr-binding-refused, no reply or resolve"
+
+run_binding_case binding-closed "$FIXTURE_REPO" 0 "$LIVE_REPO_VIEW_CLEAN" \
+  0 "$(pr_thread_binding CLOSED "$FIXTURE_BRANCH" "{\"id\":\"$FIXTURE_REPO_ID\"}")"
+assert_binding_fail "binding:refused-closed-pr" pr-binding-refused "repo-view,binding," \
+  "CLOSED PR -> exit 1 pr-binding-refused, no reply or resolve"
+
+run_binding_case binding-merged "$FIXTURE_REPO" 0 "$LIVE_REPO_VIEW_CLEAN" \
+  0 "$(pr_thread_binding MERGED "$FIXTURE_BRANCH" "{\"id\":\"$FIXTURE_REPO_ID\"}")"
+assert_binding_fail "binding:refused-merged-pr" pr-binding-refused "repo-view,binding," \
+  "MERGED PR -> exit 1 pr-binding-refused, no reply or resolve"
+
+run_binding_case binding-issue-comment "$FIXTURE_REPO" 0 "$LIVE_REPO_VIEW_CLEAN" \
+  0 '{"data":{"node":{"__typename":"IssueComment"}}}'
+assert_binding_fail "binding:refused-issue-comment-node" pr-binding-refused "repo-view,binding," \
+  "IssueComment node -> exit 1 pr-binding-refused, no reply or resolve"
+
+run_binding_case binding-null-node "$FIXTURE_REPO" 0 "$LIVE_REPO_VIEW_CLEAN" 0 '{"data":{"node":null}}'
+assert_binding_fail "binding:refused-null-node" pr-binding-refused "repo-view,binding," \
+  "null node -> exit 1 pr-binding-refused, no reply or resolve"
+
+run_binding_case binding-null-head-repo "$FIXTURE_REPO" 0 "$LIVE_REPO_VIEW_CLEAN" \
+  0 "$(pr_thread_binding OPEN "$FIXTURE_BRANCH" null)"
+assert_binding_fail "binding:refused-null-head-repository" pr-binding-refused "repo-view,binding," \
+  "null headRepository -> exit 1 pr-binding-refused, no reply or resolve"
+
+# pr-binding-lookup-failed: the branch is known but the origin repository or the thread cannot be read.
+run_binding_case binding-query-nonzero "$FIXTURE_REPO" 0 "$LIVE_REPO_VIEW_CLEAN" 1 "$LIVE_BINDING_MATCH"
+assert_binding_fail "binding:lookup-failed-query-nonzero-exit" pr-binding-lookup-failed "repo-view,binding," \
+  "binding query exit 1 -> exit 1 pr-binding-lookup-failed, no reply or resolve"
+
+run_binding_case binding-not-found "$FIXTURE_REPO" 0 "$LIVE_REPO_VIEW_CLEAN" \
+  0 '{"data":{"node":null},"errors":[{"type":"NOT_FOUND","path":["node"],"message":"Could not resolve to a node with the global id of '"'"'PRRT_l1'"'"'"}]}'
+assert_binding_fail "binding:lookup-failed-exit0-not-found" pr-binding-lookup-failed "repo-view,binding," \
+  "binding query exit 0 + NOT_FOUND errors -> exit 1 pr-binding-lookup-failed, no reply or resolve"
+
+run_binding_case binding-non-json "$FIXTURE_REPO" 0 "$LIVE_REPO_VIEW_CLEAN" 0 'not json at all'
+assert_binding_fail "binding:lookup-failed-non-json-body" pr-binding-lookup-failed "repo-view,binding," \
+  "binding query non-JSON body -> exit 1 pr-binding-lookup-failed, no reply or resolve"
+
+run_binding_case binding-repo-view-fails "$FIXTURE_REPO" 1 "$LIVE_REPO_VIEW_CLEAN" 0 "$LIVE_BINDING_MATCH"
+assert_binding_fail "binding:lookup-failed-repo-view-fails" pr-binding-lookup-failed "repo-view," \
+  "gh repo view exit 1 -> exit 1 pr-binding-lookup-failed, no binding query, no reply or resolve"
+
+run_binding_case binding-repo-view-bad-id "$FIXTURE_REPO" 0 '{"id":"R bad id"}' 0 "$LIVE_BINDING_MATCH"
+assert_binding_fail "binding:lookup-failed-repo-view-bad-id" pr-binding-lookup-failed "repo-view," \
+  "gh repo view id outside the charset -> exit 1 pr-binding-lookup-failed, no reply or resolve"
+
+no_origin_repo="$(make_scratch_repo no-origin "")" \
+  || { echo "FAIL: cannot create the no-origin scratch repo" >&2; exit 2; }
+run_binding_case binding-no-origin "$no_origin_repo" 0 "$LIVE_REPO_VIEW_CLEAN" 0 "$LIVE_BINDING_MATCH"
+assert_binding_fail "binding:lookup-failed-no-origin" pr-binding-lookup-failed "" \
+  "no origin remote -> exit 1 pr-binding-lookup-failed, gh never reached"
+
+at_url_repo="$(make_scratch_repo at-url "https://x-access-token:fixture@github.com/fixture-owner/fixture-repo.git")" \
+  || { echo "FAIL: cannot create the at-url scratch repo" >&2; exit 2; }
+run_binding_case binding-at-url "$at_url_repo" 0 "$LIVE_REPO_VIEW_CLEAN" 0 "$LIVE_BINDING_MATCH"
+assert_binding_fail "binding:lookup-failed-https-url-with-at" pr-binding-lookup-failed "" \
+  "https origin URL holding @ -> exit 1 pr-binding-lookup-failed, gh never reached"
+
+two_push_repo="$(make_scratch_repo two-push "$FIXTURE_ORIGIN_URL" "https://github.com/fixture-owner/fixture-mirror.git")" \
+  || { echo "FAIL: cannot create the two-push scratch repo" >&2; exit 2; }
+run_binding_case binding-two-push "$two_push_repo" 0 "$LIVE_REPO_VIEW_CLEAN" 0 "$LIVE_BINDING_MATCH"
+assert_binding_fail "binding:lookup-failed-two-push-urls" pr-binding-lookup-failed "" \
+  "two push URLs on origin -> exit 1 pr-binding-lookup-failed, gh never reached"
+
+# pr-binding-no-branch: a detached HEAD has no branch to bind to, so gh is never reached.
+detached_repo="$(make_scratch_repo detached "$FIXTURE_ORIGIN_URL")" \
+  && run_isolated_git -C "$detached_repo" checkout -q --detach \
+  || { echo "FAIL: cannot create the detached scratch repo" >&2; exit 2; }
+run_binding_case binding-detached "$detached_repo" 0 "$LIVE_REPO_VIEW_CLEAN" 0 "$LIVE_BINDING_MATCH"
+assert_binding_fail "binding:no-branch-detached-head" pr-binding-no-branch "" \
+  "detached HEAD -> exit 1 pr-binding-no-branch, gh never reached"
+
+# An ssh-form origin passes the URL gate: the binding matches and the reply and resolve go live.
+ssh_repo="$(make_scratch_repo ssh-origin "git@github.com:fixture-owner/fixture-repo.git")" \
+  || { echo "FAIL: cannot create the ssh-origin scratch repo" >&2; exit 2; }
+run_binding_case binding-ssh-origin "$ssh_repo" 0 "$LIVE_REPO_VIEW_CLEAN" 0 "$LIVE_BINDING_MATCH"
+if [ "$live_status" -eq 0 ] && [ -z "$live_stdout" ] && [ "$live_all_calls" = "repo-view,binding,reply,resolve," ]; then
+  pass "binding:ssh-origin-bound" "git@ origin + matching binding -> reply and resolve sent, exit 0"
+else
+  failed "binding:ssh-origin-bound" "status=$live_status stdout=$live_stdout calls=$live_all_calls stderr=$live_stderr"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────

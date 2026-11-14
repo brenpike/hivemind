@@ -333,9 +333,9 @@ This amendment records the permission posture for the `github-reviewer`'s GitHub
 
 **Decision (user choice, Q1 option B, 2026-11-13).**
 
-- The README documents the per-machine allow rules, one per script, in the form `Bash(bash "<plugin root>/skills/<skill>/scripts/<script>.sh" *)` with each script's own path (`github-review-loop` for `reply-resolve.sh` and `react-marker.sh`, `push-branch` for `push-branch.sh`), for `permissions.allow` in the gitignored `.claude/settings.local.json`.
+- The README documents the per-machine allow rules, one per script, in the form `Bash(bash "<plugin root>/skills/<skill>/scripts/<script>.sh" *)` with each script's own path (`github-review-loop` for `reply-resolve.sh` and `react-marker.sh`, `push-branch` for `push-branch.sh`), for `permissions.allow` in the gitignored `.claude/settings.local.json`. *(2026-11-14: superseded, see Amendment 2026-11-14.)*
 - A refusal asks. The reviewer returns `user-input-required` with `escalation_target: permission` and a question that names the exact rule (ADR-0040, Amendment 2026-11-13; `plugin/agents/github-reviewer.md`, step 8).
-- The plugin ships no allow for these calls.
+- The plugin ships no allow for these calls. *(2026-11-14: superseded, see Amendment 2026-11-14.)*
 
 **Documented facts relied on.** Read 2026-11-13 from the official docs. They are documented, not verified live in this repository, except where Evidence below says so.
 
@@ -353,15 +353,80 @@ This amendment records the permission posture for the `github-reviewer`'s GitHub
 
 **Considered and rejected.**
 
-- **A: a plugin PreToolUse hook that allows these calls.** The docs do not confirm that a hook allow wins over the server-side auto-mode classifier review, and U2 could not show it. It would also remove the prompt in every permission mode, not only in auto mode, and it adds a new command-parser surface to the hook. It may be reconsidered after a supervised live check proves a hook allow passes these calls through server-side review.
+- **A: a plugin PreToolUse hook that allows these calls.** The docs do not confirm that a hook allow wins over the server-side auto-mode classifier review, and U2 could not show it. It would also remove the prompt in every permission mode, not only in auto mode, and it adds a new command-parser surface to the hook. It may be reconsidered after a supervised live check proves a hook allow passes these calls through server-side review. *(2026-11-14: now the fallback route, see Amendment 2026-11-14.)*
 - **C: seed-hive writes the per-machine rules.** Amendment 2026-10-23 (Closed) rejected seeded plugin paths: a per-machine plugin path goes stale at each plugin update, and the settings merge never removes an entry.
 
 **Residuals.**
 
-- The rule's path holds the plugin version, so it goes stale after each plugin update. A stale rule matches nothing, and the call goes back to the classifier. A `*` in place of the version keeps the rule current, but it also matches a path that climbs out with `..`.
+- The rule's path holds the plugin version, so it goes stale after each plugin update. A stale rule matches nothing, and the call goes back to the classifier. A `*` in place of the version keeps the rule current, but it also matches a path that climbs out with `..`. *(2026-11-14: superseded, see Amendment 2026-11-14.)*
 - A settings edit made mid-session may need a reload before it applies. Not verified.
 - A call blocked with no classifier verdict has no **Recently blocked** row, so it cannot be approved there.
 - Each of the three calls, the `push-branch.sh` push included, still goes through the classifier unless the user adds its rule. A refusal now asks.
 - The question text is written by the reviewer, so compare the rule it names with the README's exact rules before adding it.
 - With `autoMode.classifyAllShell: true`, the rules have no effect in auto mode.
 - Not verified live: the settings rule's match for a call from a subagent or a workflow agent.
+
+## Amendment 2026-11-14: review-loop GitHub writes get a plugin skill grant (issue 574)
+
+This amendment changes the posture of Amendment 2026-11-13 for the `github-reviewer`'s GitHub-writing script calls (https://github.com/brenpike/hivemind/issues/574). Decisions 1 to 6 are unchanged: no seed rule and no settings rule is added. The reviewer side is recorded in ADR-0040 (`docs/adr/0040-post-pr-flow-on-script-engine.md`, Amendment 2026-11-14). Scope: three `bash` exact-script grants. This does not settle the NON-FINDING recorded in the Findings section. That open question and its prohibition stand as written.
+
+**Decision (user choice, issue 574 option 1, 2026-11-14).** The user said: "if we have to put permission entries that have hardcoded paths and versions, we're failing". So the grant ships in a plugin skill, not in per-machine README rules.
+
+- **The skill.** `plugin/skills/review-writes/SKILL.md` runs no command. Its `allowed-tools` holds exactly three grants: `Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh" *)`, `Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reply-resolve.sh" *)` and `Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/react-marker.sh" *)`. It sets `user-invocable: false`.
+- **When it runs.** The reviewer invokes `hivemind:review-writes` with the Skill tool right before a dispatch's first `push-branch.sh`, `reply-resolve.sh` or `react-marker.sh` call (`plugin/agents/github-reviewer.md`).
+- **README rules removed.** The README no longer documents per-machine allow rules for these calls.
+- **The refusal question is now the fallback.** The #573 permission-refused question is unchanged (Amendment 2026-11-13; ADR-0040, Amendment 2026-11-13). It now covers a call the skill grant does not reach.
+- **No hook and no seed rule.** No PreToolUse hook allows these calls. seed-hive writes no rule for them.
+- **PR binding.** `reply-resolve.sh` and `react-marker.sh` each check the target right before their first live write. Each reads the current branch and the GitHub id of the origin push repository. Each looks up the target node. It writes only when the node is the surface's type on an OPEN PR whose head is that branch in that repository. A target that fails this check is refused with `pr-binding-refused`. A missing branch or a failed lookup fails closed with `pr-binding-no-branch` or `pr-binding-lookup-failed`. The capture seam skips the binding because it writes nothing. The reviewer returns `blocked` on a `pr-binding-*` failure from `reply-resolve.sh`. A `react-marker.sh` refusal is a `marker-write-failed` block.
+
+**User decision 2026-11-14: the PR binding (local review finding 485216bdc9a2daa5d278bdf1df4779e29602a68345f062e5bfbea0557e3ac907).** The user chose option B, the PR binding above. Not chosen: option A, accept the grant as-is, and option C, drop the reply and reaction scripts from the grant. The binding does not check who calls the script. It does not bind the target to the candidate set the reviewer scanned. This is a recorded decision under plugin/governance/remediation-doctrine.md (Recorded Decisions and Repeat Findings). A later finding that asks for a caller check or a candidate-set binding, without showing a write outside the bound PR, is a repeat.
+
+**User decision 2026-11-14: any open PR from the current branch counts (local review finding 9a8a0f87e24a81e42051f3409c6193d3ed412b91a8978097c2626df2e9181672).** GitHub allows more than one open PR from one head branch, each into a different base. The PR binding accepts a target on any of them, because it checks the head branch, the head repository and the OPEN state, not one PR's id or base. The user accepted this limit and chose not to pin one PR: every PR it admits is built from the current branch in the origin repository, so no write reaches another branch's PR or another repository. Pinning one PR (a required PR argument, or refusing when the branch has more than one open PR) is not done. Under plugin/governance/remediation-doctrine.md (Recorded Decisions and Repeat Findings), a later finding that asks to pin one PR, without showing a write outside the current branch's open PRs, is a repeat.
+
+**Why a skill.**
+
+- A plugin cannot ship allow rules. The `plugin.json` fields table has no permissions field (Amendment 2026-11-13, documented facts).
+- A plugin skill's `allowed-tools` is the only documented plugin-shipped grant that follows `${CLAUDE_PLUGIN_ROOT}`. So the grant names no hardcoded path and no version.
+- This is a forced home, not a P8 extraction (`docs/engineering-principles.md`). The skill exists to carry the grant. It moves no procedure out of the reviewer.
+
+**Why one skill, not a push through `hivemind:push-branch`.**
+
+- It would add a second Skill call to each pass.
+- It would depend on whether one skill's invocation drops an earlier skill's grant. That is untested.
+- It would load push-branch's procedure, and `plugin/governance/workflow.md` with it, into every pass.
+- It would force a rewrite of the reviewer consumer pin in `tests/policy/safety-git-identifier-out-of-band.json` (github-reviewer step 7, the single push).
+- The `push-branch.sh` grant now appears in two skills, `hivemind:push-branch` and `hivemind:review-writes`. Both name the same exact script path, so this widens nothing.
+
+**Evidence.**
+
+- S11-a (Amendment 2026-10-20): a test skill's `allowed-tools` held an exact-path `bash` script grant. A workflow agent invoked the skill and then ran the script with no prompt (`reasonType: subcommandResults`). A control agent that did not invoke the skill got a prompt. The same grant applied in auto mode. The grant shape is the one used here: `bash`, an exact script path, a trailing `*`.
+- S12 (Amendment 2026-10-20): in auto mode, an untyped haiku workflow agent and a haiku `hivemind:drone` each ran the scripted push through `hivemind:push-branch`. The push script was accepted through the skill's grant (`reasonType: subcommandResults`). The Skill call itself was a classifier accept.
+- U4 (Amendment 2026-10-29): a skill preloaded through an agent's `skills:` frontmatter granted nothing. A skill grant applies when the Skill tool invokes the skill. So the reviewer invokes it with the Skill tool.
+- Live probe, 2026-11-14: a `hivemind:drone` subagent started through the Agent tool invoked `hivemind:push-branch`. Its `push-branch.sh` call ran with no denial, no prompt and no manual rule. The session's permission mode was not recorded. So the probe is inconclusive on whether the classifier ran.
+
+**Documented facts relied on.** Read 2026-11-14 from the official docs. They are documented, not verified live in this repository.
+
+- **A skill `allowed-tools` grant applies for the turn that invokes the skill** (https://code.claude.com/docs/en/skills).
+- **`${CLAUDE_PLUGIN_ROOT}` is substituted in `allowed-tools` Bash rules of plugin skills** (skills docs).
+- **`user-invocable: false` hides the skill from the `/` menu.** The model can still invoke it (skills docs).
+- **Matching allow rules resolve before the classifier.** At step 1, an action that matches an allow rule resolves at once. Server-side review covers only the actions the decision order sends for review (https://code.claude.com/docs/en/permission-modes, "How the classifier evaluates actions").
+- **`autoMode.classifyAllShell` sends all shell commands to the classifier.** It disables Bash allow rules (https://code.claude.com/docs/en/auto-mode-config).
+
+**Verification pending.** The check runs in the next auto-mode PR watch in which the reviewer writes.
+
+- Confirm the permission mode with `/status`.
+- Turn the debug log on.
+- Read each write's decision source: a rule match or a classifier verdict.
+- `autoMode.classifyAllShell` does not help. It disables the Bash allow rules this check tests.
+- Pass: record the result here.
+- Fail: add a PreToolUse hook allow limited to these exact scripts under the plugin root. Verify it the same way.
+
+**Residuals.**
+
+- Whether a later skill invocation in the same turn keeps this grant is untested. The skill text says no other skill invocation may come between the grant and the writes.
+- In auto mode the classifier judges the Skill call itself.
+- Managed `allowManagedPermissionRulesOnly`, `autoMode.classifyAllShell`, and deny and ask rules defeat the grant. A refused call then asks.
+- Any agent that invokes the skill gets the grant for its turn. The grant is bounded by the exact script paths, the scripts' input gates, the PR binding, GitHub writes that can be reversed and push-branch's refusals.
+- The reply bodies are `Fixed in <SHA>. <summary>.` and the defer body. Each holds a free-text summary the caller writes. So an agent that invokes the skill can still post a misleading summary, resolve a thread or add `EYES` on the bound PR. Each of these is visible and can be reversed.
+- The PR binding reads local git state: the current branch and the origin push URL. Only commands outside the grant can change that state.
+- The fallback rule the refusal question names still holds a versioned path. It goes stale after each plugin update, as Amendment 2026-11-13 records.

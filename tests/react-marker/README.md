@@ -24,7 +24,36 @@ different reaction content, or a non-zero `gh` exit even when the body is a clea
 `EYES` payload. No response text is pattern-matched, so a body whose error message
 says the viewer already reacted is `react-failed` too. A duplicate reaction is a
 server-side success that returns the normal payload, so it needs no special case.
-Each case asserts the stub was reached. The bootstrap tokens `cannot-self-locate`,
+Each case asserts the stub mutation was reached.
+
+Every live-path case, the `REACTMARKER_CAPTURE_FILE`-without-`REACTMARKER_TEST_MODE`
+case included, runs from a scratch git repo under the tmpdir, never from the
+hivemind checkout (CI checks pull requests out at a detached HEAD). The repo is on
+branch `bugfix/fixture-branch`, set with `git symbolic-ref`, with a fake https
+GitHub origin. Git runs with `GIT_DIR` and `GIT_WORK_TREE` unset, a scratch
+`HOME`, and `GIT_CONFIG_NOSYSTEM=1`. The one commit (the detached-HEAD repo) uses
+`-c commit.gpgsign=false`. The stub `gh` tells apart `gh repo view` (the origin
+repository id), the PR binding `gh api graphql` lookup, and the `addReaction`
+mutation. Existing live cases get a binding that matches the fixture PR.
+
+The PR binding cases each assert exit 1, the exact token on stderr, and no
+reaction sent:
+
+- `pr-binding-refused`: a node on another PR; a node whose PR head has the same
+  branch name in another repo; a `CLOSED` PR; a `MERGED` PR; a toplevel candidate
+  whose node is a `PullRequestReview`; a review candidate whose node is an
+  `IssueComment`; an `IssueComment` with a null `pullRequest`; a null node; a null
+  `headRepository`.
+- `pr-binding-lookup-failed`: a non-zero `gh` exit on the binding query; an exit-0
+  `NOT_FOUND` errors envelope; a non-JSON body; a failed `gh repo view`; no
+  `origin` remote; an https origin URL holding `@`; two push URLs.
+- `pr-binding-no-branch`: a detached HEAD, with `gh` never reached.
+
+One more case asserts the binding passes the node id as a variable, never in the
+query text. A thread-surface run from a non-git directory, with stub `git` and
+`gh` first on `PATH`, stays a silent no-op that reaches neither.
+
+The bootstrap tokens `cannot-self-locate`,
 `missing-graphql-check`, and `unparseable-graphql-check` are documented in the
 script header; the shared self-location suite covers them.
 
@@ -33,8 +62,8 @@ IssueComment and `PRR_...` for a review PullRequestReview — not fake placehold
 ids, so validation-order bugs cannot hide behind a non-production node shape. The
 inputs are short positional args (`NODE_ID`, `surface`, `candidate_url`) and the
 assertions are over the captured reaction log, so the suite needs no on-disk
-input/expected JSON fixtures — the capture files live in a disposable `mktemp -d`
-tmpdir removed on `EXIT`.
+input/expected JSON fixtures — the capture files, scratch repos and stubs live in
+a disposable `mktemp -d` tmpdir removed on `EXIT`.
 
 This directory is the designated fixture home should a future case require a canned
 on-disk fixture (it is referenced by `tools/validate.sh`'s self-test probe map for
