@@ -232,7 +232,7 @@ mutation($threadId: ID!) {
 
 ## Surface-to-Delivery Contract
 
-Maps each feedback surface to the mutation(s) used to mark a fixed or deferred surface handled. The mapping is closed-by-construction — no runtime fallback, no `addComment` mutation, no `Addresses: <url>` body convention. `reply-resolve.sh` remains the THREAD-ONLY mutation path (reply + conditional resolve); the non-thread `toplevel`/`review` surfaces are marked handled by a self-authored `EYES` reaction (see [Reaction Marker](#reaction-marker)), NOT by `reply-resolve.sh`. The same reviewer-own `EYES` also records a Bot-authored non-thread comment the reviewer skipped as noise (`reviewer_filter` `automated` or `codex-only`).
+Maps each feedback surface to the mutation(s) used to mark a fixed or deferred surface handled. The mapping is closed-by-construction — no runtime fallback, no `addComment` mutation, no `Addresses: <url>` body convention. `reply-resolve.sh` remains the THREAD-ONLY mutation path (reply + conditional resolve); the non-thread `toplevel`/`review` surfaces are marked handled by a self-authored `EYES` reaction (see [Reaction Marker](#reaction-marker)), NOT by `reply-resolve.sh`. The same reviewer-own `EYES` also records a Codex-authored non-thread comment the reviewer skipped as noise (`codex-only` in `reviewer-identity.jq`).
 
 | Surface | Mutation(s) | Notes |
 |---------|-------------|-------|
@@ -245,7 +245,7 @@ Thread replies carry only the fix or defer summary: no `Addresses: <url>` back-r
 
 ## Reaction Marker
 
-Non-thread reviewer surfaces (`toplevel` = IssueComment, `review` = PullRequestReview summary) carry `thread_id: null` and have no thread node to reply to or resolve. A committed fix to such a surface is recorded handled by adding a self-authored `EYES` (👀) reaction to the reviewer's own comment/review node. The same reviewer-own (viewer-scoped) `EYES` also records a Bot-authored non-thread comment the reviewer skipped as noise (`reviewer_filter` `automated` or `codex-only`); a Codex summary marked this way stays handled even if later edited in place, because Codex posts findings as separate comments. Both `IssueComment` and `PullRequestReview` implement `Reactable`, so the same mutation and harvest fragment apply to both.
+Non-thread reviewer surfaces (`toplevel` = IssueComment, `review` = PullRequestReview summary) carry `thread_id: null` and have no thread node to reply to or resolve. A committed fix to such a surface is recorded handled by adding a self-authored `EYES` (👀) reaction to the reviewer's own comment/review node. The same reviewer-own (viewer-scoped) `EYES` also records a Codex-authored non-thread comment the reviewer skipped as noise (`codex-only` in `reviewer-identity.jq`); a Codex summary marked this way stays handled even if later edited in place, because Codex posts findings as separate comments. Both `IssueComment` and `PullRequestReview` implement `Reactable`, so the same mutation and harvest fragment apply to both.
 
 ### Emit (mark handled)
 

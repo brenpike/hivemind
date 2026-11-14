@@ -37,8 +37,8 @@
 # only for the authenticated gh viewer's OWN reaction, so a human or Codex
 # reacting 👀 (EYES) from another account does NOT false-positive as handled.
 # `EYES` is the single marker constant emitted by react-marker.sh's addReaction.
-# The reviewer's own EYES also records a Bot-authored non-thread comment it
-# skipped as noise (reviewer_filter automated or codex-only). A Codex summary
+# The reviewer's own EYES also records a Codex-authored (`codex-only`) non-thread
+# comment it skipped as noise. A Codex summary
 # marked this way stays handled even if later edited in place, because Codex
 # posts findings as separate comments.
 #

@@ -13,8 +13,7 @@
 # fixed surface is recorded handled by adding a self-authored EYES (👀) reaction to
 # the reviewer's own comment/review node; the classifier harvest keys on that exact
 # reaction to skip the surface on the next poll. The same marker also records a
-# Bot-authored non-thread comment the reviewer skipped as noise (reviewer_filter
-# automated or codex-only).
+# Codex-authored (`codex-only`) non-thread comment the reviewer skipped as noise.
 #
 # This script OWNS the runtime reaction mutation. The mutation it issues is the
 # canonical template from
