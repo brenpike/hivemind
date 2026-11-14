@@ -304,40 +304,113 @@ NO_FOLDER="$WORK_ROOT/no-folder"
 mkdir -p "$NO_FOLDER"
 CHECKOUT_LINK="$WORK_ROOT/checkout-link"
 ln -s "$CHECKOUT" "$CHECKOUT_LINK"
+SUBFOLDER="$CHECKOUT/sub/dir"
+mkdir -p "$SUBFOLDER"
+FILE_FOLDER="$WORK_ROOT/file-folder"
+mkdir -p "$FILE_FOLDER"
+printf 'not a folder\n' >"$FILE_FOLDER/.hivemind"
 
+# Rows: id|agent|path|cwd|expected decision|condition word ('-' for none). An agent of '-' omits
+# agent_type.
 WRITE_CASES=(
-  "molt-relative|$SYNAPSE|.hivemind/molt-inputs-a1.json|$CHECKOUT|allow"
-  "pr-relative|$SYNAPSE|.hivemind/pr-inputs-a1.json|$CHECKOUT|allow"
-  "molt-absolute|$SYNAPSE|$CHECKOUT/.hivemind/molt-inputs-Z-9.json|$CHECKOUT|allow"
-  "pr-absolute|$SYNAPSE|$CHECKOUT/.hivemind/pr-inputs-$TOKEN64.json|$CHECKOUT|allow"
-  "cwd-through-symlink|$SYNAPSE|$CHECKOUT_LINK/.hivemind/pr-inputs-a.json|$CHECKOUT_LINK|allow"
-  "token-65|$SYNAPSE|.hivemind/pr-inputs-$TOKEN65.json|$CHECKOUT|deny"
-  "other-name|$SYNAPSE|$CHECKOUT/.hivemind/other.json|$CHECKOUT|deny"
-  "checkout-root|$SYNAPSE|$CHECKOUT/molt-inputs-a.json|$CHECKOUT|deny"
-  "other-folder|$SYNAPSE|$WORK_ROOT/.hivemind/molt-inputs-a.json|$CHECKOUT|deny"
-  "subfolder|$SYNAPSE|.hivemind/sub/molt-inputs-a.json|$CHECKOUT|deny"
-  "traversal|$SYNAPSE|$CHECKOUT/.hivemind/../.hivemind/molt-inputs-a.json|$CHECKOUT|deny"
-  "dot-slash|$SYNAPSE|./.hivemind/molt-inputs-a.json|$CHECKOUT|deny"
-  "suffix|$SYNAPSE|.hivemind/molt-inputs-a.json.bak|$CHECKOUT|deny"
-  "source-file|$SYNAPSE|$CHECKOUT/plugin/skills/molt/scripts/molt.sh|$CHECKOUT|deny"
-  "symlinked-folder|$SYNAPSE|$SYMLINKED/.hivemind/molt-inputs-a.json|$SYMLINKED|deny"
-  "symlinked-folder-relative|$SYNAPSE|.hivemind/molt-inputs-a.json|$SYMLINKED|deny"
-  "symlinked-leaf|$SYNAPSE|.hivemind/molt-inputs-leaf.json|$CHECKOUT|deny"
-  "directory-leaf|$SYNAPSE|.hivemind/molt-inputs-dir.json|$CHECKOUT|deny"
-  "missing-folder|$SYNAPSE|.hivemind/molt-inputs-a.json|$NO_FOLDER|deny"
-  "relative-cwd|$SYNAPSE|.hivemind/molt-inputs-a.json|checkout|deny"
-  "drone-inputs|$DRONE|.hivemind/molt-inputs-a.json|$CHECKOUT|none"
-  "drone-elsewhere|$DRONE|/etc/passwd|$CHECKOUT|none"
-  "main-session|-|$CHECKOUT/x.txt|$CHECKOUT|none"
+  "molt-relative|$SYNAPSE|.hivemind/molt-inputs-a1.json|$CHECKOUT|allow|-"
+  "pr-relative|$SYNAPSE|.hivemind/pr-inputs-a1.json|$CHECKOUT|allow|-"
+  "pr-body-relative|$SYNAPSE|.hivemind/pr-inputs-a1-body.json|$CHECKOUT|allow|-"
+  "molt-absolute|$SYNAPSE|$CHECKOUT/.hivemind/molt-inputs-Z-9.json|$CHECKOUT|allow|-"
+  "pr-absolute|$SYNAPSE|$CHECKOUT/.hivemind/pr-inputs-$TOKEN64.json|$CHECKOUT|allow|-"
+  "cwd-through-symlink|$SYNAPSE|$CHECKOUT_LINK/.hivemind/pr-inputs-a.json|$CHECKOUT_LINK|allow|-"
+  "symlinked-prefix-physical-cwd|$SYNAPSE|$CHECKOUT_LINK/.hivemind/pr-inputs-a.json|$CHECKOUT|allow|-"
+  "physical-prefix-symlinked-cwd|$SYNAPSE|$CHECKOUT/.hivemind/molt-inputs-a.json|$CHECKOUT_LINK|allow|-"
+  "missing-folder|$SYNAPSE|.hivemind/molt-inputs-a.json|$NO_FOLDER|allow|-"
+  "missing-folder-absolute|$SYNAPSE|$NO_FOLDER/.hivemind/pr-inputs-a.json|$NO_FOLDER|allow|-"
+  "subfolder-cwd-relative|$SYNAPSE|.hivemind/molt-inputs-a.json|$SUBFOLDER|allow|-"
+  "subfolder-cwd-absolute|$SYNAPSE|$SUBFOLDER/.hivemind/pr-inputs-a.json|$SUBFOLDER|allow|-"
+  "subfolder-cwd-checkout-folder|$SYNAPSE|$CHECKOUT/.hivemind/molt-inputs-a.json|$SUBFOLDER|deny|outside-dir"
+  "token-65|$SYNAPSE|.hivemind/pr-inputs-$TOKEN65.json|$CHECKOUT|deny|leaf-name"
+  "other-name|$SYNAPSE|$CHECKOUT/.hivemind/other.json|$CHECKOUT|deny|leaf-name"
+  "checkout-root|$SYNAPSE|$CHECKOUT/molt-inputs-a.json|$CHECKOUT|deny|path-form"
+  "other-folder|$SYNAPSE|$WORK_ROOT/.hivemind/molt-inputs-a.json|$CHECKOUT|deny|outside-dir"
+  "subfolder|$SYNAPSE|.hivemind/sub/molt-inputs-a.json|$CHECKOUT|deny|path-form"
+  "traversal|$SYNAPSE|$CHECKOUT/.hivemind/../.hivemind/molt-inputs-a.json|$CHECKOUT|deny|path-form"
+  "dot-slash|$SYNAPSE|./.hivemind/molt-inputs-a.json|$CHECKOUT|deny|path-form"
+  "suffix|$SYNAPSE|.hivemind/molt-inputs-a.json.bak|$CHECKOUT|deny|leaf-name"
+  "source-file|$SYNAPSE|$CHECKOUT/plugin/skills/molt/scripts/molt.sh|$CHECKOUT|deny|path-form"
+  "symlinked-folder|$SYNAPSE|$SYMLINKED/.hivemind/molt-inputs-a.json|$SYMLINKED|deny|folder-symlink"
+  "symlinked-folder-relative|$SYNAPSE|.hivemind/molt-inputs-a.json|$SYMLINKED|deny|folder-symlink"
+  "file-folder|$SYNAPSE|.hivemind/molt-inputs-a.json|$FILE_FOLDER|deny|folder-not-directory"
+  "symlinked-leaf|$SYNAPSE|.hivemind/molt-inputs-leaf.json|$CHECKOUT|deny|leaf-symlink"
+  "directory-leaf|$SYNAPSE|.hivemind/molt-inputs-dir.json|$CHECKOUT|deny|leaf-not-file"
+  "relative-cwd|$SYNAPSE|.hivemind/molt-inputs-a.json|checkout|deny|dir-not-absolute"
+  "drive-backslash-cwd|$SYNAPSE|.hivemind/molt-inputs-a.json|C:\\work\\repo|deny|dir-not-absolute"
+  "drive-slash-cwd|$SYNAPSE|.hivemind/molt-inputs-a.json|C:/work/repo|deny|dir-not-absolute"
+  "missing-cwd|$SYNAPSE|.hivemind/molt-inputs-a.json|$WORK_ROOT/no-such-cwd|deny|dir-unreadable"
+  "newline-path|$SYNAPSE|.hivemind/molt-inputs-a.json${NL}|$CHECKOUT|deny|control-byte"
+  "drone-inputs|$DRONE|.hivemind/molt-inputs-a.json|$CHECKOUT|none|-"
+  "drone-elsewhere|$DRONE|/etc/passwd|$CHECKOUT|none|-"
+  "main-session|-|$CHECKOUT/x.txt|$CHECKOUT|none|-"
+  "main-session-inputs|-|.hivemind/molt-inputs-a.json|$CHECKOUT|none|-"
 )
+
+# read_reason: print the decision reason in hook_output, or nothing.
+read_reason() {
+  printf '%s' "$hook_output" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null
+}
+
+# expect_write_reason <id> <path> <cwd> <word>: check the deny reason keeps its lead, ends with
+# the condition word and echoes neither the path nor the cwd.
+expect_write_reason() {
+  local deny_reason
+  deny_reason="$(read_reason)"
+  case "$deny_reason" in
+    "synapse-gate: $SYNAPSE may Write only "*"; failed condition: $4") ;;
+    *)
+      failed "write-reason:$1" "expected lead and word $4, reason=$deny_reason"
+      return 0
+      ;;
+  esac
+  case "$deny_reason" in
+    *"$2"* | *"$3"*) failed "write-reason:$1" "reason echoes the path or cwd: $deny_reason" ;;
+    *) pass "write-reason:$1" "$4" ;;
+  esac
+}
+
+# shared_path_verdict <cwd> <path>: print allow, or deny and the word, from the shared rule.
+shared_path_verdict() {
+  local shared_word
+  if shared_word="$(. "$PLUGIN_ROOT/skills/_shared/containment.sh" && hivemind_inputs_path_problem "$1" "$2" molt pr)"; then
+    printf 'allow'
+  else
+    printf 'deny %s' "$shared_word"
+  fi
+}
+
+# expect_write_parity <id> <path> <cwd>: check the hook's decision and word equal the shared rule's
+# verdict for the same (cwd, path) pair.
+expect_write_parity() {
+  local hook_verdict shared_verdict hook_reason
+  hook_verdict="$(read_decision)"
+  if [ "$hook_verdict" = deny ]; then
+    hook_reason="$(read_reason)"
+    hook_verdict="deny ${hook_reason##*; failed condition: }"
+  fi
+  shared_verdict="$(shared_path_verdict "$3" "$2")"
+  if [ "$hook_verdict" = "$shared_verdict" ]; then
+    pass "write-parity:$1" "$shared_verdict"
+  else
+    failed "write-parity:$1" "hook=$hook_verdict shared=$shared_verdict"
+  fi
+}
+
 for case_row in "${WRITE_CASES[@]}"; do
-  IFS='|' read -r case_id case_agent case_path case_cwd case_expected <<<"$case_row"
+  IFS='|' read -r -d '' case_id case_agent case_path case_cwd case_expected case_word < <(printf '%s' "$case_row")
   [ "$case_agent" != '-' ] || case_agent=''
   expect_decision "write:$case_id" "$case_expected" "$PLUGIN_ROOT" "$(write_input "$case_agent" "$case_path" "$case_cwd")"
+  [ "$case_expected" != deny ] || expect_write_reason "$case_id" "$case_path" "$case_cwd" "$case_word"
+  [ "$case_agent" != "$SYNAPSE" ] || expect_write_parity "$case_id" "$case_path" "$case_cwd"
 done
-expect_decision 'write:newline-path' deny "$PLUGIN_ROOT" "$(write_input "$SYNAPSE" ".hivemind/molt-inputs-a.json${NL}" "$CHECKOUT")"
 expect_decision 'write:nul-path' deny "$PLUGIN_ROOT" \
   "$(jq -cn --arg cwd "$CHECKOUT" '{tool_name: "Write", agent_type: "hivemind:synapse", cwd: $cwd, tool_input: {file_path: ".hivemind/molt-inputs-a.json\u0000x"}}')"
+expect_write_reason 'nul-path' '.hivemind/molt-inputs-a.json' "$CHECKOUT" control-byte
 expect_decision 'bash:nul-command' deny "$PLUGIN_ROOT" \
   "$(jq -cn --arg command "$MOLT_EXACT" '{tool_name: "Bash", agent_type: "hivemind:synapse", tool_input: {command: ($command + "\u0000")}}')"
 
@@ -346,10 +419,12 @@ expect_decision 'root:trailing-slash' allow "$PLUGIN_ROOT/" "$(bash_input "$SYNA
 expect_decision 'root:trailing-slashes' allow "$PLUGIN_ROOT//" "$(bash_input "$SYNAPSE" "bash \"$(script_path "$PLUGIN_ROOT//" molt)\" $MOLT_ARGS")"
 expect_decision 'root:trailing-slash:rewritten' deny "$PLUGIN_ROOT/" "$(bash_input "$SYNAPSE" "$MOLT_EXACT")"
 
-# make_root <name>: create a fake plugin root holding allowlist.sh; print its path.
+# make_root <name>: create a fake plugin root holding allowlist.sh and containment.sh; print its
+# path.
 make_root() {
   mkdir -p "$WORK_ROOT/$1/skills/_shared"
   cp "$PLUGIN_ROOT/skills/_shared/allowlist.sh" "$WORK_ROOT/$1/skills/_shared/allowlist.sh"
+  cp "$PLUGIN_ROOT/skills/_shared/containment.sh" "$WORK_ROOT/$1/skills/_shared/containment.sh"
   printf '%s' "$WORK_ROOT/$1"
 }
 
@@ -418,6 +493,65 @@ if [ -z "$hook_output" ] && [ "$hook_status" -ne 2 ]; then
 else
   failed 'fail-open:unparseable-allowlist' "status=$hook_status output=$hook_output"
 fi
+
+NO_CONTAINMENT_ROOT="$(make_root no-containment-root)"
+rm -f "$NO_CONTAINMENT_ROOT/skills/_shared/containment.sh"
+NO_CONTAINMENT_EXACT="bash \"$(script_path "$NO_CONTAINMENT_ROOT" molt)\" $MOLT_ARGS"
+expect_decision 'fail-open:root-without-containment' none "$NO_CONTAINMENT_ROOT" "$LOOKALIKE_INPUT"
+expect_decision 'fail-open:root-without-containment-exact' none "$NO_CONTAINMENT_ROOT" "$(bash_input "$SYNAPSE" "$NO_CONTAINMENT_EXACT")"
+expect_decision 'fail-open:root-without-containment-write' none "$NO_CONTAINMENT_ROOT" "$(write_input "$SYNAPSE" .hivemind/molt-inputs-a.json "$CHECKOUT")"
+
+BROKEN_CONTAINMENT_ROOT="$(make_root broken-containment-root)"
+printf 'hivemind_inputs_path_problem() {\n' >"$BROKEN_CONTAINMENT_ROOT/skills/_shared/containment.sh"
+run_hook "$BROKEN_CONTAINMENT_ROOT" "$SYNAPSE_WRITE_INPUT"
+if [ -z "$hook_output" ] && [ "$hook_status" -ne 2 ]; then
+  pass 'fail-open:unparseable-containment' "no output, exit $hook_status"
+else
+  failed 'fail-open:unparseable-containment' "status=$hook_status output=$hook_output"
+fi
+
+# ── broken install: a library that loads without a function the hook calls ───────
+# expect_library_incomplete <id> <root> <input> <library> <function>: check a deny whose reason
+# names the library and function, says to reinstall, ends with library-incomplete and echoes
+# neither the command nor the cwd.
+expect_library_incomplete() {
+  local deny_reason
+  expect_decision "library-incomplete:$1" deny "$2" "$3"
+  deny_reason="$(read_reason)"
+  case "$deny_reason" in
+    "synapse-gate: the hivemind plugin install is incomplete: skills/_shared/$4 does not define $5, "*"Reinstall or update the hivemind plugin"*"; failed condition: library-incomplete") ;;
+    *)
+      failed "library-incomplete-reason:$1" "reason=$deny_reason"
+      return 0
+      ;;
+  esac
+  case "$deny_reason" in
+    *"$WORK_ROOT"*) failed "library-incomplete-reason:$1" "reason echoes the input: $deny_reason" ;;
+    *) pass "library-incomplete-reason:$1" "$4 $5" ;;
+  esac
+}
+
+# Rows: library|function the stub library leaves out.
+INCOMPLETE_CASES=(
+  "allowlist.sh|hivemind_assert_identifier"
+  "containment.sh|hivemind_check_inputs_leaf"
+  "containment.sh|hivemind_inputs_path_problem"
+)
+for case_row in "${INCOMPLETE_CASES[@]}"; do
+  missing_library="${case_row%%|*}"
+  missing_function="${case_row#*|}"
+  INCOMPLETE_ROOT="$(make_root "incomplete-$missing_function")"
+  printf '%s() { :; }\n' $(sed -n 's/^\(hivemind_[a-z_]*\)() {$/\1/p' "$INCOMPLETE_ROOT/skills/_shared/$missing_library" | grep -vx "$missing_function") \
+    >"$INCOMPLETE_ROOT/skills/_shared/$missing_library"
+  INCOMPLETE_EXACT="bash \"$(script_path "$INCOMPLETE_ROOT" molt)\" $MOLT_ARGS"
+  expect_library_incomplete "$missing_function:synapse-exact" "$INCOMPLETE_ROOT" "$(bash_input "$SYNAPSE" "$INCOMPLETE_EXACT")" "$missing_library" "$missing_function"
+  expect_library_incomplete "$missing_function:synapse-other" "$INCOMPLETE_ROOT" "$(bash_input "$SYNAPSE" 'ls -la')" "$missing_library" "$missing_function"
+  expect_library_incomplete "$missing_function:drone-exact" "$INCOMPLETE_ROOT" "$(bash_input "$DRONE" "$INCOMPLETE_EXACT")" "$missing_library" "$missing_function"
+  expect_library_incomplete "$missing_function:lookalike" "$INCOMPLETE_ROOT" "$LOOKALIKE_INPUT" "$missing_library" "$missing_function"
+  expect_library_incomplete "$missing_function:synapse-write" "$INCOMPLETE_ROOT" "$(write_input "$SYNAPSE" .hivemind/molt-inputs-a.json "$CHECKOUT")" "$missing_library" "$missing_function"
+  expect_decision "library-incomplete:$missing_function:drone-unrelated" none "$INCOMPLETE_ROOT" "$(bash_input "$DRONE" 'ls -la')"
+  expect_decision "library-incomplete:$missing_function:drone-write" none "$INCOMPLETE_ROOT" "$(write_input "$DRONE" .hivemind/molt-inputs-a.json "$CHECKOUT")"
+done
 
 if bash -n "$HOOK" 2>/dev/null; then
   pass 'hook:parses' 'bash -n'

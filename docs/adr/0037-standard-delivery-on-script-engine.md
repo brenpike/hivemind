@@ -1363,7 +1363,7 @@ First finding: synapse has no Skill tool, so it never loads the five skill bodie
 - **Removed instead of hardened.** The drone's git-script task exemption; the prompt sentences `gitScriptSentence`, `skillRunOnlySentence` and `runnerToolSentence`; the Skill call and skill text in each runner context, about 13 per run; and the manual-mode Skill prompt before runner commits, pushes and pull requests.
 - **Threat model.** Decision 6 and the S12 classifier record. The spike's appended and planted runs in auto mode are existing behavior (ADR-0010, Amendment 2026-10-29, the auto-mode classifier finding). Q1 A closes the same-name copy and the appended chain for the five names by construction: an exact grammar plus a name deny. Renamed copies stay a residual.
 
-Second finding: agent frontmatter cannot scope Write. The hook closes it for synapse: it allows the two inputs-file forms only, the parent must resolve to the working directory's `.hivemind`, a symlinked target is denied, and every other synapse Write is denied.
+Second finding: agent frontmatter cannot scope Write. The hook closes it for synapse: it allows the two inputs-file forms only, the parent must resolve to the working directory's `.hivemind`, a symlinked target is denied, and every other synapse Write is denied. Amended 2026-11-13 (issue 561): that `.hivemind` may now be absent. The hook decides with the shared rule in `plugin/skills/_shared/containment.sh`, anchored on the working directory, and a deny names the failed check (see Amendment 2026-11-13: the synapse inputs Write is anchored on the working directory (issue 561)).
 
 **The gate.** Its rules are stated once, in `plugin/governance/security-policy.md` (Synapse Runner Gate). Text: `plugin/hooks/synapse-gate.sh`, and `plugin/hooks/hooks.json`, an exec-form PreToolUse entry with matcher `Bash|Write` and a timeout of 10 seconds. Tests: `tools/test_synapse_gate.sh`, the `test_synapse_gate.sh` suite of `tools/validate.sh`.
 
@@ -1790,7 +1790,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/488. `molt.sh`
 
 **The change.**
 
-- `plugin/skills/_shared/containment.sh` gains one function, `hivemind_remove_inputs_file`. It deletes only a leaf named `<kind>-inputs-<token>.json`, where `<kind>` is `molt` or `pr` and `<token>` is 1 to 64 characters of `[A-Za-z0-9-]`, the hook's class. The leaf must sit directly under a real `<top>/.hivemind` folder, where `<top>` is the checkout's top, so a linked worktree uses its own top. It refuses a symlink or a file that is not a regular file. It deletes from inside the canonical folder, so a symlink or a swapped ancestor already in place when it checks cannot redirect the delete. A same-user race during the delete is outside the threat model (see the recorded decision below). The function adds no top-level statement, and the existing functions are unchanged.
+- `plugin/skills/_shared/containment.sh` gains one function, `hivemind_remove_inputs_file`. It deletes only a leaf named `<kind>-inputs-<token>.json`, where `<kind>` is `molt` or `pr` and `<token>` is 1 to 64 characters of `[A-Za-z0-9-]`, the hook's class. The leaf must sit directly under a real `<top>/.hivemind` folder, where `<top>` is the checkout's top, so a linked worktree uses its own top. Amended 2026-11-13 (issue 561): the leaf must now sit directly under the `.hivemind` of the folder the script was started in, checked with the shared rule `hivemind_inputs_path_problem`, and that folder must be the top or a folder under it (see Amendment 2026-11-13: the synapse inputs Write is anchored on the working directory (issue 561)). It refuses a symlink or a file that is not a regular file. It deletes from inside the canonical folder, so a symlink or a swapped ancestor already in place when it checks cannot redirect the delete. A same-user race during the delete is outside the threat model (see the recorded decision below). The function adds no top-level statement, and the existing functions are unchanged.
 - Each script calls it on the exact leaf it read, right after its `jq` read into the private copy, whether or not that read succeeded, and before any later check. A file that holds invalid JSON is still deleted.
 - The delete is best effort. A failed delete leaves the file and is not a stop, under the stop-calibration rule.
 - A refusal before the read keeps the file: a usage error, a bad identifier, a delay, a missing `gh`, a file not found, and a file outside the checkout.
@@ -2770,3 +2770,57 @@ It updates these places in place, each with a dated note, all in Amendment 2026-
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/531, https://github.com/brenpike/hivemind/issues/500.
+
+## Amendment 2026-11-13: the synapse inputs Write is anchored on the working directory (issue 561)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/561. The synapse gate denied a commit runner's inputs-file Write, and the deny reason did not say which check failed.
+
+**Triage and root cause.** The text of the original denial is lost, so the cause below is the one the code supports. The gate required `<cwd>/.hivemind` to exist, where `<cwd>` is the hook input's working directory: it canonicalized that folder with `cd -P`, which fails on an absent folder. On the script engine only `gather-facts.sh` creates `.hivemind`, and only at the checkout top. Claude Code's hooks reference gives `cwd` as the session's current working directory, which follows the session, a `cd` included. So a session whose working directory was not the top, because it started in a subfolder or ran a `cd`, met no `.hivemind` there and was denied, with a reason that named no condition. The token and the leaf class cannot cause it: before each runner call, `plugin/workflow-src/lib/runner.js` checks every runner word with `describeRunnerWordProblem` (`plugin/workflow-src/lib/facts.js`), whose `--inputs` and `--body-file` class is the gate's leaf class. A built path that fails it stops the run before synapse starts.
+
+**The user's decision.** Q1, option A, answered by the user: when the working directory is not the checkout top, the inputs file lives in that directory's own `.hivemind`, which may be absent before the Write. Every check is anchored on the working directory, never on the top. Option B, always the checkout top, was rejected.
+
+**The change.**
+
+- `plugin/skills/_shared/containment.sh` gains `hivemind_inputs_path_problem <base_dir> <path> <kind>...`, the one inputs-path rule, and its leaf check `hivemind_check_inputs_leaf`. The rule passes `.hivemind/<leaf>`, or an absolute path whose folder above `.hivemind` resolves to `<base_dir>`. That `.hivemind` may be absent. When present, it must be a real folder that resolves to itself, and the leaf must not be a symlink or a file that is not a regular file. On a failure the rule prints one condition word: `control-byte`, `dir-not-absolute`, `dir-unreadable`, `path-form`, `leaf-name`, `outside-dir`, `folder-symlink`, `folder-not-directory`, `folder-elsewhere`, `leaf-symlink` or `leaf-not-file`.
+- `plugin/hooks/synapse-gate.sh` sources `containment.sh` and fails open when it cannot, as it does for `allowlist.sh`. It decides each synapse Write with the rule, anchored on the hook input's `cwd`, for the kinds `molt` and `pr`. A deny reason ends `; failed condition: <word>` and never echoes the path or the working directory.
+- `hivemind_remove_inputs_file` applies the same rule, anchored on the folder the script was started in. The commit and PR scripts pass that folder.
+- `plugin/governance/security-policy.md` (Synapse Runner Gate) states the absent-or-real `.hivemind`, the one shared function and the named failed check.
+
+**Condition analysis.** Each condition the Write and its script can meet, and the outcome now.
+
+- **Working directory at the top, `.hivemind` present.** Allow, as before.
+- **Working directory at the top, `.hivemind` absent.** Allow, and the Write creates the folder. Before, deny.
+- **Working directory in a subfolder, its `.hivemind` absent or a real folder.** Allow. The Write lands in `<subfolder>/.hivemind`. The script, started in the same folder, reads the relative path there and deletes the leaf it read. Before, deny.
+- **`.hivemind` a symlink, a file, or a folder that resolves elsewhere.** Deny, naming `folder-symlink`, `folder-not-directory` or `folder-elsewhere`. Unchanged, except for the named condition.
+- **A leaf that is a symlink, live or dangling, or not a regular file.** Deny, naming `leaf-symlink` or `leaf-not-file`. Unchanged.
+- **An absolute path whose folder above `.hivemind` is not the working directory.** Deny, naming `outside-dir`. Unchanged.
+- **A leaf outside the class, an empty, `.` or `..` component, or a control byte.** Deny, naming `leaf-name`, `path-form` or `control-byte`. Unchanged.
+- **A working directory that is not absolute, such as a native Windows drive-letter path.** Deny, naming `dir-not-absolute`. See the recorded residuals.
+- **A script started in a subfolder and given `../.hivemind/<leaf>` or the top's absolute `.hivemind` path.** The script reads the file, which is inside the checkout, and keeps it, because the delete's rule is anchored on the start folder. A bare leaf given from inside `.hivemind` is read and kept too.
+
+**Surface account.**
+
+- Added: one shared rule function with its leaf check, the eleven condition words, the hook's load of `containment.sh`, and tests in `tools/test_shared_libs.sh`, `tools/test_synapse_gate.sh`, `tools/test_molt.sh`, `tools/test_open_plan_pr.sh` and `tests/workflow-scripts/`.
+- Removed: the hook's private leaf and location rule (`check_inputs_token`, `check_inputs_leaf` and `check_inputs_write`), and the delete's private leaf rule.
+- No contract row, schema, prompt or state machine change.
+
+**Options ruled out.**
+
+- **The top anchor (option B).** Rejected by the user on Q1. A relative Write lands under the working directory, so a top anchor needs an absolute top path from the engine, or a git call in the hook on every Write.
+- **A workflow mkdir.** A workflow script cannot touch files, so a mkdir needs one more synapse command outside the five exact forms, which grows the gate's surface. It would also create the folder at the top, not where a subfolder Write lands.
+- **A prompt rule.** Text telling synapse not to change folder cannot move a session started in a subfolder, and bounds nothing. The fix closes the class by construction instead.
+
+**Recorded residuals.**
+
+- **A native Windows drive-letter working directory is denied.** Root cause: the rule needs an absolute POSIX path and names `dir-not-absolute` otherwise. Bounded impact: the commit or pull request runner stops before its script runs, so no git write is made. The Windows backslash plugin root residual already denies the runner commands there. Ground: decided by the run, not the user, and journaled. A separate issue will be opened.
+- **Case-insensitive filesystems are untested in CI.** Root cause: CI runs only on a case-sensitive filesystem. Bounded impact: the rule allows only when two canonical paths are equal as strings, which holds only for the same folder, so a case difference can cause a deny or a kept file, never an allow elsewhere.
+- **An empty `<subfolder>/.hivemind` may be left behind.** Root cause: the Write creates the folder, and the script deletes only the leaf it read. Bounded impact: git lists no empty folder, and nothing reads it.
+- **A working directory change between the Write and the script.** Root cause: the Write lands under the working directory at Write time, and the script resolves the relative path against its own start folder. Bounded impact: the script stops with `inputs file not found` before any git write, and the written file stays where it landed.
+- **The seeded fallback rules match only the project-root `.hivemind`.** Root cause: the `Edit(.hivemind/molt-inputs-*.json)` and `Edit(.hivemind/pr-inputs-*.json)` rules that seed-hive adds are relative to the project root. Bounded impact: when the hook cannot decide and the working directory is a subfolder, the Write gets the normal permission flow, a prompt, never a wider allow.
+- **Synapse may now create `.hivemind` in its working directory.** Root cause: the rule passes an absent `.hivemind`, and Write creates missing folders. Bounded impact: the only paths created are that folder and one leaf in the inputs-file class, inside the working directory.
+
+It updates these places in place, each with a dated note: the issue 467 amendment's sentence on the hook's Write rule ("Second finding"), and the issue 488 amendment's bullet on the `<top>/.hivemind` leaf of `hivemind_remove_inputs_file`.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/561, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).

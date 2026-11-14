@@ -57,25 +57,52 @@
 #     PRECONDITION: the leaf must be a file target. A chain whose leaf is "." or ".." is
 #       OUT OF CONTRACT (no special handling); callers must not pass such chains.
 #
-#   hivemind_remove_inputs_file <raw_repo_root> <inputs_file_path> <kind>
+#   hivemind_check_inputs_leaf <leaf> <kind>...
+#     Returns 0 when <leaf> is <kind>-inputs-<token>.json for one of the kinds, <token> 1 to 64
+#     characters of [A-Za-z0-9-], and 1 otherwise. The pr body file
+#     (pr-inputs-<token>-body.json) is the same form, its token being <token>-body. Prints
+#     nothing. Never exits.
+#
+#   hivemind_inputs_path_problem <base_dir> <path> <kind>...
+#     The one inputs-path rule. <base_dir> is the working directory the path belongs to; every
+#     check is anchored on it, never on the checkout top.
+#     On success: prints nothing and returns 0.
+#     On failure: prints exactly one word and returns 1. Checked in this order, first failure wins:
+#       control-byte          <base_dir> or <path> holds a control byte.
+#       dir-not-absolute      <base_dir> does not start with `/` (a drive letter form included).
+#       dir-unreadable        cd -P into <base_dir> fails.
+#       path-form             <path> is not `.hivemind/<leaf>`, nor an absolute path ending in
+#                             `/.hivemind/<leaf>`, or it has an empty, `.` or `..` component.
+#       leaf-name             <leaf> fails hivemind_check_inputs_leaf for every <kind>.
+#       outside-dir           the folder above `.hivemind` of an absolute <path> does not
+#                             canonicalize (cd -P && pwd -P) to the canonical <base_dir>.
+#       folder-symlink        <canonical base>/.hivemind is a symlink.
+#       folder-not-directory  <canonical base>/.hivemind exists and is not a folder.
+#       folder-elsewhere      <canonical base>/.hivemind does not canonicalize to itself.
+#       leaf-symlink          the leaf is a symlink, live or dangling.
+#       leaf-not-file         the leaf exists and is not a regular file.
+#     An absent .hivemind passes, and so does an absent leaf. Never exits, runs no top-level
+#     statement, and is safe under `set -e` when called in a condition.
+#
+#   hivemind_remove_inputs_file <raw_repo_root> <start_dir> <inputs_file_path> <kind>
 #     <raw_repo_root>    the git checkout root (e.g. `git rev-parse --show-toplevel`).
-#     <inputs_file_path> the inputs file the engine just read, absolute or relative to the
-#                        caller's working directory.
+#     <start_dir>        the absolute folder the engine was started in, before it moved to the
+#                        top of the work tree.
+#     <inputs_file_path> the inputs file the engine just read, as the caller gave it: absolute,
+#                        or relative to <start_dir>.
 #     <kind>             molt or pr.
 #     Deletes the path only when ALL of these hold:
-#       (1) the leaf name is <kind>-inputs-<token>.json, <token> 1 to 64 characters of
-#           [A-Za-z0-9-] (the same rule as check_inputs_leaf in plugin/hooks/synapse-gate.sh);
-#       (2) <canonical root>/.hivemind is a real folder, not a symlink;
-#       (3) the leaf's folder, canonicalized with cd && pwd -P, is exactly
-#           <canonical root>/.hivemind;
-#       (4) the leaf is not a symlink ([ -L ] first) and is a regular file;
-#       (5) git, run in <canonical root>, lists no index entry for .hivemind/<leaf>. A tracked
+#       (1) hivemind_inputs_path_problem <start_dir> <inputs_file_path> <kind> passes;
+#       (2) the canonical <start_dir> is the canonical root or a folder under it;
+#       (3) the leaf, <canonical start>/.hivemind/<leaf>, is not a symlink ([ -L ] first) and
+#           is a regular file;
+#       (4) git, run in <canonical start>, lists no index entry for .hivemind/<leaf>. A tracked
 #           or staged leaf is checkout content, not a scratch inputs file, so it is kept. When
 #           git cannot answer, the leaf is kept too. The leaf's charset holds no pathspec magic
 #           or glob character, so the plain pathspec is literal.
-#     The delete runs from inside that folder: in a subshell, cd -P, re-check pwd -P, then
-#     rm -f -- ./<leaf>. A symlink or a swapped ancestor that is already in place when the
-#     checks run is refused, so the delete never follows it.
+#     The delete runs from inside <canonical start>/.hivemind: in a subshell, cd -P, re-check
+#     pwd -P, then rm -f -- ./<leaf>. A symlink or a swapped ancestor that is already in place
+#     when the checks run is refused, so the delete never follows it.
 #     THREAT MODEL: the checks and the rm each go by pathname, so they are not bound to the
 #     file the engine read. A program running as the same user that swaps the leaf or
 #     .hivemind between the checks and the rm can get a different file of the same name
@@ -410,16 +437,158 @@ hivemind_assert_inputs_contained() {
   return 0
 }
 
-# hivemind_remove_inputs_file <raw_repo_root> <inputs_file_path> <kind>
-# Deletes an engine's own inputs file after the engine has read it: an untracked regular-file leaf named
-# <kind>-inputs-<token>.json directly under a real <canonical root>/.hivemind folder, removed
-# from inside that folder so no symlink is followed. See the header CONTRACT for the rules.
+# hivemind_check_inputs_leaf <leaf> <kind>...
+# Returns 0 when <leaf> is <kind>-inputs-<token>.json for one of the kinds, <token> 1 to 64
+# characters of [A-Za-z0-9-]; 1 otherwise. Prints nothing. Never exits.
+hivemind_check_inputs_leaf() {
+  local leaf_name="$1"
+  shift
+  local kind_name leaf_token
+  for kind_name in "$@"; do
+    case "$leaf_name" in
+      "$kind_name-inputs-"*.json) ;;
+      *) continue ;;
+    esac
+    leaf_token="${leaf_name#"$kind_name-inputs-"}"
+    leaf_token="${leaf_token%.json}"
+    if [ "${#leaf_token}" -lt 1 ] || [ "${#leaf_token}" -gt 64 ]; then
+      continue
+    fi
+    case "$leaf_token" in
+      *[!A-Za-z0-9-]*) continue ;;
+    esac
+    return 0
+  done
+  return 1
+}
+
+# hivemind_inputs_path_problem <base_dir> <path> <kind>...
+# The one inputs-path rule, anchored on <base_dir>. Prints nothing and returns 0 when <path> is
+# allowed; prints one condition word and returns 1 otherwise. See the header CONTRACT for the
+# words and their order. Never exits.
+hivemind_inputs_path_problem() {
+  local base_dir="$1"
+  local inputs_path="$2"
+  shift 2
+
+  case "$base_dir$inputs_path" in
+    *[[:cntrl:]]*)
+      printf '%s\n' control-byte
+      return 1
+      ;;
+  esac
+  case "$base_dir" in
+    /*) ;;
+    *)
+      printf '%s\n' dir-not-absolute
+      return 1
+      ;;
+  esac
+  local canon_base
+  if ! canon_base="$(CDPATH='' cd -P -- "$base_dir" 2>/dev/null && pwd -P)" || [ -z "$canon_base" ]; then
+    printf '%s\n' dir-unreadable
+    return 1
+  fi
+
+  local remaining_path path_component
+  remaining_path="${inputs_path#/}"
+  while :; do
+    path_component="${remaining_path%%/*}"
+    case "$path_component" in
+      '' | . | ..)
+        printf '%s\n' path-form
+        return 1
+        ;;
+    esac
+    case "$remaining_path" in
+      */*) remaining_path="${remaining_path#*/}" ;;
+      *) break ;;
+    esac
+  done
+
+  local leaf_name="${inputs_path##*/}"
+  local folder_path="${inputs_path%/*}"
+  local prefix_dir=""
+  case "$inputs_path" in
+    /*)
+      case "$folder_path" in
+        */.hivemind)
+          prefix_dir="${folder_path%/.hivemind}"
+          [ -n "$prefix_dir" ] || prefix_dir="/"
+          ;;
+        *)
+          printf '%s\n' path-form
+          return 1
+          ;;
+      esac
+      ;;
+    .hivemind/*)
+      if [ "$folder_path" != .hivemind ]; then
+        printf '%s\n' path-form
+        return 1
+      fi
+      ;;
+    *)
+      printf '%s\n' path-form
+      return 1
+      ;;
+  esac
+
+  if ! hivemind_check_inputs_leaf "$leaf_name" "$@"; then
+    printf '%s\n' leaf-name
+    return 1
+  fi
+
+  if [ -n "$prefix_dir" ]; then
+    local canon_prefix
+    canon_prefix="$(CDPATH='' cd -P -- "$prefix_dir" 2>/dev/null && pwd -P)" || canon_prefix=""
+    if [ -z "$canon_prefix" ] || [ "$canon_prefix" != "$canon_base" ]; then
+      printf '%s\n' outside-dir
+      return 1
+    fi
+  fi
+
+  local hivemind_dir="${canon_base%/}/.hivemind"
+  if [ -L "$hivemind_dir" ]; then
+    printf '%s\n' folder-symlink
+    return 1
+  fi
+  if [ ! -e "$hivemind_dir" ]; then
+    return 0
+  fi
+  if [ ! -d "$hivemind_dir" ]; then
+    printf '%s\n' folder-not-directory
+    return 1
+  fi
+  local canon_folder
+  canon_folder="$(CDPATH='' cd -P -- "$hivemind_dir" 2>/dev/null && pwd -P)" || canon_folder=""
+  if [ "$canon_folder" != "$hivemind_dir" ]; then
+    printf '%s\n' folder-elsewhere
+    return 1
+  fi
+  if [ -L "$hivemind_dir/$leaf_name" ]; then
+    printf '%s\n' leaf-symlink
+    return 1
+  fi
+  if [ -e "$hivemind_dir/$leaf_name" ] && [ ! -f "$hivemind_dir/$leaf_name" ]; then
+    printf '%s\n' leaf-not-file
+    return 1
+  fi
+  return 0
+}
+
+# hivemind_remove_inputs_file <raw_repo_root> <start_dir> <inputs_file_path> <kind>
+# Deletes an engine's own inputs file after the engine has read it: an untracked regular-file leaf
+# that hivemind_inputs_path_problem allows against <start_dir>, under a <start_dir> inside the
+# checkout, removed from inside its .hivemind folder so no symlink is followed. See the header
+# CONTRACT for the rules.
 # Returns 0 when it deleted the file, 1 when the path is not one it deletes (left untouched),
 # 2 when the delete failed. Prints reasons on stderr only. Never exits.
 hivemind_remove_inputs_file() {
   local raw_root="$1"
-  local inputs_file_path="$2"
-  local inputs_kind="$3"
+  local start_dir="$2"
+  local inputs_file_path="$3"
+  local inputs_kind="$4"
 
   case "$inputs_kind" in
     molt | pr) ;;
@@ -429,34 +598,9 @@ hivemind_remove_inputs_file() {
       ;;
   esac
 
-  local inputs_leaf inputs_dir
-  case "$inputs_file_path" in
-    */*)
-      inputs_leaf="${inputs_file_path##*/}"
-      inputs_dir="${inputs_file_path%/*}"
-      [ -n "$inputs_dir" ] || inputs_dir="/"
-      ;;
-    *)
-      inputs_leaf="$inputs_file_path"
-      inputs_dir="."
-      ;;
-  esac
-
-  local inputs_token=""
-  case "$inputs_leaf" in
-    "$inputs_kind-inputs-"*.json)
-      inputs_token="${inputs_leaf#"$inputs_kind-inputs-"}"
-      inputs_token="${inputs_token%.json}"
-      ;;
-  esac
-  case "$inputs_token" in
-    '' | *[!A-Za-z0-9-]*)
-      printf 'refusing to delete %s: leaf is not %s-inputs-<token>.json\n' "$inputs_file_path" "$inputs_kind" >&2
-      return 1
-      ;;
-  esac
-  if [ "${#inputs_token}" -gt 64 ]; then
-    printf 'refusing to delete %s: token is longer than 64 characters\n' "$inputs_file_path" >&2
+  local path_problem
+  if ! path_problem="$(hivemind_inputs_path_problem "$start_dir" "$inputs_file_path" "$inputs_kind")"; then
+    printf 'refusing to delete %s: %s\n' "$inputs_file_path" "$path_problem" >&2
     return 1
   fi
 
@@ -465,18 +609,21 @@ hivemind_remove_inputs_file() {
     printf 'refusing to delete %s: failed to canonicalize repo root %s\n' "$inputs_file_path" "$raw_root" >&2
     return 1
   fi
-  local canon_hivemind="$canon_root/.hivemind"
-  if [ -L "$canon_hivemind" ] || [ ! -d "$canon_hivemind" ]; then
-    printf 'refusing to delete %s: %s is not a real folder\n' "$inputs_file_path" "$canon_hivemind" >&2
+  local canon_start
+  if ! canon_start="$(hivemind_canon_root "$start_dir")"; then
+    printf 'refusing to delete %s: failed to canonicalize start folder %s\n' "$inputs_file_path" "$start_dir" >&2
     return 1
   fi
+  case "${canon_start%/}/" in
+    "${canon_root%/}/"*) ;;
+    *)
+      printf 'refusing to delete %s: start folder %s is outside the checkout\n' "$inputs_file_path" "$canon_start" >&2
+      return 1
+      ;;
+  esac
 
-  local canon_inputs_dir
-  canon_inputs_dir="$(CDPATH='' cd -- "$inputs_dir" 2>/dev/null && pwd -P)"
-  if [ "$canon_inputs_dir" != "$canon_hivemind" ]; then
-    printf 'refusing to delete %s: its folder is not %s\n' "$inputs_file_path" "$canon_hivemind" >&2
-    return 1
-  fi
+  local inputs_leaf="${inputs_file_path##*/}"
+  local canon_hivemind="${canon_start%/}/.hivemind"
   if [ -L "$canon_hivemind/$inputs_leaf" ] || [ ! -f "$canon_hivemind/$inputs_leaf" ]; then
     printf 'refusing to delete %s: not a regular file\n' "$inputs_file_path" >&2
     return 1
@@ -484,7 +631,7 @@ hivemind_remove_inputs_file() {
   # A tracked or staged leaf is checkout content, never a scratch inputs file: keep it. The leaf
   # passed the [A-Za-z0-9-] token rule above, so this plain pathspec is literal.
   local tracked_entry
-  if ! tracked_entry="$(git -C "$canon_root" ls-files --cached -- ".hivemind/$inputs_leaf" 2>/dev/null)"; then
+  if ! tracked_entry="$(git -C "$canon_start" ls-files --cached -- ".hivemind/$inputs_leaf" 2>/dev/null)"; then
     printf 'refusing to delete %s: git could not tell whether it is tracked\n' "$inputs_file_path" >&2
     return 1
   fi

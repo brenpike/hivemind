@@ -7,7 +7,8 @@
 # The engine takes REQUIRED `--head <branch> --base <branch> --expect-commit <sha> --inputs <path>
 # --body-file <path>` plus optional `--remote <name>`. It gates the identifiers, reads the inputs
 # file and the body file once each (after the containment read-guard and the same-file check),
-# deletes each right after its read when it is a .hivemind/pr-inputs-<token>.json leaf, and
+# deletes each right after its read when it is a .hivemind/pr-inputs-<token>.json leaf in the
+# folder it was started in, and
 # checks the fields and the body, refuses gh missing, an
 # in-progress operation, unmerged paths, a dirty tree and a failed open-PR lookup, then pushes
 # through push-branch.sh, reuses the open PR on the pushed commit (re-reading to absorb head SHA
@@ -1593,6 +1594,9 @@ EOF
 
 # ── Subfolder invocation ────────────────────────────────────────────────────
 
+# A subfolder run reads relative inputs and body paths from the subfolder. The subfolder's own
+# .hivemind/<leaf> files are deleted after the reads; ../.hivemind/<leaf>, the top's files, are
+# read and kept.
 test_subfolder_invocation() {
     create_world subfolder
     stub_respond pr-list '' '[]'
@@ -1600,8 +1604,29 @@ test_subfolder_invocation() {
     assert_success subfolder "$WORK_TREE/sub" "$(expected_block true)" \
         --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "../$INPUTS_REL" --body-file "../$BODY_REL"
     assert_branch_pushed subfolder-pushed
-    assert_inputs_present subfolder-inputs-deleted "$INPUTS_PATH" no
-    assert_inputs_present subfolder-body-deleted "$BODY_PATH" no
+    assert_inputs_present subfolder-parent-inputs-kept "$INPUTS_PATH" yes
+    assert_inputs_present subfolder-parent-body-kept "$BODY_PATH" yes
+
+    create_world subfolder-own-hivemind
+    mkdir -p "$WORK_TREE/sub/.hivemind"
+    mv "$INPUTS_PATH" "$WORK_TREE/sub/$INPUTS_REL"
+    mv "$BODY_PATH" "$WORK_TREE/sub/$BODY_REL"
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    assert_success subfolder-own-hivemind "$WORK_TREE/sub" "$(expected_block true)" \
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL"
+    assert_branch_pushed subfolder-own-hivemind-pushed
+    assert_inputs_present subfolder-own-hivemind-inputs-deleted "$WORK_TREE/sub/$INPUTS_REL" no
+    assert_inputs_present subfolder-own-hivemind-body-deleted "$WORK_TREE/sub/$BODY_REL" no
+    assert_equal subfolder-own-hivemind-body "${DEFAULT_BODY}x" "$(cat "$GH_STUB_DIR/pr-create.1.body"; printf 'x')" "subfolder body passed verbatim"
+
+    create_world subfolder-top-absolute
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    assert_success subfolder-top-absolute "$WORK_TREE/sub" "$(expected_block true)" \
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_PATH" --body-file "$BODY_PATH"
+    assert_inputs_present subfolder-top-absolute-inputs-kept "$INPUTS_PATH" yes
+    assert_inputs_present subfolder-top-absolute-body-kept "$BODY_PATH" yes
 
     create_world subfolder-relative
     assert_refused_unchanged subfolder-relative-to-start "$WORK_TREE/sub" "$INPUTS_MISSING_REASON" \
