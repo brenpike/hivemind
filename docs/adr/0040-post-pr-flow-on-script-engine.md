@@ -95,7 +95,7 @@ PR2, PR3 and PR4 touch disjoint files and can proceed in parallel.
 ## Recorded residuals
 
 - **F1 stays a known limit (D1).** The overlord may still skip the workflow's `message` before the watch. The bounded impact ADR-0037 records stands: the user still sees the PR and the watch report.
-- **GitHub writes from a workflow agent are untested until PR6 (edge case c).** A failed check holds go-live and amends this ADR. *(2026-11-12: the check is now one supervised run in auto mode. See Amendment 2026-11-12.)* *(2026-11-12: the run passed. Push and PR comment completed; reply and resolve were not exercised. See Amendment 2026-11-12, Result.)*
+- **GitHub writes from a workflow agent are untested until PR6 (edge case c).** A failed check holds go-live and amends this ADR. *(2026-11-12: the check is now one supervised run in auto mode. See Amendment 2026-11-12.)* *(2026-11-12: the run passed. Push and PR comment completed; reply and resolve were not exercised. See Amendment 2026-11-12, Result.)* *(2026-11-13: reply and resolve were later refused in auto mode. See Amendment 2026-11-13.)*
 - **R4 grows (edge case d).** open-plan-pr's R4 now covers at most one decisions comment per remediation run that took a decision.
 - **A No at the approval prompt ends the turn (edge case e).** Nothing falls back in that turn. The user restarts the watch.
 - **The hand-off drops a non-default reviewer filter.** The fix pass uses `automated`. That is the same as the watch default, so the default path loses nothing. Only a watch started with a different filter (`all`, `codex-only`, or a named author) can miss the escalating thread. The fix pass may then end clean while that thread stays open. Workaround: ask for a one-shot fix on the PR that names the filter. User decision 2026-11-12. See Amendment 2026-11-12 (reviewer filter).
@@ -256,11 +256,11 @@ This amendment replaces the method of edge case (c). The edge case's text stays 
 
 **Writes attempted, both completed.** `git push` of commits `1d214b53` and `59675c20` through the push script (PR head `59675c20`). The `gh` PR comment carrying the decisions.
 
-**Not exercised.** Review-thread reply and resolve (`reply-resolve.sh`). The escalation path does not reply or resolve, so the Codex thread stayed unresolved for the watch.
+**Not exercised.** Review-thread reply and resolve (`reply-resolve.sh`). The escalation path does not reply or resolve, so the Codex thread stayed unresolved for the watch. *(2026-11-13: since exercised in the PR 566 watch, and refused in auto mode. See Amendment 2026-11-13.)*
 
 **Denials and blocks.** None: no permission prompt, no denial, no auto-mode block. One hook deny came from the plugin's own `synapse-gate` (the `bump-type.sh` exact-form rule) on a malformed call, which the agent corrected. It is a command-format guard, not a permission denial.
 
-**Residual.** Reply and resolve from a workflow agent in auto mode are unproven. If the auto-mode classifier blocks them, the thread stays unresolved and the run ends blocked with the denial shown. The opt-out is `Workflow(hivemind:pr-feedback-remediation)` in `permissions.deny`.
+**Residual.** Reply and resolve from a workflow agent in auto mode are unproven. If the auto-mode classifier blocks them, the thread stays unresolved and the run ends blocked with the denial shown. The opt-out is `Workflow(hivemind:pr-feedback-remediation)` in `permissions.deny`. *(2026-11-13: this happened, to the watch's reviewer. See Amendment 2026-11-13.)*
 
 ## Amendment 2026-11-12: local review finding 4ffc2b81, the head-branch checkout keeps the loaded shell rule
 
@@ -386,3 +386,28 @@ Superseded in part by Amendment 2026-11-12: the reviewer's question is never cut
 **Repeat findings.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks to cut, truncate or move the pinned question back into the lead, or to put it in the brief, contests this record and is a repeat.
 
 **Prose budgets and builds.** Built `pr-feedback-remediation.js` length is 175807 of 190000, prose 38077 of the 38200 budget. Built `standard-delivery.js` length is 189856 of 190000, prose 41810. `analysis-only.js` is rebuilt, with a new `BUILD_ID` and the lib refactor. All three `BUILD_ID` values change, so a run paused on an old build cannot resume. No budget raise.
+
+## Amendment 2026-11-13: reply and resolve were refused in auto mode (issues 567, 568)
+
+This amendment updates the Result of the go-live permission check (Amendment 2026-11-12, Result). The verdict stands: the pass was the user's call at the time, on the evidence then.
+
+**What happened (issue 567).** In the post-PR watch of PR 566 (https://github.com/brenpike/hivemind/pull/566), the server-side auto-mode classifier refused the cycle-0 `github-reviewer`'s call of `reply-resolve.sh` with `--resolve-eligible`. The denial read: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: The server-side auto mode classifier judged this action dangerous (it gave no explanation)." The same call form had passed earlier in the session. The fix was committed, pushed and validated, but the thread got no reply and was not resolved. The reviewer returned `blocked`, and the watch ended. https://github.com/brenpike/hivemind/issues/567.
+
+**What it changes.** Reply and resolve are now exercised in auto mode, and they can be refused. So the Result's residual happened. The refused call came from the watch's reviewer in the main session, not from a workflow agent, but the call form and the classifier are the same.
+
+**Non-productive passes (issue 568).** In the same PR's watch, Codex posted comment 6844290352, a review receipt reading "Didn't find any major issues", on head 38e8582f. Two fix passes ran on it. Both returned `clean` with `findings_resolved: 0`, and the reviewer classified the two Codex bot comments as noise. A comment skipped as noise got no `EYES` marker, so `fix-history-classify.jq` still counted it as actionable, and every `CHANGED` wake dispatched it again. The watch ran until its idle window elapsed. https://github.com/brenpike/hivemind/issues/568.
+
+**This PR's fixes.**
+
+- **A refused write asks (issue 567).** When Claude Code refuses the reviewer's Bash call of `push-branch.sh`, `reply-resolve.sh` or `react-marker.sh` (a permission or auto-mode denial, so the script never ran), the reviewer makes no further GitHub write that pass. It returns `user-input-required` with `escalation_target: permission` and a question opening `Permission refused:`. The question names the fix SHA, if any, and the rule `Bash(bash "<the script's full path>" *)` to add to `permissions.allow` in `.claude/settings.local.json`. A retry reply reruns the refused call and the step-8 calls still owed. A declining reply returns `blocked`. The overlord's Question gate and the script engine's fix-pass pause already pause on this exit (the 2026-11-12 amendments above), so no workflow is rebuilt. Text: `plugin/agents/github-reviewer.md`, step 8. Pin: `tests/policy/safety-review-permission-question.json`.
+- **Skipped bot noise is marked (issue 568).** Under `reviewer_filter` `automated` or `codex-only`, the reviewer marks each Bot `toplevel` or `review` comment it skips as noise with its own viewer-scoped `EYES` reaction, through `react-marker.sh`. The next wake's prefilter then prints `PREFILTER_SKIP`. Text: `plugin/agents/github-reviewer.md`, steps 4 and 8. Tests: `tests/fix-history/case25-codex-no-major-issues-passed-over.json`, `tools/test_fix_history_classify.sh`, `tools/test_prefilter.sh`. Pin: `tests/policy/safety-review-noise-marker.json`.
+- **Allow rules stay per machine.** The README documents one allow rule per script for the user's `.claude/settings.local.json`. The plugin ships no allow for these calls. The decision and its reasons are in ADR-0010 (`docs/adr/0010-permission-allowlist-posture.md`, Amendment 2026-11-13).
+
+Commit 326bf2fd.
+
+**Run decisions.** Decided by the run, not the user, under `plugin/governance/decision-autonomy.md`:
+
+- **Q2, option A.** A refusal reuses the existing `user-input-required` exit with `escalation_target: permission`, not a new exit, because both pause paths already pause on it.
+- **Q3, option A.** The reviewer marks skipped Bot noise with `EYES`, not a wider handled signal in `fix-history-classify.jq`, because the marker covers any Bot comment the reviewer judges noise, not only the comment shapes on an allowlist.
+
+**Not changed.** Edge case (c), the Result's verdict and its other paragraphs stand as written.
