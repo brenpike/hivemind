@@ -1,0 +1,31 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "totalCount": 0,
+          "nodes": []
+        },
+        "comments": {
+          "totalCount": 1,
+          "nodes": [
+            {
+              "id": "IC_kwDOcase25comment2500",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "Codex Review: Didn't find any major issues. Hooray!\n\nAbout Codex in GitHub\n",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2500",
+              "reactionGroups": [ { "content": "EYES", "viewerHasReacted": true } ]
+            }
+          ]
+        },
+        "reviews": {
+          "totalCount": 0,
+          "nodes": []
+        }
+      }
+    }
+  }
+}

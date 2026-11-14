@@ -12,7 +12,9 @@
 # addPullRequestReviewThreadReply has no valid target (the #218 defect). Instead a
 # fixed surface is recorded handled by adding a self-authored EYES (👀) reaction to
 # the reviewer's own comment/review node; the classifier harvest keys on that exact
-# reaction to skip the surface on the next poll.
+# reaction to skip the surface on the next poll. The same marker also records a
+# Bot-authored non-thread comment the reviewer skipped as noise (reviewer_filter
+# automated or codex-only).
 #
 # This script OWNS the runtime reaction mutation. The mutation it issues is the
 # canonical template from

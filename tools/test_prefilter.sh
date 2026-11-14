@@ -62,8 +62,10 @@ SELF_LOGIN="selfuser"
 
 CASE01="$FIXTURES/case01-handled-by-marker.json"
 CASE04="$FIXTURES/case04-no-self-fix-thread.json"
+CASE25="$FIXTURES/case25-codex-no-major-issues-passed-over.json"
 [ -f "$CASE01" ] || { echo "FAIL: fixture missing: $CASE01" >&2; exit 2; }
 [ -f "$CASE04" ] || { echo "FAIL: fixture missing: $CASE04" >&2; exit 2; }
+[ -f "$CASE25" ] || { echo "FAIL: fixture missing: $CASE25" >&2; exit 2; }
 
 # ── PATH-shim fake gh ───────────────────────────────────────────────────────────────
 # Prints the file named by FAKE_GH_BODY (CR stripped) and exits with FAKE_GH_EXIT.
@@ -144,6 +146,16 @@ run_case "shape:null-comments-nodes" "$NULL_COMMENTS_NODES" 0 "PREFILTER_ERROR=g
 run_case "shape:null-thread-comments-nodes" "$NULL_THREAD_COMMENTS_NODES" 0 "PREFILTER_ERROR=graphql-missing-connection" 1
 run_case "shape:valid-empty-skips" "$VALID_EMPTY" 0 "PREFILTER_SKIP" 0
 run_case "shape:errors-over-null-pr" "$ERRORS_OVER_NULL_PR" 0 "PREFILTER_ERROR=graphql-errors" 1
+
+# ── Codex no-major-issues comment passed over by a self EYES reaction ────────────
+NO_EYES="$(derive_body case25-no-eyes \
+  'del(.data.repository.pullRequest.comments.nodes[0].reactionGroups[])' "$CASE25")" || exit 2
+EYES_NOT_VIEWER="$(derive_body case25-eyes-not-viewer \
+  '.data.repository.pullRequest.comments.nodes[0].reactionGroups[0].viewerHasReacted = false' "$CASE25")" || exit 2
+
+run_case "codex-no-major:eyes-reacted-skips" "$CASE25" 0 "PREFILTER_SKIP" 0
+run_case "codex-no-major:no-eyes-dispatches" "$NO_EYES" 0 "PREFILTER_DISPATCH" 0
+run_case "codex-no-major:eyes-not-viewer-dispatches" "$EYES_NOT_VIEWER" 0 "PREFILTER_DISPATCH" 0
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
 echo
