@@ -17,6 +17,13 @@
 #                                                                   the failed condition word
 #   anything else                                                   no decision
 #
+# BROKEN INSTALL: when allowlist.sh or containment.sh loads but does not define a function this
+# hook calls (hivemind_assert_identifier; hivemind_check_inputs_leaf, hivemind_inputs_path_problem),
+# every Bash or Write from hivemind:synapse, and every Bash from any agent that names a runner
+# script file, exact form included, is denied. The reason names the library and the missing
+# function, says to reinstall or update the plugin, and ends with the condition word
+# library-incomplete. Every other call gets no decision.
+#
 # WRITE RULE: the one inputs-path rule in skills/_shared/containment.sh, anchored on the input cwd,
 # the working folder synapse runs in, never the checkout top. The path is
 # .hivemind/<molt|pr>-inputs-<token>.json, relative to the cwd or absolute with its folder above
@@ -44,7 +51,8 @@
 # directly before or after it.
 #
 # FAIL OPEN, NEVER TOWARD AN ALLOW OF ITS OWN: missing jq, an empty or non-absolute CLAUDE_PLUGIN_ROOT,
-# a missing or unparseable allowlist.sh or containment.sh, or malformed input prints nothing and
+# a missing or unparseable allowlist.sh or containment.sh (one that loads without a needed
+# function is a BROKEN INSTALL, above), or malformed input prints nothing and
 # exits 0, so the normal permission flow applies. A settings allow rule that covers the call then applies with none of these checks;
 # the seeded inputs-file rules do so for synapse's Write (security-policy.md, Synapse Runner Gate). The EXIT trap turns any other non-zero exit into 1. This hook never exits 2, because
 # exit 2 blocks the tool call. A decision is printed only as the last step.
@@ -328,6 +336,21 @@ esac
 [ -f "$plugin_root/skills/_shared/containment.sh" ] || exit 0
 . "$plugin_root/skills/_shared/containment.sh" || exit 0
 
+# require_library_functions <library> <function>...
+#   Sets library_problem, unless already set, to the first <function> the sourced
+#   skills/_shared/<library> did not define. Both values are fixed strings of this hook.
+library_problem=''
+require_library_functions() {
+  local library_name="$1" function_name
+  shift
+  for function_name in "$@"; do
+    [ -z "$library_problem" ] || return 0
+    declare -F "$function_name" >/dev/null || library_problem="skills/_shared/$library_name does not define $function_name"
+  done
+}
+require_library_functions allowlist.sh hivemind_assert_identifier
+require_library_functions containment.sh hivemind_check_inputs_leaf hivemind_inputs_path_problem
+
 quoted_path_allowed=yes
 case "$plugin_root" in
   *'"'* | *'$'* | *'`'* | *'\'* | *[[:cntrl:]]*) quoted_path_allowed=no ;;
@@ -345,6 +368,16 @@ input_fields_program='def text: if type == "string" then explode | map(if . == 0
 input_json=''
 IFS= read -r -d '' input_json || true
 read_input_fields || exit 0
+
+if [ -n "$library_problem" ]; then
+  case "$tool_name" in
+    Bash) [ "$agent_type" = "$gate_agent_type" ] || find_named_script "$first_value" || exit 0 ;;
+    Write) [ "$agent_type" = "$gate_agent_type" ] || exit 0 ;;
+    *) exit 0 ;;
+  esac
+  emit_decision deny "synapse-gate: the hivemind plugin install is incomplete: $library_problem, a function this hook needs. Reinstall or update the hivemind plugin, then retry; failed condition: library-incomplete"
+  exit 0
+fi
 
 case "$tool_name" in
   Bash)

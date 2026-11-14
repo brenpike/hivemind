@@ -510,6 +510,49 @@ else
   failed 'fail-open:unparseable-containment' "status=$hook_status output=$hook_output"
 fi
 
+# ── broken install: a library that loads without a function the hook calls ───────
+# expect_library_incomplete <id> <root> <input> <library> <function>: check a deny whose reason
+# names the library and function, says to reinstall, ends with library-incomplete and echoes
+# neither the command nor the cwd.
+expect_library_incomplete() {
+  local deny_reason
+  expect_decision "library-incomplete:$1" deny "$2" "$3"
+  deny_reason="$(read_reason)"
+  case "$deny_reason" in
+    "synapse-gate: the hivemind plugin install is incomplete: skills/_shared/$4 does not define $5, "*"Reinstall or update the hivemind plugin"*"; failed condition: library-incomplete") ;;
+    *)
+      failed "library-incomplete-reason:$1" "reason=$deny_reason"
+      return 0
+      ;;
+  esac
+  case "$deny_reason" in
+    *"$WORK_ROOT"*) failed "library-incomplete-reason:$1" "reason echoes the input: $deny_reason" ;;
+    *) pass "library-incomplete-reason:$1" "$4 $5" ;;
+  esac
+}
+
+# Rows: library|function the stub library leaves out.
+INCOMPLETE_CASES=(
+  "allowlist.sh|hivemind_assert_identifier"
+  "containment.sh|hivemind_check_inputs_leaf"
+  "containment.sh|hivemind_inputs_path_problem"
+)
+for case_row in "${INCOMPLETE_CASES[@]}"; do
+  missing_library="${case_row%%|*}"
+  missing_function="${case_row#*|}"
+  INCOMPLETE_ROOT="$(make_root "incomplete-$missing_function")"
+  printf '%s() { :; }\n' $(sed -n 's/^\(hivemind_[a-z_]*\)() {$/\1/p' "$INCOMPLETE_ROOT/skills/_shared/$missing_library" | grep -vx "$missing_function") \
+    >"$INCOMPLETE_ROOT/skills/_shared/$missing_library"
+  INCOMPLETE_EXACT="bash \"$(script_path "$INCOMPLETE_ROOT" molt)\" $MOLT_ARGS"
+  expect_library_incomplete "$missing_function:synapse-exact" "$INCOMPLETE_ROOT" "$(bash_input "$SYNAPSE" "$INCOMPLETE_EXACT")" "$missing_library" "$missing_function"
+  expect_library_incomplete "$missing_function:synapse-other" "$INCOMPLETE_ROOT" "$(bash_input "$SYNAPSE" 'ls -la')" "$missing_library" "$missing_function"
+  expect_library_incomplete "$missing_function:drone-exact" "$INCOMPLETE_ROOT" "$(bash_input "$DRONE" "$INCOMPLETE_EXACT")" "$missing_library" "$missing_function"
+  expect_library_incomplete "$missing_function:lookalike" "$INCOMPLETE_ROOT" "$LOOKALIKE_INPUT" "$missing_library" "$missing_function"
+  expect_library_incomplete "$missing_function:synapse-write" "$INCOMPLETE_ROOT" "$(write_input "$SYNAPSE" .hivemind/molt-inputs-a.json "$CHECKOUT")" "$missing_library" "$missing_function"
+  expect_decision "library-incomplete:$missing_function:drone-unrelated" none "$INCOMPLETE_ROOT" "$(bash_input "$DRONE" 'ls -la')"
+  expect_decision "library-incomplete:$missing_function:drone-write" none "$INCOMPLETE_ROOT" "$(write_input "$DRONE" .hivemind/molt-inputs-a.json "$CHECKOUT")"
+done
+
 if bash -n "$HOOK" 2>/dev/null; then
   pass 'hook:parses' 'bash -n'
 else
