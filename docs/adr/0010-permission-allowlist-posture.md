@@ -377,6 +377,9 @@ This amendment changes the posture of Amendment 2026-11-13 for the `github-revie
 - **README rules removed.** The README no longer documents per-machine allow rules for these calls.
 - **The refusal question is now the fallback.** The #573 permission-refused question is unchanged (Amendment 2026-11-13; ADR-0040, Amendment 2026-11-13). It now covers a call the skill grant does not reach.
 - **No hook and no seed rule.** No PreToolUse hook allows these calls. seed-hive writes no rule for them.
+- **PR binding.** `reply-resolve.sh` and `react-marker.sh` each check the target right before their first live write. Each reads the current branch and the GitHub id of the origin push repository. Each looks up the target node. It writes only when the node is the surface's type on an OPEN PR whose head is that branch in that repository. A target that fails this check is refused with `pr-binding-refused`. A missing branch or a failed lookup fails closed with `pr-binding-no-branch` or `pr-binding-lookup-failed`. The capture seam skips the binding because it writes nothing. The reviewer returns `blocked` on a `pr-binding-*` failure from `reply-resolve.sh`. A `react-marker.sh` refusal is a `marker-write-failed` block.
+
+**User decision 2026-11-14: the PR binding (local review finding 485216bdc9a2daa5d278bdf1df4779e29602a68345f062e5bfbea0557e3ac907).** The user chose option B, the PR binding above. Not chosen: option A, accept the grant as-is, and option C, drop the reply and reaction scripts from the grant. The binding does not check who calls the script. It does not bind the target to the candidate set the reviewer scanned. This is a recorded decision under plugin/governance/remediation-doctrine.md (Recorded Decisions and Repeat Findings). A later finding that asks for a caller check or a candidate-set binding, without showing a write outside the bound PR, is a repeat.
 
 **Why a skill.**
 
@@ -421,5 +424,7 @@ This amendment changes the posture of Amendment 2026-11-13 for the `github-revie
 - Whether a later skill invocation in the same turn keeps this grant is untested. The skill text says no other skill invocation may come between the grant and the writes.
 - In auto mode the classifier judges the Skill call itself.
 - Managed `allowManagedPermissionRulesOnly`, `autoMode.classifyAllShell`, and deny and ask rules defeat the grant. A refused call then asks.
-- Any agent that invokes the skill gets the grant for its turn. The grant is bounded by the exact script paths, the scripts' input gates, the fixed reply bodies, GitHub writes that can be reversed and push-branch's refusals.
+- Any agent that invokes the skill gets the grant for its turn. The grant is bounded by the exact script paths, the scripts' input gates, the PR binding, GitHub writes that can be reversed and push-branch's refusals.
+- The reply bodies are `Fixed in <SHA>. <summary>.` and the defer body. Each holds a free-text summary the caller writes. So an agent that invokes the skill can still post a misleading summary, resolve a thread or add `EYES` on the bound PR. Each of these is visible and can be reversed.
+- The PR binding reads local git state: the current branch and the origin push URL. Only commands outside the grant can change that state.
 - The fallback rule the refusal question names still holds a versioned path. It goes stale after each plugin update, as Amendment 2026-11-13 records.
