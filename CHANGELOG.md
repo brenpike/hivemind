@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [8.0.2] - 2026-11-14
+
+### Fixed
+
+- When Claude Code refuses the GitHub reviewer's `push-branch.sh`, `reply-resolve.sh` or `react-marker.sh` call (a permission or auto-mode refusal), the reviewer now stops and asks the user with `user-input-required` (`escalation_target: permission`), naming the exact `Bash(bash "<script path>" *)` allow rule to add, and retries on the reply, instead of ending the watch blocked. The README documents the per-machine allow rules for the three scripts. ADR-0040 and ADR-0010 record the refusal and the decision (no plugin-side allow) (#567). No workflow script was rebuilt.
+
 ## [8.0.1] - 2026-11-13
 
 ### Fixed

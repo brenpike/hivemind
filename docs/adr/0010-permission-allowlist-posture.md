@@ -324,3 +324,44 @@ Verified 2026-10-31 (headless test, issue 455). Verdict: PASS for the rule match
 - **Case L (same symlink, logical rule only).** Read and Grep through the logical path rejected, `reasonCode: workingDir`. One rule is not enough for a symlinked path, as the permissions docs say, and spawn-brood's second rule is load-bearing.
 
 Not covered: the auto-mode first-read prompt (see above), and a live spawn-brood run in tmux. The stub cases of `tools/test_brood_compat.sh` Assertion 9a pin the file content and the launch command; this record pins what Claude Code does with them on 2.1.314. A Claude Code release that changes rule matching or `--settings` resolution needs this check run again.
+
+## Amendment 2026-11-13: review-loop GitHub writes keep per-machine allow rules (issue 567)
+
+This amendment records the permission posture for the `github-reviewer`'s GitHub-writing script calls after the auto-mode refusal recorded in ADR-0040 (`docs/adr/0040-post-pr-flow-on-script-engine.md`, Amendment 2026-11-13). Decisions 1 to 6 are unchanged: no seed rule and no plugin-side allow is added.
+
+**Cause.** The reviewer runs `reply-resolve.sh`, `react-marker.sh` and `push-branch.sh`. No allow rule in the plugin or the seed template matches those calls, so in auto mode the classifier decides each one. On PR 566 it refused a `reply-resolve.sh` call it had passed earlier in the same session, with no explanation, and the watch ended blocked (https://github.com/brenpike/hivemind/issues/567).
+
+**Decision (user choice, Q1 option B, 2026-11-13).**
+
+- The README documents the per-machine allow rules, one per script, in the form `Bash(bash "<plugin root>/skills/<skill>/scripts/<script>.sh" *)` with each script's own path (`github-review-loop` for `reply-resolve.sh` and `react-marker.sh`, `push-branch` for `push-branch.sh`), for `permissions.allow` in the gitignored `.claude/settings.local.json`.
+- A refusal asks. The reviewer returns `user-input-required` with `escalation_target: permission` and a question that names the exact rule (ADR-0040, Amendment 2026-11-13; `plugin/agents/github-reviewer.md`, step 8).
+- The plugin ships no allow for these calls.
+
+**Documented facts relied on.** Read 2026-11-13 from the official docs. They are documented, not verified live in this repository, except where Evidence below says so.
+
+- **A matching allow rule resolves before the classifier.** In auto mode each action goes through a fixed order, and the first matching step wins. At step 1, actions that match an allow, ask or deny rule resolve at once, with listed exceptions such as writes to protected paths and critical-path removals. At step 3, everything else goes to the classifier (https://code.claude.com/docs/en/permission-modes, "How the classifier evaluates actions").
+- **Auto mode drops broad allow rules.** On entering auto mode, broad allow rules that grant arbitrary code execution are dropped: blanket `Bash(*)`, wildcarded interpreters like `Bash(python*)`, package-manager run commands, and `Agent` and `Monitor` rules. Narrow rules stay (same page and section). The docs do not name `Bash(bash *)`. This ADR reads it as a wildcarded interpreter rule. With `autoMode.classifyAllShell: true`, auto mode suspends every Bash allow rule (https://code.claude.com/docs/en/auto-mode-config, "Route all shell commands through the classifier").
+- **A blocked action can be approved once.** A blocked action is listed under `/permissions`, **Recently blocked** tab, where the user can approve it so Claude may retry (permission-modes docs, "When auto mode falls back"). Approving adds no permission rule, and a retried action is checked again. A call blocked with no classifier verdict has no row there (auto-mode-config docs, "Review denials").
+- **Repeated blocks fall back to prompting.** After 3 blocks in a row or 20 in total, auto mode pauses and Claude Code resumes prompting (permission-modes docs, "When auto mode falls back" and "Repeated-block thresholds").
+- **A PreToolUse hook allow skips the prompt, and deny and ask rules still apply.** The hooks docs say `"allow"` "skips the permission prompt, except for actions no mode auto-approves and reads from network paths", and "Deny and ask rules are still evaluated regardless of what the hook returns" (https://code.claude.com/docs/en/hooks, "PreToolUse decision control"). The page does not say whether a hook allow overrides the auto-mode classifier.
+- **A plugin cannot ship allow rules.** The `plugin.json` fields table has no permissions field, and an unrecognized top-level field is stripped (https://code.claude.com/docs/en/plugins-reference, "Fields" and "Unrecognized fields"). `${CLAUDE_PLUGIN_ROOT}` is the absolute path of the plugin's installed version, and it changes when the plugin updates ("Environment variables").
+
+**Evidence.**
+
+- ADR-0037 (`docs/adr/0037-standard-delivery-on-script-engine.md`, Local review finding 6bc3a379): a live spike on Claude Code 2.1.314 matched a quoted settings allow rule against a quoted command, with no prompt, in default and in auto mode, and a path with a space stayed intact. It did not test grants in subagents or workflow agents, where the reviewer runs.
+- U2 of Amendment 2026-10-29: in auto mode a plugin hook allow decided the probe call, but the transcript could not show whether the classifier was also called and overruled.
+
+**Considered and rejected.**
+
+- **A: a plugin PreToolUse hook that allows these calls.** The docs do not confirm that a hook allow wins over the server-side auto-mode classifier review, and U2 could not show it. It would also remove the prompt in every permission mode, not only in auto mode, and it adds a new command-parser surface to the hook. It may be reconsidered after a supervised live check proves a hook allow passes these calls through server-side review.
+- **C: seed-hive writes the per-machine rules.** Amendment 2026-10-23 (Closed) rejected seeded plugin paths: a per-machine plugin path goes stale at each plugin update, and the settings merge never removes an entry.
+
+**Residuals.**
+
+- The rule's path holds the plugin version, so it goes stale after each plugin update. A stale rule matches nothing, and the call goes back to the classifier. A `*` in place of the version keeps the rule current, but it also matches a path that climbs out with `..`.
+- A settings edit made mid-session may need a reload before it applies. Not verified.
+- A call blocked with no classifier verdict has no **Recently blocked** row, so it cannot be approved there.
+- Each of the three calls, the `push-branch.sh` push included, still goes through the classifier unless the user adds its rule. A refusal now asks.
+- The question text is written by the reviewer, so compare the rule it names with the README's exact rules before adding it.
+- With `autoMode.classifyAllShell: true`, the rules have no effect in auto mode.
+- Not verified live: the settings rule's match for a call from a subagent or a workflow agent.
