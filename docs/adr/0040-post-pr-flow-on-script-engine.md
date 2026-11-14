@@ -423,3 +423,41 @@ This amendment supersedes the bullet "Allow rules stay per machine" of Amendment
 - The refusal route is unchanged. A refused write still asks, as in Amendment 2026-11-13. It is now the fallback.
 - No workflow script is rebuilt.
 - Verification is pending, per ADR-0010, Amendment 2026-11-14.
+
+## Amendment 2026-11-14: one handled-marker rule for every automated reviewer (issue 568)
+
+This amendment records the redesign of issue 568 that Amendment 2026-11-13 split out. https://github.com/brenpike/hivemind/issues/568.
+
+**User decision 2026-11-14.** The user said: "I don't want to make more reviewer specific stuff built in... it should work for codex, copilot, and other automated reviewers as well." The earlier design, a noise mark checked against the Codex author, is dropped. One rule now covers every automated reviewer the active `reviewer_filter` admits.
+
+**Run decisions.**
+
+- **D1. The author check is at the write.** `react-marker.sh --noise "$reviewer_filter"` marks a `toplevel` or `review` candidate skipped as noise. It reads the author GitHub reports for the node and requires `is_bot` and `reviewer_matches_filter` from `reviewer-identity.jq`. Otherwise it exits `noise-author-refused` and sends no mutation. Candidate records get no author flag. Text: `plugin/skills/github-review-loop/scripts/react-marker.sh`, and `plugin/agents/github-reviewer.md` step 8.
+- **D2. An edit reopens a marked node.** `fix-history-classify.jq` counts our `EYES` mark only while the node is unchanged since marked. `lastEditedAt` must be null, or strictly earlier than the `createdAt` of our latest `EYES` reaction. Both times use the strict UTC-second form and compare as strings. Equal times are not handled. The gate reads `lastEditedAt`, not `updatedAt`. `prefilter.sh` and `fetch-normalize.sh` fetch the edit time and the reactions.
+- **Re-mark refresh.** When our `EYES` is already on the node, `react-marker.sh` removes it first, with a positive proof of the removal, then adds it again. The fresh mark gets a new `createdAt`. This replaces the claim that a duplicate `addReaction` is a server-side no-op.
+- **D3. A failed noise mark never blocks.** It leaves the candidate unmarked. A failed fixed or deferred mark still returns `blocked` with `marker-write-failed`.
+- **D4. Scope.** Only the `EYES` mark on `toplevel` and `review` gets the edit gate. Unchanged: the legacy `Addresses:` harvest, the thread `Fixed in` and defer dispositions, the Codex summary signal, and the poll's wake on edits.
+- **D5. Fix marks have no author check.** A human's comment that we fixed must be markable.
+- **D6. No budget raise.** The prose fits its byte budget by cutting.
+- **D7. Patch bump 8.0.4.**
+
+**Issue 572 folded in.** Issue 572 said a per-node marker hides an in-place bot edit with new findings. D2 fixes it. https://github.com/brenpike/hivemind/issues/572.
+
+**The poll tail (issue 577).** The poll does not wake on an in-place edit. So an edit to a marked node is seen at the next wake from other activity, or by the next watch. The impact is bounded: an edit is seen late, never hidden for good. https://github.com/brenpike/hivemind/issues/577.
+
+**F4's premise is superseded.** Decision 5 above and ADR-0037's F4 entry rest on "the marker is for fixed or deferred items only". That premise no longer holds. A noise skip from an in-scope automated reviewer now takes the marker too.
+
+**Residuals.**
+
+- The in-scope check trusts the `reviewer_filter` the caller passes. `fetch-normalize.sh` gives it the same trust.
+- A human is never noise-marked. A human's noise comment stays actionable.
+- Fix marks have no author check (D5).
+- The `reactions` page holds the last 20 `EYES` reactions. A self reaction outside it reads as absent, so the node fails toward actionable.
+
+**Follow-up (issue 576).** Issue 576 removes the Codex-specific handling from the review loop, the Codex summary signal included. https://github.com/brenpike/hivemind/issues/576.
+
+**Not changed.** No workflow script is rebuilt.
+
+**Repeat findings.** D4 and D5 are recorded decisions under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks to extend the edit gate to the `Addresses:` harvest, the thread dispositions, the Codex summary signal or the poll's wake is a repeat. So is a finding that asks for an author check on fix marks. Either needs a new failure on that surface to reopen it.
+
+Reference: `docs/references/github-pr-review-graphql.md` (Surface-to-Delivery Contract, Reaction Marker).
