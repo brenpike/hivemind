@@ -1,0 +1,59 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": { "totalCount": 0, "nodes": [] },
+        "comments": {
+          "totalCount": 2,
+          "nodes": [
+            {
+              "id": "IC_kwDOcase25comment2500",
+              "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" },
+              "body": "Codex Review: Didn't find any major issues. Keep it up!",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2500",
+              "lastEditedAt": null,
+              "reactionGroups": [ { "content": "EYES", "viewerHasReacted": true } ],
+              "reactions": {
+                "nodes": [
+                  { "content": "EYES", "createdAt": "2026-11-10T12:00:00Z", "user": { "login": "selfuser", "__typename": "User" } }
+                ]
+              }
+            },
+            {
+              "id": "IC_kwDOcase25comment2501",
+              "author": { "login": "deploy-preview", "__typename": "Bot" },
+              "body": "Deploy preview ready.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2501",
+              "lastEditedAt": "2026-11-10T11:59:59Z",
+              "reactionGroups": [ { "content": "EYES", "viewerHasReacted": true } ],
+              "reactions": {
+                "nodes": [
+                  { "content": "EYES", "createdAt": "2026-11-10T12:00:00Z", "user": { "login": "selfuser", "__typename": "User" } }
+                ]
+              }
+            }
+          ]
+        },
+        "reviews": {
+          "totalCount": 1,
+          "nodes": [
+            {
+              "id": "PRR_kwDOcase25review2502",
+              "author": { "login": "copilot-pull-request-reviewer", "__typename": "Bot" },
+              "body": "Copilot reviewed 3 out of 3 changed files in this pull request and generated no comments.",
+              "state": "COMMENTED",
+              "url": "https://github.com/o/r/pull/1#pullrequestreview-2502",
+              "lastEditedAt": "2026-11-10T11:30:00Z",
+              "reactionGroups": [ { "content": "EYES", "viewerHasReacted": true } ],
+              "reactions": {
+                "nodes": [
+                  { "content": "EYES", "createdAt": "2026-11-10T12:00:00Z", "user": { "login": "selfuser", "__typename": "User" } }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -355,6 +355,41 @@ run_case "case23:codex-summary-findings" "case23-codex-summary-findings.json" "s
 run_case "case24:codex-summary-bad-state" "case24-codex-summary-bad-state.json" "selfuser" "automated" \
   '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2400","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2400","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2401","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2401","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2402","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2402","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2403","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2403","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2404","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2404","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2405","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2405","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2406","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2406","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2407","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2407","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2408","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2408","classification":"actionable"}]'
 
+# ── Case 25: our EYES mark handles noise from every reviewer, no reviewer-specific code ──
+# Three no-finding notices, each with our EYES mark (viewerHasReacted:true) and a self EYES reaction
+# node at 12:00:00Z, none edited after the mark:
+#   2500 Codex Bot top-level "no major issues", lastEditedAt null (never edited).
+#   2501 Bot outside the registry, top-level, edited at 11:59:59Z (one second before the mark).
+#   2502 Copilot Bot COMMENTED review "generated no comments", edited at 11:30:00Z.
+# all → all three handled. automated → the registry Bots 2500 and 2502 handled; 2501 is not a
+# registry author, so the filter does not emit it.
+run_case "case25:noise-marked-bots-all" "case25-noise-marked-bots.json" "selfuser" "all" \
+  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase25comment2500","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2500","classification":"handled"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase25comment2501","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2501","classification":"handled"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase25review2502","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-2502","classification":"handled"}]'
+run_case "case25:noise-marked-bots-automated" "case25-noise-marked-bots.json" "selfuser" "automated" \
+  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase25comment2500","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2500","classification":"handled"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase25review2502","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-2502","classification":"handled"}]'
+
+# ── Case 26: a mark stops counting once the node is edited at or after it ────────
+# Every node is by a human User and carries an EYES group with viewerHasReacted:true unless stated;
+# the self EYES reaction node is at 12:00:00Z unless stated. Each must be actionable except 2608 and
+# 2609:
+#   2600 edited 12:05:00Z, after the mark.
+#   2601 edited 12:00:00Z, the same second as the mark (strict compare).
+#   2602 edited 12:05:00Z; only ANOTHER user's EYES (12:10:00Z) is newer than the edit.
+#   2603 no lastEditedAt key at all.
+#   2604 lastEditedAt `2026-11-10T11:00:00.000Z`: earlier as a string, but not the second-precision
+#        format, so it is rejected.
+#   2605 edited 11:00:00Z; the only self reaction time `2026-11-10T12:00:00+00:00` is malformed and
+#        ignored, so there is no mark time.
+#   2606 COMMENTED review edited 12:05:00Z, after the mark.
+#   2607 lastEditedAt null and a self reaction node, but viewerHasReacted:false.
+#   2608 edited 11:59:59Z, before the mark → handled.
+#   2609 COMMENTED review edited 11:59:59Z, before the mark → handled.
+#   2610 edited 12:05:00Z; the newer EYES (12:10:00Z) is by a Bot sharing the self login, not self.
+#   2611 edited 11:00:00Z with `reactions` a string: the gate is total and reads not handled.
+#   2612 lastEditedAt a number: not a time string → not handled.
+run_case "case26:marked-then-edited" "case26-marked-then-edited.json" "selfuser" "all" \
+  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2600","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2600","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2601","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2601","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2602","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2602","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2603","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2603","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2604","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2604","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2605","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2605","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2607","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2607","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2608","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2608","classification":"handled"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2610","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2610","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2611","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2611","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2612","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2612","classification":"actionable"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase26review2606","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-2606","classification":"actionable"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase26review2609","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-2609","classification":"handled"}]'
+
 # ── Registry integrity ───────────────────────────────────────────────────────────
 # Each rule is a jq predicate over a registry ARRAY on its input, evaluated with the module
 # included (so `approval_kinds` resolves). It must hold for the real `automated_reviewers` AND be
@@ -452,6 +487,7 @@ CLOSURE_TARGETS=(
   "$MODULE_DIR/fetch-normalize.sh"
   "$REPO_ROOT/plugin/skills/_shared/fetch-normalize-core.sh"
   "$MODULE_DIR/pr-change-detect-poll.sh"
+  "$MODULE_DIR/react-marker.sh"
 )
 BOT_STRIP_ERE='\[bot\\*\]'
 

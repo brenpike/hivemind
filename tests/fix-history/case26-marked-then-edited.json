@@ -1,0 +1,392 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "totalCount": 0,
+          "nodes": []
+        },
+        "comments": {
+          "totalCount": 11,
+          "nodes": [
+            {
+              "id": "IC_kwDOcase26comment2600",
+              "author": {
+                "login": "human-reviewer",
+                "__typename": "User"
+              },
+              "body": "Finding 2600: please fix.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2600",
+              "lastEditedAt": "2026-11-10T12:05:00Z",
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "IC_kwDOcase26comment2601",
+              "author": {
+                "login": "human-reviewer",
+                "__typename": "User"
+              },
+              "body": "Finding 2601: please fix.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2601",
+              "lastEditedAt": "2026-11-10T12:00:00Z",
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "IC_kwDOcase26comment2602",
+              "author": {
+                "login": "human-reviewer",
+                "__typename": "User"
+              },
+              "body": "Finding 2602: please fix.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2602",
+              "lastEditedAt": "2026-11-10T12:05:00Z",
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  },
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:10:00Z",
+                    "user": {
+                      "login": "other-user",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "IC_kwDOcase26comment2603",
+              "author": {
+                "login": "human-reviewer",
+                "__typename": "User"
+              },
+              "body": "Finding 2603: please fix.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2603",
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "IC_kwDOcase26comment2604",
+              "author": {
+                "login": "human-reviewer",
+                "__typename": "User"
+              },
+              "body": "Finding 2604: please fix.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2604",
+              "lastEditedAt": "2026-11-10T11:00:00.000Z",
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "IC_kwDOcase26comment2605",
+              "author": {
+                "login": "human-reviewer",
+                "__typename": "User"
+              },
+              "body": "Finding 2605: please fix.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2605",
+              "lastEditedAt": "2026-11-10T11:00:00Z",
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00+00:00",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "IC_kwDOcase26comment2607",
+              "author": {
+                "login": "human-reviewer",
+                "__typename": "User"
+              },
+              "body": "Finding 2607: please fix.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2607",
+              "lastEditedAt": null,
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": false
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "IC_kwDOcase26comment2608",
+              "author": {
+                "login": "human-reviewer",
+                "__typename": "User"
+              },
+              "body": "Finding 2608: please fix.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2608",
+              "lastEditedAt": "2026-11-10T11:59:59Z",
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "IC_kwDOcase26comment2610",
+              "author": {
+                "login": "human-reviewer",
+                "__typename": "User"
+              },
+              "body": "Finding 2610: please fix.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2610",
+              "lastEditedAt": "2026-11-10T12:05:00Z",
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  },
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:10:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "Bot"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "IC_kwDOcase26comment2611",
+              "author": {
+                "login": "human-reviewer",
+                "__typename": "User"
+              },
+              "body": "Finding 2611: please fix.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2611",
+              "lastEditedAt": "2026-11-10T11:00:00Z",
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": "garbage"
+            },
+            {
+              "id": "IC_kwDOcase26comment2612",
+              "author": {
+                "login": "human-reviewer",
+                "__typename": "User"
+              },
+              "body": "Finding 2612: please fix.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2612",
+              "lastEditedAt": 12345,
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "reviews": {
+          "totalCount": 2,
+          "nodes": [
+            {
+              "id": "PRR_kwDOcase26review2606",
+              "author": {
+                "login": "human-reviewer",
+                "__typename": "User"
+              },
+              "body": "Finding 2606: please fix.",
+              "state": "COMMENTED",
+              "url": "https://github.com/o/r/pull/1#pullrequestreview-2606",
+              "lastEditedAt": "2026-11-10T12:05:00Z",
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRR_kwDOcase26review2609",
+              "author": {
+                "login": "human-reviewer",
+                "__typename": "User"
+              },
+              "body": "Finding 2609: please fix.",
+              "state": "COMMENTED",
+              "url": "https://github.com/o/r/pull/1#pullrequestreview-2609",
+              "lastEditedAt": "2026-11-10T11:59:59Z",
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

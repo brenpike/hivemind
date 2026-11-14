@@ -31,12 +31,32 @@
 # Sentinel rationale (why a constant at byte 0 and not prose):
 # docs/adr/0032-defer-marker-sentinel-and-agent-layer-home-truth.md.
 #
-# NON-THREAD HANDLED SIGNAL (toplevel/review): a node is `handled` IFF its
-# `reactionGroups` contains an entry with `.content == "EYES"` AND
-# `.viewerHasReacted == true`. This is VIEWER-SCOPED: `viewerHasReacted` is true
-# only for the authenticated gh viewer's OWN reaction, so a human or Codex
-# reacting 👀 (EYES) from another account does NOT false-positive as handled.
+# NON-THREAD HANDLED SIGNAL (toplevel/review): our EYES mark makes a node
+# `handled` only while the node is UNCHANGED SINCE MARKED. All of these hold:
+#   - its `reactionGroups` contains an entry with `.content == "EYES"` AND
+#     `.viewerHasReacted == true`;
+#   - the node HAS a `lastEditedAt` key; and
+#   - `lastEditedAt` is null (never edited), or it is STRICTLY EARLIER than the
+#     latest `createdAt` among the node's `reactions.nodes[]` whose `content` is
+#     EYES and whose `user` is self per the module's `is_self`.
+# Both times must match `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$`
+# and compare as strings (fixed-width UTC, so string order is time order). A
+# self EYES reaction time that does not match is ignored. A missing
+# `lastEditedAt` key, an edited node with no self EYES reaction node, an edit in
+# the same second as the mark or later, or a malformed time => not handled by
+# this signal. The gate is total (`try`/`catch`): a malformed node never errors
+# the filter, it reads as not handled.
+# The gate applies to EVERY author the active filter admits, with no
+# reviewer-specific case: a reviewer that edits a marked comment or review in
+# place (new findings appended to an old body) turns it actionable again, while
+# an unedited mark, or one placed after the last edit, keeps it handled.
+# This is VIEWER-SCOPED: `viewerHasReacted` is true only for the authenticated
+# gh viewer's OWN reaction, and the mark time is read only off a self reaction
+# node, so a human or Codex reacting 👀 (EYES) from another account does NOT
+# false-positive as handled and cannot refresh our mark past an edit.
 # `EYES` is the single marker constant emitted by react-marker.sh's addReaction.
+# The `reactions` page is bounded: a self reaction outside the fetched page
+# reads as absent (fail toward "actionable").
 #
 # LEGACY HANDLED SIGNAL (toplevel/review, backward-compat): PRs already processed
 # by the PRE-reaction workflow carry the durable self-authored `Addresses: <url>`
@@ -103,8 +123,13 @@
 #       .author.__typename         # account type; identity key with the login
 #       .body
 #       .url
+#       .lastEditedAt              # ISO-8601 UTC or null; key REQUIRED for the
+#                                  # EYES signal (unchanged-since-marked gate)
 #       .reactionGroups[]          # [{content, viewerHasReacted}]; EYES +
-#                                  # viewerHasReacted==true => handled (self marker)
+#                                  # viewerHasReacted==true => self mark present
+#       .reactions(content: EYES).nodes[]
+#           { content createdAt user { login __typename } }
+#                                  # self EYES createdAt = mark time (§1)
 #   .data.repository.pullRequest.reviews.nodes[]
 #       .id                        # GraphQL review node id (PRR_...);
 #                                  # threaded through as `id` for node(id:) body refetch
@@ -113,8 +138,13 @@
 #       .body
 #       .state
 #       .url
+#       .lastEditedAt              # ISO-8601 UTC or null; key REQUIRED for the
+#                                  # EYES signal (unchanged-since-marked gate)
 #       .reactionGroups[]          # [{content, viewerHasReacted}]; EYES +
-#                                  # viewerHasReacted==true => handled (self marker)
+#                                  # viewerHasReacted==true => self mark present
+#       .reactions(content: EYES).nodes[]
+#           { content createdAt user { login __typename } }
+#                                  # self EYES createdAt = mark time (§1)
 #
 # `author.__typename` is a CONTRACT field on every surface: the registry filter
 # modes (`automated`, `codex-only`) match only a Bot account per the module's
@@ -186,14 +216,21 @@
 #                      self-authored reply can become a defer disposition.
 #                      toplevel/review: the node's own `reactionGroups` carries an
 #                      EYES group with viewerHasReacted == true (our self-authored
-#                      reaction marker), OR (legacy backward-compat) the node's own
+#                      reaction marker) AND the node is unchanged since that mark
+#                      (NON-THREAD HANDLED SIGNAL in §1: `lastEditedAt` present and
+#                      null, or strictly earlier than our latest self EYES
+#                      reaction's `createdAt`), for every author the filter
+#                      admits, OR (legacy backward-compat) the node's own
 #                      `url` is in the `Addresses: <url>` harvest set of a self-
 #                      authored top-level comment. toplevel ONLY: OR the node is a
 #                      Codex Review Summary whose state reports no findings or a
 #                      running code review (CODEX SUMMARY HANDLED SIGNAL in §1).
 #                      A missing/empty reactionGroups, an EYES group with
-#                      viewerHasReacted == false, or no EYES group at all AND no
-#                      legacy `Addresses:` harvest match AND no clear Codex summary
+#                      viewerHasReacted == false, no EYES group at all, or a mark
+#                      that fails the unchanged-since-marked gate (no
+#                      `lastEditedAt` key, edited at or after the mark, no self
+#                      EYES reaction node, malformed time), AND no legacy
+#                      `Addresses:` harvest match AND no clear Codex summary
 #                      state => not handled (actionable).
 #   followup-after-fix in-thread ONLY, and ONLY when the thread's LATEST
 #                      disposition is a FIX: databaseId > that disposition's id
@@ -279,15 +316,47 @@ include "reviewer-identity";
 # bot suffix itself.
 def matches_filter($a; $t): reviewer_matches_filter($a; $t; $login; $filter);
 
-# Non-thread handled predicate. A toplevel/review node is handled IFF its own
-# `reactionGroups` carries an EYES group whose viewerHasReacted is true — i.e. a
-# self-authored EYES reaction by the authenticated gh viewer (react-marker.sh's
-# marker). VIEWER-SCOPED: viewerHasReacted is true only for our viewer's own
-# reaction, so an EYES from a human / Codex on another account does not register.
+# Self mark presence. True IFF a toplevel/review node's own `reactionGroups`
+# carries an EYES group whose viewerHasReacted is true — i.e. a self-authored
+# EYES reaction by the authenticated gh viewer (react-marker.sh's marker). It is
+# necessary, not sufficient: has_unchanged_self_eyes_mark adds the edit gate.
+# VIEWER-SCOPED: viewerHasReacted is true only for our viewer's own reaction, so
+# an EYES from a human / Codex on another account does not register.
 # Null-safe: a node lacking `reactionGroups` is treated as not handled.
 def has_self_eyes_reaction:
   ((.reactionGroups // [])
    | any(.content == "EYES" and (.viewerHasReacted == true)));
+
+# True when the input is a second-precision UTC ISO-8601 time string, the one
+# shape whose string order is time order.
+def is_utc_second_time:
+  type == "string"
+  and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$");
+
+# Mark time: the latest well-formed `createdAt` among the node's EYES
+# `reactions.nodes[]` authored by self (module `is_self`), or null when none.
+def latest_self_eyes_at:
+  [ (.reactions.nodes // [])[]
+    | select(.content == "EYES")
+    | select(is_self(.user.login; .user.__typename; $login))
+    | .createdAt
+    | select(is_utc_second_time)
+  ] | max;
+
+# Unchanged-since-marked gate (NON-THREAD HANDLED SIGNAL in the header): our
+# EYES mark is present AND the node carries a `lastEditedAt` key that is null or
+# strictly earlier than the mark time. Total: any error reads as not handled.
+def has_unchanged_self_eyes_mark:
+  try (
+    has_self_eyes_reaction
+    and has("lastEditedAt")
+    and (.lastEditedAt == null
+         or (.lastEditedAt as $edited
+             | latest_self_eyes_at as $marked
+             | ($edited | is_utc_second_time)
+               and $marked != null
+               and $edited < $marked))
+  ) catch false;
 
 # Codex Review Summary state: the parsed JSON of the node body's
 # `<!-- codex-review-state:v1 {json} -->` marker, or null when the marker is
@@ -480,7 +549,7 @@ $pr.reviewThreads as $rt |
       databaseId: null,
       url: $u,
       classification: (
-        if ($c | has_self_eyes_reaction) then "handled"
+        if ($c | has_unchanged_self_eyes_mark) then "handled"
         elif ($addressed_urls | index($u)) != null then "handled"
         elif ($c | is_clear_codex_summary) then "handled"
         else "actionable"
@@ -506,7 +575,7 @@ $pr.reviewThreads as $rt |
       databaseId: null,
       url: $u,
       classification: (
-        if ($r | has_self_eyes_reaction) then "handled"
+        if ($r | has_unchanged_self_eyes_mark) then "handled"
         elif ($addressed_urls | index($u)) != null then "handled"
         else "actionable"
         end
