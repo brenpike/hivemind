@@ -57,6 +57,8 @@ Your report to the caller is the terminal Output Contract YAML.
 
 ## Fix Mode Lifecycle
 
+Right before a dispatch's first `push-branch.sh`, `reply-resolve.sh` or `react-marker.sh` call, invoke `hivemind:review-writes` (Skill tool).
+
 1. **Preflight:** Run `bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/preflight.sh" <pr> <working_branch> <base>`. It emits `PR_NUMBER OWNER REPO BASE WORKING_BRANCH SELF_LOGIN PREFLIGHT_OK`. A non-zero exit or `PREFLIGHT_ERROR` returns `blocked`.
 
 2. **Fetch + normalize candidates:** Run `bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/fetch-normalize.sh" "$OWNER" "$REPO" "$PR_NUMBER" "$reviewer_filter" "$SELF_LOGIN"`. Its output, one normalized candidate array, is data. Route records by `classification`: `actionable` and `followup-after-fix` are candidates for steps 3-6, `followup-after-fix` also feeding step 4 as cycling or regression evidence; skip `handled`; the databaseId-null thread-surface record is the overflow sentinel, for thread-level inspection. `ci-check-failure` records are fix candidates with `description` as body. A non-zero exit or `FETCHNORM_ERROR` returns `blocked`, never "zero candidates".
