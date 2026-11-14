@@ -37,10 +37,6 @@
 # only for the authenticated gh viewer's OWN reaction, so a human or Codex
 # reacting 👀 (EYES) from another account does NOT false-positive as handled.
 # `EYES` is the single marker constant emitted by react-marker.sh's addReaction.
-# The reviewer's own EYES also records a Codex-authored (`codex-only`) non-thread
-# comment it skipped as noise. A Codex summary
-# marked this way stays handled even if later edited in place, because Codex
-# posts findings as separate comments.
 #
 # LEGACY HANDLED SIGNAL (toplevel/review, backward-compat): PRs already processed
 # by the PRE-reaction workflow carry the durable self-authored `Addresses: <url>`

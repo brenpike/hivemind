@@ -325,7 +325,7 @@ Verified 2026-10-31 (headless test, issue 455). Verdict: PASS for the rule match
 
 Not covered: the auto-mode first-read prompt (see above), and a live spawn-brood run in tmux. The stub cases of `tools/test_brood_compat.sh` Assertion 9a pin the file content and the launch command; this record pins what Claude Code does with them on 2.1.314. A Claude Code release that changes rule matching or `--settings` resolution needs this check run again.
 
-## Amendment 2026-11-13: review-loop GitHub writes keep per-machine allow rules (issues 567, 568)
+## Amendment 2026-11-13: review-loop GitHub writes keep per-machine allow rules (issue 567)
 
 This amendment records the permission posture for the `github-reviewer`'s GitHub-writing script calls after the auto-mode refusal recorded in ADR-0040 (`docs/adr/0040-post-pr-flow-on-script-engine.md`, Amendment 2026-11-13). Decisions 1 to 6 are unchanged: no seed rule and no plugin-side allow is added.
 
