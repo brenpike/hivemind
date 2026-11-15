@@ -456,6 +456,8 @@ This amendment records the redesign of issue 568 that Amendment 2026-11-13 split
 - Fix marks have no author check (D5).
 - The `reactions` page holds the last 20 `EYES` reactions. A self reaction outside it reads as absent, so the node fails toward actionable.
 - A bot edit between our read and our mark counts as handled (issue 578).
+- GitHub's edit and reaction times are trusted to be real dates. The gate checks only their UTC-second shape, so an impossible date such as month 99 is not rejected. Only GitHub writes these times, and a response that could carry one already controls every field the classifier reads. User decision 2026-11-14 on local review finding 74adfc537aad0a2a62a83958f2c9779eb39e54d2ad5ec8f822324c67f120c2a1.
+- The re-mark refresh removes our `EYES` before adding it again. If the add fails after the remove, or two watchers on one account refresh the same node at once, the node is left unmarked. This fails safe: an unmarked noise node is dispatched again, and a failed fixed or deferred mark still returns `blocked` with `marker-write-failed`. User decision 2026-11-14 on local review finding a2753963af74985306499403d92d1061b3518b08cd75f15191803ba003ed65c7.
 
 **Follow-up (issue 576).** Issue 576 removes the Codex-specific handling from the review loop, the Codex summary signal included. https://github.com/brenpike/hivemind/issues/576.
 
