@@ -445,6 +445,8 @@ This amendment records the redesign of issue 568 that Amendment 2026-11-13 split
 
 **The poll tail (issue 577).** The poll does not wake on an in-place edit. So an edit to a marked node is seen at the next wake from other activity, or by the next watch. The impact is bounded: an edit is seen late, never hidden for good. https://github.com/brenpike/hivemind/issues/577.
 
+**The read-to-mark window (issue 578).** The mark is not tied to the version of the comment the reviewer read. A bot edit that lands between the read and our `EYES` mark gets an edit time earlier than the mark, so the new text counts as handled. The window is seconds for a noise mark, and the whole fix, validate, commit and push span for a fixed mark. Local review finding eacfe5033a8c4d342296b770eec64a988ad0a53e9cfa449446b9a40d985c1e11 raised it. User decision 2026-11-14: ship this change and track the fix in issue 578. Before this change, any mark hid every later edit for good, so this is a narrower leftover, not a regression. https://github.com/brenpike/hivemind/issues/578.
+
 **F4's premise is superseded.** Decision 5 above and ADR-0037's F4 entry rest on "the marker is for fixed or deferred items only". That premise no longer holds. A noise skip from an in-scope automated reviewer now takes the marker too.
 
 **Residuals.**
@@ -453,6 +455,7 @@ This amendment records the redesign of issue 568 that Amendment 2026-11-13 split
 - A human is never noise-marked. A human's noise comment stays actionable.
 - Fix marks have no author check (D5).
 - The `reactions` page holds the last 20 `EYES` reactions. A self reaction outside it reads as absent, so the node fails toward actionable.
+- A bot edit between our read and our mark counts as handled (issue 578).
 
 **Follow-up (issue 576).** Issue 576 removes the Codex-specific handling from the review loop, the Codex summary signal included. https://github.com/brenpike/hivemind/issues/576.
 
