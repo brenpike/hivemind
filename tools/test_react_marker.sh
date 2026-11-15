@@ -20,6 +20,14 @@
 # pr-binding-refused, a failed lookup is pr-binding-lookup-failed, and a detached HEAD is
 # pr-binding-no-branch, each with no reaction sent.
 #
+# The noise-mode cases (#568) pass --noise <reviewer_filter> and assert the binding node's author
+# decides: a Bot account inside the filter is marked; a human, a Bot outside the filter or a null
+# author is noise-author-refused with no mutation sent. They also cover missing-value-for-noise,
+# missing-identity-module, the capture seam skipping the author check, and fix mode marking a
+# human-authored node. The re-mark refresh cases assert a viewer EYES already on the node is removed
+# (removeReaction) before addReaction, and that a removal lacking positive proof is react-failed with
+# addReaction never sent. Cases that must not reach gh put a failing gh stub first on PATH.
+#
 # Mirrors tools/test_reply_resolve.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any
 # -fail convention. Read-only: the only writes are scratch capture files, scratch repos and shim
 # files in a disposable tmpdir removed on EXIT.
@@ -153,11 +161,13 @@ fi
 # runs with GIT_DIR and GIT_WORK_TREE unset, HOME and XDG_CONFIG_HOME pointed at an empty scratch home
 # and GIT_CONFIG_NOSYSTEM=1, so no user or system config (url rewrites included) reaches the binding.
 #
-# The gh shim tells apart its three calls: `gh repo view` (the origin repository id), the binding
-# `gh api graphql` lookup, and the addReaction mutation (a query= argument naming addReaction). Each
-# call records a <part>-reached marker and its arguments under the case dir named by
-# FIXTURE_GH_CASE_DIR, prints <part>.body on stdout, writes an unrelated line on stderr and exits
-# <part>.status. live_reached means the MUTATION was reached.
+# The gh shim tells apart its four calls: `gh repo view` (the origin repository id), the binding
+# `gh api graphql` lookup, the removeReaction mutation of the re-mark refresh (part unreact, a query=
+# argument naming removeReaction) and the addReaction mutation (part react, a query= argument naming
+# addReaction). Each call appends its part name to calls.log (the call order), records a
+# <part>-reached marker and its arguments under the case dir named by FIXTURE_GH_CASE_DIR, prints
+# <part>.body on stdout, writes an unrelated line on stderr and exits <part>.status. live_reached
+# means the addReaction MUTATION was reached.
 FIXTURE_BRANCH="bugfix/fixture-branch"
 FIXTURE_ORIGIN_URL="https://github.com/fixture-owner/fixture-repo.git"
 FIXTURE_REPO_ID="R_kgDOFixture1"
@@ -213,12 +223,14 @@ elif [ "${1:-}" = api ] && [ "${2:-}" = graphql ]; then
   for arg in "$@"; do
     case "$arg" in
       query=*addReaction*) part=react ;;
+      query=*removeReaction*) part=unreact ;;
     esac
   done
 else
   printf '%s\n' "$*" > "$case_dir/unexpected-reached"
   exit 99
 fi
+printf '%s\n' "$part" >> "$case_dir/calls.log"
 printf reached > "$case_dir/$part-reached"
 printf '%s\n' "$@" > "$case_dir/$part.args"
 cat "$case_dir/$part.body"
@@ -236,14 +248,34 @@ exit 99
 SHIM
 chmod +x "$GIT_SHIM_DIR/git"
 
-# bound_node_body <typename>: a binding response whose node is <typename> on the OPEN fixture PR.
+# A failing gh stub for cases that must never reach gh: it records gh-reached and exits 97.
+FAIL_GH_SHIM_DIR="$TMPDIR_TEST/fail-gh-shim-bin"
+mkdir -p "$FAIL_GH_SHIM_DIR"
+cat > "$FAIL_GH_SHIM_DIR/gh" <<'SHIM'
+#!/usr/bin/env bash
+printf reached > "$FIXTURE_GH_CASE_DIR/gh-reached"
+exit 97
+SHIM
+chmod +x "$FAIL_GH_SHIM_DIR/gh"
+
+# Author and reaction-group JSON for the binding node. Bot names appear only in these fixtures.
+CODEX_BOT_AUTHOR='{"login":"chatgpt-codex-connector","__typename":"Bot"}'
+COPILOT_BOT_AUTHOR='{"login":"copilot-pull-request-reviewer","__typename":"Bot"}'
+OTHER_BOT_AUTHOR='{"login":"fixture-lint-app","__typename":"Bot"}'
+HUMAN_AUTHOR='{"login":"fixture-human","__typename":"User"}'
+VIEWER_EYES_GROUPS='[{"content":"THUMBS_UP","viewerHasReacted":false},{"content":"EYES","viewerHasReacted":true}]'
+OTHER_EYES_GROUPS='[{"content":"EYES","viewerHasReacted":false}]'
+
+# bound_node_body <typename> [author json] [reactionGroups json]: a binding response whose node is
+# <typename> on the OPEN fixture PR, authored by <author json> (default the Codex Bot) and carrying
+# <reactionGroups json> (default []).
 bound_node_body() {
-  printf '{"data":{"node":{"__typename":"%s","pullRequest":{"state":"OPEN","headRefName":"%s","headRepository":{"id":"%s"}}}}}' \
-    "$1" "$FIXTURE_BRANCH" "$FIXTURE_REPO_ID"
+  printf '{"data":{"node":{"__typename":"%s","pullRequest":{"state":"OPEN","headRefName":"%s","headRepository":{"id":"%s"}},"author":%s,"reactionGroups":%s}}}' \
+    "$1" "$FIXTURE_BRANCH" "$FIXTURE_REPO_ID" "${2:-$CODEX_BOT_AUTHOR}" "${3:-[]}"
 }
 
-# set_gh_part <part> <exit status> <body>: set one shim response (repo | binding | react) for the
-# current case dir.
+# set_gh_part <part> <exit status> <body>: set one shim response (repo | binding | unreact | react)
+# for the current case dir.
 set_gh_part() {
   printf '%s' "$3" > "$case_dir/$1.body"
   printf '%s' "$2" > "$case_dir/$1.status"
@@ -251,7 +283,7 @@ set_gh_part() {
 
 # new_gh_case <name> <surface>: create a fresh case dir whose repo view and binding match the fixture
 # repo for <surface> (toplevel IssueComment, review PullRequestReview) and whose reaction is a clean
-# EYES success. Sets case_dir.
+# EYES success; a removal, when reached, proves no viewer EYES remains. Sets case_dir.
 new_gh_case() {
   local node_type="IssueComment"
   [ "$2" = review ] && node_type="PullRequestReview"
@@ -259,6 +291,7 @@ new_gh_case() {
   mkdir -p "$case_dir"
   set_gh_part repo 0 "{\"id\":\"$FIXTURE_REPO_ID\"}"
   set_gh_part binding 0 "$(bound_node_body "$node_type")"
+  set_gh_part unreact 0 '{"data":{"removeReaction":{"reactionGroups":[{"content":"EYES","viewerHasReacted":false}]}}}'
   set_gh_part react 0 '{"data":{"addReaction":{"reaction":{"content":"EYES"}}}}'
 }
 
@@ -267,9 +300,18 @@ reached_flag() {
   if [ -f "$case_dir/$1-reached" ]; then printf yes; else printf no; fi
 }
 
+# call_order: print the shim's recorded call order for the current case dir on one line.
+call_order() {
+  if [ -f "$case_dir/calls.log" ]; then tr '\n' ' ' < "$case_dir/calls.log"; fi
+}
+
+# MARKER_FLAGS: flags run_bound_case passes before the positionals (empty = fix mode).
+MARKER_FLAGS=()
+
 # run_bound_case <repo dir> <node id> <surface> [env assignments...]: run react-marker on the live path
-# from <repo dir> against the gh shim of the current case dir. Sets live_status, live_stdout,
-# live_stderr, live_reached (the mutation), repo_reached, binding_reached.
+# from <repo dir> against the gh shim of the current case dir, with MARKER_FLAGS before the
+# positionals. Sets live_status, live_stdout, live_stderr, live_reached (the mutation), repo_reached,
+# binding_reached, unreact_reached.
 run_bound_case() {
   local repo_dir="$1" node_id="$2" surface="$3"
   shift 3
@@ -278,7 +320,8 @@ run_bound_case() {
     env -u GIT_DIR -u GIT_WORK_TREE -u REACTMARKER_TEST_MODE -u REACTMARKER_CAPTURE_FILE \
       HOME="$FIXTURE_HOME" XDG_CONFIG_HOME="$FIXTURE_HOME/.config" GIT_CONFIG_NOSYSTEM=1 \
       PATH="$GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" "$@" \
-      bash "$REACT_MARKER" "$node_id" "$surface" "https://github.com/fixture-owner/fixture-repo/pull/5"
+      bash "$REACT_MARKER" ${MARKER_FLAGS[@]+"${MARKER_FLAGS[@]}"} "$node_id" "$surface" \
+      "https://github.com/fixture-owner/fixture-repo/pull/5"
   ) > "$case_dir/run.stdout" 2> "$case_dir/run.stderr"
   live_status=$?
   live_stdout="$(cat "$case_dir/run.stdout")"
@@ -286,6 +329,7 @@ run_bound_case() {
   live_reached="$(reached_flag react)"
   repo_reached="$(reached_flag repo)"
   binding_reached="$(reached_flag binding)"
+  unreact_reached="$(reached_flag unreact)"
 }
 
 # ── Fail-closed gate lock: CAPTURE_FILE WITHOUT TEST_MODE does NOT divert ────────────
@@ -530,6 +574,229 @@ if [ "$repo_reached" = no ] && [ "$binding_reached" = no ] && [ ! -f "$case_dir/
 else
   failed "binding:no-branch-detached-head" "gh reached: repo=$repo_reached binding=$binding_reached stderr=$live_stderr"
 fi
+
+# ── NOISE MODE (#568): --noise <reviewer_filter> marks only an automated author's node ──
+# Each case runs the live path from the bound repo with a binding whose node is on the fixture PR, so
+# only the noise author check decides. The check reads only author.login and author.__typename
+# through reviewer-identity.jq: is_bot and reviewer_matches_filter with an empty self login.
+
+# run_noise_case <name> <filter> <surface> <author json>: a bound live case in noise mode with
+# <filter> as the --noise value, the binding node authored by <author json>.
+run_noise_case() {
+  local node_id="$TOPLEVEL_NODE" node_type="IssueComment"
+  if [ "$3" = review ]; then node_id="$REVIEW_NODE"; node_type="PullRequestReview"; fi
+  new_gh_case "$1" "$3"
+  set_gh_part binding 0 "$(bound_node_body "$node_type" "$4")"
+  MARKER_FLAGS=(--noise "$2")
+  run_bound_case "$BOUND_REPO" "$node_id" "$3"
+  MARKER_FLAGS=()
+}
+
+# assert_noise_refused <name> <label>: exit 1, exactly noise-author-refused on stderr, the binding
+# reached and neither mutation sent.
+assert_noise_refused() {
+  if [ "$live_status" -eq 1 ] && [ "$binding_reached" = yes ] && [ "$live_reached" = no ] \
+     && [ "$unreact_reached" = no ] && [ "$live_stderr" = "REACTMARKER_ERROR=noise-author-refused" ]; then
+    pass "$1" "$2"
+  else
+    failed "$1" "status=$live_status binding=$binding_reached unreact=$unreact_reached react=$live_reached stderr=$live_stderr"
+  fi
+}
+
+run_noise_case noise-codex-automated "" toplevel "$CODEX_BOT_AUTHOR"
+assert_live_success "noise:accepted-codex-bot-comment-automated" "Codex Bot IssueComment, empty filter (automated) -> exit 0, reaction sent"
+
+run_noise_case noise-copilot-review-automated automated review "$COPILOT_BOT_AUTHOR"
+assert_live_success "noise:accepted-copilot-bot-review-automated" "Copilot Bot review, filter automated -> exit 0, reaction sent"
+
+run_noise_case noise-other-bot-all all toplevel "$OTHER_BOT_AUTHOR"
+assert_live_success "noise:accepted-non-registry-bot-all" "non-registry Bot, filter all -> exit 0, reaction sent"
+
+run_noise_case noise-human-all all toplevel "$HUMAN_AUTHOR"
+assert_noise_refused "noise:refused-human-all" "human author, filter all -> exit 1 noise-author-refused, no mutation"
+
+run_noise_case noise-human-own-login fixture-human toplevel "$HUMAN_AUTHOR"
+assert_noise_refused "noise:refused-human-own-login-filter" "human author, filter naming that login -> exit 1 noise-author-refused, no mutation"
+
+run_noise_case noise-other-bot-automated automated toplevel "$OTHER_BOT_AUTHOR"
+assert_noise_refused "noise:refused-non-registry-bot-automated" "non-registry Bot, filter automated -> exit 1 noise-author-refused, no mutation"
+
+run_noise_case noise-copilot-codex-only codex-only review "$COPILOT_BOT_AUTHOR"
+assert_noise_refused "noise:refused-copilot-codex-only" "Copilot Bot, filter codex-only -> exit 1 noise-author-refused, no mutation"
+
+run_noise_case noise-null-author automated toplevel null
+assert_noise_refused "noise:refused-null-author" "null author -> exit 1 noise-author-refused, no mutation"
+
+# A binding refusal still wins over the author check: a Codex Bot node on another PR is
+# pr-binding-refused, never marked.
+new_gh_case noise-other-pr toplevel
+set_gh_part binding 0 \
+  "{\"data\":{\"node\":{\"__typename\":\"IssueComment\",\"pullRequest\":{\"state\":\"OPEN\",\"headRefName\":\"feature/other-branch\",\"headRepository\":{\"id\":\"$FIXTURE_REPO_ID\"}},\"author\":$CODEX_BOT_AUTHOR,\"reactionGroups\":[]}}}"
+MARKER_FLAGS=(--noise automated)
+run_bound_case "$BOUND_REPO" "$TOPLEVEL_NODE" toplevel
+MARKER_FLAGS=()
+assert_binding_token "noise:binding-refusal-precedes-author-check" pr-binding-refused "Codex Bot node on another PR in noise mode -> pr-binding-refused"
+
+# --noise as the last argument has no value: missing-value-for-noise before any git or gh call.
+new_gh_case noise-missing-value toplevel
+(
+  cd "$BOUND_REPO" || exit 98
+  env -u GIT_DIR -u GIT_WORK_TREE -u REACTMARKER_TEST_MODE -u REACTMARKER_CAPTURE_FILE \
+    PATH="$FAIL_GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" \
+    bash "$REACT_MARKER" "$TOPLEVEL_NODE" toplevel "https://github.com/fixture-owner/fixture-repo/pull/5" --noise
+) > "$case_dir/run.stdout" 2> "$case_dir/run.stderr"
+status=$?
+if [ "$status" -eq 1 ] && [ "$(cat "$case_dir/run.stderr")" = "REACTMARKER_ERROR=missing-value-for-noise" ] \
+   && [ "$(reached_flag gh)" = no ]; then
+  pass "noise:missing-value" "--noise with no value -> exit 1 missing-value-for-noise, gh never reached"
+else
+  failed "noise:missing-value" "status=$status stderr=$(cat "$case_dir/run.stderr") gh=$(reached_flag gh)"
+fi
+
+# Under the capture seam noise mode skips the binding and the author check and captures the
+# reaction like fix mode.
+cap="$(fresh_capture noise-capture)"
+new_gh_case noise-capture toplevel
+out="$(PATH="$FAIL_GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" REACTMARKER_TEST_MODE=1 \
+  REACTMARKER_CAPTURE_FILE="$cap" \
+  bash "$REACT_MARKER" --noise automated "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
+status=$?
+if [ "$status" -eq 0 ] && [ -z "$out" ] && [ "$(grep -c '^REACT ' "$cap")" -eq 1 ] \
+   && grep -qx "REACT node=$TOPLEVEL_NODE content=EYES" "$cap" && [ "$(reached_flag gh)" = no ]; then
+  pass "noise:capture-seam-skips-author-check" "capture seam in noise mode -> one REACT line, exit 0, gh never reached"
+else
+  failed "noise:capture-seam-skips-author-check" "status=$status out=$out cap=$(cat "$cap") gh=$(reached_flag gh)"
+fi
+
+# The thread surface stays a silent no-op in noise mode.
+cap="$(fresh_capture noise-thread)"
+out="$(REACTMARKER_TEST_MODE=1 REACTMARKER_CAPTURE_FILE="$cap" \
+  bash "$REACT_MARKER" --noise automated "$TOPLEVEL_NODE" thread "https://github.com/o/r/pull/5#discussion_r1" 2>&1)"
+status=$?
+if [ "$status" -eq 0 ] && [ ! -s "$cap" ] && [ -z "$out" ]; then
+  pass "noise:thread-silent-no-op" "thread surface in noise mode -> no reaction, zero output, exit 0"
+else
+  failed "noise:thread-silent-no-op" "status=$status cap=$(cat "$cap") out=$out"
+fi
+
+# A copy of the script whose directory lacks reviewer-identity.jq: noise mode fails with
+# missing-identity-module before any gh call; fix mode never needs the module.
+NO_IDENTITY_ROOT="$TMPDIR_TEST/no-identity-plugin"
+mkdir -p "$NO_IDENTITY_ROOT/skills/github-review-loop/scripts" "$NO_IDENTITY_ROOT/skills/_shared"
+cp "$REACT_MARKER" "$NO_IDENTITY_ROOT/skills/github-review-loop/scripts/react-marker.sh"
+cp "$REPO_ROOT/plugin/skills/_shared/graphql-response.sh" "$NO_IDENTITY_ROOT/skills/_shared/graphql-response.sh"
+NO_IDENTITY_MARKER="$NO_IDENTITY_ROOT/skills/github-review-loop/scripts/react-marker.sh"
+
+new_gh_case noise-no-identity toplevel
+(
+  cd "$BOUND_REPO" || exit 98
+  env -u GIT_DIR -u GIT_WORK_TREE -u REACTMARKER_TEST_MODE -u REACTMARKER_CAPTURE_FILE \
+    PATH="$FAIL_GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" \
+    bash "$NO_IDENTITY_MARKER" --noise automated "$TOPLEVEL_NODE" toplevel "https://github.com/fixture-owner/fixture-repo/pull/5"
+) > "$case_dir/run.stdout" 2> "$case_dir/run.stderr"
+status=$?
+if [ "$status" -eq 1 ] && [ "$(cat "$case_dir/run.stderr")" = "REACTMARKER_ERROR=missing-identity-module" ] \
+   && [ "$(reached_flag gh)" = no ]; then
+  pass "noise:missing-identity-module" "noise mode without reviewer-identity.jq -> exit 1 missing-identity-module, gh never reached"
+else
+  failed "noise:missing-identity-module" "status=$status stderr=$(cat "$case_dir/run.stderr") gh=$(reached_flag gh)"
+fi
+
+cap="$(fresh_capture fix-no-identity)"
+out="$(PATH="$FAIL_GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" REACTMARKER_TEST_MODE=1 \
+  REACTMARKER_CAPTURE_FILE="$cap" \
+  bash "$NO_IDENTITY_MARKER" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
+status=$?
+if [ "$status" -eq 0 ] && grep -qx "REACT node=$TOPLEVEL_NODE content=EYES" "$cap"; then
+  pass "fix:no-identity-module-needed" "fix mode without reviewer-identity.jq -> exit 0, reaction captured"
+else
+  failed "fix:no-identity-module-needed" "status=$status out=$out cap=$(cat "$cap")"
+fi
+
+# Fix mode makes no author check: a human-authored node bound to the fixture PR is still marked.
+new_gh_case fix-human-author toplevel
+set_gh_part binding 0 "$(bound_node_body IssueComment "$HUMAN_AUTHOR")"
+run_bound_case "$BOUND_REPO" "$TOPLEVEL_NODE" toplevel
+assert_live_success "fix:human-author-still-reacts" "fix mode over a human-authored node -> exit 0, reaction sent"
+
+# ── RE-MARK REFRESH (#568): a viewer EYES already present is removed before the new mark ──
+# assert_remark_order <name> <label>: exit 0, silent stdout, no error token, and the shim saw
+# repo view, binding, removeReaction, addReaction in that order.
+assert_remark_order() {
+  local order
+  order="$(call_order)"
+  if [ "$live_status" -eq 0 ] && [ -z "$live_stdout" ] && [ "$order" = "repo binding unreact react " ] \
+     && ! printf '%s\n' "$live_stderr" | grep -q 'REACTMARKER_ERROR='; then
+    pass "$1" "$2"
+  else
+    failed "$1" "status=$live_status order=$order stdout=$live_stdout stderr=$live_stderr"
+  fi
+}
+
+new_gh_case remark-fix toplevel
+set_gh_part binding 0 "$(bound_node_body IssueComment "$HUMAN_AUTHOR" "$VIEWER_EYES_GROUPS")"
+run_bound_case "$BOUND_REPO" "$TOPLEVEL_NODE" toplevel
+assert_remark_order "remark:fix-unreact-before-react" "fix mode, viewer EYES present -> removeReaction then addReaction, exit 0"
+
+if [ -f "$case_dir/unreact.args" ] && grep -qx "id=$TOPLEVEL_NODE" "$case_dir/unreact.args" \
+   && grep -qF 'removeReaction(input: { subjectId: $id, content: EYES })' "$case_dir/unreact.args" \
+   && ! grep -vx "id=$TOPLEVEL_NODE" "$case_dir/unreact.args" | grep -qF "$TOPLEVEL_NODE"; then
+  pass "remark:unreact-node-id-is-variable" "removeReaction passes id=<node> as a variable, query text never holds it"
+else
+  failed "remark:unreact-node-id-is-variable" "args=$(cat "$case_dir/unreact.args" 2>/dev/null)"
+fi
+
+new_gh_case remark-noise review
+set_gh_part binding 0 "$(bound_node_body PullRequestReview "$COPILOT_BOT_AUTHOR" "$VIEWER_EYES_GROUPS")"
+MARKER_FLAGS=(--noise automated)
+run_bound_case "$BOUND_REPO" "$REVIEW_NODE" review
+MARKER_FLAGS=()
+assert_remark_order "remark:noise-unreact-before-react" "noise mode, viewer EYES present -> removeReaction then addReaction, exit 0"
+
+# An EYES group the viewer did not add needs no removal: only addReaction is sent.
+new_gh_case remark-other-eyes toplevel
+set_gh_part binding 0 "$(bound_node_body IssueComment "$CODEX_BOT_AUTHOR" "$OTHER_EYES_GROUPS")"
+run_bound_case "$BOUND_REPO" "$TOPLEVEL_NODE" toplevel
+if [ "$live_status" -eq 0 ] && [ "$(call_order)" = "repo binding react " ]; then
+  pass "remark:other-eyes-no-unreact" "EYES group with viewerHasReacted false -> no removeReaction, exit 0"
+else
+  failed "remark:other-eyes-no-unreact" "status=$live_status order=$(call_order) stderr=$live_stderr"
+fi
+
+# run_remark_failure <name> <exit status> <body>: a bound fix-mode case whose binding shows the
+# viewer's EYES and whose removeReaction answers <body> with <exit status>.
+run_remark_failure() {
+  new_gh_case "$1" toplevel
+  set_gh_part binding 0 "$(bound_node_body IssueComment "$CODEX_BOT_AUTHOR" "$VIEWER_EYES_GROUPS")"
+  set_gh_part unreact "$2" "$3"
+  run_bound_case "$BOUND_REPO" "$TOPLEVEL_NODE" toplevel
+}
+
+# assert_remark_failed <name> <label>: exit 1, exactly react-failed on stderr, the removal reached and
+# addReaction never sent.
+assert_remark_failed() {
+  if [ "$live_status" -eq 1 ] && [ "$unreact_reached" = yes ] && [ "$live_reached" = no ] \
+     && [ "$live_stderr" = "REACTMARKER_ERROR=react-failed" ]; then
+    pass "$1" "$2"
+  else
+    failed "$1" "status=$live_status unreact=$unreact_reached react=$live_reached stderr=$live_stderr"
+  fi
+}
+
+run_remark_failure remark-fail-exit1 1 \
+  '{"data":{"removeReaction":{"reactionGroups":[{"content":"EYES","viewerHasReacted":false}]}}}'
+assert_remark_failed "remark:removal-gh-nonzero" "removeReaction gh exit 1 -> exit 1 react-failed, addReaction not sent"
+
+run_remark_failure remark-fail-errors 0 \
+  '{"data":{"removeReaction":null},"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}'
+assert_remark_failed "remark:removal-errors-envelope" "removeReaction exit 0 + errors envelope -> exit 1 react-failed, addReaction not sent"
+
+run_remark_failure remark-fail-still-eyes 0 \
+  '{"data":{"removeReaction":{"reactionGroups":[{"content":"EYES","viewerHasReacted":true}]}}}'
+assert_remark_failed "remark:removal-eyes-still-reacted" "removeReaction payload still shows viewer EYES -> exit 1 react-failed, addReaction not sent"
+
+run_remark_failure remark-fail-null-groups 0 '{"data":{"removeReaction":{"reactionGroups":null}}}'
+assert_remark_failed "remark:removal-null-reaction-groups" "removeReaction payload with null reactionGroups -> exit 1 react-failed, addReaction not sent"
 
 # ── thread surface from a non-git directory stays a silent no-op ─────────────────────
 # The thread surface never runs the binding: from a directory outside any repository, with shim git

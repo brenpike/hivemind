@@ -62,8 +62,11 @@ SELF_LOGIN="selfuser"
 
 CASE01="$FIXTURES/case01-handled-by-marker.json"
 CASE04="$FIXTURES/case04-no-self-fix-thread.json"
-[ -f "$CASE01" ] || { echo "FAIL: fixture missing: $CASE01" >&2; exit 2; }
-[ -f "$CASE04" ] || { echo "FAIL: fixture missing: $CASE04" >&2; exit 2; }
+CASE25="$FIXTURES/case25-noise-marked-bots.json"
+CASE26="$FIXTURES/case26-marked-then-edited.json"
+for fixture_path in "$CASE01" "$CASE04" "$CASE25" "$CASE26"; do
+  [ -f "$fixture_path" ] || { echo "FAIL: fixture missing: $fixture_path" >&2; exit 2; }
+done
 
 # ── PATH-shim fake gh ───────────────────────────────────────────────────────────────
 # Prints the file named by FAKE_GH_BODY (CR stripped) and exits with FAKE_GH_EXIT.
@@ -95,12 +98,14 @@ write_body() {
   printf '%s\n' "$body_path"
 }
 
-# run_case <name> <body file> <gh exit> <expected stdout> <expected rc>
+# run_case <name> <body file> <gh exit> <expected stdout> <expected rc> [reviewer filter]
+# The reviewer filter defaults to REVIEWER_FILTER.
 run_case() {
   local case_name="$1" body_path="$2" gh_exit="$3" want_out="$4" want_rc="$5"
+  local reviewer_filter="${6:-$REVIEWER_FILTER}"
   local got_out got_rc
   got_out="$(PATH="$STUB_BIN:$PATH" FAKE_GH_BODY="$body_path" FAKE_GH_EXIT="$gh_exit" \
-    bash "$PREFILTER" "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$REVIEWER_FILTER" "$SELF_LOGIN" 2>/dev/null)"
+    bash "$PREFILTER" "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$reviewer_filter" "$SELF_LOGIN" 2>/dev/null)"
   got_rc=$?
   if [ "$got_out" = "$want_out" ] && [ "$got_rc" -eq "$want_rc" ]; then
     pass "$case_name" "stdout=$got_out rc=$got_rc"
@@ -144,6 +149,37 @@ run_case "shape:null-comments-nodes" "$NULL_COMMENTS_NODES" 0 "PREFILTER_ERROR=g
 run_case "shape:null-thread-comments-nodes" "$NULL_THREAD_COMMENTS_NODES" 0 "PREFILTER_ERROR=graphql-missing-connection" 1
 run_case "shape:valid-empty-skips" "$VALID_EMPTY" 0 "PREFILTER_SKIP" 0
 run_case "shape:errors-over-null-pr" "$ERRORS_OVER_NULL_PR" 0 "PREFILTER_ERROR=graphql-errors" 1
+
+# ── EYES mark cases ──────────────────────────────────────────────────────────────
+# Each single-node body keeps one top-level comment or review from case25/case26 and empties the
+# other connection, so the node alone decides SKIP or DISPATCH. Each bot node runs under a
+# reviewer filter that keeps it in scope.
+# single_comment_program <comment id>: print a jq program that keeps only that top-level comment.
+single_comment_program() {
+  printf '%s' ".data.repository.pullRequest |= (.comments.nodes |= map(select(.id == \"$1\")) | .comments.totalCount = (.comments.nodes | length) | .reviews = {totalCount: 0, nodes: []})"
+}
+# single_review_program <review id>: print a jq program that keeps only that review.
+single_review_program() {
+  printf '%s' ".data.repository.pullRequest |= (.reviews.nodes |= map(select(.id == \"$1\")) | .reviews.totalCount = (.reviews.nodes | length) | .comments = {totalCount: 0, nodes: []})"
+}
+
+CODEX_MARKED="$(derive_body s568-2-codex-marked \
+  "$(single_comment_program IC_kwDOcase25comment2500)" "$CASE25")" || exit 2
+GENERIC_BOT_MARKED="$(derive_body s568-2-generic-bot-marked \
+  "$(single_comment_program IC_kwDOcase25comment2501)" "$CASE25")" || exit 2
+COPILOT_MARKED="$(derive_body s568-2-copilot-marked \
+  "$(single_review_program PRR_kwDOcase25review2502)" "$CASE25")" || exit 2
+EDITED_AFTER_MARK="$(derive_body s568-2-edited-after-mark \
+  "$(single_comment_program IC_kwDOcase26comment2600)" "$CASE26")" || exit 2
+EDITED_BEFORE_MARK="$(derive_body s568-2-edited-before-mark \
+  "$(single_comment_program IC_kwDOcase26comment2608)" "$CASE26")" || exit 2
+
+run_case "eyes:codex-noise-marked-skips" "$CODEX_MARKED" 0 "PREFILTER_SKIP" 0 "codex-only"
+run_case "eyes:copilot-noise-marked-skips" "$COPILOT_MARKED" 0 "PREFILTER_SKIP" 0 "automated"
+run_case "eyes:generic-bot-noise-marked-skips" "$GENERIC_BOT_MARKED" 0 "PREFILTER_SKIP" 0 "all"
+run_case "eyes:case25-noise-marked-bots-skips" "$CASE25" 0 "PREFILTER_SKIP" 0 "all"
+run_case "eyes:edited-after-mark-dispatches" "$EDITED_AFTER_MARK" 0 "PREFILTER_DISPATCH" 0 "all"
+run_case "eyes:edited-before-mark-skips" "$EDITED_BEFORE_MARK" 0 "PREFILTER_SKIP" 0 "all"
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
 echo

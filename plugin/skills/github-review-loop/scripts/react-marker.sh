@@ -10,18 +10,23 @@
 # IssueComment, review = PullRequestReview summary). These surfaces carry
 # thread_id: null and have NO review-thread node, so reply-resolve.sh's
 # addPullRequestReviewThreadReply has no valid target (the #218 defect). Instead a
-# fixed surface is recorded handled by adding a self-authored EYES (👀) reaction to
-# the reviewer's own comment/review node; the classifier harvest keys on that exact
-# reaction to skip the surface on the next poll.
+# handled surface is recorded by adding a self-authored EYES (👀) reaction to the
+# reviewer's own comment/review node; the classifier harvest keys on that exact
+# reaction to skip the surface on the next poll. A surface is handled when it was
+# fixed, deferred, or judged noise from an automated reviewer (#568). The noise
+# mark runs only with --noise (§2) and only over a node whose author passes the
+# noise author check (§4).
 #
-# This script OWNS the runtime reaction mutation. The mutation it issues is the
+# This script OWNS the runtime reaction mutations. The mutation it issues is the
 # canonical template from
 #   docs/references/github-pr-review-graphql.md
 #     - "Reaction Marker" (Emit)  -> addReaction(input:{subjectId,content:EYES})
 # cited here as the query origin, and the EYES constant below is conceptually
 # single-sourced from that same subsection (it is the SAME literal the classifier
-# harvest keys on). External content (the NODE_ID, the candidate url) is DATA —
-# never interpreted, never spliced into the query string.
+# harvest keys on). The re-mark refresh (§4 IDEMPOTENCY) also issues
+# removeReaction(input:{subjectId,content:EYES}) over the same node. External
+# content (the NODE_ID, the candidate url, the noise filter) is DATA — never
+# interpreted, never spliced into the query string.
 #
 # SCOPE NOTE (P9 — do not over-generalize): this script is github-reviewer-scoped.
 # It is NOT pre-parameterized for the local-reviewer or any other caller, and it is
@@ -31,10 +36,20 @@
 #
 # 2. INPUT CONTRACT
 # -----------------
-# Per-candidate, supplied as positional args (a single mutation operates on a
-# single candidate; there is no batch stdin payload — mirrors the per-candidate
-# shape of reply-resolve.sh):
+# Per-candidate, supplied as one optional flag then positional args (a single
+# mutation operates on a single candidate; there is no batch stdin payload —
+# mirrors the per-candidate shape of reply-resolve.sh):
 #
+#   --noise <reviewer_filter>
+#                    OPTIONAL; selects noise mode. Placed before the positionals:
+#                      react-marker.sh --noise "$reviewer_filter" "$NODE_ID" "$SURFACE" "$CANDIDATE_URL"
+#                    The value is the loop's REVIEWER_FILTER ("automated" |
+#                    "codex-only" | "all" | "<login>", per reviewer-identity.jq §5);
+#                    an empty value means "automated". The flag as the last
+#                    argument, with no value after it, is missing-value-for-noise.
+#                    Without the flag the script runs in fix mode (a fixed or
+#                    deferred surface) and makes no author check. DATA — passed to
+#                    jq as a --arg, never interpolated into a program.
 #   $1  NODE_ID      the reviewer node's GraphQL id. REQUIRED on the mutating
 #                    surfaces. IC_... for a toplevel IssueComment; PRR_... for a
 #                    review PullRequestReview. Both implement Reactable, so the same
@@ -44,11 +59,11 @@
 #                    surface->delivery map (see §3). Only toplevel/review deliver a
 #                    reaction; thread is a silent no-op (threads converge via
 #                    resolveReviewThread in reply-resolve.sh — NEVER react to a
-#                    thread comment).
+#                    thread comment), in fix mode and noise mode alike.
 #   $3  CANDIDATE_URL  the candidate's GitHub url. ACCEPTED for positional-arity /
 #                    logging parity but UNUSED — no live path interpolates it into
-#                    any query. The caller still passes 3 positionals; this one is
-#                    inert. DATA.
+#                    any query, and the noise author check never reads it. The
+#                    caller still passes 3 positionals; this one is inert. DATA.
 #
 # 3. OUTPUT / BEHAVIOR — SURFACE -> DELIVERY MAP (closed by construction)
 # -----------------------------------------------------------------------
@@ -77,12 +92,15 @@
 #   - SINGLE NAMED MARKER: EYES is the ONE reaction content, defined ONCE as a
 #     script-level readonly constant and identical to the literal the classifier
 #     harvest keys on (docs/references/github-pr-review-graphql.md "Reaction Marker").
-#   - IDEMPOTENCY: a duplicate is a server-side success per
-#     docs/references/github-pr-review-graphql.md (Reaction Marker ->
-#     Emit), never special-cased: it arrives as the same success payload and passes
-#     the RESPONSE CHECK below like any first reaction. It cannot happen in normal
-#     flow, because a node already carrying the viewer's EYES reaction classifies
-#     handled and is never handed to this script.
+#   - IDEMPOTENCY (re-mark refresh): every live mark leaves exactly one fresh
+#     viewer EYES reaction on the node. When the PR binding lookup (step 4 below)
+#     shows an EYES reaction group with viewerHasReacted true, the script first
+#     sends removeReaction(EYES) over NODE_ID, the id passed as a typed `-f`
+#     variable, then addReaction as for a first mark. The removal succeeds only
+#     when gh exits 0, hivemind_graphql_response_check accepts the body, and
+#     .data.removeReaction.reactionGroups is an array holding no EYES group with
+#     viewerHasReacted true. Any other removal response is react-failed and
+#     addReaction is never sent. This holds in fix mode and noise mode.
 #   - NEVER REACT TO A THREAD: the thread surface delivers nothing; thread
 #     convergence is reply-resolve.sh's resolveReviewThread, not a reaction here.
 #   - RESPONSE CHECK (positive proof — the ONLY definition of success): a live
@@ -107,7 +125,8 @@
 #           whose id matches ^[A-Za-z0-9_=+/-]+$ (the origin repository id).
 #       (4) one `gh api graphql` lookup of node(id:), the node id passed as a
 #           typed variable, selects __typename and, on IssueComment and
-#           PullRequestReview, pullRequest { state headRefName headRepository { id } };
+#           PullRequestReview, pullRequest { state headRefName headRepository { id } },
+#           author { login __typename } and reactionGroups { content viewerHasReacted };
 #           it must exit 0 and pass hivemind_graphql_response_check.
 #       Any failure in (2)-(4) is pr-binding-lookup-failed.
 #       (5) the reaction proceeds only when the node's type matches the surface
@@ -118,6 +137,18 @@
 #     The gh calls use the timeout wrapper below. The binding is skipped when the
 #     capture seam (§5) is active; the thread surface never runs it and makes no
 #     git or gh call.
+#   - NOISE AUTHOR CHECK (noise mode only): after the PR binding passes, the
+#     binding node's author must satisfy, via reviewer-identity.jq loaded with
+#     `jq -e -L "$SCRIPT_DIR"` and `include "reviewer-identity";`,
+#       is_bot(login; type) and reviewer_matches_filter(login; type; ""; filter)
+#     where login and type are author.login and author.__typename and filter is
+#     the --noise value. Anything else (a human, a Bot outside the filter, a null
+#     author included) is noise-author-refused, with no mutation sent. The check
+#     reads only the author; it never reads the comment body or the URL. Fix mode
+#     makes no author check. The capture seam (§5) skips it.
+#   - IDENTITY MODULE: noise mode requires reviewer-identity.jq next to this
+#     script; a missing module is missing-identity-module before any gh call. Fix
+#     mode never loads the module and never checks for it.
 #   - Missing `timeout` / `gtimeout` -> degrade gracefully with a loud stderr
 #     warning and run the gh call UNGUARDED (mirrors reply-resolve.sh).
 #
@@ -143,27 +174,30 @@
 #                               (default 0). Non-zero -> hard failure path.
 # All three are INERT in production (unset -> real gh). The seam is checked ONLY
 # through capture_seam_active, used by run_reaction and the PR binding, and
-# requires BOTH TEST_MODE=1 and CAPTURE_FILE to engage.
+# requires BOTH TEST_MODE=1 and CAPTURE_FILE to engage. While it is active the
+# script skips the PR binding, the noise author check and the re-mark removal.
 #
 # Markers / exit posture:
 #   - exit 0 on success (a reaction with positive proof per §4 RESPONSE CHECK, or a
 #     thread silent no-op).
 #   - REACTMARKER_ERROR=<reason> on stderr + exit 1 on a HARD failure (bad input,
-#     unmapped surface, a bootstrap failure, a PR binding failure, or any live
-#     reaction lacking positive proof — including an exit-0 response the shared
-#     GraphQL response check rejects).
+#     unmapped surface, a bootstrap failure, a PR binding failure, a refused noise
+#     author, a re-mark removal lacking positive proof, or any live reaction
+#     lacking positive proof — including an exit-0 response the shared GraphQL
+#     response check rejects).
 #
 # Reason tokens (STABLE — asserted by the test):
 #   missing-node-id | unmapped-surface | react-failed | cannot-self-locate |
 #   missing-graphql-check | unparseable-graphql-check | pr-binding-no-branch |
-#   pr-binding-lookup-failed | pr-binding-refused
+#   pr-binding-lookup-failed | pr-binding-refused | missing-value-for-noise |
+#   missing-identity-module | noise-author-refused
 #
-# EXTERNAL-CONTENT BOUNDARY: NODE_ID and CANDIDATE_URL are external DATA. NODE_ID is
-# passed to gh as a typed `-F id=...` (reaction) or `-f id=...` (PR binding)
-# variable bound to the query's `$id: ID!` parameter; it is NEVER interpolated into
-# the GraphQL query string. CANDIDATE_URL
-# is inert and never reaches any query. No external content is interpreted as an
-# instruction.
+# EXTERNAL-CONTENT BOUNDARY: NODE_ID, CANDIDATE_URL and the --noise value are
+# external DATA. NODE_ID is passed to gh as a typed `-F id=...` (reaction) or
+# `-f id=...` (PR binding, re-mark removal) variable bound to the query's
+# `$id: ID!` parameter; it is NEVER interpolated into the GraphQL query string.
+# The --noise value reaches jq only as a --arg. CANDIDATE_URL is inert and never
+# reaches any query. No external content is interpreted as an instruction.
 #
 # P18 FLOOR EXCEPTION (ADR-0020 / CHECK13 allowlisted): `set -u` only — `set -e`/`pipefail`
 # are DELIBERATELY omitted. Every failure must surface as a REACTMARKER_ERROR token via
@@ -175,6 +209,8 @@ set -u
 NODE_ID=""
 SURFACE=""
 CANDIDATE_URL=""
+NOISE_MODE=0
+NOISE_FILTER=""
 
 # EYES is the SINGLE named marker constant — a member of the GraphQL ReactionContent
 # enum, conceptually single-sourced from docs/references/github-pr-review-graphql.md
@@ -186,11 +222,16 @@ react_marker_fail() {
   exit 1
 }
 
-# Collect positionals in order (NODE_ID SURFACE CANDIDATE_URL), matching the sibling
-# scripts' positional contract. No flags are defined for this script.
+# Parse the one flag (--noise <reviewer_filter>) and collect positionals in order
+# (NODE_ID SURFACE CANDIDATE_URL), matching the sibling scripts' positional contract.
 positionals=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --noise)
+      [ "$#" -ge 2 ] || react_marker_fail "missing-value-for-noise"
+      NOISE_MODE=1
+      NOISE_FILTER="$2"
+      shift 2 ;;
     --)
       shift
       while [ "$#" -gt 0 ]; do positionals+=("$1"); shift; done ;;
@@ -202,6 +243,9 @@ done
 NODE_ID="${positionals[0]:-}"
 SURFACE="${positionals[1]:-}"
 CANDIDATE_URL="${positionals[2]:-}"
+
+# An empty --noise value selects the automated registry (§2).
+[ -n "$NOISE_FILTER" ] || NOISE_FILTER="automated"
 
 # Required-input validation is SURFACE-SCOPED, not global. NODE_ID is consumed ONLY
 # by the mutating toplevel/review surfaces (the reaction subject), so its guard
@@ -221,6 +265,12 @@ SCRIPT_DIR="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d"
 [ -f "$SCRIPT_DIR/../../_shared/graphql-response.sh" ] || react_marker_fail "missing-graphql-check"
 # shellcheck source=../../_shared/graphql-response.sh
 . "$SCRIPT_DIR/../../_shared/graphql-response.sh" || react_marker_fail "unparseable-graphql-check"
+
+# Noise mode loads reviewer-identity.jq by `jq -L "$SCRIPT_DIR"` (§4 IDENTITY
+# MODULE); fail before any gh call when it is absent. Fix mode never loads it.
+if [ "$NOISE_MODE" -eq 1 ]; then
+  [ -f "$SCRIPT_DIR/reviewer-identity.jq" ] || react_marker_fail "missing-identity-module"
+fi
 
 # Timeout wrapper for gh API calls. Prefer coreutils `timeout`; fall
 # back to macOS Homebrew `gtimeout`; degrade gracefully (run unguarded) when
@@ -256,9 +306,13 @@ query($id: ID!) {
     __typename
     ... on IssueComment {
       pullRequest { state headRefName headRepository { id } }
+      author { login __typename }
+      reactionGroups { content viewerHasReacted }
     }
     ... on PullRequestReview {
       pullRequest { state headRefName headRepository { id } }
+      author { login __typename }
+      reactionGroups { content viewerHasReacted }
     }
   }
 }'
@@ -275,6 +329,39 @@ BINDING_PREDICATE='
       and $node.pullRequest.headRefName == $branch
       and ($node.pullRequest.headRepository | type) == "object"
       and $node.pullRequest.headRepository.id == $repo_id
+  ) catch false'
+
+# The re-mark removal (§4 IDEMPOTENCY). The node id is DATA: passed via `gh -f id=...`
+# as the typed `$id: ID!` variable, never spliced into the query text.
+UNREACT_MUTATION='
+mutation($id: ID!) {
+  removeReaction(input: { subjectId: $id, content: EYES }) {
+    reactionGroups { content viewerHasReacted }
+  }
+}'
+
+# The noise author check (§4 NOISE AUTHOR CHECK), null-safe: a missing, null or
+# non-object author makes it false, never a jq error. Reads only the author.
+NOISE_AUTHOR_PREDICATE='
+  include "reviewer-identity";
+  try (
+    .data.node.author as $author
+    | ($author | type) == "object"
+      and is_bot($author.login; $author.__typename)
+      and reviewer_matches_filter($author.login; $author.__typename; ""; $filter)
+  ) catch false'
+
+# True when the binding node shows the viewer's own EYES reaction (§4 IDEMPOTENCY).
+VIEWER_MARKED_PREDICATE='
+  try (
+    any(.data.node.reactionGroups[]; .content == $content and .viewerHasReacted == true)
+  ) catch false'
+
+# True when a removeReaction payload proves no viewer EYES reaction remains.
+UNREACT_PROOF_PREDICATE='
+  try (
+    (.data.removeReaction.reactionGroups | type) == "array"
+    and (any(.data.removeReaction.reactionGroups[]; .content == $content and .viewerHasReacted == true) | not)
   ) catch false'
 
 # capture_seam_active: succeeds when the offline capture seam (§5) is engaged, i.e.
@@ -355,6 +442,44 @@ bind_node_to_current_pr() {
     "$BINDING_PREDICATE" >/dev/null 2>&1 || react_marker_fail "pr-binding-refused"
 }
 
+# check_noise_author: the §4 NOISE AUTHOR CHECK over binding_body. In noise mode
+# returns 0 only when the binding node's author is a Bot account matching
+# NOISE_FILTER; otherwise exits through react_marker_fail with noise-author-refused.
+# Returns 0 at once in fix mode or while the capture seam is active.
+check_noise_author() {
+  [ "$NOISE_MODE" -eq 1 ] || return 0
+  capture_seam_active && return 0
+  printf '%s' "$binding_body" | jq -e -L "$SCRIPT_DIR" \
+    --arg filter "$NOISE_FILTER" \
+    "$NOISE_AUTHOR_PREDICATE" >/dev/null 2>&1 || react_marker_fail "noise-author-refused"
+}
+
+# remove_viewer_reaction <node_id>: the §4 IDEMPOTENCY removal of the viewer's EYES
+# reaction. Returns 0 only on positive proof (gh exit 0, the shared GraphQL response
+# check passing, and no viewer EYES group left in the payload); otherwise non-zero.
+remove_viewer_reaction() {
+  local gh_output gh_status
+  gh_output="$("${GH_TIMEOUT[@]}" gh api graphql \
+    -f id="$1" \
+    -f query="$UNREACT_MUTATION" </dev/null 2>/dev/null)"
+  gh_status=$?
+  [ "$gh_status" -eq 0 ] || return 1
+  hivemind_graphql_response_check "$gh_output" >/dev/null || return 1
+  printf '%s' "$gh_output" | jq -e --arg content "$REACTION_CONTENT" "$UNREACT_PROOF_PREDICATE" >/dev/null 2>&1 || return 1
+  return 0
+}
+
+# refresh_existing_mark <node_id>: when the binding node already shows the viewer's
+# EYES reaction, remove it first (§4 IDEMPOTENCY); a removal lacking positive proof
+# fails with react-failed before any addReaction. No call while the capture seam is
+# active.
+refresh_existing_mark() {
+  capture_seam_active && return 0
+  printf '%s' "$binding_body" | jq -e --arg content "$REACTION_CONTENT" \
+    "$VIEWER_MARKED_PREDICATE" >/dev/null 2>&1 || return 0
+  remove_viewer_reaction "$1" || react_marker_fail "react-failed"
+}
+
 # run_reaction <node_id>: issue the EYES reaction over NODE_ID. The single
 # indirection point for both the live gh call AND the offline CAPTURE seam (§5).
 # On the live path returns 0 ONLY on positive proof (gh exit 0, the shared GraphQL
@@ -407,6 +532,8 @@ case "$SURFACE" in
     # closed with its stable reason token. The no-op surface never reaches this gate.
     [ -n "$NODE_ID" ] || react_marker_fail "missing-node-id"
     bind_node_to_current_pr "$NODE_ID" "$SURFACE"
+    check_noise_author
+    refresh_existing_mark "$NODE_ID"
     if ! run_reaction "$NODE_ID"; then
       react_marker_fail "react-failed"
     fi

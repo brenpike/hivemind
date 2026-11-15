@@ -9,7 +9,9 @@ appended to a scratch capture file (one line per reaction, format
 `REACT node=<NODE_ID> content=EYES`) instead of being issued against `gh`. The
 simulated live mutation exit status is supplied via `REACTMARKER_REACT_STATUS` for
 the failure-path case. Reason tokens asserted on the hard-failure paths are
-`missing-node-id`, `unmapped-surface`, and `react-failed`.
+`missing-node-id`, `unmapped-surface`, and `react-failed`; the noise-mode cases
+below add `noise-author-refused`, `missing-value-for-noise`, and
+`missing-identity-module`.
 
 The live-path cases (issue #393) leave `REACTMARKER_TEST_MODE` and
 `REACTMARKER_CAPTURE_FILE` unset and put a stub `gh` first on `PATH`. The stub
@@ -53,6 +55,44 @@ One more case asserts the binding passes the node id as a variable, never in the
 query text. A thread-surface run from a non-git directory, with stub `git` and
 `gh` first on `PATH`, stays a silent no-op that reaches neither.
 
+The binding stub payloads carry the node's `author { login __typename }` and
+`reactionGroups { content viewerHasReacted }`. The stub also tells apart the
+`removeReaction` mutation (part `unreact`) and logs each call's part name in
+order, so a case can assert the call order.
+
+Noise mode (issue #568) passes `--noise <reviewer_filter>` before the
+positionals; an empty value means `automated`. After the PR binding passes, the
+binding node's author must be a Bot account matching the filter, checked through
+`reviewer-identity.jq` (`is_bot` and `reviewer_matches_filter` with an empty
+self login). The script never reads the comment body or the URL for this.
+
+- Accepted, exit 0 with the reaction sent: a Codex Bot `IssueComment` with an
+  empty filter; a Copilot Bot review with `automated`; a Bot outside the registry
+  with `all`.
+- `noise-author-refused`, exit 1 with no mutation sent: a human with `all`; a
+  human with a filter naming that human's own login; a Bot outside the registry
+  with `automated`; a Copilot Bot with `codex-only`; a null author. A Codex Bot
+  node on another PR stays `pr-binding-refused`.
+- `missing-value-for-noise`: `--noise` as the last argument, with a failing stub
+  `gh` first on `PATH` that is never reached.
+- `missing-identity-module`: a copy of the script whose directory lacks
+  `reviewer-identity.jq`, run in noise mode, fails before any `gh` call. The same
+  copy in fix mode still marks, since fix mode never loads the module.
+- Under the capture seam, noise mode skips the binding and the author check and
+  captures the reaction; the thread surface stays a silent no-op.
+
+Fix mode (no flag) makes no author check: a human-authored node bound to the
+fixture PR is still marked.
+
+The re-mark refresh cases cover a binding whose `reactionGroups` holds an `EYES`
+group with `viewerHasReacted` true. The script sends `removeReaction` first, then
+`addReaction`; the logged order is repo view, binding, `unreact`, `react`, in fix
+mode and noise mode. The removal passes the node id as a variable. An `EYES`
+group the viewer did not add causes no removal. A removal fails with
+`react-failed` and `addReaction` is never sent when `gh` exits non-zero, the body
+is an errors envelope, the payload still shows the viewer's `EYES`, or its
+`reactionGroups` is null.
+
 The bootstrap tokens `cannot-self-locate`,
 `missing-graphql-check`, and `unparseable-graphql-check` are documented in the
 script header; the shared self-location suite covers them.
@@ -60,7 +100,8 @@ script header; the shared self-location suite covers them.
 The suite uses REAL production-shaped reviewer node ids — `IC_...` for a toplevel
 IssueComment and `PRR_...` for a review PullRequestReview — not fake placeholder
 ids, so validation-order bugs cannot hide behind a non-production node shape. The
-inputs are short positional args (`NODE_ID`, `surface`, `candidate_url`) and the
+inputs are short args (an optional `--noise` flag, then `NODE_ID`, `surface`,
+`candidate_url`) and the
 assertions are over the captured reaction log, so the suite needs no on-disk
 input/expected JSON fixtures — the capture files, scratch repos and stubs live in
 a disposable `mktemp -d` tmpdir removed on `EXIT`.

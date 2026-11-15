@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [8.0.4] - 2026-11-14
+
+### Fixed
+
+- The post-PR review watch now uses one handled-marker rule for every automated reviewer, with no reviewer-specific code. When the reviewer skips an automated reviewer's comment as noise, it marks it with its `EYES` reaction through `react-marker.sh --noise`, which checks on GitHub that the author is a bot in the watch's reviewer scope; a human's comment is never noise-marked. A marker counts only while the comment is unchanged since it was added, so a comment edited afterwards is reviewed again; a re-mark removes and re-adds the reaction so it postdates the edit. Fixes repeated no-op review passes on summary and receipt comments (#568, with #572 folded in). The poll still does not wake on an edit (#577); Codex-specific handling is removed later (#576). No workflow script was rebuilt.
+
 ## [8.0.3] - 2026-11-14
 
 ### Fixed
