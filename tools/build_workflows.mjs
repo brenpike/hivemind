@@ -274,7 +274,7 @@ export function readDataConstant(root, name) {
  * WORKFLOW_APPROVAL_LIMIT is the script length, in UTF-16 code units, above
  * which Claude Code 2.1.308 offers only "No" in the Workflow approval dialog.
  * It is an undocumented constant of that release, and an update may lower
- * it. The build fails above MAX_BUILT_SCRIPT_LENGTH, so the 10,000 margin
+ * it. The build fails above MAX_BUILT_SCRIPT_LENGTH, so the 9,000 margin
  * lets the pull request that crosses the budget fail while its script is
  * still approvable. No CR allowance is needed: .gitattributes pins
  * plugin/workflows/*.js to eol=lf.
