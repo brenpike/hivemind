@@ -149,9 +149,17 @@ _Avoid_: pre-check, setup
 ### Review
 
 **Adaptation Cycle**:
-The iterative cycle where a reviewer agent invokes Codex, classifies findings, fixes simple issues directly (≤2 files), flares complex ones to the overlord, validates, and repeats until stable or a stop condition fires. The bare alias "review loop" always means THIS local pre-PR Codex cycle — distinct from the **GitHub Review Loop** skill, which is the post-PR watch.
+The iterative cycle where a reviewer agent runs the configured **Local Reviewer**, classifies findings, fixes simple issues directly (≤2 files), flares complex ones to the overlord, validates, and repeats until stable or a stop condition fires. The bare alias "review loop" always means THIS local pre-PR cycle, which runs the configured **Local Reviewer** — distinct from the **GitHub Review Loop** skill, which is the post-PR watch.
 _Alias_: review loop
 _Avoid_: review cycle (ambiguous with remediation cycle), feedback loop
+
+**Local Reviewer**:
+The `HIVEMIND_LOCAL_REVIEWER` setting that picks the tool the **Adaptation Cycle** runs: a **Review Preset** name or a JSON argv list with an optional `{prompt}` slot; unset falls back to the `codex-plugin` preset when Codex is installed, else local review is skipped.
+_Avoid_: review CLI, codex override
+
+**Review Preset**:
+A named, built-in **Local Reviewer** configuration; today only `codex-plugin`, which calls the Codex plugin's own adversarial-review command.
+_Avoid_: adapter, profile
 
 **Remediation**:
 The act of addressing a review finding: classify, fix directly (≤2 files) or flare to overlord, validate, checkpoint-commit, push.
@@ -176,7 +184,7 @@ The one-shot operating mode of the github-reviewer agent that processes existing
 _Avoid_: one-shot mode, immediate mode
 
 **GitHub Review Loop**:
-The main-session skill (`hivemind:github-review-loop`, executed by the overlord) that watches a single PR via a thin change-detection poll armed on a Monitor and dispatches the github-reviewer agent in fix mode per actionable event. It owns the loop lifecycle — cycle counting, continue/stop decisions, and the single terminal report to the overlord — but never reads, interprets, or classifies feedback (that is the reviewer's job). It returns ONLY on a terminal condition: merged, closed, max cycles, an idle window elapsing with no new review activity (distinct from the cycle ceiling), same-finding-repeat, deferred escalation, injection-suspect, or a **Reviewer Approval** with nothing actionable remaining. Distinct from the **Adaptation Cycle** ("review loop"), which is the local pre-PR Codex cycle. Operational detail of its remediation signals now in `hivemind:detect-remediation-signals`; remediation policy in the **Remediation Doctrine**.
+The main-session skill (`hivemind:github-review-loop`, executed by the overlord) that watches a single PR via a thin change-detection poll armed on a Monitor and dispatches the github-reviewer agent in fix mode per actionable event. It owns the loop lifecycle — cycle counting, continue/stop decisions, and the single terminal report to the overlord — but never reads, interprets, or classifies feedback (that is the reviewer's job). It returns ONLY on a terminal condition: merged, closed, max cycles, an idle window elapsing with no new review activity (distinct from the cycle ceiling), same-finding-repeat, deferred escalation, injection-suspect, or a **Reviewer Approval** with nothing actionable remaining. Distinct from the **Adaptation Cycle** ("review loop"), which is the local pre-PR cycle that runs the configured **Local Reviewer**. Operational detail of its remediation signals now in `hivemind:detect-remediation-signals`; remediation policy in the **Remediation Doctrine**.
 _Avoid_: watch mode, polling mode, monitor mode, continuous mode, background watch
 
 **Automated Reviewer**:
