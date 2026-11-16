@@ -8,7 +8,7 @@
   "consumers": [
     {
       "file": "plugin/governance/decision-autonomy.md",
-      "pattern": "The report is gated on `HIVEMIND_ENABLE_DECISION_REPORT`, set in the `env` block of `.claude/settings.json` (committed) or `.claude/settings.local.json` (gitignored), the channel of `HIVEMIND_SKIP_PR_WATCH` and `HIVEMIND_LOCAL_REVIEW_MODEL`, and checked by presence, with a mechanical non-empty test"
+      "pattern": "The report is gated on `HIVEMIND_ENABLE_DECISION_REPORT`, set in the `env` block of `.claude/settings.json` (committed) or `.claude/settings.local.json` (gitignored), the channel of `HIVEMIND_SKIP_PR_WATCH` and `HIVEMIND_LOCAL_REVIEWER`, and checked by presence, with a mechanical non-empty test"
     },
     {
       "file": "plugin/governance/decision-autonomy.md",

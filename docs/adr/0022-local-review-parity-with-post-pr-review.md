@@ -2,6 +2,8 @@
 
 **Status:** accepted — 2026-06-04
 
+**Status note (2026-11-16):** supporting decision (a), the `HIVEMIND_LOCAL_REVIEW_MODEL` override, is superseded by ADR-0042 (`docs/adr/0042-tool-neutral-local-review.md`).
+
 ## Context
 
 The pre-PR local adversarial Codex review (`local-reviewer` agent + `hivemind:adaptation-cycle` skill) historically UNDER-CAUGHT relative to the post-PR GitHub Codex review. Security, injection, contract, and performance defects — including P0s — slipped past the fast local loop and surfaced only on the slow GitHub round-trips. The goal of issue #165 is to SHIFT-LEFT to parity: the local loop should find what the GitHub round catches, before the PR opens.

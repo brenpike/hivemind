@@ -41,7 +41,7 @@ try_step() {
 
 # ── (0) Ensure hard-required apt tools ──────────────────────────────────────
 # jq and perl are HARD-REQUIRED: gate (1) below hard-fails if either is absent,
-# and seed_codex_grant also calls jq directly.  Install them before the gate so
+# and the settings-seeding steps rely on it.  Install them before the gate so
 # a fresh container never aborts on a missing-tool that apt can supply.
 #
 # Idempotency: skip the apt round-trip when both tools are already on PATH.
@@ -149,36 +149,6 @@ install_bun() {
     export PATH="${HOME}/.bun/bin:${PATH}"
 }
 try_step "bun (claude-mem dependency)" install_bun
-
-# ── Codex cache permission grant ─────────────────────────────────────────────
-# Seed the GITIGNORED .claude/settings.local.json (never the tracked
-# settings.json) with the Codex cache Bash grant for THIS container's $HOME,
-# so the local Codex review flow runs prompt-free. Merge without clobbering.
-seed_codex_grant() {
-    local grant="Bash(node ${HOME}/.claude/plugins/cache/openai-codex/codex/*)"
-    local settings='.claude/settings.local.json'
-
-    mkdir -p .claude
-    if [[ ! -f "$settings" ]]; then
-        echo '{"permissions":{"allow":[]}}' > "$settings"
-    fi
-
-    # Already present (for this exact grant) → nothing to do.
-    if jq -e --arg g "$grant" \
-        '(.permissions.allow // []) | index($g) != null' \
-        "$settings" > /dev/null 2>&1; then
-        echo "  Codex cache grant already present, skipping"
-        return 0
-    fi
-
-    local tmp
-    tmp="$(mktemp)"
-    jq --arg g "$grant" \
-        '.permissions = (.permissions // {}) | .permissions.allow = ((.permissions.allow // []) + [$g])' \
-        "$settings" > "$tmp" && mv "$tmp" "$settings"
-    echo "  Seeded Codex cache grant for HOME=${HOME}"
-}
-try_step "Codex cache permission grant (.claude/settings.local.json)" seed_codex_grant
 
 # ── Claude Code plugin installs (non-interactive) ────────────────────────────
 # `claude plugin install <plugin>@<marketplace>` is a real non-interactive

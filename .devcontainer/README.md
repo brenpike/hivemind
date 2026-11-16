@@ -7,7 +7,6 @@ This dev container provisions a **CI-parity toolchain** so contributors can run 
 - The exact validation toolchain used by `.github/workflows/policy-check.yml`, so a green local run is a strong signal the branch will pass CI.
 - All CLI dependencies for hivemind plugin development: Claude Code CLI, Codex CLI, claude-mem, bun, uv/uvx, tmux.
 - Plugin marketplaces registered (no auth required): hivemind, codex, claude-mem, caveman.
-- A seeded `.claude/settings.local.json` with the Codex cache permission grant for this container's `$HOME`.
 
 Plugin **enablement** (caveman, codex, claude-mem) and plugin **configuration** (SubagentStart hook, pluginConfigs, .envrc, permissions allowlist) are handled by `hivemind:seed-hive` — the canonical path — not by postCreate. See [Configure the plugins](#configure-the-plugins-one-time-in-claude-code) below.
 
@@ -76,10 +75,6 @@ Registers the following marketplaces via `claude plugin marketplace add` (no aut
 - `thedotmack/claude-mem`
 - `https://github.com/juliusbrussee/caveman`
 
-**Step 2 — Codex cache permission grant seeded (soft fail)**
-
-Writes the Codex cache Bash grant for the container's `$HOME` into `.claude/settings.local.json` so the local Codex review flow (`hivemind:adaptation-cycle`) runs prompt-free. Merged without clobbering existing entries.
-
 **Step 3 — CI-parity smoke test (hard fail if any gate fails)**
 
 Runs the same three gates as `.github/workflows/policy-check.yml`:
@@ -95,10 +90,10 @@ A green run here is a strong best-effort signal the branch will pass CI.
 
 ## Configure the plugins (one-time, in Claude Code)
 
-Plugin enablement and configuration require an authenticated `claude` CLI session. postCreate handles OS/CLI tooling, marketplace registration, and the container-real-path Codex grant; everything below is done once inside Claude Code.
+Plugin enablement and configuration require an authenticated `claude` CLI session. postCreate handles OS/CLI tooling, and marketplace registration; everything below is done once inside Claude Code.
 
 **Division of labor:**
-- `postCreate.sh` — OS tooling, npm CLIs, marketplace registration, container-real-path Codex grant in `.claude/settings.local.json` (gitignored)
+- `postCreate.sh` — OS tooling, npm CLIs, marketplace registration
 - `hivemind:seed-hive` — plugin enablement (`enabledPlugins`), plugin config (`pluginConfigs`), SubagentStart hook, `.envrc`, permissions allowlist; writes to `.claude/settings.json` (tracked in this repo)
 
 ### Bootstrap order
@@ -170,11 +165,7 @@ All three must pass before opening a PR.
 
 ## `.claude/settings.local.json`
 
-This file is gitignored and per-contributor. `postCreate.sh` seeds one entry into it:
-
-- **Codex cache Bash grant** — allows the local Codex review flow to run without permission prompts, scoped to the container's `$HOME`.
-
-The seed is a jq-merge: it appends entries that are absent and never overwrites entries that are already present. Re-running the script is safe.
+This file is gitignored and per-contributor. `postCreate.sh` seeds nothing into it. The local review script is granted by the `hivemind:adaptation-cycle` skill, so no permission rule is needed for it.
 
 Note: caveman enablement (`enabledPlugins`, `pluginConfigs`) is no longer seeded here by postCreate. It is written to the tracked `.claude/settings.json` by `hivemind:seed-hive caveman=yes`.
 
@@ -190,10 +181,10 @@ All install steps are idempotent. Re-running is safe and will skip already-insta
 
 **Soft-fail install warnings:**
 
-Optional installs (npm globals, uv, bun, tmux, marketplace registration, Codex grant) print `[warn]` on failure but do not abort. The CI-parity smoke test gates are the must-pass part. Common causes in offline or locked-down Codespaces:
+Optional installs (npm globals, uv, bun, tmux, marketplace registration) print `[warn]` on failure but do not abort. The CI-parity smoke test gates are the must-pass part. Common causes in offline or locked-down Codespaces:
 
 - Network access blocked — npm/curl installs fail silently; the toolchain verification and JSON/linter gates still run.
-- `claude` CLI not yet installed — marketplace-add and Codex grant steps are skipped; the smoke test still runs.
+- `claude` CLI not yet installed — the marketplace-add step is skipped; the smoke test still runs.
 
 **Ubuntu-20.04 vs CI `ubuntu-latest` caveat:**
 

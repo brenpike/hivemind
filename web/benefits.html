@@ -81,7 +81,7 @@
             <p class="kicker kicker--benefit xs">Benefit</p>
             <p>Less context-switching and fewer stops. A single interface. You give the overlord a task; the swarm handles the rest.</p>
           </div>
-          <div class="code-panel diagram" id="ben-pipeline-diagram" role="img" tabindex="0" aria-label="Pipeline: you give the overlord a task; the overlord routes to the cerebrate, a drone or changeling, the local-reviewer (which needs the codex companion), then a PR that is watched by default. Routine planner questions are decided for you. You do not manage the hand-offs.">
+          <div class="code-panel diagram" id="ben-pipeline-diagram" role="img" tabindex="0" aria-label="Pipeline: you give the overlord a task; the overlord routes to the cerebrate, a drone or changeling, the local-reviewer (which needs a review tool, Codex by default), then a PR that is watched by default. Routine planner questions are decided for you. You do not manage the hand-offs.">
 <pre><code><span class="t-dim">Before:  You → plan → build → review → ship</span>
 <span class="t-dim">         (every hand-off is manual)</span>
 
@@ -89,7 +89,7 @@
 You → <span class="t-key">Overlord</span>
        ├─▶ <span class="t-str">Cerebrate</span>       (plan)
        ├─▶ <span class="t-hot">Drone</span> / <span class="t-lit">Changeling</span>  (build)
-       ├─▶ <span class="t-str">Local-Reviewer</span>  (review, needs codex)
+       ├─▶ <span class="t-str">Local-Reviewer</span>  (review, needs a review tool)
        └─▶ <span class="t-hot">PR</span>  (watched by default)
 
 <span class="t-dim">Routine questions: decided for you</span></code></pre>
@@ -129,18 +129,18 @@ You → <span class="t-key">Overlord</span>
             <p class="kicker kicker--problem xs">Problem</p>
             <p>Without a built-in review step, code reaches the PR, or production, without being challenged. Adding an external review step is manual work that gets skipped under pressure.</p>
             <p class="kicker kicker--solution xs">Solution</p>
-            <p>Two separate review layers. <strong>Local pre-PR review</strong> needs the optional codex companion: the <code>local-reviewer</code> runs an adversarial Codex loop on the branch diff, fixing simple findings and escalating complex ones, before any PR exists. A local review fix that fails its check is undone, with only its own files restored to the last commit. <strong>The post-PR watch</strong> is the default and does not need codex: after opening the PR, the overlord runs <code>github-review-loop</code>, which fixes, pushes, replies to, and resolves actionable feedback from Codex, Copilot, or Claude reviewer bots until approval, merge, or close. Agents never merge.</p>
+            <p>Two separate review layers. <strong>Local pre-PR review</strong> needs a review tool, the optional codex companion by default or any review CLI, such as Copilot CLI, set with <code>HIVEMIND_LOCAL_REVIEWER</code>: the <code>local-reviewer</code> runs an adversarial review loop on the branch diff, fixing simple findings and escalating complex ones, before any PR exists. When no reviewer can run, local review is skipped with a warning on the PR. A local review fix that fails its check is undone, with only its own files restored to the last commit. <strong>The post-PR watch</strong> is the default and does not need a local review tool: after opening the PR, the overlord runs <code>github-review-loop</code>, which fixes, pushes, replies to, and resolves actionable feedback from Codex, Copilot, or Claude reviewer bots until approval, merge, or close. Agents never merge.</p>
             <p><strong>Gates hold on one commit.</strong> In a workflow-script run, validation (with its version check) and local review are gates, and the PR step pushes only a commit every configured gate held on. A later commit, such as a validation fix round or a local-review fix, reruns every gate that ended on an earlier commit. The reruns are bounded; at the bound the run opens a draft PR and no longer asks. A gate not configured for the run is listed on the PR.</p>
             <p class="kicker kicker--benefit xs">Benefit</p>
             <p>A review gate built into the flow, not bolted on after the fact. The PR carries the commit the gates held on.</p>
             <p><span class="tag tag--cyan">hivemind:local-reviewer</span> <span class="tag tag--violet">hivemind:github-review-loop</span></p>
           </div>
-          <div class="code-panel diagram" id="ben-review-diagram" role="img" tabindex="0" aria-label="Review flow: after the build, validation with its version check and bounded fix rounds, and the local-reviewer, which needs the codex companion, are gates on one commit; the local-reviewer runs a Codex review on the branch diff before the PR, fixing simple findings, undoing a fix that fails its check, and escalating complex ones; the PR step pushes only the commit every configured gate held on; after the PR opens, github-review-loop watches it by default and fixes, pushes, replies to, and resolves reviewer-bot feedback until approval, merge, or close">
+          <div class="code-panel diagram" id="ben-review-diagram" role="img" tabindex="0" aria-label="Review flow: after the build, validation with its version check and bounded fix rounds, and the local-reviewer, which needs a review tool (Codex by default), are gates on one commit; the local-reviewer runs a review on the branch diff before the PR, fixing simple findings, undoing a fix that fails its check, and escalating complex ones; the PR step pushes only the commit every configured gate held on; after the PR opens, github-review-loop watches it by default and fixes, pushes, replies to, and resolves reviewer-bot feedback until approval, merge, or close">
 <pre><code>Build complete
  └─▶ Gates on one commit
       ├─▶ Validation  (version check, bounded fix rounds)
-      └─▶ <span class="t-str">Local-Reviewer</span>  (pre-PR, needs codex)
-           ├─▶ Codex review on branch diff
+      └─▶ <span class="t-str">Local-Reviewer</span>  (pre-PR, needs a review tool)
+           ├─▶ Review on branch diff
            ├─▶ Simple findings fixed
            ├─▶ Fix that fails its check undone
            └─▶ Complex findings escalated
@@ -226,11 +226,11 @@ PR opened  (watched by default)
             <p class="kicker kicker--problem xs">Problem</p>
             <p>Tooling that demands full buy-in up front, including specific review services, memory systems, or communication styles, blocks incremental adoption. If one dependency is absent, nothing works.</p>
             <p class="kicker kicker--solution xs">Solution</p>
-            <p>Optional companion plugins: <code>claude-mem</code> for cross-session memory, <code>codex</code> for local pre-PR review, <code>caveman</code> for token-compressed output. All optional. The framework works without any of them; if one is not enabled, steps that depend on them are skipped gracefully. The theme itself is optional flavor: <strong>the framework works with or without it.</strong></p>
+            <p>Optional companion plugins: <code>claude-mem</code> for cross-session memory, <code>codex</code> for the default local pre-PR reviewer, <code>caveman</code> for token-compressed output. All optional. The framework works without any of them; if one is not enabled, steps that depend on them are skipped gracefully. The theme itself is optional flavor: <strong>the framework works with or without it.</strong></p>
             <p class="kicker kicker--benefit xs">Benefit</p>
             <p>Adopt incrementally. Start with the core pipeline; layer in companions when you need them.</p>
           </div>
-          <div class="code-panel diagram" id="ben-companions-diagram" role="img" tabindex="0" aria-label="Companion plugins are all optional layers on top of the core framework of seven agents: claude-mem adds memory, codex adds local pre-PR review, caveman adds compression; removing any has no effect on the others">
+          <div class="code-panel diagram" id="ben-companions-diagram" role="img" tabindex="0" aria-label="Companion plugins are all optional layers on top of the core framework of seven agents: claude-mem adds memory, codex adds the default local pre-PR reviewer, caveman adds compression; removing any has no effect on the others">
 <pre><code><span class="t-dim">Core framework  ──────────────── always on</span>
  ├─ overlord / cerebrate / drone / changeling
  ├─ local-reviewer / github-reviewer
@@ -251,7 +251,7 @@ PR opened  (watched by default)
           </article>
           <article class="panel card">
             <h3 class="xg">codex</h3>
-            <p>Local pre-PR Codex review. Enables the <code>local-reviewer</code> agent. The post-PR watch is the default and runs without codex. If codex is not enabled, local review is skipped gracefully.</p>
+            <p>Default local pre-PR reviewer: runs the Codex review for the <code>local-reviewer</code> agent. Any other review CLI, such as Copilot CLI, is set with <code>HIVEMIND_LOCAL_REVIEWER</code>. The post-PR watch is the default and runs without codex. When no reviewer can run, local review is skipped with a warning on the PR.</p>
             <span class="tag tag--cyan">Optional</span>
           </article>
           <article class="panel card">

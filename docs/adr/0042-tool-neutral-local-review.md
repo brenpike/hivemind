@@ -14,14 +14,28 @@ The decisions below come from a plan-interrogation session with the user on 2026
 
 1. **Hivemind owns the review.** The plugin ships one adversarial-review prompt and one findings JSON schema. The `codex-plugin` preset still calls the Codex plugin's own command.
 2. **One setting picks the reviewer.** `HIVEMIND_LOCAL_REVIEWER`, set in the settings `env` block, holds a preset name (`codex-plugin`) or a JSON argv list. If one element is exactly `"{prompt}"`, the whole prompt replaces it as one argv element. Otherwise the prompt goes on stdin. No shell runs the command. When the setting is unset, the `codex-plugin` preset runs if the Codex plugin is installed; else local review is skipped. Examples: `["codex","exec","--sandbox","read-only","-"]` and `["copilot","-p","{prompt}","-s","--no-ask-user","--deny-tool=write","--deny-tool=shell"]`.
-3. **Change input by size.** A diff of about 64 KB or less goes inline in the prompt. This stays under the 128 KB Linux limit for one argument. A larger diff goes to a file under `.hivemind/`, and the prompt points at it. Every finding must cite a file and a line inside the diff. Any other finding is rejected.
+3. **Change input by size.** A diff of about 64 KB or less goes inline in the prompt. This stays under the 128 KB Linux limit for one argument. A larger diff goes to a file under `.hivemind/`, and the prompt points at it. Every finding must cite a file the branch changes. A finding on any other file is dropped and counted (Implementation decisions, item 2).
 4. **Prompt and schema come from the Codex plugin.** They are copied from `prompts/adversarial-review.md` and `schemas/review-output.schema.json` (Apache-2.0, Copyright 2026 OpenAI) and adapted. The copies carry the license attribution and mark the changes. The prompt states that the review is read-only.
 5. **Output parsing is strict.** The parser accepts bare JSON, or JSON inside one ```` ```json ```` fence with nothing else around it. Any other output is blocked as an unexpected output shape.
-6. **Cannot run means skip; bad output means blocked.** The review cannot run when the setting is unset and Codex is not installed, the tool is missing, the user is not signed in, the tool crashes, the setting is invalid, or the 10-minute timeout passes. Then local review is skipped, and the PR opens with a warning in the PR body and in the final report. A review that ran but returned bad output is blocked.
+6. **Cannot run means skip; bad output means blocked.** The review cannot run when the setting is unset and Codex is not installed (`no-reviewer`), the setting is invalid (`bad-setting`), the tool is missing (`tool-missing`), the tool fails, for example the user is not signed in or the tool crashes (`tool-failed`), or the 590-second timeout passes (`timed-out`). Then local review is skipped, and the PR opens with a warning in the PR body and in the final report. A review that ran but returned bad output is blocked. A tool failure that states a retry time, and a permission refusal of the script call, are not skips (Implementation decisions, items 1 and 7).
 7. **`HIVEMIND_LOCAL_REVIEW_MODEL` is retired.** Hivemind never names a model. Each tool uses its own default or its own config.
 8. **The overlord always requests local review,** unless the request skips it. The review skill decides whether the review can run. Codex mentions leave the overlord and the workflows.
 9. **One plugin script runs every reviewer.** `run-review.sh` is granted through the skill's `allowed-tools` with a `${CLAUDE_PLUGIN_ROOT}` path. The hand-written `Bash(node /path/to/.claude/plugins/cache/openai-codex/codex/*)` rule and its docs are removed.
 10. **Before and after check.** The script records `git status` and HEAD before the review. Any change after the review is blocked as "reviewer modified the working tree". The change is never reverted automatically.
+
+## Implementation decisions (2026-11-16)
+
+These were settled while the change was built. Each names who decided it.
+
+1. **A tool failure with a retry time keeps the bounded wait.** The failure states when the tool is back, for example a usage or rate limit with a retry time. The review then ends blocked with `retry_minutes`. The run waits, within its existing bounds, and reviews again. User decision.
+2. **Inside the diff means a changed file.** A finding is inside the diff when it cites any line of a file the branch changes. The path is the new-side path. Findings on unchanged files are dropped and counted. This replaces the reading that a finding must sit within 3 lines of a hunk. User decision.
+3. **The `codex-plugin` preset uses `--json`.** Its `.result` is checked against the same schema as every other tool. Run decision.
+4. **`run-review.sh` times out at 590 seconds.** This is under the Bash tool's 600-second cap. So the before and after check always runs. Run decision.
+5. **The devcontainer stops seeding the Codex node grant.** The grant is dead now that `run-review.sh` runs every reviewer. Run decision.
+6. **A skip holds for the rest of the run.** Later gate reruns do not retry local review. Run decision.
+7. **A permission refusal is blocked, not skipped.** When the permission system refuses the `run-review.sh` call, local review ends blocked. So a broken grant is noticed. User decision.
+
+Skip reasons are exactly `no-reviewer`, `bad-setting`, `tool-missing`, `tool-failed` and `timed-out`.
 
 ## Considered Options
 
