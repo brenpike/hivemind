@@ -21,7 +21,7 @@ The decisions below come from a plan-interrogation session with the user on 2026
 7. **`HIVEMIND_LOCAL_REVIEW_MODEL` is retired.** Hivemind never names a model. Each tool uses its own default or its own config.
 8. **The overlord always requests local review,** unless the request skips it. The review skill decides whether the review can run. Codex mentions leave the overlord and the workflows.
 9. **One plugin script runs every reviewer.** `run-review.sh` is granted through the skill's `allowed-tools` with a `${CLAUDE_PLUGIN_ROOT}` path. The hand-written `Bash(node /path/to/.claude/plugins/cache/openai-codex/codex/*)` rule and its docs are removed.
-10. **Before and after check.** The script records `git status` and HEAD before the review. Any change after the review is blocked as "reviewer modified the working tree". The change is never reverted automatically.
+10. **Before and after check.** The script records `git status` and HEAD before the review. Any change after the review is blocked as "reviewer modified the working tree". The change is never reverted automatically. The check guards only files a commit could carry: HEAD, tracked files and untracked files that are not ignored. It does not see ignored files, such as `.claude/settings.local.json` or `.hivemind/`, or paths outside the repo. Those rely on the review tool's own sandbox. User decision, 2026-11-16: a finding that asks the check to cover them repeats this decision.
 
 ## Implementation decisions (2026-11-16)
 
