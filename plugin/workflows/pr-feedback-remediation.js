@@ -692,7 +692,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '3e01e25001861a49';
+const BUILD_ID = 'af5504597fdee428';
 
 function supportedSchemaKeywords(){
 return[
@@ -3610,7 +3610,7 @@ return values.created==='true'
 }
 function describeHeldGates(run){
 const held=configuredGateIds(run).map((gateId)=>gateNames()[gateId]);
-const notConfigured=gateIds().filter((gateId)=>!configuredGateIds(run).includes(gateId)).map((gateId)=>gateNames()[gateId]);
+const notConfigured=gateIds().filter((gateId)=>!configuredGateIds(run).includes(gateId)&&!describeGateSkip(run,gateId)).map((gateId)=>gateNames()[gateId]);
 const heldLine=joinNames(held,'and')+' held on commit '+run.head+'.';
 const line=heldLine.charAt(0).toUpperCase()+heldLine.slice(1);
 return notConfigured.length===0?line:line+' Not configured: '+joinNames(notConfigured,'and')+'.';
@@ -3618,6 +3618,7 @@ return notConfigured.length===0?line:line+' Not configured: '+joinNames(notConfi
 function finishDeliveryComplete(run,plan,prValues,gates){
 const pr={url:prValues.url,head_ref_oid:prValues.head_ref_oid,created:prValues.created==='true'};
 const blocks=[{text:describePullRequest(prValues)},{text:gates.draft===undefined?describeHeldGates(run):describeDraftLine('The',gates.draft)}];
+blocks.push(...listGateSkipWarnings(run).map((warning)=>({text:warning})));
 if(prValues.warning!==undefined){
 blocks.push({text:'The pull request step warned: '+prValues.warning+'.'});
 }
@@ -4368,17 +4369,14 @@ const prefix=buildTitlePrefix(plan);
 const text=buildTitleText(plan);
 return text===''?prefix:prefix+' '+text;
 }
-function renderPullRequestGates(run,gates){
-const lines=['Gates:'];
-for(const gateId of gateIds()){
-const name=gateNames()[gateId];
+function describePullRequestGate(run,gates,gateId){
 if(!configuredGateIds(run).includes(gateId)){
-lines.push('- '+name+': not configured for this run');
-continue;
+return describeGateSkip(run,gateId)??'not configured for this run';
 }
-lines.push('- '+name+': '+(gates.held[gateId]===undefined?'did not hold':gates.notes[gateId]+', held on commit '+gates.held[gateId]));
+return gates.held[gateId]===undefined?'did not hold':gates.notes[gateId]+', held on commit '+gates.held[gateId];
 }
-return lines.join('\n');
+function renderPullRequestGates(run,gates){
+return['Gates:',...gateIds().map((gateId)=>'- '+gateNames()[gateId]+': '+describePullRequestGate(run,gates,gateId))].join('\n');
 }
 function renderPullRequestPart(part){
 return part.external?neutralizePullRequestText(part.text):part.text;
@@ -4752,6 +4750,12 @@ function runGateStep(stepId,run,plan,facts,gates){
 return stepId==='pr'?runPullRequestStep(run,plan,gates):runValidateGate(run,plan,facts,gates);
 }
 function listNotConfiguredGateLines(){
+return[];
+}
+function describeGateSkip(){
+return undefined;
+}
+function listGateSkipWarnings(){
 return[];
 }
 function toPullRequestDecision(entry){

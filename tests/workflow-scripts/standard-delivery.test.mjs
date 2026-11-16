@@ -4388,7 +4388,7 @@ const ROW_TESTS = {
         assert.notEqual(main.describeReviewProblem(withOption({ destructive: list })), undefined, label);
       }
     });
-    test('REVIEW_SCHEMA holds the Output Contract fields, requires the always-present ones, and labels each Codex-derived text field', async () => {
+    test('REVIEW_SCHEMA holds the Output Contract fields, requires the always-present ones, and labels each text field the review tool can fill', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       const agentSchema = callOf(run, 'review-1-1').opts.schema;
       const schema = structuredClone(main.buildReviewSchema());
@@ -4397,7 +4397,7 @@ const ROW_TESTS = {
       const conditionalFields = [...new Set(Object.values(contract.conditional).flat())];
       assert.deepEqual(Object.keys(schema.properties).sort(), [...new Set([...contract.keys, ...conditionalFields, 'retry_minutes'])].sort());
       assert.deepEqual(schema.required, contract.keys);
-      assert.ok(reviewerText.includes('Only with `blocked`, when Codex or another outside service the loop needs is out and states when it is back, set `retry_minutes`: the whole minutes from now (read with `date`) until then, at least 1. Never guess it.'));
+      assert.ok(reviewerText.includes('Only with `blocked`, when the review tool or another outside service the loop needs is out and states when it is back, set `retry_minutes`: the whole minutes from now (read with `date`) until then, at least 1. Never guess it.'));
       assert.equal(schema.additionalProperties, false);
       assert.deepEqual(schema.properties.exit_reason.enum, contract.exitReasons);
       const labelled = Object.keys(schema.properties).filter((name) => schema.properties[name].description.startsWith('Can carry external content. '));
@@ -4725,7 +4725,7 @@ const ROW_TESTS = {
   'SD-35': () => {
     test('localReviewRoutes keys are the local-reviewer Output Contract exit reasons in order', () => {
       const contract = readReviewerContract('## Output Contract');
-      assert.equal(contract.exitReasons.length, 10);
+      assert.equal(contract.exitReasons.length, 11);
       assert.deepEqual(Object.keys(main.localReviewRoutes()), contract.exitReasons);
       assert.deepEqual({ ...main.localReviewRoutes() }, {
         clean: 'hold',
@@ -4737,7 +4737,8 @@ const ROW_TESTS = {
         'user-input-required': 'question',
         'planner-escalation': 'replan',
         'high-severity-rejection': 'question',
-        blocked: 'stop_rerun'
+        blocked: 'stop_rerun',
+        skipped: 'skip'
       });
     });
     test('the exits routed to hold or diminishing are the exits workflow.md (PR Requirements) names as holding, and only the diminishing ones carry its taken condition', () => {
@@ -4766,17 +4767,19 @@ const ROW_TESTS = {
       assert.deepEqual(localReviewExitsRoutedTo('stop_replan'), []);
       assert.deepEqual(localReviewExitsRoutedTo('stop_rerun'), ['blocked']);
       assert.deepEqual(localReviewExitsRoutedTo('draft'), ['break-fix-break', 'max-iterations-reached']);
+      assert.deepEqual(localReviewExitsRoutedTo('skip'), ['skipped']);
+      assert.equal(transitions.skipped, 'gate_check');
       for (const exitReason of [...localReviewExitsRoutedTo('stop'), ...localReviewExitsRoutedTo('stop_rerun'), ...localReviewExitsRoutedTo('draft')]) {
         assert.notEqual(transitions[exitReason], 'open_pr', exitReason);
         assert.equal(deliveryMachine.states[transitions[exitReason]].type, 'terminal', exitReason);
         assert.equal(reachesStateWithout(deliveryMachine, transitions[exitReason], 'open_pr', 'local_review'), false, exitReason);
       }
     });
-    test('the only transitions into gate_check are local_review clean, diminishing_returns_decision taken and local_review_decision skipped and held', () => {
-      const holdEdges = localReviewExitsRoutedTo('hold').map((exitReason) => 'local_review.' + exitReason);
+    test('the only transitions into gate_check are local_review clean and skipped, diminishing_returns_decision taken and local_review_decision skipped and held', () => {
+      const holdEdges = [...localReviewExitsRoutedTo('hold'), ...localReviewExitsRoutedTo('skip')].map((exitReason) => 'local_review.' + exitReason);
       const allowed = [...holdEdges, 'diminishing_returns_decision.taken', 'local_review_decision.held', 'local_review_decision.skipped'].sort();
       assert.deepEqual(listTransitionsInto(deliveryMachine, 'gate_check'), allowed);
-      assert.deepEqual(allowed, ['diminishing_returns_decision.taken', 'local_review.clean', 'local_review_decision.held', 'local_review_decision.skipped']);
+      assert.deepEqual(allowed, ['diminishing_returns_decision.taken', 'local_review.clean', 'local_review.skipped', 'local_review_decision.held', 'local_review_decision.skipped']);
     });
     test('gate_check is an overlord decision whose held is the only transition into open_pr, whose rerun goes back to validate and whose blocked ends at blocked', () => {
       const gate = deliveryMachine.states.gate_check;
@@ -10182,6 +10185,61 @@ const ROW_TESTS = {
       assert.deepEqual(passTwoLabels(run), ['plan-2', 'revise-1', 'revise-1-opus']);
       assert.deepEqual(modelsOf(run, passTwoLabels(run)), ['sonnet', 'sonnet', 'opus']);
       assert.equal(callOf(run, 'revise-1-opus').prompt, callOf(run, 'revise-1').prompt);
+    });
+  },
+  'SD-86': () => {
+    const SKIP_CODES = ['no-reviewer', 'bad-setting', 'tool-missing', 'tool-failed', 'timed-out'];
+    const skippedReview = (skipReason) => ({ ...REVIEW_CLEAN, exit_reason: 'skipped', skip_reason: skipReason });
+    for (const code of SKIP_CODES) {
+      test('a review skipped with ' + code + ' goes on to the pull request with local review dropped, and the body and the complete message name the skip', async () => {
+        const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': skippedReview(code) }));
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        const labels = labelsOf(run);
+        assert.deepEqual(labels.slice(labels.indexOf('validate-1-1')), ['validate-1-1', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+        const body = prBodyOf(run, 'pr-1');
+        assert.ok(body.includes('- local review: skipped (' + code + ')'), body);
+        assert.ok(!body.includes('not configured'), body);
+        const blocks = run.result.message.split('\n\n');
+        assert.equal(blocks[1], 'Validation held on commit ' + OTHER + '.');
+        assert.equal(blocks[2], 'Warning: local review was skipped (' + code + ').');
+        assert.ok(!run.result.message.includes('Not configured'), run.result.message);
+        assert.ok(!run.result.message.includes(HELD_ALL), run.result.message);
+      });
+    }
+    test('a skipped review whose commit step moves the head reruns validation alone, never local review, and still names the skip', async () => {
+      const results = happyResults({ 'review-1-1': skippedReview('tool-missing'), 'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }) });
+      const run = await runWorkflow(LAUNCH, { ...results, 'validate-1-2': results['validate-1-1'] });
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const labels = labelsOf(run);
+      assert.deepEqual(labels.slice(labels.indexOf('validate-1-1')), ['validate-1-1', 'review-1-1', 'review-commit-1-1', 'validate-1-2', 'pr-1']);
+      assert.ok(prBodyOf(run, 'pr-1').includes('- local review: skipped (tool-missing)'), prBodyOf(run, 'pr-1'));
+      assert.ok(run.result.message.includes('\n\nValidation held on commit ' + THIRD + '.\n\nWarning: local review was skipped (tool-missing).'), run.result.message);
+    });
+    test('the skip holds for the rest of the run: configuredGateIds drops local review and describeGateSkip names the code', () => {
+      const state = { localReview: true, reviewSkip: 'tool-failed' };
+      assert.deepEqual([...main.configuredGateIds(state)], ['validate']);
+      assert.equal(main.describeGateSkip(state, 'review'), 'skipped (tool-failed)');
+      assert.equal(main.describeGateSkip(state, 'validate'), undefined);
+      assert.equal(main.describeGateSkip({ localReview: true }, 'review'), undefined);
+      assert.deepEqual([...main.listGateSkipWarnings(state)], ['Warning: local review was skipped (tool-failed).']);
+      assert.deepEqual([...main.listGateSkipWarnings({ localReview: true })], []);
+      const run = { localReview: true };
+      assert.deepEqual({ ...main.routeLocalReview(skippedReview('timed-out'), run) }, { held: false });
+      assert.equal(run.reviewSkip, 'timed-out');
+    });
+    test('REVIEW_SCHEMA requires skip_reason under skipped, as one of the five codes, and refuses it under any other exit_reason', () => {
+      assert.deepEqual(readReviewerContract('## Output Contract').conditional.skipped, ['skip_reason']);
+      const schema = main.buildReviewSchema();
+      assert.deepEqual([...schema.properties.skip_reason.enum], SKIP_CODES);
+      for (const code of SKIP_CODES) {
+        assert.equal(main.describeReviewProblem(skippedReview(code)), undefined, code);
+      }
+      const { skip_reason: dropped, ...missing } = skippedReview('no-reviewer');
+      assert.equal(dropped, 'no-reviewer');
+      for (const [label, review] of [['no skip_reason', missing], ['an unknown code', skippedReview('codex-missing')], ['an empty code', skippedReview('')], ['free text', skippedReview('the tool crashed')], ['skip_reason under clean', { ...REVIEW_CLEAN, skip_reason: 'no-reviewer' }]]) {
+        assert.ok(!lib.validateSchema(schema, review).ok, label);
+        assert.notEqual(main.describeReviewProblem(review), undefined, label);
+      }
     });
   }
 };

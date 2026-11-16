@@ -147,7 +147,9 @@
  *   run.answerLog, its rounds and resume_args never hold a decision.
  *   run.open, the open findings of the last usable review, and run.waits,
  *   the waits for an outside service the run made, start [] and 0
- *   (review.js waitForService).
+ *   (review.js waitForService). run.reviewSkip, the skip_reason of a
+ *   skipped local review, is unset until routeLocalReview (review.js) sets
+ *   it.
  *   run.approvals starts [] and changes only through applyApprovalChoices
  *   (lib/approvals.js) at each reply round, so it holds only the destructive
  *   changes the user's own replies approved, never a decision the run took.

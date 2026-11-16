@@ -696,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'ed2253c867c245ae';
+const BUILD_ID = '9a05871a703603e4';
 
 function supportedSchemaKeywords(){
 return[
@@ -3630,7 +3630,7 @@ return values.created==='true'
 }
 function describeHeldGates(run){
 const held=configuredGateIds(run).map((gateId)=>gateNames()[gateId]);
-const notConfigured=gateIds().filter((gateId)=>!configuredGateIds(run).includes(gateId)).map((gateId)=>gateNames()[gateId]);
+const notConfigured=gateIds().filter((gateId)=>!configuredGateIds(run).includes(gateId)&&!describeGateSkip(run,gateId)).map((gateId)=>gateNames()[gateId]);
 const heldLine=joinNames(held,'and')+' held on commit '+run.head+'.';
 const line=heldLine.charAt(0).toUpperCase()+heldLine.slice(1);
 return notConfigured.length===0?line:line+' Not configured: '+joinNames(notConfigured,'and')+'.';
@@ -3638,6 +3638,7 @@ return notConfigured.length===0?line:line+' Not configured: '+joinNames(notConfi
 function finishDeliveryComplete(run,plan,prValues,gates){
 const pr={url:prValues.url,head_ref_oid:prValues.head_ref_oid,created:prValues.created==='true'};
 const blocks=[{text:describePullRequest(prValues)},{text:gates.draft===undefined?describeHeldGates(run):describeDraftLine('The',gates.draft)}];
+blocks.push(...listGateSkipWarnings(run).map((warning)=>({text:warning})));
 if(prValues.warning!==undefined){
 blocks.push({text:'The pull request step warned: '+prValues.warning+'.'});
 }
@@ -4403,17 +4404,14 @@ const prefix=buildTitlePrefix(plan);
 const text=buildTitleText(plan);
 return text===''?prefix:prefix+' '+text;
 }
-function renderPullRequestGates(run,gates){
-const lines=['Gates:'];
-for(const gateId of gateIds()){
-const name=gateNames()[gateId];
+function describePullRequestGate(run,gates,gateId){
 if(!configuredGateIds(run).includes(gateId)){
-lines.push('- '+name+': not configured for this run');
-continue;
+return describeGateSkip(run,gateId)??'not configured for this run';
 }
-lines.push('- '+name+': '+(gates.held[gateId]===undefined?'did not hold':gates.notes[gateId]+', held on commit '+gates.held[gateId]));
+return gates.held[gateId]===undefined?'did not hold':gates.notes[gateId]+', held on commit '+gates.held[gateId];
 }
-return lines.join('\n');
+function renderPullRequestGates(run,gates){
+return['Gates:',...gateIds().map((gateId)=>'- '+gateNames()[gateId]+': '+describePullRequestGate(run,gates,gateId))].join('\n');
 }
 function renderPullRequestPart(part){
 return part.external?neutralizePullRequestText(part.text):part.text;
@@ -4535,7 +4533,13 @@ function gateIds(){
 return['validate','review'];
 }
 function configuredGateIds(run){
-return run.localReview?gateIds():gateIds().filter((gateId)=>gateId!=='review');
+return run.localReview&&!run.reviewSkip?gateIds():gateIds().filter((gateId)=>gateId!=='review');
+}
+function describeGateSkip(run,gateId){
+return gateId==='review'&&run.reviewSkip?'skipped ('+run.reviewSkip+')':undefined;
+}
+function listGateSkipWarnings(run){
+return gateIds().filter((gateId)=>describeGateSkip(run,gateId)!==undefined).map((gateId)=>'Warning: '+gateNames()[gateId]+' was '+describeGateSkip(run,gateId)+'.');
 }
 function gateNames(){
 return{validate:'validation',review:'local review'};
@@ -4644,7 +4648,8 @@ title:{type:'string',text:'The title of the finding.',isExternal:true,bounds:{ma
 user_question:{type:'question',text:'The question the user answers about the finding.',isExternal:true},
 blocker:{type:'string',text:'What blocked the review.',isExternal:true,bounds:{maxLength:300}},
 stage:{type:'string',text:'The loop stage that was blocked.'},
-retry_minutes:{type:'integer',text:'Minutes until the blocking service is back, 1 or more.'}
+retry_minutes:{type:'integer',text:'Minutes until the blocking service is back, 1 or more.'},
+skip_reason:{type:'string',text:'Why the review could not run.',bounds:{enum:['no-reviewer','bad-setting','tool-missing','tool-failed','timed-out']}}
 };
 }
 function describeReviewField(entry){
@@ -4778,7 +4783,8 @@ clean:'hold',
 'user-input-required':'question',
 'planner-escalation':'replan',
 'high-severity-rejection':'question',
-blocked:'stop_rerun'
+blocked:'stop_rerun',
+skipped:'skip'
 };
 }
 function reviewExitFields(){
@@ -4792,7 +4798,8 @@ clean:[],
 'user-input-required':['finding_id','user_question'],
 'planner-escalation':['finding_id','classification','file','title'],
 'high-severity-rejection':['finding_id','user_question'],
-blocked:['blocker','stage']
+blocked:['blocker','stage'],
+skipped:['skip_reason']
 };
 }
 function fixLedgerPath(){
@@ -5042,6 +5049,9 @@ return waitForService(review,run);
 return stopDelivery([{problem:describeReviewStop(review,run.head)}],run);
 case'stop':
 return stopDelivery([{problem:describeReviewStop(review,run.head),terminal:true}],run);
+case'skip':
+run.reviewSkip=review.skip_reason;
+return{held:false};
 default:
 throw new Error('routeLocalReview: no route for exit reason '+JSON.stringify(review.exit_reason));
 }

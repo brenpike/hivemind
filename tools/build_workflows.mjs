@@ -280,7 +280,7 @@ export function readDataConstant(root, name) {
  * plugin/workflows/*.js to eol=lf.
  */
 export const WORKFLOW_APPROVAL_LIMIT = 200000;
-export const MAX_BUILT_SCRIPT_LENGTH = 190000;
+export const MAX_BUILT_SCRIPT_LENGTH = 191000;
 
 /**
  * Claude Code 2.1.308 offers only "No" in the Workflow approval dialog when:

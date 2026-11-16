@@ -27,7 +27,10 @@
  *          configuredGateIds(), validation alone; gateNames();
  *          runGateStep(stepId, run, plan, facts, gates), the pull request
  *          step (lib/pr.js) for 'pr', else validation (lib/gates.js); and
- *          listNotConfiguredGateLines(), none.
+ *          listNotConfiguredGateLines(), none. The hooks lib/pr.js and
+ *          lib/record.js read: describeGateSkip(), undefined, and
+ *          listGateSkipWarnings(), none, since no gate of this workflow is
+ *          ever skipped.
  *   The pull request hooks lib/pr.js reads:
  *   buildPullRequestComment(run, gates)  a fixed lead naming commit
  *          run.head, then the run record of renderPullRequestRecord
@@ -72,6 +75,14 @@ function runGateStep(stepId, run, plan, facts, gates) {
 }
 
 function listNotConfiguredGateLines() {
+  return [];
+}
+
+function describeGateSkip() {
+  return undefined;
+}
+
+function listGateSkipWarnings() {
   return [];
 }
 

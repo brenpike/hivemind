@@ -9,7 +9,8 @@
  *          answerLog, head, trunk, approvals, taken, rejected, undone, open,
  *          waits, run.replans and run.reviewReplans, and run.resumeLedger,
  *          which only this module sets and reads: true from a review replan
- *          or a rerun of a blocked review until the next review run.
+ *          or a rerun of a blocked review until the next review run, and
+ *          run.reviewSkip, set only here: a skip's skip_reason (gates.js).
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   gates  the gate loop state of runGates (lib/gates.js): runs.review, answer
  *          and takenReview, which only this module sets and reads: the review
@@ -17,12 +18,12 @@
  *   review the local reviewer result, under REVIEW_SCHEMA.
  *
  * Outputs
- *   runReviewGate(run, plan, gates)  {held, note}, {replan}, {draft:
- *          reason} at a loop cap, so the pull request opens as a draft, or
- *          {result}: a pause, a wait or a blocked finish, or {rerun: true}
- *          when the user replied to a stop of its commit step or to a
- *          blocked review, or a wait ended, so local review runs again, its
- *          commit runner reading the head.
+ *   runReviewGate(run, plan, gates)  {held, note}, {held: false} on a
+ *          skip, {replan}, {draft: reason} at a loop cap, so the pull
+ *          request opens as a draft, or {result}: a pause, a wait or a
+ *          blocked finish, or {rerun: true} when the user replied to a
+ *          stop of its commit step or to a blocked review, or a wait ended,
+ *          so local review runs again, its commit runner reading the head.
  *   The step, as meta.js names it:
  *   Review  a gate when configured. hivemind:local-reviewer runs its loop on
  *           the branch with base, working_branch, trunk, max_iterations and
@@ -34,6 +35,11 @@
  *           and the texts reviewCommitTexts() gives, so any edit left behind
  *           stops it, and the gate holds on the commit it reports.
  *           localReviewRoutes() routes each exit_reason: clean holds,
+ *           skipped, a review that could not run, sets run.reviewSkip
+ *           and returns {held: false}, so configuredGateIds (gates.js)
+ *           drops local review for the rest of the run and the pull request
+ *           opens, its gates part and the complete message naming the skip
+ *           (describeGateSkip, gates.js), never held or not configured,
  *           diminishing returns resolve through decide() and a take holds, a
  *           planner escalation or root cluster resolves through
  *           decide() and a take, counted in run.replans and
@@ -133,7 +139,7 @@
  *   main.js: the build bundles this module into it, so a row can name a
  *   function of this module.
  *   Trust boundary: the overlord is a trusted relay, as in analysis-only
- *   (ADR-0036 decision 13). The local review result carries Codex-derived text:
+ *   (ADR-0036 decision 13). The local review result carries review-tool text:
  *   REVIEW_SCHEMA labels each such field, it reaches the planner only in a data
  *   block under the boundary sentence, it reaches local review, encoded in a
  *   logged review round, only inside the inputs data block as answers, it
@@ -153,7 +159,7 @@
  *   engine never takes the reviewer's ledger_path.
  *
  * Why
- *   The review result is the one step result that carries Codex-derived
+ *   The review result is the one step result that carries review-tool
  *   text, so its routes and every place that text can reach sit together.
  */
 
@@ -168,7 +174,8 @@ function localReviewRoutes() {
     'user-input-required': 'question',
     'planner-escalation': 'replan',
     'high-severity-rejection': 'question',
-    blocked: 'stop_rerun'
+    blocked: 'stop_rerun',
+    skipped: 'skip'
   };
 }
 
@@ -183,7 +190,8 @@ function reviewExitFields() {
     'user-input-required': ['finding_id', 'user_question'],
     'planner-escalation': ['finding_id', 'classification', 'file', 'title'],
     'high-severity-rejection': ['finding_id', 'user_question'],
-    blocked: ['blocker', 'stage']
+    blocked: ['blocker', 'stage'],
+    skipped: ['skip_reason']
   };
 }
 
@@ -546,6 +554,9 @@ function routeLocalReview(review, run) {
       return stopDelivery([{ problem: describeReviewStop(review, run.head) }], run);
     case 'stop':
       return stopDelivery([{ problem: describeReviewStop(review, run.head), terminal: true }], run);
+    case 'skip':
+      run.reviewSkip = review.skip_reason;
+      return { held: false };
     default:
       throw new Error('routeLocalReview: no route for exit reason ' + JSON.stringify(review.exit_reason));
   }

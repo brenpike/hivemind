@@ -33,8 +33,9 @@
  *   PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND, GATE_RERUN_KIND
  *   and STEP_STOP_KIND. pauseDelivery also reads BUILD_ID, the line the
  *   build injects. The workflow functions it reads: the gate hooks of
- *   finishDeliveryComplete, gateNames, gateIds and configuredGateIds (the
- *   workflow's gates.js, as lib/gates.js names them). Every workflow whose
+ *   finishDeliveryComplete, gateNames, gateIds, configuredGateIds,
+ *   describeGateSkip and listGateSkipWarnings (the workflow's gates.js, as
+ *   lib/gates.js and lib/pr.js name them). Every workflow whose
  *   code calls finishDeliveryComplete declares them, and every workflow
  *   whose code calls a function of this file declares the constants it
  *   reads. Every other function it reads is a library's, among them
@@ -139,7 +140,9 @@
  *           when the relay's commented is true (describePullRequest), one
  *           line naming the gates that held and
  *           any gate not configured, or when gates.draft is set the line
- *           naming the draft and its reason, the warning line when there is one, the
+ *           naming the draft and its reason, each listGateSkipWarnings
+ *           line, one per gate the run skipped, the
+ *           warning line of the pull request step when there is one, the
  *           rejected findings block when run.rejected or run.undone is not
  *           empty, then the reversible effects and the shown taken
  *           decisions, one line each.
@@ -345,7 +348,7 @@ function describePullRequest(values) {
 
 function describeHeldGates(run) {
   const held = configuredGateIds(run).map((gateId) => gateNames()[gateId]);
-  const notConfigured = gateIds().filter((gateId) => !configuredGateIds(run).includes(gateId)).map((gateId) => gateNames()[gateId]);
+  const notConfigured = gateIds().filter((gateId) => !configuredGateIds(run).includes(gateId) && !describeGateSkip(run, gateId)).map((gateId) => gateNames()[gateId]);
   const heldLine = joinNames(held, 'and') + ' held on commit ' + run.head + '.';
   const line = heldLine.charAt(0).toUpperCase() + heldLine.slice(1);
   return notConfigured.length === 0 ? line : line + ' Not configured: ' + joinNames(notConfigured, 'and') + '.';
@@ -354,6 +357,7 @@ function describeHeldGates(run) {
 function finishDeliveryComplete(run, plan, prValues, gates) {
   const pr = { url: prValues.url, head_ref_oid: prValues.head_ref_oid, created: prValues.created === 'true' };
   const blocks = [{ text: describePullRequest(prValues) }, { text: gates.draft === undefined ? describeHeldGates(run) : describeDraftLine('The', gates.draft) }];
+  blocks.push(...listGateSkipWarnings(run).map((warning) => ({ text: warning })));
   if (prValues.warning !== undefined) {
     blocks.push({ text: 'The pull request step warned: ' + prValues.warning + '.' });
   }

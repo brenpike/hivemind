@@ -17,8 +17,9 @@
  *   The constants of the workflow's main.js this file reads: RUN_NAME and
  *   RELAY_SCHEMA. The workflow functions it reads: maxPullRequestTextLength(),
  *   the limit, and the hooks buildPullRequestComment(run, gates), the
- *   comment text, or undefined when the workflow sends none, and
- *   toPullRequestDecision(entry), the taken decision entry the run record of
+ *   comment text, or undefined when the workflow sends none,
+ *   describeGateSkip(run, gateId), the text of a gate the run skipped, else
+ *   undefined, and toPullRequestDecision(entry), the taken decision entry the run record of
  *   the pull request texts shows. Every workflow whose code calls
  *   runPullRequestStep declares them all. Every other function it reads is
  *   a library's, among them the title helpers and listCloses of
@@ -159,21 +160,24 @@ function buildPullRequestTitle(plan) {
 }
 
 /**
- * Returns the Gates: part: one line per gate, its note and held commit, did
- * not hold for a configured gate with no hold (draft mode, gates.js), or
+ * Returns the status of gateId on the Gates: part: its note and held
+ * commit, did not hold for a configured gate with no hold (draft mode,
+ * gates.js), the describeGateSkip hook text for a gate the run skipped, or
  * not configured for this run.
  */
-function renderPullRequestGates(run, gates) {
-  const lines = ['Gates:'];
-  for (const gateId of gateIds()) {
-    const name = gateNames()[gateId];
-    if (!configuredGateIds(run).includes(gateId)) {
-      lines.push('- ' + name + ': not configured for this run');
-      continue;
-    }
-    lines.push('- ' + name + ': ' + (gates.held[gateId] === undefined ? 'did not hold' : gates.notes[gateId] + ', held on commit ' + gates.held[gateId]));
+function describePullRequestGate(run, gates, gateId) {
+  if (!configuredGateIds(run).includes(gateId)) {
+    return describeGateSkip(run, gateId) ?? 'not configured for this run';
   }
-  return lines.join('\n');
+  return gates.held[gateId] === undefined ? 'did not hold' : gates.notes[gateId] + ', held on commit ' + gates.held[gateId];
+}
+
+/**
+ * Returns the Gates: part: one line per gate, its name and
+ * describePullRequestGate status.
+ */
+function renderPullRequestGates(run, gates) {
+  return ['Gates:', ...gateIds().map((gateId) => '- ' + gateNames()[gateId] + ': ' + describePullRequestGate(run, gates, gateId))].join('\n');
 }
 
 function renderPullRequestPart(part) {

@@ -163,14 +163,14 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$base_seen" = true ] || blocker "$usage_reason"
 
-script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || blocker 'cannot self-locate the script directory'
+script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot self-locate the script directory"
 template_path="$script_dir/../references/adversarial-review.md"
 schema_path="$script_dir/../references/review-output.schema.json"
 [ -f "$template_path" ] && [ -f "$schema_path" ] || blocker 'review references missing'
-shared_dir="$(CDPATH= cd -- "$script_dir/../../_shared" 2>/dev/null && pwd -P 2>/dev/null)" || blocker 'cannot self-locate the script directory'
-[ -f "$shared_dir/containment.sh" ] || blocker 'review references missing'
+shared_dir="$(CDPATH= cd -- "$script_dir/../../_shared" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot self-locate the script directory"
+[ -f "$shared_dir/containment.sh" ] || blocker "review references missing"
 # shellcheck source=../../_shared/containment.sh
-. "$shared_dir/containment.sh" || blocker 'review references missing'
+. "$shared_dir/containment.sh" || blocker "review references missing"
 
 command -v jq >/dev/null 2>&1 || blocker 'jq not found'
 command -v git >/dev/null 2>&1 || blocker 'git not found'

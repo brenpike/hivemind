@@ -37,8 +37,10 @@
  *   message and not the planner keep no maxLength: ledger_path, stage,
  *   prior_fix_commit, latest_severity_max, the entries of signals_fired,
  *   signals_observed and conflicting_findings, the title and record of
- *   each rejected finding and the title of each undone fix. Each field that can carry Codex-derived
- *   text starts its description with externalLabel(). The title of each
+ *   each rejected finding and the title of each undone fix. Each field that can carry
+ *   review-tool text starts its description with externalLabel().
+ *   skip_reason is an enum code, never tool text, so describeGateSkip
+ *   (gates.js) builds its message text in code. The title of each
  *   open finding reaches the pull request body, so it keeps maxLength 300.
  *   validateSchema takes a retry_minutes of zero; review.js waits only on
  *   1 or more.
@@ -51,7 +53,7 @@
  *   2026-10-25: local review counts are display only).
  *
  * Why
- *   The review result is the one step result that carries Codex-derived
+ *   The review result is the one step result that carries review-tool
  *   text, so the bound of every field it holds sits in one place.
  */
 
@@ -86,7 +88,8 @@ function reviewFieldTexts() {
     user_question: { type: 'question', text: 'The question the user answers about the finding.', isExternal: true },
     blocker: { type: 'string', text: 'What blocked the review.', isExternal: true, bounds: { maxLength: 300 } },
     stage: { type: 'string', text: 'The loop stage that was blocked.' },
-    retry_minutes: { type: 'integer', text: 'Minutes until the blocking service is back, 1 or more.' }
+    retry_minutes: { type: 'integer', text: 'Minutes until the blocking service is back, 1 or more.' },
+    skip_reason: { type: 'string', text: 'Why the review could not run.', bounds: { enum: ['no-reviewer', 'bad-setting', 'tool-missing', 'tool-failed', 'timed-out'] } }
   };
 }
 
