@@ -40,9 +40,10 @@
 #   of references/review-output.schema.json). A template missing a placeholder is the blocker
 #   `cannot build the review prompt`. The review input is the commit log (<base>..HEAD), the
 #   diff stat and `git diff --no-color --no-ext-diff <base>...HEAD`. Input of at most 65536 bytes
-#   goes inline. Larger input is written to .hivemind/review-loop/review-diff.patch (a contained
-#   path, see _shared/containment.sh) before the before-snapshot, the prompt points at that file,
-#   and the file is removed after the after-check. A `{prompt}` element is replaced whole by the
+#   goes inline. Larger input is written to a new file .hivemind/review-loop/review-diff.<random>
+#   (made by mktemp, so it never reuses or overwrites an existing file, in a contained folder,
+#   see _shared/containment.sh) before the before-snapshot, the prompt points at that file, and
+#   only that file is removed after the after-check. A `{prompt}` element is replaced whole by the
 #   prompt as one argv element, with stdin /dev/null; otherwise the prompt goes on stdin.
 #
 # EXECUTION: from the top of the work tree, under `timeout -k 5 590` (or `gtimeout`). With
@@ -138,7 +139,7 @@ usage_reason='invalid arguments; usage: run-review.sh --base <ref> [-- <focus>]'
 readonly INLINE_INPUT_LIMIT=65536
 readonly REVIEW_TIMEOUT_SECONDS=590
 readonly REVIEW_KILL_GRACE_SECONDS=5
-readonly PATCH_REL='.hivemind/review-loop/review-diff.patch'
+readonly PATCH_DIR_REL='.hivemind/review-loop'
 
 base=''
 base_seen=false
@@ -285,7 +286,7 @@ write_review_input() {
 # build_generic_prompt: write the filled prompt to $work_dir/prompt.txt, and the review diff
 # file when the review input is over the inline limit.
 build_generic_prompt() {
-  local input_path="$work_dir/review-input.txt" input_bytes guidance input_text_path canon_root
+  local input_path="$work_dir/review-input.txt" input_bytes guidance input_text_path canon_root patch_rel
   write_review_input >"$input_path" 2>/dev/null || blocker 'cannot compute the branch diff'
   input_bytes="$(wc -c <"$input_path")" || blocker 'cannot compute the branch diff'
   input_bytes=$((input_bytes + 0))
@@ -293,15 +294,16 @@ build_generic_prompt() {
     guidance='The commit log, diff stat and full diff are inlined in the repository context below. Read other repository files as needed for context, without changing anything.'
     input_text_path="$input_path"
   else
-    canon_root="$(hivemind_assert_file_contained "$repo_root" "$PATCH_REL" 2>/dev/null)" || blocker 'cannot prepare the review diff file'
+    canon_root="$(hivemind_assert_contained "$repo_root" "$PATCH_DIR_REL" 2>/dev/null)" || blocker 'cannot prepare the review diff file'
     [ -n "$canon_root" ] || blocker 'cannot prepare the review diff file'
-    mkdir -p -- "$canon_root/.hivemind/review-loop" || blocker 'cannot prepare the review diff file'
-    patch_path="$canon_root/$PATCH_REL"
-    cp -- "$input_path" "$patch_path" || blocker 'cannot prepare the review diff file'
-    guidance="The change is too large to inline. Before you review, read the file $PATCH_REL at the repository root with your file-read tool: it holds the commit log, diff stat and full diff. Read other repository files as needed for context, without changing anything."
+    mkdir -p -- "$canon_root/$PATCH_DIR_REL" || blocker 'cannot prepare the review diff file'
+    patch_path="$(mktemp "$canon_root/$PATCH_DIR_REL/review-diff.XXXXXXXXXX")" || blocker 'cannot prepare the review diff file'
+    patch_rel="$PATCH_DIR_REL/${patch_path##*/}"
+    cat -- "$input_path" >"$patch_path" || blocker 'cannot prepare the review diff file'
+    guidance="The change is too large to inline. Before you review, read the file $patch_rel at the repository root with your file-read tool: it holds the commit log, diff stat and full diff. Read other repository files as needed for context, without changing anything."
     input_text_path="$work_dir/review-input-pointer.txt"
     printf 'The commit log, diff stat and full diff against %s are in %s at the repository root (%s bytes).\n' \
-      "$base" "$PATCH_REL" "$input_bytes" >"$input_text_path" || blocker 'cannot prepare the review diff file'
+      "$base" "$patch_rel" "$input_bytes" >"$input_text_path" || blocker 'cannot prepare the review diff file'
   fi
   jq -n -j \
     --rawfile template "$template_path" \

@@ -69,7 +69,9 @@ pass() { echo "PASS [$1] $2"; PASS_COUNT=$((PASS_COUNT + 1)); }
 failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 
 USAGE_REASON='invalid arguments; usage: run-review.sh --base <ref> [-- <focus>]'
-PATCH_REL='.hivemind/review-loop/review-diff.patch'
+# The large-diff file is a fresh mktemp file: review-diff. plus a 10-character random suffix.
+PATCH_DIR_REL='.hivemind/review-loop'
+PATCH_GLOB='review-diff.??????????'
 TIMEOUT_ARGS_LOG="$TMPDIR_TEST/timeout-args.log"
 NODE_LOG="$TMPDIR_TEST/node-companion-path.log"
 
@@ -129,7 +131,13 @@ case "$action" in
   edit-and-fail) printf 'reviewer edit\n' >>src/a.txt; exit 3 ;;
   add-untracked) printf 'reviewer note\n' >reviewer-note.txt ;;
   move-head) git commit -q --allow-empty -m 'reviewer commit' || exit 90 ;;
-  read-patch) cp .hivemind/review-loop/review-diff.patch "$capture_dir/patch-seen" 2>/dev/null || : ;;
+  read-patch)
+    for patch_file in .hivemind/review-loop/review-diff.??????????; do
+      [ -f "$patch_file" ] || continue
+      printf '%s\n' "$patch_file" >>"$capture_dir/patch-names"
+      cp "$patch_file" "$capture_dir/patch-seen" 2>/dev/null || :
+    done
+    ;;
   *) printf 'fake-reviewer: unknown action %s\n' "$action" >&2; exit 91 ;;
 esac
 cat "$reply_file"
@@ -335,6 +343,16 @@ file_has_text() { [ -f "$1" ] && grep -Fq -- "$2" "$1"; }
 # file_lacks_text <file> <fixed text>
 file_lacks_text() { [ -f "$1" ] && ! grep -Fq -- "$2" "$1"; }
 
+# no_run_patch_files <repo>: no large-diff file made by a run is left in the review-loop folder.
+no_run_patch_files() { ! compgen -G "$1/$PATCH_DIR_REL/$PATCH_GLOB" >/dev/null; }
+
+# one_patch_named_in <capture> <prompt file>: the reviewer saw exactly one large-diff file, and
+# the prompt names it.
+one_patch_named_in() {
+  [ -f "$1/patch-names" ] && [ "$(wc -l <"$1/patch-names")" -eq 1 ] \
+    && grep -Fq -- "$(cat "$1/patch-names")" "$2"
+}
+
 # argv_equals <capture> <expected elements...>: the recorded argv is exactly the elements.
 argv_equals() {
   local capture="$1"
@@ -467,7 +485,7 @@ assert_check "argv:runs-from-top-level" "reviewer cwd is the work tree top" \
 assert_check "argv:timeout-guard" "timeout got -k 5 590 then the reviewer" \
   grep -q "^-k 5 590 $FAKE_REVIEWER " "$TIMEOUT_ARGS_LOG"
 assert_check "argv:no-patch-file-small-diff" "small input writes no patch file" \
-  test ! -e "$REPO/$PATCH_REL"
+  no_run_patch_files "$REPO"
 
 STDIN_CAPTURE="$(new_capture stdin-mode)" || exit 2
 REPO="$(new_repo stdin-mode)" || exit 2
@@ -653,11 +671,27 @@ assert_check "large:patch-written" "the reviewer read the patch file during the 
   file_has_text "$CAPTURE/patch-seen" "+$LARGE_MARKER"
 assert_check "large:patch-holds-diff" "the patch file holds the full diff" \
   file_has_text "$CAPTURE/patch-seen" '+line 3 MARKER_CHANGED_LINE'
-assert_check "large:prompt-points-at-patch" "the prompt names the patch file" \
-  file_has_text "$CAPTURE/stdin.txt" "$PATCH_REL"
+assert_check "large:prompt-points-at-patch" "the prompt names the one patch file the reviewer saw" \
+  one_patch_named_in "$CAPTURE" "$CAPTURE/stdin.txt"
 assert_check "large:prompt-not-inlined" "the prompt does not inline the diff" \
   file_lacks_text "$CAPTURE/stdin.txt" "$LARGE_MARKER"
-assert_check "large:patch-removed" "the patch file is gone after the run" test ! -e "$REPO/$PATCH_REL"
+assert_check "large:patch-removed" "the patch file is gone after the run" no_run_patch_files "$REPO"
+
+# A file already in the review-loop folder, such as one left by an older run, is never reused,
+# overwritten or removed.
+CAPTURE="$(new_capture large-stale)" || exit 2
+REPO="$(new_repo large-stale "$LARGE_TEMPLATE_REPO")" || exit 2
+mkdir -p "$REPO/$PATCH_DIR_REL"
+printf 'EXISTING_FILE_CONTENT\n' >"$REPO/$PATCH_DIR_REL/review-diff.patch"
+run_review "$REPO" "$EMPTY_HOME" "$BIN_PASS" set "$(reviewer_setting "$CAPTURE" read-patch "$BARE_REPLY" no)" --base main
+assert_success "large-stale:success" '.base == "main"'
+assert_check "large-stale:existing-file-kept" "the existing file is unchanged" \
+  test "$(cat "$REPO/$PATCH_DIR_REL/review-diff.patch")" = 'EXISTING_FILE_CONTENT'
+assert_check "large-stale:fresh-file-read" "the reviewer read a fresh file holding the diff" \
+  file_has_text "$CAPTURE/patch-seen" "+$LARGE_MARKER"
+assert_check "large-stale:prompt-names-fresh-file" "the prompt names the fresh file, not the existing one" \
+  one_patch_named_in "$CAPTURE" "$CAPTURE/stdin.txt"
+assert_check "large-stale:fresh-file-removed" "only the fresh file is removed" no_run_patch_files "$REPO"
 
 # ── Preset: fake node + fake companion ─────────────────────────────────────────
 
