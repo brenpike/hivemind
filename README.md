@@ -23,6 +23,7 @@ Then run `/hivemind:seed-hive` once in each project (see [Per-project setup](#pe
 - Claude Code CLI. When Claude Code's Workflow tool is available, analysis requests run as a workflow script, delivery requests run as one or on Instinct, and an escalated PR review runs as one. Otherwise analysis requests run on the workflow state machine, and Instinct is the `standard-delivery` fallback (see [Two engines](#two-engines)).
 - **tmux**: only for brood execution (`hivemind:spawn-brood`, `hivemind:brood-status`)
 - **node**: only for the `codex-plugin` local review preset (`codex` companion)
+- **timeout** (GNU coreutils; `gtimeout` on macOS, from Homebrew `coreutils`): needed for local review, which is skipped without it
 
 PowerShell and native Windows are not supported. All toolchain scripts are bash-based.
 

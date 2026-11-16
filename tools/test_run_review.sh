@@ -7,8 +7,12 @@
 # no codex, no copilot, no real node. Each case runs the REAL script, unmodified, from a scratch
 # git repository under a mktemp dir, with exactly three settings under test control:
 #   - PATH: one fake-tool dir first (a fake `timeout`, and a fake `node` in the pass-through dir),
-#     then the host PATH for git and jq. The pass-through `timeout` checks its `-k 5 590` prefix
-#     and execs the rest; the expiring ones exit 124 or 137 without running anything.
+#     then the host PATH for git and jq. The pass-through `timeout` checks its `-k 5 <deadline>`
+#     prefix (all-digit deadline), logs its argv and the epoch second of its call, and execs the
+#     rest; the expiring ones exit 124 or 137 without running anything. The curated-PATH cases
+#     replace the host PATH with a dir of symlinks to the host tools the script, containment.sh
+#     and the fakes call, with no `timeout` or `gtimeout` among them. A slow fake `git` sleeps 3
+#     seconds on the snapshot's `ls-files --others`, then runs the real git.
 #   - HOME: a scratch home. Only the preset cases install a fake Codex companion under it; the
 #     fake `node` runs that companion with bash.
 #   - HIVEMIND_LOCAL_REVIEWER: unset, empty, `codex-plugin`, a malformed value, or a JSON argv
@@ -19,10 +23,12 @@
 # `feature` changes line 3 of src/a.txt, adds src/new.txt and deletes src/doomed.txt. Every case
 # reviews `feature` against `--base main` in its own `cp -a` copy of that repo.
 #
-# Covered: argv `{prompt}` and stdin prompt delivery; every skip reason; bare and fenced JSON,
-# prose, two fences and schema violations; out-of-diff filtering and its count; the finding_id
-# formula against precomputed digests; tracked edit, untracked file and HEAD move each blocked
-# with the change left in place; the large-diff patch file; the preset argv and its `.result`.
+# Covered: argv `{prompt}` and stdin prompt delivery; every skip reason, including no timeout
+# tool; the `gtimeout` fallback; the deadline derived from the call budget and the
+# before-snapshot reserve; bare and fenced JSON, prose, two fences and schema violations;
+# out-of-diff filtering and its count; the finding_id formula against precomputed digests and
+# its field framing; tracked edit, untracked file and HEAD move each blocked with the change left
+# in place; the large-diff patch file; the preset argv and its `.result`.
 #
 # Mirrors tools/test_prefilter.sh's pass/fail counter, per-case assertion and
 # exit-nonzero-on-any-fail convention. The only writes are under a tmpdir removed on EXIT.
@@ -73,12 +79,25 @@ USAGE_REASON='invalid arguments; usage: run-review.sh --base <ref> [-- <focus>]'
 PATCH_DIR_REL='.hivemind/review-loop'
 PATCH_GLOB='review-diff.??????????'
 TIMEOUT_ARGS_LOG="$TMPDIR_TEST/timeout-args.log"
+TIMEOUT_EPOCH_LOG="$TMPDIR_TEST/timeout-epoch.log"
 NODE_LOG="$TMPDIR_TEST/node-companion-path.log"
+REAL_GIT="$(type -P git)" || { echo "FAIL: git is not an executable on PATH" >&2; exit 2; }
 
-# Precomputed SHA-256 digests of file + line_start + line_end + title (UTF-8), the finding_id
-# formula of run-review.sh's header, for the two findings the base review keeps.
-ID_A_TXT='1f1216b68da04c82183e10dca74b1677b118935e781cd5139bf8576416ccf0f6'
-ID_NEW_TXT='8b5b3f2356a05f9789df202ca639ca76ecc493becab4322943d529eee234023c'
+# The run-review.sh deadline bounds: the 570-second call budget, the 5-second kill grace, the
+# highest deadline (570 - 0 spent - 2 * 1 snapshot reserve - 5 grace) and the lowest this suite
+# accepts for a fast run.
+CALL_BUDGET_SECONDS=570
+KILL_GRACE_SECONDS=5
+DEADLINE_MAX=563
+DEADLINE_FAST_MIN=500
+
+# Precomputed SHA-256 digests of the JSON array text [file, line_start, line_end, title]
+# (UTF-8), the finding_id formula of run-review.sh's header, for the two findings the base
+# review keeps.
+ID_A_JSON_TEXT='["src/a.txt",9,9,"Kept on an unchanged line of a changed file"]'
+ID_NEW_JSON_TEXT='["src/new.txt",1,2,"Ünïcödé title on a new file"]'
+ID_A_TXT='d991ff84f411d707f05711423f885fc34ce96dd3e8884fc1867f6bae66e571f5'
+ID_NEW_TXT='1c5a33d8b6fd02e3358b60f53176f8387c10032705e46efcb9e171ef2772fd5e'
 TITLE_A_TXT='Kept on an unchanged line of a changed file'
 TITLE_NEW_TXT='Ünïcödé title on a new file'
 
@@ -87,15 +106,65 @@ TITLE_NEW_TXT='Ünïcödé title on a new file'
 BIN_PASS="$FAKES/bin-pass"
 BIN_EXPIRE_124="$FAKES/bin-expire-124"
 BIN_EXPIRE_137="$FAKES/bin-expire-137"
-mkdir -p "$BIN_PASS" "$BIN_EXPIRE_124" "$BIN_EXPIRE_137"
+BIN_NONE="$FAKES/bin-none"
+BIN_GTIMEOUT="$FAKES/bin-gtimeout"
+BIN_SLOW_GIT="$FAKES/bin-slow-git"
+CURATED_BIN="$FAKES/curated-bin"
+mkdir -p "$BIN_PASS" "$BIN_EXPIRE_124" "$BIN_EXPIRE_137" "$BIN_NONE" "$BIN_GTIMEOUT" "$BIN_SLOW_GIT" \
+  "$CURATED_BIN"
 
-cat >"$BIN_PASS/timeout" <<STUB
+# write_pass_timeout <path>: a pass-through timeout that logs the epoch second of its call and
+# its argv, requires `-k 5 <all-digit deadline>`, then execs the rest.
+write_pass_timeout() {
+  cat >"$1" <<STUB || return 1
 #!/usr/bin/env bash
+date +%s >$(printf '%q' "$TIMEOUT_EPOCH_LOG")
 printf '%s\n' "\$*" >$(printf '%q' "$TIMEOUT_ARGS_LOG")
-[ "\$1" = -k ] && [ "\$2" = 5 ] && [ "\$3" = 590 ] || { echo "fake timeout: unexpected prefix \$*" >&2; exit 92; }
+[ "\$1" = -k ] && [ "\$2" = 5 ] || { echo "fake timeout: unexpected prefix \$*" >&2; exit 92; }
+case "\$3" in
+  ''|*[!0-9]*) echo "fake timeout: deadline is not all digits: \$*" >&2; exit 92 ;;
+esac
 shift 3
 exec "\$@"
 STUB
+  chmod +x "$1"
+}
+write_pass_timeout "$BIN_PASS/timeout" || exit 2
+write_pass_timeout "$BIN_GTIMEOUT/gtimeout" || exit 2
+write_pass_timeout "$BIN_SLOW_GIT/timeout" || exit 2
+
+cat >"$BIN_SLOW_GIT/git" <<STUB
+#!/usr/bin/env bash
+lists_files=false
+lists_others=false
+for arg in "\$@"; do
+  case "\$arg" in
+    ls-files) lists_files=true ;;
+    --others) lists_others=true ;;
+  esac
+done
+if [ "\$lists_files" = true ] && [ "\$lists_others" = true ]; then
+  sleep 3
+fi
+exec $(printf '%q' "$REAL_GIT") "\$@"
+STUB
+chmod +x "$BIN_SLOW_GIT/git"
+
+# INVARIANT: the curated bin holds every host tool the script, containment.sh and the fakes call,
+# and never `timeout` or `gtimeout`, so a curated-PATH run sees no timeout tool at all.
+CURATED_REQUIRED_TOOLS=(bash env date dirname basename jq git mktemp wc cat rm mkdir readlink xargs cmp grep cp)
+CURATED_OPTIONAL_TOOLS=(sha256sum shasum)
+for tool_name in "${CURATED_REQUIRED_TOOLS[@]}"; do
+  tool_path="$(type -P "$tool_name")" || { echo "FAIL: host tool missing: $tool_name" >&2; exit 2; }
+  ln -s "$tool_path" "$CURATED_BIN/$tool_name" || exit 2
+done
+for tool_name in "${CURATED_OPTIONAL_TOOLS[@]}"; do
+  tool_path="$(type -P "$tool_name")" || continue
+  ln -s "$tool_path" "$CURATED_BIN/$tool_name" || exit 2
+done
+[ ! -e "$CURATED_BIN/timeout" ] && [ ! -e "$CURATED_BIN/gtimeout" ] \
+  || { echo "FAIL: the curated bin holds a timeout tool" >&2; exit 2; }
+
 cat >"$BIN_PASS/node" <<STUB
 #!/usr/bin/env bash
 printf '%s\n' "\$1" >$(printf '%q' "$NODE_LOG")
@@ -264,9 +333,11 @@ reviewer_setting() {
 # ── Runner and assertions ──────────────────────────────────────────────────────
 
 RUN_SEQ=0
+# RR_PATH_TAIL: the PATH after the fake-tool dir; the host PATH except in run_review_curated.
+RR_PATH_TAIL="$HOST_PATH"
 
 # run_review <cwd> <home> <bin dir> <unset|set> <setting> [script args...]: run the real script
-# from <cwd>; sets RR_OUT, RR_ERR (file paths) and RR_RC.
+# from <cwd> with PATH <bin dir>:RR_PATH_TAIL; sets RR_OUT, RR_ERR (file paths) and RR_RC.
 run_review() {
   local run_cwd="$1" run_home="$2" bin_dir="$3" setting_mode="$4" setting="$5"
   shift 5
@@ -275,12 +346,20 @@ run_review() {
   RR_ERR="$TMPDIR_TEST/runs/$RUN_SEQ.err"
   RR_RC=0
   if [ "$setting_mode" = unset ]; then
-    (cd "$run_cwd" && HOME="$run_home" PATH="$bin_dir:$HOST_PATH" bash "$RUN_REVIEW" "$@") \
+    (cd "$run_cwd" && HOME="$run_home" PATH="$bin_dir:$RR_PATH_TAIL" bash "$RUN_REVIEW" "$@") \
       >"$RR_OUT" 2>"$RR_ERR" || RR_RC=$?
   else
-    (cd "$run_cwd" && HIVEMIND_LOCAL_REVIEWER="$setting" HOME="$run_home" PATH="$bin_dir:$HOST_PATH" \
+    (cd "$run_cwd" && HIVEMIND_LOCAL_REVIEWER="$setting" HOME="$run_home" PATH="$bin_dir:$RR_PATH_TAIL" \
       bash "$RUN_REVIEW" "$@") >"$RR_OUT" 2>"$RR_ERR" || RR_RC=$?
   fi
+}
+
+# run_review_curated <run_review args...>: run_review with the curated bin in place of the host
+# PATH, so no timeout tool is reachable except one in <bin dir>.
+run_review_curated() {
+  RR_PATH_TAIL="$CURATED_BIN"
+  run_review "$@"
+  RR_PATH_TAIL="$HOST_PATH"
 }
 
 # describe_run: one-line summary of the last run.
@@ -382,6 +461,38 @@ sha256_hex() {
   printf '%s\n' "${digest_line%% *}"
 }
 
+# all_digits <text>: <text> is one or more ASCII digits.
+all_digits() {
+  case "$1" in
+    ''|*[!0-9]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# deadline_within <low> <high> <command prefix>: the last pass-through timeout call was
+# `-k 5 <deadline> <command prefix>...` with an all-digit deadline in [<low>, <high>].
+deadline_within() {
+  local call_line deadline
+  call_line="$(head -n 1 "$TIMEOUT_ARGS_LOG")" || return 1
+  deadline="$(printf '%s\n' "$call_line" | awk '{ print $3 }')" || return 1
+  all_digits "$deadline" || return 1
+  [ "$deadline" -ge "$1" ] && [ "$deadline" -le "$2" ] || return 1
+  case "$call_line" in
+    "-k 5 $deadline $3"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# kill_within_call_budget <start epoch>: the seconds from <start epoch> to the timeout call, plus
+# the deadline and the kill grace, are at most the call budget plus one second of rounding.
+kill_within_call_budget() {
+  local call_epoch deadline
+  call_epoch="$(cat "$TIMEOUT_EPOCH_LOG")" || return 1
+  deadline="$(awk 'NR == 1 { print $3 }' "$TIMEOUT_ARGS_LOG")" || return 1
+  all_digits "$call_epoch" && all_digits "$deadline" || return 1
+  [ $((call_epoch - $1 + deadline + KILL_GRACE_SECONDS)) -le $((CALL_BUDGET_SECONDS + 1)) ]
+}
+
 # ── Usage and base ref blockers ────────────────────────────────────────────────
 
 REPO="$(new_repo usage)" || exit 2
@@ -460,11 +571,23 @@ assert_skip "skip:timed-out-124" 'skipped: timed-out'
 run_review "$REPO" "$EMPTY_HOME" "$BIN_EXPIRE_137" set "$(reviewer_setting "$CAPTURE" reply "$BARE_REPLY" no)" --base main
 assert_skip "skip:timed-out-137" 'skipped: timed-out'
 
+# ── Skip: no timeout tool ──────────────────────────────────────────────────────
+
+CAPTURE="$(new_capture no-timeout)" || exit 2
+run_review_curated "$REPO" "$EMPTY_HOME" "$BIN_NONE" set "$(reviewer_setting "$CAPTURE" reply "$BARE_REPLY" no)" --base main
+assert_skip "skip:no-timeout-tool" 'skipped: tool-missing'
+assert_check "no-timeout:reviewer-never-ran" "the reviewer never ran without a timeout tool" \
+  test ! -e "$CAPTURE/argv.nul"
+run_review_curated "$REPO" "$EMPTY_HOME" "$BIN_NONE" unset '' --base main
+assert_skip "skip:no-timeout-no-reviewer-first" 'skipped: no-reviewer'
+
 # ── Generic run: argv {prompt} and stdin delivery ──────────────────────────────
 
 ARGV_CAPTURE="$(new_capture argv-mode)" || exit 2
 REPO="$(new_repo argv-mode)" || exit 2
 : >"$TIMEOUT_ARGS_LOG"
+: >"$TIMEOUT_EPOCH_LOG"
+ARGV_START_EPOCH="$(date +%s)"
 run_review "$REPO/src" "$EMPTY_HOME" "$BIN_PASS" set "$(reviewer_setting "$ARGV_CAPTURE" reply "$BARE_REPLY" yes)" --base main
 assert_success "argv:success" '.base == "main" and .verdict == "needs-attention"'
 assert_check "argv:prompt-is-one-element" "argc is 1" grep -qx 1 "$ARGV_CAPTURE/argc"
@@ -482,10 +605,30 @@ assert_check "argv:prompt-comment-stripped" "leading HTML comment removed" \
   not_html_comment_start "$ARGV_CAPTURE/prompt.txt"
 assert_check "argv:runs-from-top-level" "reviewer cwd is the work tree top" \
   test "$(cat "$ARGV_CAPTURE/cwd")" = "$REPO"
-assert_check "argv:timeout-guard" "timeout got -k 5 590 then the reviewer" \
-  grep -q "^-k 5 590 $FAKE_REVIEWER " "$TIMEOUT_ARGS_LOG"
+assert_check "argv:timeout-guard" "timeout got -k 5 <deadline in $DEADLINE_FAST_MIN..$DEADLINE_MAX> then the reviewer" \
+  deadline_within "$DEADLINE_FAST_MIN" "$DEADLINE_MAX" "$FAKE_REVIEWER "
+assert_check "budget:kill-before-call-budget" "call second + deadline + kill grace <= $((CALL_BUDGET_SECONDS + 1))" \
+  kill_within_call_budget "$ARGV_START_EPOCH"
 assert_check "argv:no-patch-file-small-diff" "small input writes no patch file" \
   no_run_patch_files "$REPO"
+
+CAPTURE="$(new_capture gtimeout)" || exit 2
+REPO="$(new_repo gtimeout)" || exit 2
+: >"$TIMEOUT_ARGS_LOG"
+run_review_curated "$REPO" "$EMPTY_HOME" "$BIN_GTIMEOUT" set "$(reviewer_setting "$CAPTURE" reply "$BARE_REPLY" no)" --base main
+assert_success "argv:gtimeout-fallback" '.base == "main" and (.findings | length) == 2'
+assert_check "argv:gtimeout-guard" "gtimeout got -k 5 <deadline> then the reviewer" \
+  deadline_within "$DEADLINE_FAST_MIN" "$DEADLINE_MAX" "$FAKE_REVIEWER "
+
+# A before-snapshot of over 3 seconds reserves twice its time for the after-check:
+# 570 - 3 spent - 2 * 4 reserve - 5 grace = 554 at most.
+CAPTURE="$(new_capture slow-snapshot)" || exit 2
+REPO="$(new_repo slow-snapshot)" || exit 2
+: >"$TIMEOUT_ARGS_LOG"
+run_review "$REPO" "$EMPTY_HOME" "$BIN_SLOW_GIT" set "$(reviewer_setting "$CAPTURE" reply "$BARE_REPLY" no)" --base main
+assert_success "slow-snapshot:success" '.base == "main"'
+assert_check "budget:slow-snapshot-reserve" "a slow before-snapshot lowers the deadline to 554 or less" \
+  deadline_within 60 554 "$FAKE_REVIEWER "
 
 STDIN_CAPTURE="$(new_capture stdin-mode)" || exit 2
 REPO="$(new_repo stdin-mode)" || exit 2
@@ -612,13 +755,43 @@ assert_success "filter:result-keys" \
   'keys_unsorted == ["base", "verdict", "summary", "findings", "next_steps", "dropped_outside_diff"]'
 assert_success "filter:finding-id-first" \
   'all(.findings[]; keys_unsorted == ["finding_id", "severity", "title", "body", "file", "line_start", "line_end", "confidence", "recommendation"])'
-assert_check "id:formula-matches-precomputed-a" "sha256(file+start+end+title) is the precomputed digest" \
-  test "$(sha256_hex "src/a.txt99$TITLE_A_TXT")" = "$ID_A_TXT"
-assert_check "id:formula-matches-precomputed-new" "UTF-8 title digest is the precomputed digest" \
-  test "$(sha256_hex "src/new.txt12$TITLE_NEW_TXT")" = "$ID_NEW_TXT"
+assert_check "id:formula-matches-precomputed-a" "sha256 of the JSON array text is the precomputed digest" \
+  test "$(sha256_hex "$ID_A_JSON_TEXT")" = "$ID_A_TXT"
+assert_check "id:formula-matches-precomputed-new" "UTF-8 JSON array text digest is the precomputed digest" \
+  test "$(sha256_hex "$ID_NEW_JSON_TEXT")" = "$ID_NEW_TXT"
 assert_success "id:finding-a" ".findings[0].finding_id == \"$ID_A_TXT\""
 assert_success "id:finding-new-utf8" ".findings[1].finding_id == \"$ID_NEW_TXT\""
 assert_check "success:stderr-empty" "a clean run writes nothing to stderr" test ! -s "$RR_ERR"
+
+# Four findings whose old run-together id texts collide in pairs: (1, 123) with (11, 23), and
+# (12, "3 title") with (123, " title").
+COLLISION_REVIEW="$(derive_review '
+  .findings[0] as $base_finding
+  | .findings = [
+      $base_finding + {line_start: 1, line_end: 123, title: "Same title"},
+      $base_finding + {line_start: 11, line_end: 23, title: "Same title"},
+      $base_finding + {line_start: 5, line_end: 12, title: "3 title"},
+      $base_finding + {line_start: 5, line_end: 123, title: " title"}
+    ]')" || exit 2
+COLLISION_JSON_TEXTS=(
+  '["src/a.txt",1,123,"Same title"]'
+  '["src/a.txt",11,23,"Same title"]'
+  '["src/a.txt",5,12,"3 title"]'
+  '["src/a.txt",5,123," title"]'
+)
+COLLISION_IDS=()
+for collision_text in "${COLLISION_JSON_TEXTS[@]}"; do
+  collision_id="$(sha256_hex "$collision_text")" || exit 2
+  COLLISION_IDS+=("$collision_id")
+done
+COLLISION_REPLY="$(write_reply collision "$COLLISION_REVIEW")" || exit 2
+assert_check "id:old-concatenation-collides" "each pair's old file+start+end+title bytes are equal" \
+  jq -e '[.findings[] | .file + (.line_start | tostring) + (.line_end | tostring) + .title]
+    | .[0] == .[1] and .[2] == .[3]' "$COLLISION_REPLY"
+run_reply_case id-collision "$COLLISION_REPLY"
+assert_success "id:boundary-distinct" '(.findings | length) == 4 and ([.findings[].finding_id] | unique | length) == 4'
+assert_success "id:boundary-framed" \
+  "[.findings[].finding_id] == $(jq -nc '$ARGS.positional' --args "${COLLISION_IDS[@]}")"
 
 # ── Work tree changes: blocked, change left in place ───────────────────────────
 
@@ -729,8 +902,8 @@ assert_success "preset:result-used" \
 assert_check "preset:argv" "node got the companion then the preset argv" \
   argv_equals "$CAPTURE/argv.nul" "${PRESET_ARGV[@]}"
 assert_check "preset:stdin-empty" "the companion's stdin was empty" test ! -s "$CAPTURE/stdin.txt"
-assert_check "preset:timeout-guard" "timeout got -k 5 590 node <companion>" \
-  grep -q "^-k 5 590 node $PRESET_HOME/.claude/plugins/cache/openai-codex/codex/1.0.6/scripts/codex-companion.mjs " "$TIMEOUT_ARGS_LOG"
+assert_check "preset:timeout-guard" "timeout got -k 5 <deadline in $DEADLINE_FAST_MIN..$DEADLINE_MAX> node <companion>" \
+  deadline_within "$DEADLINE_FAST_MIN" "$DEADLINE_MAX" "node $PRESET_HOME/.claude/plugins/cache/openai-codex/codex/1.0.6/scripts/codex-companion.mjs "
 
 CAPTURE="$(new_capture preset-unset)" || exit 2
 PRESET_HOME="$(make_preset_home preset-unset "$CAPTURE" "$PRESET_REPLY")" || exit 2

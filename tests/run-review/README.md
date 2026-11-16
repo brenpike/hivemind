@@ -11,10 +11,14 @@ repository's `feature` branch changes one file, adds one and deletes one against
 `main`, and every case passes `--base main`. The suite controls only three
 settings:
 
-- `PATH`: a fake-tool directory comes first. It holds a pass-through `timeout`
-  that checks its `-k 5 590` prefix, or one that exits 124 or 137, and a fake
-  `node` that runs the companion with bash. The host `PATH` follows for git and
-  jq.
+- `PATH`: a fake-tool directory comes first. It holds a pass-through `timeout`,
+  or one that exits 124 or 137, and a fake `node` that runs the companion with
+  bash. The pass-through `timeout` (and `gtimeout`) requires `-k`, `5` and an
+  all-digit deadline, logs its argv and the epoch second of its call, then runs
+  the rest. The host `PATH` follows for git and jq. The curated cases replace
+  the host `PATH` with symlinks to the host tools the script and the fakes call,
+  without `timeout` or `gtimeout`. A slow fake `git` sleeps 3 seconds on the
+  snapshot's `ls-files --others`, then runs the real git.
 - `HOME`: a scratch home. Only the preset cases put a fake Codex companion under
   `.claude/plugins/cache/openai-codex/codex/<version>/scripts/`.
 - `HIVEMIND_LOCAL_REVIEWER`: unset, empty, `codex-plugin`, a malformed value, or
@@ -28,14 +32,22 @@ Covered behavior:
 - Prompt delivery: one `{prompt}` argv element with empty stdin, or the prompt on
   stdin. Both modes get the same prompt, and the focus text is trimmed and never
   run.
-- Skip reasons: `no-reviewer`, `bad-setting`, `tool-missing` (exit 127, exit 126
-  and a missing preset companion), `tool-failed` with its `stderr_excerpt` line,
-  and `timed-out` (exit 124 and 137).
+- Skip reasons: `no-reviewer`, `bad-setting`, `tool-missing` (exit 127, exit 126,
+  a missing preset companion, and no `timeout` or `gtimeout` on `PATH`, where the
+  reviewer never runs and `no-reviewer` still comes first), `tool-failed` with
+  its `stderr_excerpt` line, and `timed-out` (exit 124 and 137).
+- Deadline: the reviewer runs only under `-k 5 <deadline>`, with `gtimeout` when
+  `timeout` is missing. A fast run's deadline is an integer from 500 to 563. The
+  call second, the deadline and the 5-second grace stay within the 570-second
+  budget plus one second. A before-snapshot slowed by 3 seconds lowers the
+  deadline to 554 or less.
 - Output shape: bare JSON and one `json` fence are accepted. Prose, two fences,
   two objects, empty output and schema violations are blocked.
 - Findings: a finding on a file the diff does not change is dropped and counted.
   A finding on any line of a changed or added file is kept. Each `finding_id` is
-  checked against a precomputed SHA-256 digest.
+  checked against a precomputed SHA-256 digest of the JSON array text
+  `[file, line_start, line_end, title]`. Four findings whose old run-together
+  texts collide in pairs, such as lines 1-123 and 11-23, get four distinct ids.
 - Work tree: a tracked edit, a new untracked file and a HEAD move are each
   blocked, and the change stays in place.
 - Large diff: the patch file exists while the reviewer runs, the prompt points at

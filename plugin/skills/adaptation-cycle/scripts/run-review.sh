@@ -46,9 +46,17 @@
 #   only that file is removed after the after-check. A `{prompt}` element is replaced whole by the
 #   prompt as one argv element, with stdin /dev/null; otherwise the prompt goes on stdin.
 #
-# EXECUTION: from the top of the work tree, under `timeout -k 5 590` (or `gtimeout`). With
-#   neither, the run is unguarded and one WARNING line goes to stderr. stdout and stderr go to
-#   files in a private mktemp folder that the EXIT trap removes.
+# EXECUTION: from the top of the work tree, only under `<timeout> -k 5 <deadline>`, where
+#   <timeout> is the executable `timeout` on PATH, else `gtimeout` (resolved by `type -P`, so a
+#   shell function or builtin of that name is never used). With neither, the result is
+#   `skipped: tool-missing`, decided right after the reviewer setting and before any other work;
+#   the reviewer never runs unguarded. The deadline is derived from CALL_BUDGET_SECONDS (570: 30
+#   seconds under the 600-second cap that the review call in the adaptation-cycle SKILL.md sets
+#   with `timeout: 600000`): the budget less the seconds the script has spent (SECONDS, reset at its start), less
+#   twice the before-snapshot time (its whole seconds plus one) as the reserve for the
+#   after-check, less the 5-second kill grace. A deadline under MIN_REVIEW_SECONDS (60) is
+#   `skipped: timed-out` without running the reviewer. stdout and stderr go to files in a private
+#   mktemp folder that the EXIT trap removes.
 #
 # BEFORE/AFTER CHECK: before the run the script records HEAD, `git status --porcelain=v1 -z
 #   --untracked-files=all --no-renames`, and for every path of `git ls-files -z --cached --others
@@ -74,8 +82,11 @@
 #                     match schema`.
 #   A finding is kept only when its `file` is a new-side path of `git diff --name-only -z
 #   --no-renames --diff-filter=d <base>...HEAD` (exact string match); the others are dropped and
-#   counted. Each kept finding gets `finding_id`: the SHA-256 hex digest of file + line_start +
-#   line_end + title, concatenated as strings, UTF-8 (sha256sum, else shasum -a 256).
+#   counted. Each kept finding gets `finding_id`: the SHA-256 hex digest (sha256sum, else shasum
+#   -a 256) of the compact UTF-8 JSON text of the array [file, line_start, line_end, title], as
+#   jq's `[.file, .line_start, .line_end, .title] | tojson` prints it, e.g.
+#   `["src/a.txt",9,9,"A title"]`. The JSON framing keeps the fields apart, so (1, 123) and
+#   (11, 23) give different ids.
 #
 # OUTPUT / EXIT CONTRACT:
 #   0  success: ONE line on stdout, a JSON object
@@ -83,6 +94,8 @@
 #      each finding being the reviewer's fields with `finding_id` first.
 #   0  skip: `skipped: <reason>` on stdout, reason exactly no-reviewer | bad-setting |
 #      tool-missing | tool-failed | timed-out; tool-failed adds the stderr_excerpt line.
+#      tool-missing also covers no `timeout` or `gtimeout` executable on PATH; timed-out also
+#      covers a deadline under the 60-second floor (EXECUTION).
 #   1  blocked: NOTHING on stdout. stderr carries `blocker: <fixed reason>` as its FIRST line,
 #      then detail lines: `raw_excerpt: <JSON string>` (unexpected output shape), or for the
 #      working tree blocker an optional `head_moved: true` line and up to 50
@@ -99,13 +112,17 @@
 # reports its changes); paths that are not UTF-8 are compared after jq's decoding only when
 # the changed paths are listed. The reviewer command is operator config and is trusted to be
 # what the operator chose; the script only keeps any shell out of the path between the setting
-# and the exec.
+# and the exec. An after-check that outlasts its reserve ends the call at the Bash tool's cap,
+# and the skill then blocks with `review timed out`, never passes. A reviewer that leaves its
+# process group escapes the timeout's kill (the operator-configured command is trusted). The
+# stderr_excerpt and raw_excerpt are not redacted, per ADR-0042 Implementation decisions item 9.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, bash 3.2 compatible (no mapfile, no
 # associative arrays), jq for every JSON read and write.
 
 set -euo pipefail
+SECONDS=0
 
 work_dir=''
 patch_path=''
@@ -137,7 +154,8 @@ skip_review() {
 
 usage_reason='invalid arguments; usage: run-review.sh --base <ref> [-- <focus>]'
 readonly INLINE_INPUT_LIMIT=65536
-readonly REVIEW_TIMEOUT_SECONDS=590
+readonly CALL_BUDGET_SECONDS=570
+readonly MIN_REVIEW_SECONDS=60
 readonly REVIEW_KILL_GRACE_SECONDS=5
 readonly PATCH_DIR_REL='.hivemind/review-loop'
 
@@ -231,6 +249,9 @@ else
   printf '%s' "$setting" | jq -s -e "$SETTING_CHECK" >/dev/null 2>&1 || skip_review 'bad-setting'
   reviewer_mode='generic'
 fi
+
+timeout_path="$(type -P timeout)" || timeout_path="$(type -P gtimeout)" || skip_review 'tool-missing'
+[ -n "$timeout_path" ] || skip_review 'tool-missing'
 
 if command -v sha256sum >/dev/null 2>&1; then
   sha_cmd=(sha256sum)
@@ -390,24 +411,18 @@ CHANGED_PATHS_PROGRAM='
 
 before="$work_dir/before"
 after="$work_dir/after"
+snapshot_started="$SECONDS"
 take_snapshot "$before" || blocker 'cannot snapshot the working tree'
+snapshot_seconds=$((SECONDS - snapshot_started + 1))
 
-timeout_bin=''
-if command -v timeout >/dev/null 2>&1; then
-  timeout_bin='timeout'
-elif command -v gtimeout >/dev/null 2>&1; then
-  timeout_bin='gtimeout'
-else
-  printf '%s\n' "run-review: WARNING neither 'timeout' nor 'gtimeout' found on PATH; the reviewer runs UNGUARDED and a hung reviewer can outlast the Bash tool's limit, skipping the after-check. Install GNU coreutils to restore the guard." >&2
-fi
+# INVARIANT: review_seconds >= MIN_REVIEW_SECONDS > 0 here, so GNU `timeout 0` (no limit) is
+# never reached.
+review_seconds=$((CALL_BUDGET_SECONDS - SECONDS - 2 * snapshot_seconds - REVIEW_KILL_GRACE_SECONDS))
+[ "$review_seconds" -ge "$MIN_REVIEW_SECONDS" ] || skip_review 'timed-out'
 
 run_status=0
-if [ -n "$timeout_bin" ]; then
-  "$timeout_bin" -k "$REVIEW_KILL_GRACE_SECONDS" "$REVIEW_TIMEOUT_SECONDS" "${run_argv[@]}" \
-    <"$stdin_path" >"$work_dir/stdout" 2>"$work_dir/stderr" || run_status=$?
-else
-  ( exec "${run_argv[@]}" ) <"$stdin_path" >"$work_dir/stdout" 2>"$work_dir/stderr" || run_status=$?
-fi
+"$timeout_path" -k "$REVIEW_KILL_GRACE_SECONDS" "$review_seconds" "${run_argv[@]}" \
+  <"$stdin_path" >"$work_dir/stdout" 2>"$work_dir/stderr" || run_status=$?
 
 take_snapshot "$after" || blocker 'cannot snapshot the working tree'
 tree_changed=false
@@ -528,7 +543,7 @@ finding_count="$(jq -r '.findings | length' <"$work_dir/kept.json" 2>/dev/null)"
 : >"$work_dir/ids.txt"
 index=0
 while [ "$index" -lt "$finding_count" ]; do
-  digest_line="$(jq -j --argjson i "$index" '.findings[$i] | .file + (.line_start | tostring) + (.line_end | tostring) + .title' \
+  digest_line="$(jq -j --argjson i "$index" '.findings[$i] | [.file, .line_start, .line_end, .title] | tojson' \
     <"$work_dir/kept.json" | "${sha_cmd[@]}")" || blocker 'cannot compute a finding id'
   digest="${digest_line%% *}"
   [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || blocker 'cannot compute a finding id'
