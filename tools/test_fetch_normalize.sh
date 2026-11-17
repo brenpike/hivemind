@@ -8,7 +8,9 @@
 # via its documented test seam (--payload-file / --ci-payload-file, both bypassing the live
 # `gh api graphql` / `gh pr checks` fetches), feeds canned fixtures, and asserts the emitted
 # normalized JSON array equals an expected set. The normalize core is a PURE function of the
-# injected payload(s) + --arg login/filter, so every case is deterministic and offline.
+# injected payload(s) + --arg login/filter, so every case is deterministic and offline. The live
+# `gh pr checks` capture-lifecycle cases run the live CI branch against a fake `gh` put first on
+# PATH, never the real one.
 #
 # Review-path fixtures are reused from tests/fix-history/ (verified by STEP-001 to conform to
 # fetch-normalize.sh's GraphQL input contract). CI-path, connection-tripwire, and empty/malformed
@@ -611,6 +613,105 @@ run_live_failopen_case "live-open:ci-no-checks-status1" \
   "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-blank.json" "FETCHNORM_LIVE_CI_STATUS=1" \
   "FETCHNORM_LIVE_CI_STDERR_FILE=$FN_DIR/live-ci-stderr-no-checks.txt" \
   -- o r 5 all selfuser
+# 11a-2. The no-checks line at the allowlisted statuses 0 and 8 is NOT the row (status 1 only) ->
+#        ci-not-array.
+run_live_fail_case "live-closed:ci-status0-blank-no-checks" "ci-not-array" \
+  "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-valid-empty.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
+  "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-blank.json" "FETCHNORM_LIVE_CI_STATUS=0" \
+  "FETCHNORM_LIVE_CI_STDERR_FILE=$FN_DIR/live-ci-stderr-no-checks.txt" \
+  -- o r 5 all selfuser
+run_live_fail_case "live-closed:ci-status8-blank-no-checks" "ci-not-array" \
+  "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-valid-empty.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
+  "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-blank.json" "FETCHNORM_LIVE_CI_STATUS=8" \
+  "FETCHNORM_LIVE_CI_STDERR_FILE=$FN_DIR/live-ci-stderr-no-checks.txt" \
+  -- o r 5 all selfuser
+# 11a-3. Anchored near-misses of the no-checks line at status 1 + blank body -> ci-not-array: gh's
+#        `no required checks` variant, a prefixed line, and a suffixed line.
+printf "no required checks reported on the 'x' branch\n" > "$WORKDIR/stderr-near-required.txt"
+printf "error: no checks reported on the 'x' branch\n" > "$WORKDIR/stderr-near-prefix.txt"
+printf "no checks reported on the 'x' branch yet\n" > "$WORKDIR/stderr-near-suffix.txt"
+for near in required prefix suffix; do
+  run_live_fail_case "live-closed:ci-status1-blank-near-miss-$near" "ci-not-array" \
+    "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-valid-empty.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
+    "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-blank.json" "FETCHNORM_LIVE_CI_STATUS=1" \
+    "FETCHNORM_LIVE_CI_STDERR_FILE=$WORKDIR/stderr-near-$near.txt" \
+    -- o r 5 all selfuser
+done
+
+# ── Live `gh pr checks` stderr capture lifecycle (#560) ─────────────────────────────
+# These cases set NO CI seam, so fetch_ci_payload takes its LIVE branch against a fake `gh` first on
+# PATH: mktemp, the subshell's own EXIT trap and the stderr capture really run (the GraphQL fetch
+# keeps its seam). Each case gets its own TMPDIR, and every case asserts no capture file is left
+# there, whatever the outcome.
+FAKE_GH_DIR="$WORKDIR/fake-gh-bin"
+mkdir -p "$FAKE_GH_DIR"
+cat > "$FAKE_GH_DIR/gh" <<'FAKEGH'
+#!/usr/bin/env bash
+case "${FAKE_GH_MODE:-}" in
+  no-checks) printf "no checks reported on the 'x' branch\n" >&2; exit 1 ;;
+  array8) printf '[]'; exit 8 ;;
+  auth4) printf 'HTTP 401: Bad credentials\n' >&2; exit 4 ;;
+  signal)
+    # SIGTERM the subshell running fetch_ci_payload while it waits on gh. Every ancestor running
+    # the script shares its command line; the topmost is the main script, and the one just below
+    # it is fetch_ci_payload's command-substitution subshell.
+    chain=()
+    p="$PPID"
+    while [ -n "$p" ] && [ "$p" -gt 1 ]; do
+      case "$(ps -o args= -p "$p" 2>/dev/null)" in
+        *fetch-normalize.sh*) chain+=("$p") ;;
+      esac
+      p="$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')"
+    done
+    [ "${#chain[@]}" -ge 2 ] && kill -TERM "${chain[${#chain[@]}-2]}"
+    sleep 1
+    exit 1 ;;
+esac
+exit 99
+FAKEGH
+chmod +x "$FAKE_GH_DIR/gh"
+
+# run_live_gh_case <case> <fake-gh-mode> <tmpdir> <expected-exit> <expected-stdout>
+# <expected-stdout> is compared after canon on exit 0, verbatim otherwise.
+run_live_gh_case() {
+  local case_name="$1" mode="$2" tmp="$3" want_status="$4" want_out="$5"
+  local out status left=""
+  out="$(env -u FETCHNORM_LIVE_CI_FILE -u FETCHNORM_LIVE_CI_STDERR_FILE \
+    PATH="$FAKE_GH_DIR:$PATH" TMPDIR="$tmp" FAKE_GH_MODE="$mode" FETCHNORM_TEST_MODE=1 \
+    "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-valid-empty.json" FETCHNORM_LIVE_GRAPHQL_STATUS=0 \
+    bash "$NORMALIZE" o r 5 all selfuser 2>/dev/null)"
+  status=$?
+  if [ "$status" -eq 0 ]; then out="$(printf '%s' "$out" | canon)"; fi
+  if [ -d "$tmp" ]; then
+    left="$(find "$tmp" -name 'hivemind-fetchnorm-ci-stderr.*' -print)"
+  fi
+  if [ -n "$left" ]; then
+    failed "$case_name" "capture file left behind: $left"
+  elif [ "$status" -ne "$want_status" ] || [ "$out" != "$want_out" ]; then
+    failed "$case_name" "expected exit=$want_status stdout=$want_out, got exit=$status stdout=$out"
+  else
+    pass "$case_name" "exit=$status, no capture file left"
+  fi
+}
+
+mkdir -p "$WORKDIR/tmp-plain"
+ODD_TMP="$WORKDIR/tmp sp 'q' \$x"$'\n'"nl"
+mkdir -p "$ODD_TMP"
+# 11d. live no-checks -> [] exit 0, capture removed.
+run_live_gh_case "live-gh:no-checks" no-checks "$WORKDIR/tmp-plain" 0 "[]"
+# 11e. live status 8 + array -> [] exit 0, capture removed.
+run_live_gh_case "live-gh:array-status8" array8 "$WORKDIR/tmp-plain" 0 "[]"
+# 11f. live auth failure -> ci-operational-failure, capture removed on the error return.
+run_live_gh_case "live-gh:auth4-error-return" auth4 "$WORKDIR/tmp-plain" 1 \
+  "FETCHNORM_ERROR=ci-operational-failure"
+# 11g. SIGTERM to the subshell while gh runs -> the fetch dies with no FETCHNORM_ERROR line (it never
+#      reached one), and its EXIT trap still removed the capture.
+run_live_gh_case "live-gh:sigterm-during-gh" signal "$WORKDIR/tmp-plain" 1 ""
+# 11h. a TMPDIR holding a space, quotes, `$` and a newline -> the trap's quoted path still removes it.
+run_live_gh_case "live-gh:odd-tmpdir" no-checks "$ODD_TMP" 0 "[]"
+# 11i. mktemp cannot create the capture (TMPDIR missing) -> ci-operational-failure, never [].
+run_live_gh_case "live-gh:mktemp-failure" no-checks "$WORKDIR/tmp-missing" 1 \
+  "FETCHNORM_ERROR=ci-operational-failure"
 # Connection-shape gate must NOT over-reject (#322). Both shapes below are legitimate live responses.
 # 11b. every requested connection PRESENT but EMPTY (`nodes: []`, including `reviewThreads.nodes: []`,
 #      on which the nested per-thread clause is vacuously true) -> [] exit 0. A genuinely clean PR
