@@ -299,9 +299,11 @@ poll_fail() {
 # its base-10 value to the variable <name> and return 0; otherwise return 1 and
 # assign nothing. It declares no locals, so no target name can collide with one.
 # INVARIANT: read_decimal is the script's only bounded-decimal check and its
-# only base-10 coercion, and every number the script does arithmetic or a
-# numeric test on is read through it or read_clock, never checked at its use
-# site. Bash arithmetic is signed 64-bit and wraps silently; 18 digits stay
+# only base-10 coercion. Every number the script reads from outside itself (an
+# argument, the seed, a gh capture, the clock) is read through it or read_clock,
+# never checked at its use site. Every other number is a script-internal
+# integer: a literal, or a value computed only from checked numbers and
+# literals, never read from outside. Bash arithmetic is signed 64-bit and wraps silently; 18 digits stay
 # below 2^63 with room for the epoch the deadline adds, so no accepted value can
 # wrap. The base-10 coercion keeps a leading zero from reading as octal (08/09
 # error under set -u, 060 mis-scales to 48), and a normalized value also

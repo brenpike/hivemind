@@ -107,8 +107,10 @@
 # window, including a re-arm whose window is smaller than the interval. The executable lines of the
 # poll hold exactly one `sleep` command, inside that helper, so a second raw sleep goes red.
 #
-# THE CHECKED-NUMBER CONTRACT: every number the poll does arithmetic or a numeric test on is read
-# through one of two helpers. read_decimal is the only bounded-decimal check (1 to 18 digits) and
+# THE CHECKED-NUMBER CONTRACT: every number the poll reads from outside itself (an argument, the
+# seed, a gh capture, the clock) is read through one of two helpers, and every other number it does
+# arithmetic or a numeric test on is a script-internal integer computed only from literals and
+# checked numbers. read_decimal is the only bounded-decimal check (1 to 18 digits) and
 # the only base-10 coercion; read_clock holds the only `date` command and routes its reading
 # through read_decimal. A failed or bad clock reading, at any of the three clock reads (arm time,
 # the loop-top deadline check, sleep_to_next_poll), is POLL_ERROR, exit 1, and a 19-digit PR number
@@ -116,7 +118,8 @@
 # cases hold the rule: the executable lines hold exactly one `date` command, inside read_clock; and
 # the bounded-decimal pattern and `10#` appear only inside read_decimal, while every variable
 # operand of `$(( ))` or of a numeric test is a read_decimal or read_clock target or on a short
-# named list of script-internal integers, so a new unchecked number goes red.
+# named list of script-internal integers, each written only as a literal, an arithmetic expansion
+# or a copy of a checked or listed name, so a new unchecked number goes red.
 #
 # Usage:
 #   ./tools/test_change_detect_poll.sh
@@ -2144,7 +2147,9 @@ fi
 #   (d) STRUCTURAL: a digit-class pattern and `10#` appear on executable lines only inside
 #       read_decimal, and every variable operand of `$(( ))` or of a -eq/-ne/-gt/-ge/-lt/-le test
 #       outside read_decimal is a read_decimal or read_clock target or on NUMBER_INTERNAL_NAMES.
-#       `${#...}` and `$#` are exempt. A positional operand is never on the list.
+#       `${#...}` and `$#` are exempt. A positional operand is never on the list. Each name on
+#       NUMBER_INTERNAL_NAMES is written only as a literal, an arithmetic expansion or a copy of
+#       one checked or listed name, so a list entry cannot carry an unchecked value.
 #   (e) a 19-digit PR number is POLL_ERROR, exit 1, with zero gh calls.
 CLOCK_BAD_READINGS=(FAIL "" abc -1 9999999999999999999)
 CLOCK_BAD_READ_COUNT=4
@@ -2289,6 +2294,73 @@ unchecked_number_operands() {
     <(printf '%s\n' "$allowed_names") -
 }
 
+# unprovenanced_internal_writes: `<line>:<word>` for each word on an executable, non-comment line
+# of the poll that names a NUMBER_INTERNAL_NAMES entry bare (not as a `$` or `${` reference) and is
+# not one of the allowed forms: the bare name in a `local` declaration, or `<name>=` followed by a
+# decimal literal, an arithmetic expansion, or a `$` reference, quoted or not, to one checked or
+# listed name. INVARIANT: the scan is line-local and splits words on whitespace after replacing
+# each `$(( ))` with a placeholder, so a `read`, `printf -v`, `for ... in` or any other write to a
+# listed name goes red.
+unprovenanced_internal_writes() {
+  local allowed_names
+  allowed_names="$(poll_checked_targets; printf '%s\n' "${NUMBER_INTERNAL_NAMES[@]}")"
+  awk -v internal="${NUMBER_INTERNAL_NAMES[*]}" -v allowed="$(printf '%s ' $allowed_names)" '
+    BEGIN {
+      count = split(internal, words, " ")
+      for (k = 1; k <= count; k++) is_internal[words[k]] = 1
+      count = split(allowed, words, " ")
+      for (k = 1; k <= count; k++) is_allowed[words[k]] = 1
+    }
+    function allowed_value(value, ref) {
+      if (value ~ /^[0-9]+$/ || value == "@ARITH@") return 1
+      ref = value
+      gsub(/"/, "", ref)
+      if (ref !~ /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/) return 0
+      if ((ref ~ /^\$\{/) != (ref ~ /\}$/)) return 0
+      gsub(/[${}]/, "", ref)
+      return (ref in is_allowed)
+    }
+    function names_internal_bare(word, rest, token, before) {
+      rest = word
+      while (match(rest, /[A-Za-z_][A-Za-z0-9_]*/)) {
+        token = substr(rest, RSTART, RLENGTH)
+        before = RSTART > 1 ? substr(rest, RSTART - 1, 1) : ""
+        if ((token in is_internal) && before != "$" && before != "{") return 1
+        rest = substr(rest, RSTART + RLENGTH)
+      }
+      return 0
+    }
+    /^[[:space:]]*#/ { next }
+    {
+      line = ""
+      rest = $0
+      while ((start = index(rest, "$((")) > 0) {
+        line = line substr(rest, 1, start - 1) "@ARITH@"
+        rest = substr(rest, start + 3)
+        depth = 2
+        for (pos = 1; pos <= length(rest) && depth > 0; pos++) {
+          ch = substr(rest, pos, 1)
+          if (ch == "(") depth++
+          if (ch == ")") depth--
+        }
+        rest = substr(rest, pos)
+      }
+      line = line rest
+      count = split(line, words, /[[:space:]]+/)
+      is_local = (words[1] == "local" || words[2] == "local")
+      for (k = 1; k <= count; k++) {
+        word = words[k]
+        if (!names_internal_bare(word)) continue
+        if (is_local && (word in is_internal)) continue
+        eq = index(word, "=")
+        if (eq > 1 && (substr(word, 1, eq - 1) in is_internal) \
+          && allowed_value(substr(word, eq + 1))) continue
+        print NR ":" word
+      }
+    }
+  ' "$POLL"
+}
+
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   clock_ok=1
   clock_detail=""
@@ -2364,12 +2436,14 @@ fi
 number_checks="$(poll_number_checks)"
 number_checks_outside="$(printf '%s\n' "$number_checks" | grep -v ':1$' | grep .)"
 unchecked_operands="$(unchecked_number_operands)"
+unprovenanced_writes="$(unprovenanced_internal_writes)"
 if printf '%s\n' "$number_checks" | grep -q '^pattern:[0-9]*:1$' \
   && printf '%s\n' "$number_checks" | grep -q '^coerce:[0-9]*:1$' \
-  && [ -z "$number_checks_outside" ] && [ -z "$unchecked_operands" ]; then
-  pass "numbers:one-checked-source" "the digit check and 10# live only in read_decimal, and every numeric operand is checked or a named internal integer"
+  && [ -z "$number_checks_outside" ] && [ -z "$unchecked_operands" ] \
+  && [ -z "$unprovenanced_writes" ]; then
+  pass "numbers:one-checked-source" "the digit check and 10# live only in read_decimal, every numeric operand is checked or a named internal integer, and each named internal integer is written only from literals or checked numbers"
 else
-  failed "numbers:one-checked-source" "checks outside read_decimal=[$(printf '%s' "$number_checks_outside" | tr '\n' ' ')] all checks=[$(printf '%s' "$number_checks" | tr '\n' ' ')] unchecked operands line:name=[$(printf '%s' "$unchecked_operands" | tr '\n' ' ')]"
+  failed "numbers:one-checked-source" "checks outside read_decimal=[$(printf '%s' "$number_checks_outside" | tr '\n' ' ')] all checks=[$(printf '%s' "$number_checks" | tr '\n' ' ')] unchecked operands line:name=[$(printf '%s' "$unchecked_operands" | tr '\n' ' ')] unprovenanced internal writes line:word=[$(printf '%s' "$unprovenanced_writes" | tr '\n' ' ')]"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
