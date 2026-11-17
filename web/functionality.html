@@ -118,7 +118,7 @@
             <span class="tag tag--ember">JSON</span>
           </article>
         </div>
-        <p class="note">When Claude Code's Workflow tool is available, analysis requests run as a workflow script, and delivery requests run as one or on Instinct. A refused or blocked <code>standard-delivery</code> launch (denied, not found, or workflows turned off), and a started run that fails, continue on <em>Instinct</em>: the overlord's judgment-driven delivery path, with no script and no run ledger, that keeps the plan, the branch and every gate. A <code>Workflow(hivemind:standard-delivery)</code> deny entry sends delivery to Instinct. The workflow state machine runs the other workflows, a refused <code>analysis-only</code> launch and resumed runs. A delivery request that names neither the engine nor Instinct gets a question with a recommendation, and a brood child takes the engine. A No at the approval prompt still has no fallback (see <a href="#lifecycle">Lifecycle</a>). <code>tmux</code> is needed only for brood mode. Each strain runs in its own detached tmux session. <code>node</code> is needed only for the optional local Codex review (the codex companion).</p>
+        <p class="note">When Claude Code's Workflow tool is available, analysis requests run as a workflow script, and delivery requests run as one or on Instinct. A refused or blocked <code>standard-delivery</code> launch (denied, not found, or workflows turned off), and a started run that fails, continue on <em>Instinct</em>: the overlord's judgment-driven delivery path, with no script and no run ledger, that keeps the plan, the branch and every gate. A <code>Workflow(hivemind:standard-delivery)</code> deny entry sends delivery to Instinct. The workflow state machine runs the other workflows, a refused <code>analysis-only</code> launch and resumed runs. A delivery request that names neither the engine nor Instinct gets a question with a recommendation, and a brood child takes the engine. A No at the approval prompt still has no fallback (see <a href="#lifecycle">Lifecycle</a>). <code>tmux</code> is needed only for brood mode. Each strain runs in its own detached tmux session. <code>node</code> is needed only for the <code>codex-plugin</code> local review preset (the codex companion).</p>
       </div>
     </section>
 
@@ -161,11 +161,8 @@
           <div class="cmd" role="region" aria-label="seed-hive with seed_allowlist turned off">
             <pre><code>/hivemind:seed-hive seed_allowlist=no</code></pre>
           </div>
-          <p>The supported setup for local Codex review is a per-contributor grant: add your Codex cache path to the gitignored <code>.claude/settings.local.json</code>:</p>
-          <div class="code-panel" role="region" aria-label="Codex cache permission grant" tabindex="0">
-            <pre><code><span class="t-str">"Bash(node /path/to/.claude/plugins/cache/openai-codex/codex/*)"</span></code></pre>
-          </div>
-          <p class="note">Replace <code>/path/to/</code> with your actual home directory path. The <code>codex/*</code> wildcard covers all Codex CLI entry points so the entry does not need updating when Codex is upgraded.</p>
+          <p>Local review needs no allow rule. It runs every reviewer through one plugin script, <code>run-review.sh</code>, which the <code>hivemind:adaptation-cycle</code> skill grants in its <code>allowed-tools</code> by its <code>${CLAUDE_PLUGIN_ROOT}</code> path, and seed-hive seeds no reviewer grant. Whether that grant stops the permission prompt when the local reviewer runs as a subagent is not yet verified. When Claude Code refuses the <code>run-review.sh</code> call, local review ends blocked, not skipped, so a broken grant is noticed.</p>
+          <p class="note">Local review no longer uses any rule for the Codex plugin cache path. Delete one you added by hand to <code>.claude/settings.local.json</code>, or the unexpanded <code>/path/to/</code> one an earlier seed-hive wrote to <code>.claude/settings.json</code>.</p>
           <p>Skill grants are scoped too. While a skill runs, for the rest of that turn and for workflow agents started in it, its <code>allowed-tools</code> pre-approve only the Write of its own inputs file (for example <code>Edit(.hivemind/molt-inputs-*.json)</code> in <code>hivemind:molt</code>) and Reads of plugin files under <code>~/.claude/plugins/cache/brenpike/hivemind/</code>, a rule that also covers Grep searches of them, per the Claude Code permissions docs and a headless test on Claude Code 2.1.310. Apart from the six user-invoked executor skills (<code>tdd</code>, <code>refactor-to-depth</code>, <code>plan-to-prd</code>, <code>plan-interrogation</code>, <code>create-handoff</code> and <code>creep-spread</code>), which still carry broad Read, Write and Edit, no skill pre-approves a Read or Write of any other path. If the plugin loads from a local path (<code>--plugin-dir</code>, or a marketplace added from a local folder), Reads of its files outside the project prompt; to pre-approve them, add <code>Read(//&lt;absolute plugin folder&gt;/**)</code> to the project's gitignored <code>.claude/settings.local.json</code>. The seeded rules are unchanged.</p>
           <p class="note">See the <a href="https://github.com/brenpike/hivemind#per-project-setup" target="_blank" rel="noopener noreferrer">README setup section</a> for the full rationale and the upgrade path for already-seeded projects.</p>
         </div>
@@ -183,7 +180,7 @@
           </article>
           <article class="panel card" role="region" aria-labelledby="setup-agentsmd-heading">
             <h3 class="xg" id="setup-agentsmd-heading"><span class="step-num">Step 3</span> Create AGENTS.md</h3>
-            <p>Add project-specific Codex reviewer guidance at the repo root:</p>
+            <p>Add project-specific review guidance for your local review tool at the repo root, when that tool reads it (Codex does):</p>
             <ul class="dots" aria-label="AGENTS.md contents">
               <li>Review focus areas</li>
               <li>Severity definitions</li>
@@ -234,7 +231,7 @@
               <tr>
                 <td><code>hivemind:local-reviewer</code></td>
                 <td><span class="tag tag--violet">Pre-PR reviewer</span></td>
-                <td>Adversarial Codex review loop before the PR opens, up to 10 iterations. Fixes simple findings itself (two files or fewer); a fix that fails its check is undone, with only its own files restored, and listed. Escalates complex ones and stops on break-fix cycles. Needs the codex companion.</td>
+                <td>Adversarial review loop before the PR opens, up to 10 iterations, with the tool <code>HIVEMIND_LOCAL_REVIEWER</code> picks (Codex by default). Fixes simple findings itself (two files or fewer); a fix that fails its check is undone, with only its own files restored, and listed. Escalates complex ones and stops on break-fix cycles. Skipped, with a PR warning, when no reviewer can run.</td>
               </tr>
               <tr>
                 <td><code>hivemind:github-reviewer</code></td>
@@ -318,7 +315,7 @@
               </tr>
               <tr>
                 <td><code>hivemind:adaptation-cycle</code></td>
-                <td>Run a local pre-PR Codex review of the branch diff and return normalized findings. Review-only: it never fixes. Invoked by the <code>local-reviewer</code> agent only.</td>
+                <td>Run a local pre-PR review of the branch diff with the tool <code>HIVEMIND_LOCAL_REVIEWER</code> picks (the <code>codex-plugin</code> preset by default) through <code>run-review.sh</code>, and return normalized findings. Skips when no reviewer can run; blocks on output it cannot read or a changed working tree. Review-only: it never fixes. Invoked by the <code>local-reviewer</code> agent only.</td>
               </tr>
               <tr>
                 <td><code>hivemind:github-review-loop</code></td>
@@ -433,7 +430,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">Review</h3>
-              <p>The local reviewer reviews the branch and commits its simple fixes. A fix that fails its check is undone, with only its own files restored, and listed. A stated outside-service outage, such as a Codex usage limit with a retry time, is waited out, bounded, with no question. It needs the codex companion.</p>
+              <p>The local reviewer reviews the branch and commits its simple fixes. A fix that fails its check is undone, with only its own files restored, and listed. A stated outside-service outage, such as a review tool's usage limit with a retry time, is waited out, bounded, with no question. When no reviewer can run, local review is skipped and the PR body and final report say so. Output the review cannot read, or a changed working tree, ends it blocked, and the change is never undone automatically.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">PR</h3>
@@ -633,7 +630,7 @@
           </article>
           <article class="panel card">
             <h3 class="xg">codex</h3>
-            <p>Local pre-PR Codex review. Enables the <code>local-reviewer</code> agent, backed by <code>hivemind:adaptation-cycle</code>. That is all codex unlocks: the post-PR watch is the default and runs without codex. If codex is not enabled, local review is skipped gracefully.</p>
+            <p>The default local review tool. Local pre-PR review (the <code>local-reviewer</code> agent, backed by <code>hivemind:adaptation-cycle</code>) is tool-neutral: <code>HIVEMIND_LOCAL_REVIEWER</code> picks the tool, and with it unset the <code>codex-plugin</code> preset runs when codex is installed. When no reviewer can run, local review is skipped with a warning on the PR. The post-PR watch is the default and runs without codex.</p>
             <div class="code-panel" role="region" aria-label="codex install commands" tabindex="0">
               <pre><code>/plugin marketplace add https://github.com/openai/codex-plugin-cc.git
 /plugin install codex@openai-codex
@@ -675,8 +672,8 @@
               </thead>
               <tbody>
                 <tr>
-                  <td><code>HIVEMIND_LOCAL_REVIEW_MODEL</code></td>
-                  <td>Overrides the model for local Codex review. Empty or unset: codex uses its own default. The value must match <code>^[a-zA-Z0-9/_.\-]+$</code>.</td>
+                  <td><code>HIVEMIND_LOCAL_REVIEWER</code></td>
+                  <td>Picks the local review tool. Unset: the <code>codex-plugin</code> preset when the Codex plugin is installed, else local review is skipped with a warning in the PR body and final report. <code>codex-plugin</code>: that preset. Otherwise a JSON argv list, written as a string and run with no shell. An element that is exactly <code>{prompt}</code> gets the whole prompt as one argument; with none, the prompt goes on stdin. Examples: <code>["codex","exec","--sandbox","read-only","-"]</code> and <code>["copilot","-p","{prompt}","-s","--no-ask-user","--deny-tool=write","--deny-tool=shell"]</code>. Any other value skips local review. <code>HIVEMIND_LOCAL_REVIEW_MODEL</code> is removed: set the model in the tool's own config, or in your argv list.</td>
                 </tr>
                 <tr>
                   <td><code>HIVEMIND_SKIP_PR_WATCH</code></td>

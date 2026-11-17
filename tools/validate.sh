@@ -70,6 +70,7 @@ SUITE_TEST_CHANGE_DETECT_POLL='test_change_detect_poll.sh'
 SUITE_TEST_SCRIPT_BOOTSTRAP='test_script_bootstrap.sh'
 SUITE_TEST_PREFILTER='test_prefilter.sh'
 SUITE_TEST_SYNAPSE_GATE='test_synapse_gate.sh'
+SUITE_TEST_RUN_REVIEW='test_run_review.sh'
 SUITE_TEST_WORKFLOW_SCRIPTS='test_workflow_scripts.sh'
 
 # Full suite, in CI order. Used by --all and by every FAIL-CLOSED escalation.
@@ -105,6 +106,7 @@ ALL_SUITES=(
   "$SUITE_TEST_SCRIPT_BOOTSTRAP"
   "$SUITE_TEST_PREFILTER"
   "$SUITE_TEST_SYNAPSE_GATE"
+  "$SUITE_TEST_RUN_REVIEW"
   "$SUITE_TEST_WORKFLOW_SCRIPTS"
 )
 
@@ -141,6 +143,7 @@ KNOWN_SUITES=(
   test_script_bootstrap.sh
   test_prefilter.sh
   test_synapse_gate.sh
+  test_run_review.sh
   test_workflow_scripts.sh
 )
 
@@ -365,6 +368,11 @@ run_suites() {
 #                                      -> test_synapse_gate (hooks.json ALSO -> json-manifests;
 #                                         synapse-gate.sh ALSO -> test_workflow_scripts; the
 #                                         _shared libs keep their other routes by union)
+#   plugin/skills/adaptation-cycle/scripts/run-review.sh, the two references it reads
+#     (references/adversarial-review.md, references/review-output.schema.json),
+#     plugin/skills/_shared/containment.sh, tests/run-review/**
+#                                      -> test_run_review (the libs and references keep their other
+#                                         routes by union)
 #   plugin/**/*.sh                     -> test_script_bootstrap (engine bootstrap/self-location contract)
 #   plugin/workflow-src/**, plugin/workflows/*.js, plugin/workflows/*.json,
 #     plugin/skills/route-workflow/SKILL.md,
@@ -916,6 +924,22 @@ map_path() {
     matched=1
   fi
 
+  # test_run_review: the adaptation-cycle local review entrypoint (.sh), the prompt template and
+  # findings schema it reads at run time, the _shared/containment.sh guard it sources for the
+  # review diff file, and its fixture dir. The script and references are ALSO plugin/* files
+  # (policy_check prose-lints them via the wholesale rule below), but policy_check NEVER EXECUTES
+  # bash, so without this rule a run-review edit would only be prose-linted, never behaviorally
+  # exercised. (tools/test_run_review.sh itself is covered by the tools/** full-suite leg.)
+  if [[ "$p" == plugin/skills/adaptation-cycle/scripts/run-review.sh \
+     || "$p" == plugin/skills/adaptation-cycle/references/adversarial-review.md \
+     || "$p" == plugin/skills/adaptation-cycle/references/review-output.schema.json \
+     || "$p" == plugin/skills/_shared/containment.sh \
+     || "$p" == tools/test_run_review.sh \
+     || "$p" == tests/run-review/* ]]; then
+    add_selected "$SUITE_TEST_RUN_REVIEW" "$p (run-review script/references/fixture)"
+    matched=1
+  fi
+
   # test_change_detect_poll: the thin PR change-detection poll script (.sh) + its fixture dir. The
   # script is ALSO a plugin/* file (policy_check prose-lints it via the wholesale rule below), but
   # policy_check NEVER EXECUTES bash — so without this rule a change-detect-poll edit would only be
@@ -1283,6 +1307,7 @@ self_test() {
     ["test_script_bootstrap.sh"]="plugin/skills/_shared/claude-mem-path.sh"
     ["test_prefilter.sh"]="plugin/skills/github-review-loop/scripts/prefilter.sh"
     ["test_synapse_gate.sh"]="plugin/hooks/synapse-gate.sh"
+    ["test_run_review.sh"]="tests/run-review/README.md"
     ["test_workflow_scripts.sh"]="plugin/workflow-src/lib/decide.js"
   )
   local script_name expected_suite suite_path probe_path hit

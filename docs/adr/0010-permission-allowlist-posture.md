@@ -430,3 +430,12 @@ This amendment changes the posture of Amendment 2026-11-13 for the `github-revie
 - The reply bodies are `Fixed in <SHA>. <summary>.` and the defer body. Each holds a free-text summary the caller writes. So an agent that invokes the skill can still post a misleading summary, resolve a thread or add `EYES` on the bound PR. Each of these is visible and can be reversed.
 - The PR binding reads local git state: the current branch and the origin push URL. Only commands outside the grant can change that state.
 - The fallback rule the refusal question names still holds a versioned path. It goes stale after each plugin update, as Amendment 2026-11-13 records.
+
+## Amendment 2026-11-16: the local review grant ships in the adaptation-cycle skill (issue 581)
+
+This amendment records the permission posture for local review after ADR-0042 (`docs/adr/0042-tool-neutral-local-review.md`). Decisions 1 to 6 are unchanged: no seed rule and no settings rule is added. The standing rule of Amendment 2026-08-24 stands. This does not settle the NON-FINDING recorded in the Findings section. That open question and its prohibition stand as written.
+
+- **The grant.** The skill `hivemind:adaptation-cycle` holds `Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/adaptation-cycle/scripts/run-review.sh" *)` in its `allowed-tools`. One plugin script runs every reviewer, so the grant names no hardcoded path and no version.
+- **The node rule is removed.** The hand-written `Bash(node /path/to/.claude/plugins/cache/openai-codex/codex/*)` rule and its docs are removed. The devcontainer no longer seeds it (ADR-0042, Implementation decisions, item 5).
+- **Not verified: the grant in a subagent in auto mode.** The local reviewer runs as a subagent. Whether the skill grant applies to its call in auto mode is not verified. https://github.com/brenpike/hivemind/issues/580 tracks this.
+- **A refusal stops local review as blocked.** When the permission system refuses the `run-review.sh` call, local review ends blocked, not skipped. So a broken grant is noticed. User decision (ADR-0042, Implementation decisions, item 7).

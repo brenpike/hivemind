@@ -22,7 +22,8 @@ Then run `/hivemind:seed-hive` once in each project (see [Per-project setup](#pe
 - **jq**: required by the run-ledger engines (`hivemind:init-run-ledger`, `hivemind:record-state-result`), by the facts and git scripts (`hivemind:gather-facts`, `hivemind:molt`, `hivemind:open-plan-pr`), and by `hivemind:seed-hive`
 - Claude Code CLI. When Claude Code's Workflow tool is available, analysis requests run as a workflow script, delivery requests run as one or on Instinct, and an escalated PR review runs as one. Otherwise analysis requests run on the workflow state machine, and Instinct is the `standard-delivery` fallback (see [Two engines](#two-engines)).
 - **tmux**: only for brood execution (`hivemind:spawn-brood`, `hivemind:brood-status`)
-- **node**: only for the optional local Codex review (`codex` companion)
+- **node**: only for the `codex-plugin` local review preset (`codex` companion)
+- **timeout** (GNU coreutils; `gtimeout` on macOS, from Homebrew `coreutils`): needed for local review, which is skipped without it
 
 PowerShell and native Windows are not supported. All toolchain scripts are bash-based.
 
@@ -80,15 +81,9 @@ The seeded entries cover read/output helper Bash commands (`echo`, `printf`, `ca
 
 **After upgrading the plugin, re-run `/hivemind:seed-hive`.** A newer version may recommend `permissions.allow` entries your project does not have yet, and those entries are merged only when `seed-hive` runs, never automatically on upgrade. Skipping the re-run does not take away any capability (tool grants ship inside the plugin itself and load at session start); it only leaves those newer allow rules unmerged in your `.claude/settings.json`. Re-running is always safe: the merge is idempotent and your existing entries are preserved.
 
-The supported setup for local Codex review (`hivemind:adaptation-cycle`) is a per-contributor grant: add your Codex cache path to the gitignored `.claude/settings.local.json`, never the tracked `.claude/settings.json`, because this entry hard-codes one machine's absolute `$HOME` path and the tracked file is shared across a team and across machines:
+**Local review grant.** Local review (`hivemind:adaptation-cycle`) runs every reviewer through one plugin script, `run-review.sh`. The skill's `allowed-tools` grants that script by its `${CLAUDE_PLUGIN_ROOT}` path, so you add no rule, and `seed-hive` seeds no reviewer grant. Whether that grant stops the permission prompt when the local reviewer runs as a subagent is not yet verified (https://github.com/brenpike/hivemind/issues/580). When Claude Code refuses the `run-review.sh` call, local review ends blocked, not skipped, so a broken grant is noticed. The command `HIVEMIND_LOCAL_REVIEWER` names runs inside that script with no approval of its own.
 
-```json
-"Bash(node /path/to/.claude/plugins/cache/openai-codex/codex/*)"
-```
-
-Replace `/path/to/` with your actual home directory path. The `codex/*` wildcard covers all Codex CLI entry points so the entry does not need updating when Codex is upgraded. `seed-hive`'s allowlist template deliberately seeds no provider grant at all, because a machine-specific path cannot be templated into a committed file without becoming a permanently dead rule.
-
-**Upgrading an already-seeded project.** A project seeded by an earlier plugin version may still carry a literal `Bash(node /path/to/.claude/plugins/cache/openai-codex/codex/*)` line in its committed `.claude/settings.json`. The `/path/to/` placeholder was never expanded there, so the rule matches nothing, so delete it by hand. Re-running `/hivemind:seed-hive` will not re-add it; the merge is union append-if-absent and never removes, so the fix stops new and repeat seeds but does not clean up an existing file.
+**Upgrading an already-seeded project.** Local review no longer uses any rule for the Codex plugin cache path. Delete such a rule by hand: one you added to `.claude/settings.local.json`, or the unexpanded `/path/to/` one an earlier `seed-hive` wrote to `.claude/settings.json`. Re-running `/hivemind:seed-hive` never removes entries, so it does not clean them up.
 
 2. Create or extend `CLAUDE.md` with project-specific details:
    - Build/test commands (the `## Validation` section is what the overlord runs at the `validate` state)
@@ -96,7 +91,7 @@ Replace `/path/to/` with your actual home directory path. The `codex/*` wildcard
    - Versioning configuration (bump triggers, changelogs, tag prefixes)
    - Architecture and code style notes
 
-3. Create `AGENTS.md` at the project root with project-specific Codex review guidance. Include:
+3. Create `AGENTS.md` at the project root with project-specific review guidance for your local review tool, when that tool reads it (Codex does). Include:
    - Review focus areas
    - Severity definitions
    - Project-specific conventions for reviewers
@@ -110,7 +105,7 @@ Three optional operator overrides are read from the `env` block of `.claude/sett
 ```json
 {
   "env": {
-    "HIVEMIND_LOCAL_REVIEW_MODEL": "gpt-5.3-codex",
+    "HIVEMIND_LOCAL_REVIEWER": "codex-plugin",
     "HIVEMIND_SKIP_PR_WATCH": "1",
     "HIVEMIND_ENABLE_DECISION_REPORT": "1"
   }
@@ -119,9 +114,20 @@ Three optional operator overrides are read from the `env` block of `.claude/sett
 
 | Key | Effect | Reference |
 |---|---|---|
-| `HIVEMIND_LOCAL_REVIEW_MODEL` | Model for the local pre-PR Codex review. Empty or unset means Codex uses its own default. The value must match `^[a-zA-Z0-9/_.\-]+$` (e.g. `gpt-5.3-codex`, `gpt-5.5`); anything else blocks the review before Codex is invoked. Whether a given model is available depends on your Codex account. | `docs/adr/0022-local-review-parity-with-post-pr-review.md` |
+| `HIVEMIND_LOCAL_REVIEWER` | Picks the tool for the local pre-PR review. Unset: the `codex-plugin` preset when the Codex plugin is installed, else local review is skipped and the PR body and final report carry a warning. `codex-plugin`: that preset, which runs the Codex plugin's own review command. Otherwise a JSON argv list, written as a string (examples below). The command runs with no shell. An element that is exactly `{prompt}` is replaced by the whole review prompt as one argument; with no such element, the prompt goes on stdin. Any other value skips local review with the same warning. | `docs/adr/0042-tool-neutral-local-review.md` |
 | `HIVEMIND_SKIP_PR_WATCH` | Checked by presence (any non-empty value): the overlord never watches a PR after opening it, and does not read your request for a watch opt-out. Unset or empty means the default watch applies. | `docs/adr/0029-default-pr-watch-and-idle-window-lifecycle.md` |
 | `HIVEMIND_ENABLE_DECISION_REPORT` | Covers state-machine runs only: workflow-script runs keep no run ledger, so the report does not see them, and a script run instead lists decisions it took, for veto before merge, in its final message and on the PR, and Decisions on the PR under The Lifecycle says which. Opt-in, checked by presence (any non-empty value). When set, after a run's PR merges or closes the overlord shows you a report of the decisions it made on your behalf (`hivemind:decision-report`, chat only). The decision journal in the run ledger is written either way. When unset or empty, no report is rendered and no GitHub call is made, but runs that would have reported still get a zero-byte `.decision-report-done` marker, so enabling the key later only reports runs that finish after you enable it. | `docs/adr/0030-config-gated-post-merge-decision-report.md` |
+
+Two `HIVEMIND_LOCAL_REVIEWER` argv lists, the Codex CLI read-only and the GitHub Copilot CLI with its write and shell tools denied:
+
+```json
+"HIVEMIND_LOCAL_REVIEWER": "[\"codex\",\"exec\",\"--sandbox\",\"read-only\",\"-\"]"
+"HIVEMIND_LOCAL_REVIEWER": "[\"copilot\",\"-p\",\"{prompt}\",\"-s\",\"--no-ask-user\",\"--deny-tool=write\",\"--deny-tool=shell\"]"
+```
+
+As a plain list, the first is `["codex","exec","--sandbox","read-only","-"]` and the second `["copilot","-p","{prompt}","-s","--no-ask-user","--deny-tool=write","--deny-tool=shell"]`.
+
+**Migrating from `HIVEMIND_LOCAL_REVIEW_MODEL`.** That key is removed, and Hivemind no longer names a model. Set the model in the review tool's own config, or pass the tool's model flag in your `HIVEMIND_LOCAL_REVIEWER` argv list.
 
 To keep a workflow off its workflow script, add a `Workflow(hivemind:analysis-only)`, `Workflow(hivemind:standard-delivery)` or `Workflow(hivemind:pr-feedback-remediation)` entry to `permissions.deny` in `.claude/settings.json` or `.claude/settings.local.json`. The launch is then refused with no prompt and falls back: `analysis-only` and `pr-feedback-remediation` to the state machine, and `standard-delivery` to Instinct (see [Two engines](#two-engines)).
 
@@ -129,14 +135,14 @@ To keep a workflow off its workflow script, add a `Workflow(hivemind:analysis-on
 
 - [`claude-mem`](https://github.com/thedotmack/claude-mem): provides optional cross-session memory and continuity. Install separately as a Claude Code plugin. Hivemind works without it. When it is present, the cerebrate reads claude-mem memory directly via the MCP search tools (`mcp__plugin_claude-mem_mcp-search__*`) while planning. It skips memory cleanly when the session facts say `claude-mem: absent`, or when a memory tool call returns `No such tool available`; when the overlord forwards a `Memory context:` block in the delegation, the cerebrate uses that and does not search again. Writes happen through claude-mem's automatic capture (there is no write MCP tool). `uvx` (from [Astral's `uv`](https://astral.sh/uv)) is an optional dependency of claude-mem that enables its semantic (vector/Chroma) search backend; without it, claude-mem falls back to keyword search and MCP tools remain fully callable. Install with `curl -LsSf https://astral.sh/uv/install.sh | sh`; diagnostics at `~/.claude-mem/logs/` (look for `CHROMA_MCP` entries).
 
-- [`codex`](https://github.com/openai/codex-plugin-cc): provides local Codex code review. Install and configure with:
+- [`codex`](https://github.com/openai/codex-plugin-cc): the default local review tool. Install and configure with:
   ```text
   /plugin marketplace add https://github.com/openai/codex-plugin-cc.git
   /plugin install codex@openai-codex
   /reload-plugins
   /codex:setup
   ```
-  Once it is installed and enabled for the project (`seed-hive` enables it when you confirm it), it adds only the local pre-PR review: the `local-reviewer` agent, backed by `hivemind:adaptation-cycle`. If it is not installed or not enabled, the overlord skips local review and goes straight to the PR. The post-PR watch (`hivemind:github-review-loop` plus the `github-reviewer` agent) does not need it; it works from GitHub review feedback.
+  Local pre-PR review (the `local-reviewer` agent, backed by `hivemind:adaptation-cycle`) is tool-neutral: `HIVEMIND_LOCAL_REVIEWER` picks the tool (see [Configuration](#configuration)). Codex is the default: with that key unset, the `codex-plugin` preset runs once the plugin is installed and enabled for the project (`seed-hive` enables it when you confirm it). When no reviewer can run (the key is unset and Codex is not installed, the key is invalid, or the tool is missing, fails with no retry time, or times out), local review is skipped and the PR opens with a warning in its body and in the final report. A review that returns output Hivemind cannot read, or that changes the working tree, ends blocked; the change is never undone automatically. The post-PR watch (`hivemind:github-review-loop` plus the `github-reviewer` agent) does not need it; it works from GitHub review feedback.
 
 - [`caveman`](https://github.com/juliusbrussee/caveman) (`caveman@caveman`): token-compressed communication. Optional. When enabled through `seed-hive`, framework agents output in caveman ultra mode. `seed-hive` detects it and includes it in its companion confirmation, or add manually to `.claude/settings.json`:
   ```json
@@ -179,8 +185,6 @@ claude plugin install caveman@caveman
 
 The optional npm installs are wrapped so a single failure (for example in an offline/locked-down Codespace) prints a warning but does not abort; only the smoke-test gates are must-pass. The script is idempotent: re-running `bash .devcontainer/postCreate.sh` is safe.
 
-The Codex cache permission grant (container `$HOME` node path) is seeded into the **gitignored** `.claude/settings.local.json` (never the tracked `.claude/settings.json`), using a jq-merge that does not clobber existing entries.
-
 See `.devcontainer/README.md` for full launch instructions (Codespaces and local Dev Containers), the complete list of what is auto-provisioned, and troubleshooting.
 
 ## After cloning a project that uses this plugin
@@ -205,7 +209,7 @@ Hivemind coordinates specialized bioforms to plan, build, review, and ship code,
 
 Two more agents handle review. They are composites rather than bioforms: each one classifies findings, fixes the simple ones itself, and hands everything else back to the overlord.
 
-- **Local-Reviewer** (pre-PR): runs an adversarial Codex review loop before the PR exists (needs the `codex` companion).
+- **Local-Reviewer** (pre-PR): runs an adversarial review loop before the PR exists, with the tool `HIVEMIND_LOCAL_REVIEWER` picks (Codex by default). When no reviewer can run, local review is skipped and the PR says so.
 - **GitHub-Reviewer** (post-PR): a stateless, one-shot worker that fetches and classifies GitHub review feedback, fixes, pushes, replies, and resolves threads. `hivemind:github-review-loop` dispatches it.
 
 One more agent, the **Synapse**, runs the committed runner scripts for the workflow scripts: the facts, commit, push and pull request steps. Only workflow scripts start it. The overlord never delegates to it.
@@ -233,7 +237,7 @@ How a script run behaves:
 - **Runner steps.** The facts, commit, push and pull request steps run on `hivemind:synapse`, a haiku agent that runs one committed script and relays its output. A plugin `PreToolUse` hook (`plugin/hooks/`) allows synapse the five exact runner commands with no prompt, including the push and the PR. Any command that names one of those five scripts in another form is denied for every agent. To read those files, use Read.
 - **Stopping a run.** You can stop a launched run from any surface, Remote Control included, by asking the overlord. The stopped run keeps every completed agent result, and when you ask the overlord to go on, later in the same session, it resumes the run from there.
 - **Effects outside the repo.** A plan step that declares an irreversible effect outside the repo, such as a deploy, a publish, a migration or a write to an outside service, asks you before the first wave.
-- **Request options.** A delivery request can ask for a draft PR, or to skip local review. Local review is also skipped when the Codex plugin is not available in the session.
+- **Request options.** A delivery request can ask for a draft PR, or to skip local review. Local review is also skipped, with a warning in the PR body and the final report, when no reviewer can run, for example when `HIVEMIND_LOCAL_REVIEWER` is unset and the Codex plugin is not installed.
 
 ### The Lifecycle
 
@@ -246,10 +250,10 @@ A `standard-delivery` script run, from request to PR:
 5. **Branch.** A runner creates or confirms the working branch (`hivemind:create-working-branch`).
 6. **Waves.** The script computes each ready wave of plan steps in `plugin/workflow-src/lib/waves.js`. Workers run each wave in parallel, and a runner commits the wave's files after each wave (`hivemind:molt`).
 7. **Validate.** A drone runs each validation command the plan names, once. When the plan names none, it runs the gate command the project's `CLAUDE.md` names, once, so validation is never skipped. A test case that hits its own time limit in a file the branch does not change runs once more alone; if it passes there, validation passes and the PR lists the case as slow. When the plan names version files, the same drone also runs the version check (`hivemind:bump-type --version-file`), read-only: each version file must hold its trunk version raised by the bump the branch's commits call for. A plan step sets that version, beside the change log, so a version already at its target passes. A mismatch gets a fix round with no question. A version the check cannot derive or read asks you, and your reply runs one fix round and never plans again. Validation edits nothing and makes no commit: a path it leaves dirty stops the next commit or the PR step. A failure gets a bounded number of fix rounds, one at a time, each one committed; a failure is kept for its commit, so a round that commits nothing does not validate the same commit again. After the last round the run asks you.
-8. **Review.** The local reviewer reviews the branch and commits its simple fixes, when local review is on. A fix that fails its check is undone, with only its own files going back to the last commit, and the run lists it. When an outside service is down and says when it is back, such as a Codex usage limit with a retry time, the run waits it out, bounded, and asks nothing.
+8. **Review.** The local reviewer reviews the branch and commits its simple fixes, when local review is on. A fix that fails its check is undone, with only its own files going back to the last commit, and the run lists it. When an outside service is down and says when it is back, such as a review tool's usage limit with a retry time, the run waits it out, bounded, and asks nothing. A review that returns output Hivemind cannot read, or that changes the working tree, ends blocked, and the change is never undone automatically.
 9. **PR.** A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (`hivemind:open-plan-pr`). At a loop cap (the local review iteration limit, a break-fix-break cycle, the replan cap, the gate rerun cap or the wait cap) validation passes first, then the run opens a draft PR that says why and lists the open findings.
 
-**Gates hold on one commit.** Validation, with its version check, and local review are gates. Each gate holds only for the commit it ended on, and the PR step pushes only a commit every configured gate held on. So a later commit, such as a validation fix round or a local-review fix, reruns the gates it invalidates: every gate that ended on an earlier commit. Validation, which makes no commit, ends on the commit it ran on. The reruns are bounded; at the bound the run opens a draft PR and no longer asks. A gate not configured for the run, such as local review without the Codex plugin, is listed on the PR.
+**Gates hold on one commit.** Validation, with its version check, and local review are gates. Each gate holds only for the commit it ended on, and the PR step pushes only a commit every configured gate held on. So a later commit, such as a validation fix round or a local-review fix, reruns the gates it invalidates: every gate that ended on an earlier commit. Validation, which makes no commit, ends on the commit it ran on. The reruns are bounded; at the bound the run opens a draft PR and no longer asks. A gate that did not run, such as a skipped local review, is listed on the PR with its reason.
 
 **Decisions on the PR.** A new PR's body is built in code for a reviewer who never saw the chat. It holds the closing lines, the plan digest (the problem, then the change), and the steps with their files and outcomes, then the run record: the reversible effects; the gates; the slow test cases; for a draft PR, why it is a draft and the findings local review left open; the short ids of the findings any local review of the run rejected or whose fix it undid; the destructive changes you approved; and one line per decision under "Decided for you". External text in it is neutralized, so it mentions no one and closes or links no issue. When the run reuses an open PR, the same run record goes in a PR comment. The final message lists the same decisions as the run record, so you can veto them before you merge. Three kinds of decision are not listed: accepting the plan, accepting a remediation plan, and rerunning a gate after a later commit. A plan or remediation plan acceptance is listed anyway when the plan changes a file outside your stated limits or repeats a surface whose earlier fix left its class open. A gate rerun is never listed. A script run keeps no decision journal, so the final message and the run record on the PR are its only record of decisions. A local review call is taken when `plugin/governance/decision-autonomy.md` (Review Calls) lets the run take it, and asked otherwise; a taken call is recorded at its source, naming the run as the one who decided, and listed, so you can veto it before you merge. A review question in the Ask Set, and any other Ask Set question that comes up after the last wave, pauses the run with the question open and nothing pushed. Your answer to a local review question goes back to the local reviewer, which reviews the same commit again with your answer: a finding you reject is recorded at its source and committed, and the review goes on. Your answer to a version question runs one fix round, and your reply to a stop with a cause you can clear, or an approval to give, takes that step again. Any other answer starts a new planning pass with your answer. No pull request opens from those commits until a run holds every configured gate on them, or hits a loop cap and opens a draft PR.
 
@@ -266,7 +270,7 @@ You --> Overlord --> route-workflow --> standard-delivery
             ^                   |
             +---- checkpoint <--+   (one molt per wave)
     version_bump_decision -> [version_bump -> version_checkpoint] -> validate
-    local_review_decision -> local_review (Local-Reviewer + Codex, or skipped)
+    local_review_decision -> local_review (Local-Reviewer + configured tool, or skipped)
     local_review (diminishing-returns) -> diminishing_returns_decision (only taken -> gate_check)
     gate_check (validation held on the head -> open_pr; a later commit -> validate)
     open_pr --> github_review_decision --> github_review_loop (GitHub-Reviewer)
@@ -281,7 +285,7 @@ You --> Overlord --> route-workflow --> standard-delivery
 4. **Branch.** `git_preflight` checks git state, then `branch` creates or confirms a compliant working branch (`feature/`, `bugfix/`, `hotfix/`, `refactor/`, `chore/`, `docs/`, `test/`, `ci/`). Nothing is ever committed to trunk.
 5. **Build in waves.** `implement_next_step` asks `hivemind:next-wave` for the ready wave; `implement_step` dispatches it as parallel drones and changelings; `checkpoint` molts once for the whole wave.
 6. **Gate.** `version_bump_decision` (via `hivemind:bump-type`; a required bump goes through `version_bump` and `version_checkpoint`), then `validate` runs the project's validation commands.
-7. **Review.** `local_review_decision`, then `local_review`: the local-reviewer runs the Codex review. It needs the `codex` companion (see [Recommended companion plugins](#recommended-companion-plugins)); without it, the step is skipped. A `diminishing-returns` exit goes through `diminishing_returns_decision` first: only a taken advisory reaches `gate_check`, and one not taken ends the run blocked before the PR.
+7. **Review.** `local_review_decision`, then `local_review`: the local-reviewer runs the review with the tool `HIVEMIND_LOCAL_REVIEWER` picks, the `codex` companion by default (see [Configuration](#configuration)). When no reviewer can run, the step is skipped and the PR says so; output Hivemind cannot read, or a changed working tree, ends it blocked. A `diminishing-returns` exit goes through `diminishing_returns_decision` first: only a taken advisory reaches `gate_check`, and one not taken ends the run blocked before the PR.
 8. **Gate check.** `gate_check` opens the PR only on the commit validation passed on. A commit after validation, such as a local review fix, sends the run back through `validate`; local review, which held on that commit, does not run again.
 9. **Ship and watch.** `open_pr` opens the PR, then `github_review_decision` and `github_review_loop` watch it by default, fixing, pushing, replying to, and resolving feedback from the Codex, Copilot, or Claude reviewer bots until approval, merge, close, or an idle hour. Opt out in your request or with `HIVEMIND_SKIP_PR_WATCH`. Agents never merge.
 
@@ -388,7 +392,7 @@ package.json                # website tooling (npm scripts: build, test)
 package-lock.json
 tsconfig.json               # website TypeScript build (web/src -> web/scripts)
 vitest.config.ts            # website test config
-AGENTS.md                   # project-specific Codex reviewer guidance
+AGENTS.md                   # project-specific guidance for the local review tool
 CHANGELOG.md                # project changelog (Keep a Changelog format)
 CLAUDE.md                   # project instructions for Claude Code
 CONTEXT.md                  # project domain glossary
@@ -410,7 +414,7 @@ README.md
 | `hivemind:drone` | opus | Implementation within explicitly assigned file scope; the default owner of every step. |
 | `hivemind:changeling` | sonnet | Presentational UI/UX work within explicitly assigned file scope. |
 | `hivemind:synapse` | haiku | Runs one committed runner script (facts, commit, push or pull request) and relays its output word for word. Started only by workflow scripts, never by the overlord or a user. Tools: Bash and Write. A plugin hook allows only the five exact runner commands. |
-| `hivemind:local-reviewer` | opus | Pre-PR adversarial Codex review loop (`max_iterations` 10). Fixes simple findings itself (2 files or fewer, no architecture or contract impact); a fix that fails its check is undone (only its own files go back to the last commit) and listed. Escalates complex ones to the overlord, and stops on break-fix cycles. Needs the `codex` companion. |
+| `hivemind:local-reviewer` | opus | Pre-PR adversarial review loop (`max_iterations` 10), with the tool `HIVEMIND_LOCAL_REVIEWER` picks (Codex by default). Fixes simple findings itself (2 files or fewer, no architecture or contract impact); a fix that fails its check is undone (only its own files go back to the last commit) and listed. Escalates complex ones to the overlord, and stops on break-fix cycles. Skipped, with a PR warning, when no reviewer can run. |
 | `hivemind:github-reviewer` | opus | Stateless, one-shot post-PR worker: fetches and classifies review feedback, applies fixes, pushes, replies, and resolves threads. Dispatched by `hivemind:github-review-loop`, which does the monitoring. |
 
 ## Skills
@@ -423,7 +427,7 @@ All skills are invoked using the namespaced form:
 | `hivemind:molt` | Commit a completed phase, milestone, version bump, or review-remediation item through the committed `molt.sh` script, which commits exactly the listed files, refuses any other dirty path before it changes anything, and reports `committed: false` when there is nothing to commit. Takes an optional commit `subject`; given both its files and a subject, it runs no git command of its own. Used by both engines; in a workflow script it closes each wave and each gate step that can change files, with a subject built by the script |
 | `hivemind:create-working-branch` | Create or confirm a compliant working branch before implementation, through a committed script that refuses a dirty tree, an in-progress merge, rebase, cherry-pick, revert or bisect, and a working branch that is trunk, before any change. Used by both engines |
 | `hivemind:gather-facts` | Report the branch as it is: branch state, its history against a freshly fetched trunk, the branch's PRs, and the text of any issue or PR the request names, in one complete facts file under `.hivemind/facts/`. The facts step of both workflow scripts, and run by the overlord before every cerebrate delegation on the state machine |
-| `hivemind:adaptation-cycle` | Run a pre-PR local Codex review on the current branch diff and return normalized findings. Review-only (it fixes nothing); invoked by the `local-reviewer` agent only |
+| `hivemind:adaptation-cycle` | Run a pre-PR local review of the current branch diff with the tool `HIVEMIND_LOCAL_REVIEWER` picks (the `codex-plugin` preset by default) through `run-review.sh`, and return normalized findings. Skips when no reviewer can run; blocks on output it cannot read or a changed working tree. Review-only (it fixes nothing); invoked by the `local-reviewer` agent only |
 | `hivemind:github-review-loop` | Watch a PR in the main session and dispatch the fix-mode `github-reviewer` per actionable event; owns the post-PR review loop |
 | `hivemind:detect-remediation-signals` | Shared root-cluster / break-fix / diminishing-returns / stop-and-merge detector over a fix-ledger; emits one verdict both reviewers map to their own exit_reason |
 | `hivemind:injection-scan` | Scan external-content items for prompt-injection / instruction-override attempts against the security-policy taxonomy; shared judgment skill used by both reviewer agents. Also scans issue and PR text in the branch facts before the planner reads it: the scan step of both workflow scripts, and on the state machine before each cerebrate delegation |

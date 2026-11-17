@@ -216,7 +216,7 @@ describe('overlord standard-delivery launch args', () => {
   test('Engine names local_review and draft for standard-delivery', () => {
     assert.ok(launchArgNames.includes('local_review'), `launch args are ${JSON.stringify(launchArgNames)}`);
     assert.ok(launchArgNames.includes('draft'), `launch args are ${JSON.stringify(launchArgNames)}`);
-    for (const phrase of ['`local_review` is `false` when the Codex plugin is unavailable in this session or the request skips local review, else `true`.', '`draft` is `true` only when the request asks for a draft pull request, else `false`.']) {
+    for (const phrase of ['`local_review` is `false` only when the request skips local review, else `true`.', '`draft` is `true` only when the request asks for a draft pull request, else `false`.']) {
       assert.ok(engineSection.includes(phrase), `## Engine lacks ${phrase}`);
     }
   });
@@ -451,7 +451,7 @@ describe('overlord section-scoped Instinct pins', () => {
       'A `standard-delivery` request that names neither path takes the engine when it carries a `working_branch.base` ref',
       'otherwise ask the user which, with your recommendation',
       'Every run needs a plan before any edit',
-      'the PR by `hivemind:open-plan-pr` only on a commit that validation and local review (unless the Codex plugin is unavailable or the request skips it) both passed on',
+      'the PR by `hivemind:open-plan-pr` only on a commit that validation and local review (unless the request skips it or it returns `skipped`, named with its reason in the PR body and final report) both passed on',
       'a later commit rerunning both',
     ]);
   });

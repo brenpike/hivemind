@@ -124,7 +124,7 @@
     },
     "local_review_decision": {
       "type": "decision",
-      "description": "Overlord decides whether local pre-PR review runs (Codex present and opted in), is skipped, or already held: held only when this validate ran after a gate_check rerun, so local review held on the branch head.",
+      "description": "Overlord decides whether local pre-PR review runs (it runs unless the request skips it), is skipped, or already held: held only when this validate ran after a gate_check rerun, so local review held on the branch head.",
       "owner": "overlord",
       "transitions": {
         "required": "local_review",
@@ -139,6 +139,7 @@
       "agent": "hivemind:local-reviewer",
       "transitions": {
         "clean": "gate_check",
+        "skipped": "gate_check",
         "planner-escalation": "review_remediation_plan",
         "root-cluster-suspected": "review_remediation_plan",
         "max-iterations-reached": "review_exhausted",

@@ -13,6 +13,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [9.0.0] - 2026-11-16
+
+### Added
+
+- `HIVEMIND_LOCAL_REVIEWER` picks the local review tool: the preset `codex-plugin` or a JSON argv list run with no shell. An argv element exactly `{prompt}` receives the whole prompt as one argument, else the prompt goes on stdin.
+- `run-review.sh` runs every local reviewer under the `hivemind:adaptation-cycle` skill grant, so no per-machine allow rule is needed.
+- A hivemind-owned adversarial-review prompt and findings schema under `plugin/skills/adaptation-cycle/references/`, adapted from the Codex plugin (Apache-2.0; `LICENSE` and `NOTICE` ship beside them).
+- A local review `skipped` outcome with a `skip_reason` (`no-reviewer`, `bad-setting`, `tool-missing`, `tool-failed`, `timed-out`), and a warning in the PR body and the final report when local review is skipped.
+- A before/after working-tree check around the reviewer run: local review is blocked when the reviewer modifies the working tree.
+- The local reviewer gets the time left in the 600 s review call after the before-snapshot, which keeps room for the after-check.
+- Local review is skipped as `tool-missing` when neither `timeout` nor `gtimeout` is installed.
+- `run-review.sh` never deletes recursively: it removes only the files it created and its empty temp folder, and only paths its own `mktemp` created.
+
+### Changed
+
+- The overlord always requests local review unless the request skips it. Local review is no longer gated on the Codex plugin being installed.
+- Codex-specific wording is removed from the agents, the workflows and the docs; local review is tool-neutral (ADR-0042).
+- The built workflow script cap is raised from 190000 to 191000 characters.
+- Finding ids are the SHA-256 of the JSON array `[file, line_start, line_end, title]`, so two findings cannot share an id. Every id differs from 8.x.
+
+### Removed
+
+- `HIVEMIND_LOCAL_REVIEW_MODEL`. Set the model in the review tool's own config or in the argv list.
+- The manual Codex plugin-cache allow rule and its docs.
+- `seed_codex_grant` in the devcontainer.
+
+### Migration
+
+- Delete `HIVEMIND_LOCAL_REVIEW_MODEL` from `.claude/settings.json` and `.claude/settings.local.json`.
+- Remove any `Bash(node .../openai-codex/codex/...)` allow rule.
+- Codex users need nothing else.
+- Other review tools: set `HIVEMIND_LOCAL_REVIEWER`, for example `["copilot","-p","{prompt}","-s","--no-ask-user","--deny-tool=write","--deny-tool=shell"]`.
+- macOS: install Homebrew `coreutils` (for `gtimeout`) to keep local review running.
+
 ## [8.0.4] - 2026-11-14
 
 ### Fixed

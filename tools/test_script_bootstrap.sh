@@ -105,6 +105,7 @@ LEGACY_SELF_LOCATE='cd "$(dirname "${BASH_SOURCE[0]}")"'
 INTERIM_SELF_LOCATE='CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")"'
 SELF_LOCATE_REASON='cannot self-locate the script directory; refusing to proceed'
 PLUGIN_ROOT_REASON='cannot resolve the plugin root from the script directory; refusing to proceed'
+RUN_REVIEW_SELF_LOCATE_REASON='cannot self-locate the script directory'
 BUMP_TYPE_USAGE_REASON='missing positional base ref; usage: bump-type.sh <base> --bump-trigger yes|no --no-bump-match yes|no'
 
 # ENTRY_ROWS: <path>|<stage-1 var>|<emitter>|<C1 reason>   (C1 entrypoints)
@@ -125,6 +126,7 @@ ENTRY_ROWS=(
     "plugin/skills/brood-status/scripts/brood-status-project.sh|script_dir|blocker|$SELF_LOCATE_REASON"
     "plugin/skills/brood-status/scripts/brood-discover.sh|script_dir|blocker|$SELF_LOCATE_REASON"
     "plugin/skills/enable-brood-remote/scripts/rc-brood.sh|script_dir|blocker|$SELF_LOCATE_REASON"
+    "plugin/skills/adaptation-cycle/scripts/run-review.sh|script_dir|blocker|$RUN_REVIEW_SELF_LOCATE_REASON"
     "plugin/skills/github-review-loop/scripts/ledger-reconstruct.sh|script_dir|ledgerrecon_fail|cannot-self-locate"
     "plugin/skills/github-review-loop/scripts/loop-state.sh|SCRIPT_DIR|die|$SELF_LOCATE_REASON"
     "plugin/skills/github-review-loop/scripts/fetch-normalize.sh|SCRIPT_DIR|fetchnorm_fail|cannot-self-locate"
@@ -150,6 +152,7 @@ STAGE2_ROWS=(
     "plugin/skills/gather-facts/scripts/gather-facts.sh|shared_dir|../../_shared|cannot resolve skills/_shared from the script directory; refusing to proceed"
     "plugin/skills/create-working-branch/scripts/create-working-branch.sh|shared_dir|../../_shared|cannot resolve skills/_shared from the script directory; refusing to proceed"
     "plugin/skills/molt/scripts/molt.sh|shared_dir|../../_shared|cannot resolve skills/_shared from the script directory; refusing to proceed"
+    "plugin/skills/adaptation-cycle/scripts/run-review.sh|shared_dir|../../_shared|$RUN_REVIEW_SELF_LOCATE_REASON"
     "plugin/skills/open-plan-pr/scripts/open-plan-pr.sh|plugin_root|../../..|$PLUGIN_ROOT_REASON"
     "plugin/skills/brood-status/scripts/brood-status-collect.sh|plugin_root|../../..|$PLUGIN_ROOT_REASON"
     "plugin/skills/brood-status/scripts/brood-status-project.sh|plugin_root|../../..|$PLUGIN_ROOT_REASON"
@@ -215,6 +218,7 @@ SOURCE_ROWS=(
     "$(build_std_source_row plugin/skills/spawn-brood/scripts/spawn-brood.sh '$plugin_root/skills/_shared' ledger-project.sh)"
     "$(build_std_source_row plugin/skills/spawn-brood/scripts/spawn-brood.sh '$plugin_root/skills/_shared' brood-state.sh)"
     "$(build_std_source_row plugin/skills/seed-hive/scripts/seed-hive.sh '$shared_dir' containment.sh)"
+    'plugin/skills/adaptation-cycle/scripts/run-review.sh|$shared_dir/containment.sh|review references missing|review references missing|containment.sh'
     'plugin/skills/seed-hive/scripts/seed-hive.sh|$shared_dir/$lib|required shared library missing: skills/_shared/$lib; refusing to proceed|failed to source skills/_shared/$lib (unparseable); refusing to proceed|settings-merge.sh claude-mem-path.sh file-guard.sh test-detect.sh'
     'plugin/skills/github-review-loop/scripts/ledger-reconstruct.sh|$plugin_root/skills/_shared/ledger-reconstruct-parse.sh|missing-shared-lib|unparseable-shared-lib|ledger-reconstruct-parse.sh'
     'plugin/skills/github-review-loop/scripts/ledger-reconstruct.sh|$plugin_root/skills/_shared/ledger-reconstruct-fold.sh|missing-shared-lib|unparseable-shared-lib|ledger-reconstruct-fold.sh'
@@ -278,6 +282,7 @@ set_probe_args() {
         */pr-change-detect-poll.sh) PROBE_ARGS=(owner repo 1 0 1 automated me "$POLL_PROBE_SEED") ;;
         */spawn-brood.sh) PROBE_ARGS=("$BROOD_INPUTS_FILE") ;;
         */loop-state.sh) PROBE_ARGS=(floor) ;;
+        */run-review.sh) PROBE_ARGS=(--base main) ;;
         *) PROBE_ARGS=() ;;
     esac
 }

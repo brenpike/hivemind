@@ -116,7 +116,7 @@ SAFE_ID_RE='\A[A-Za-z0-9._-]{1,255}\z'
 #   activity, routed to the review_window_elapsed done-terminal. It is DISTINCT from
 #   max-cycles-reached, which remains the real remediation-cycle ceiling — the idle
 #   window and the cycle count are independent bounds.
-LOCAL_REVIEWER_SET=(clean max-iterations-reached break-fix-break diminishing-returns injection-suspect user-input-required planner-escalation root-cluster-suspected high-severity-rejection blocked)
+LOCAL_REVIEWER_SET=(clean max-iterations-reached break-fix-break diminishing-returns injection-suspect user-input-required planner-escalation root-cluster-suspected high-severity-rejection blocked skipped)
 REVIEW_LOOP_SET=(clean pr-merged pr-closed max-cycles-reached watch-window-elapsed planner-escalation root-cluster-suspected merge-advised blocked injection-suspect high-severity-rejection user-input-required)
 REVIEWER_FIX_SET=(clean injection-suspect user-input-required planner-escalation root-cluster-suspected high-severity-rejection merge-advised blocked)
 

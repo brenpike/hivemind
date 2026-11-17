@@ -93,7 +93,7 @@
             <li class="agent-card panel c4" data-cluster="4">
               <div class="card-top"><span class="node" aria-hidden="true"></span><h3 class="xg">Local-Reviewer</h3><span class="tag">Pre-PR</span></div>
               <p class="kind xs">Reviewer composite</p>
-              <p class="desc xs">Runs an adversarial Codex review loop before the PR exists, up to 10 iterations. Fixes simple findings (2 files or fewer), escalates complex ones, and stops on break-fix cycles. Needs the codex companion.</p>
+              <p class="desc xs">Runs an adversarial review loop before the PR exists, up to 10 iterations. Fixes simple findings (2 files or fewer), escalates complex ones, and stops on break-fix cycles. Needs a review tool: the codex companion by default, or any review CLI, such as Copilot CLI, set with <code>HIVEMIND_LOCAL_REVIEWER</code>.</p>
             </li>
             <li class="agent-card panel c5" data-cluster="5">
               <div class="card-top"><span class="node" aria-hidden="true"></span><h3 class="xg">GitHub-Reviewer</h3><span class="tag">Post-PR · one-shot</span></div>
@@ -144,7 +144,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">Review</h3>
-              <p class="xs">The local-reviewer reviews the branch and commits its simple fixes. A fix that fails its check is undone and listed. Needs the codex companion.</p>
+              <p class="xs">The local-reviewer reviews the branch and commits its simple fixes. A fix that fails its check is undone and listed. When no reviewer can run, local review is skipped with a warning on the PR.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Ship and watch</h3>
@@ -213,14 +213,14 @@
                 <li class="xs"><strong>git</strong>, <strong>gh</strong> and <strong>jq</strong></li>
                 <li class="xs">The <strong>Claude Code CLI</strong></li>
                 <li class="xs"><strong>tmux</strong>: only for brood mode</li>
-                <li class="xs"><strong>node</strong>: only for the optional local Codex review</li>
+                <li class="xs"><strong>node</strong>: only for the default Codex local review</li>
               </ul>
             </div>
             <div class="group">
               <h3 class="xg">Optional companions</h3>
               <ul>
                 <li class="xs"><strong>claude-mem</strong>: memory</li>
-                <li class="xs"><strong>codex</strong>: local pre-PR review</li>
+                <li class="xs"><strong>codex</strong>: default local pre-PR reviewer</li>
                 <li class="xs"><strong>caveman</strong>: compressed output</li>
               </ul>
             </div>

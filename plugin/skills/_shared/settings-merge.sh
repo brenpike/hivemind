@@ -343,8 +343,7 @@ unset __settings_merge_shared_dir
 # any future provider — may be added to this template. Two reasons:
 #   1. This template merges into a COMMITTED, team-shared `.claude/settings.json`, so a
 #      machine-specific `$HOME` cache path is wrong-by-construction for everyone but the seeder.
-#   2. Per-contributor grants belong in the GITIGNORED `.claude/settings.local.json`, which is
-#      exactly what `.devcontainer/postCreate.sh` already does.
+#   2. Per-contributor grants belong in the GITIGNORED `.claude/settings.local.json`.
 # The full rationale for this invariant lives in ADR-0010.
 #
 # INVARIANT (NO-PATH-ANCHOR-IN-PERMISSION-RULES): the eight navigator-transport rules below that

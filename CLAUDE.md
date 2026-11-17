@@ -120,9 +120,9 @@ CI runs via `.github/workflows/policy-check.yml` (job: `policy-check`), enforced
 
 `claude-mem` is optional — cerebrate reads its memory directly via the MCP search tool (`mcp__plugin_claude-mem_mcp-search__*`) when present, skips when absent. Writes go through claude-mem's automatic capture (there is no write MCP tool). When `claude_mem=yes` and claude-mem is installed, `seed-hive` provisions claude-mem's `CLAUDE_CODE_PATH` in `~/.claude-mem/settings.json` (only when currently empty) so its background worker can locate the `claude` binary. Do not hard-require it from any agent or skill.
 
-`codex@openai-codex` is optional — the overlord uses `codex-plugin-cc` for pre-PR local review via the `local-reviewer` agent (`hivemind:adaptation-cycle`). If not installed, the overlord skips local review and proceeds to PR. Run `codex:setup` after installation. Do not hard-require it from any agent or skill.
+`codex@openai-codex` is optional — it is the default local-review preset (`codex-plugin`) for the pre-PR review the `local-reviewer` agent runs via `hivemind:adaptation-cycle`. Local review itself is tool-neutral. When no reviewer can run, local review is skipped and the PR body and final report carry a warning; output the review cannot parse, or a reviewer that modified the working tree, blocks. Run `codex:setup` after installation. Do not hard-require it from any agent or skill.
 
-The local Codex review model is operator-overridable via `HIVEMIND_LOCAL_REVIEW_MODEL`, set in the `env` block of `.claude/settings.json` (committed) or `.claude/settings.local.json` (gitignored, per-account). Empty/unset → codex uses its own default (zero consumer regression). The value passes a charset gate `^[a-zA-Z0-9/_.\-]+$` (e.g. `gpt-5.3-codex`, `gpt-5.5` are valid). The unavailable-model `400` case is account-specific. Reference: ADR-0022.
+The local review tool is picked by `HIVEMIND_LOCAL_REVIEWER`, set in the `env` block of `.claude/settings.json` (committed) or `.claude/settings.local.json` (gitignored, per-account). Unset → the `codex-plugin` preset when the Codex plugin is installed, else local review is skipped with a PR warning. The value is the preset name `codex-plugin` or a JSON argv list run with no shell: an element exactly `{prompt}` receives the whole prompt as one argument, else the prompt goes on stdin (e.g. `["codex","exec","--sandbox","read-only","-"]`, `["copilot","-p","{prompt}","-s","--no-ask-user","--deny-tool=write","--deny-tool=shell"]`). Any other value skips local review. Every reviewer runs through the plugin script `run-review.sh`, granted by the adaptation-cycle skill's `allowed-tools`, so no allow rule is needed; a permission refusal of that call blocks local review. `HIVEMIND_LOCAL_REVIEW_MODEL` is removed: set the model in the tool's own config or in the argv list. Reference: ADR-0042.
 
 The default post-PR watch (see Branching / PR workflow above) can be switched off standing-wide via `HIVEMIND_SKIP_PR_WATCH`, set in the `env` block of `.claude/settings.json` (committed) or `.claude/settings.local.json` (gitignored, per-account). Unset/empty → the overlord watches normally per its default-watch rule (zero behavior change). Set (checked by presence) → the overlord never watches, short-circuiting the per-run `request.raw` read entirely. Because the committed settings file is in-repo, the key inherits into brood worktrees. Reference: ADR-0029.
 
@@ -140,18 +140,4 @@ Children are standard overlord sessions receiving a task description. No brood-s
 
 ## Local developer setup
 
-To eliminate permission prompts for the local Codex review flow (`hivemind:adaptation-cycle`), add your Codex cache path to `.claude/settings.local.json` (gitignored):
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(node /path/to/.claude/plugins/cache/openai-codex/codex/*)"
-    ]
-  }
-}
-```
-
-Replace `/path/to/` with your actual home directory path. This file is gitignored and must be created locally by each contributor. Reference: ADR-0010 for the rationale on where this placeholder may and may not be copied.
-
-Periodically prune stale entries from `.claude/settings.local.json`. Common dead rules to remove: old project-name allowlist entries (e.g. `agent-framework` paths that no longer exist), malformed pseudo-Bash entries that don't match Claude Code's `Bash(...)` syntax, and version-pinned codex paths superseded by the `codex/*` wildcard. A bloated local allowlist accumulates false grants and obscures the actual permission surface.
+Periodically prune stale entries from `.claude/settings.local.json`. Common dead rules to remove: old project-name allowlist entries (e.g. `agent-framework` paths that no longer exist), malformed pseudo-Bash entries that don't match Claude Code's `Bash(...)` syntax, and any rule for the Codex plugin cache path, which local review no longer uses (ADR-0042). A bloated local allowlist accumulates false grants and obscures the actual permission surface.
