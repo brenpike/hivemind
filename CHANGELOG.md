@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [10.0.1] - 2026-11-17
+
+### Fixed
+
+- The review loop's fetch-normalize now treats a PR with no CI checks as an empty check list instead of failing as `ci-not-array`. That case is gh's `no checks reported` message on stderr at exit 1 with empty output. Stacked, docs-only and no-Actions PRs can now be watched. Every other gh error stays fail-closed.
+
+Issue: #560.
+
 ## [10.0.0] - 2026-11-17
 
 ### Added
