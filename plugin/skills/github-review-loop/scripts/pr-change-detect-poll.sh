@@ -13,8 +13,10 @@
 #     filtered reviews, and review-thread comments (filtered by reviewer-filter
 #     and self identity); totalCount tripwires for the three connections capped at
 #     50; a CI `FAILED_CHECKS` scalar that counts only checks in a failed/
-#     errored state, so CI regressions wake the reviewer even when no new review
-#     comment was posted) plus ONE Reviewer Approval bool (an Automated
+#     errored state; a RISE in it against the previous snapshot or seed raises
+#     its own `CI_FAILED` marker, so a CI regression wakes the reviewer directly
+#     even when no new review comment was posted) plus ONE Reviewer Approval
+#     bool (an Automated
 #     Reviewer whose LATEST review is APPROVED, or COMMENTED with zero inline
 #     review comments, read from GitHub's per-author `latestReviews` and never
 #     rebuilt from review history, OR a 👍 reaction on the PR from an Automated
@@ -44,8 +46,9 @@
 #   - It reads each gh command's stdout directly via command substitution. There
 #     is NO functional pipe (`tail -f | grep`, etc.) feeding Monitor.
 #   - No /tmp. No stop-file. Every terminal marker and `REVIEWER_APPROVED` end
-#     the process themselves; the skill natively stops only an arm that is
-#     still running.
+#     the process themselves; `CHANGED` and `CI_FAILED` keep it running (the
+#     CONTINUING_MARKERS declaration); the skill natively stops only an arm that
+#     is still running.
 #
 # Accepted trade-off (coarse author-aware tokens, not full fingerprints): the
 # poll tracks a single max databaseId per author-filtered stream rather than a
@@ -79,14 +82,29 @@
 #     `checkRunCountsByState` and `statusContextCountsByState` — both are
 #     aggregate scalars that sum across ALL rollup contexts independent of
 #     paging, so a failed check past page 1 still bumps `FAILED_CHECKS`.
-#     This keeps `github-reviewer` step 3 (failed CI checks added as fix
-#     candidates via `gh pr checks`) wired to a wake signal: when a reviewer
-#     push lands and CI subsequently fails without any new review comment,
-#     FAILED_CHECKS changes and fires CHANGED so the reviewer can remediate.
+#     This keeps the reviewer's ci-check-failure fix candidates (failed CI
+#     checks read via `gh pr checks`) wired to a wake signal of their own.
+#     RISE RULE: when `cur_failed_checks` is greater than the previous
+#     snapshot's (or the seed's) count, compared as base-10 integers, the poll
+#     prints `CI_FAILED`, which the skill dispatches to the reviewer directly,
+#     never through `prefilter.sh` (it judges only the review surfaces, so a
+#     wake whose only change is the failed-check count would be skipped and
+#     the failure lost once the poll advances its baseline). A DROP is not a
+#     rise: it fires `CHANGED`, which the prefilter judges on the review
+#     surfaces like any other delta, and red CI that stays red at the same
+#     count raises nothing, so a steady red run never re-dispatches.
 #     SUCCESS→PENDING / PENDING→SUCCESS transitions do not wake (they are
-#     not actionable feedback). The signal is also a recovery beacon: when
-#     failures clear, the count drops back to zero and fires CHANGED once,
-#     surfacing the recovery via a reviewer wake that will return clean.
+#     not actionable feedback).
+#   - A re-failure that keeps the SAME failed count across a push landing
+#     between two polls (one check goes green, another goes red) raises no
+#     marker: the scalar never moved. Inherited from main. It is picked up on
+#     the next rise or on any other reviewer wake, since the reviewer reads
+#     every failed check on each wake.
+#   - An expired arm re-armed from an older seed diffs against that seed, so
+#     it can re-fire `CI_FAILED` once while CI stays red for a failure a
+#     reviewer pass already saw. Bounded by the skill's cycle and
+#     same-finding guards; red CI stays visible on the PR, and agents never
+#     merge.
 #
 # Modes:
 #   --snapshot <arm-kind>
@@ -96,8 +114,8 @@
 #   --check      ONE-SHOT compare for the skill's QUIET-EXIT CHECK. Takes the
 #                same $1-$8 as poll mode (seed required), computes ONE snapshot
 #                through the SAME query path, runs the poll's own marker decision
-#                once against the seed, and prints that marker or UNCHANGED. No
-#                sleep, no deadline, no baseline line.
+#                once against the seed, and prints that marker (CI_FAILED
+#                included) or UNCHANGED. No sleep, no deadline, no baseline line.
 #   (no flag)    POLL. Watches the PR, diffing the first iteration against the
 #                seed token and every later iteration against its predecessor.
 #
@@ -111,7 +129,11 @@
 # surfaces on the very first iteration.
 #
 # Markers emitted (one token-cheap line each):
-#   CHANGED          a non-terminal delta in the scalar snapshot (wake reviewer)
+#   CHANGED          a non-terminal delta in the scalar snapshot (wake reviewer
+#                    through the prefilter), a FAILED_CHECKS drop included
+#   CI_FAILED        FAILED_CHECKS rose against the previous snapshot or seed
+#                    (non-terminal; the skill dispatches the reviewer directly,
+#                    without the prefilter)
 #   STATE=MERGED     PR merged (terminal)
 #   STATE=CLOSED     PR closed unmerged (terminal)
 #   REVIEWER_APPROVED
@@ -136,9 +158,15 @@
 #   CHECK_ERROR      --check mode only: a missing/malformed seed, a retired
 #                    reviewer filter value, or a failed capture (terminal)
 #
-# Process lifetime: `CHANGED` is the ONLY marker after which the poll keeps
-# running. Every other marker is the last line the process prints. --check
-# prints exactly one line and exits.
+# Marker precedence within one iteration: STATE=MERGED, STATE=CLOSED,
+# REVIEWER_APPROVED, CI_FAILED, then CHANGED; exactly one is printed. The
+# approval goes before CI_FAILED because its confirmation pass is a full fix
+# pass that also picks up failed checks.
+#
+# Process lifetime: `CHANGED` and `CI_FAILED` are the ONLY markers after which
+# the poll keeps running, declared once in CONTINUING_MARKERS. Every other
+# marker is the last line the process prints. --check prints exactly one line
+# and exits.
 #
 # Positional arguments supplied by the skill when arming Monitor (all required;
 # the skill/overlord layer resolves defaults and passes concrete values).
@@ -168,7 +196,8 @@
 #                               scalar the poll diffs. REQUIRED, never optional:
 #                               an optional seed would let a caller silently
 #                               regress to the self-baselining blind window, so
-#                               a missing, malformed, or incomplete value is
+#                               a missing, malformed, or incomplete value, or a
+#                               failed_checks field that is not all digits, is
 #                               POLL_ERROR (CHECK_ERROR in --check mode) before
 #                               any gh call.
 #
@@ -227,6 +256,13 @@ SNAPSHOT_FIELDS=(
 # (REVIEWER_APPROVED) instead of folding into CHANGED, so the generic diff skips
 # it by name. It is still serialized like every other field.
 APPROVAL_FIELD="approval"
+# INVARIANT: CONTINUING_MARKERS is the SINGLE declaration of the markers after
+# which the poll keeps running; the main loop asks marker_continues, and every
+# other marker ends the process.
+CONTINUING_MARKERS=(
+  CHANGED
+  CI_FAILED
+)
 
 # An arm declares its KIND, and the kind travels inside the seed token rather
 # than alongside it: carrying a seed forward (arm-expiry re-arm) therefore
@@ -341,6 +377,24 @@ snapshot_changed() {
   return 1
 }
 
+# failed_checks_rose: 0 when the current FAILED_CHECKS count is greater than the
+# previous one, compared as base-10 integers so a leading zero is never read as
+# octal. Both values are digit-only: the seed is validated before any gh call and
+# compute_snapshot fails a capture whose count is not all digits.
+failed_checks_rose() {
+  [ "$((10#$cur_failed_checks))" -gt "$((10#$prev_failed_checks))" ]
+}
+
+# marker_continues: 0 when the poll keeps running after printing the given
+# marker, i.e. it is listed in CONTINUING_MARKERS.
+marker_continues() {
+  local marker="$1" continuing
+  for continuing in "${CONTINUING_MARKERS[@]}"; do
+    [ "$marker" != "$continuing" ] || return 0
+  done
+  return 1
+}
+
 # advance_snapshot: this iteration's scalars become the next iteration's
 # previous, for every declared field including the approval edge.
 advance_snapshot() {
@@ -354,7 +408,9 @@ advance_snapshot() {
 # iteration_marker: the ONE marker decision over the current snapshot against
 # the previous one. Echoes STATE=MERGED or STATE=CLOSED (terminal PR state takes
 # precedence over any other delta), REVIEWER_APPROVED (an in-scope approval
-# newly present), CHANGED (any other declared field differs), or nothing.
+# newly present), CI_FAILED (FAILED_CHECKS rose), CHANGED (any other
+# non-approval declared field differs, a FAILED_CHECKS drop included), or
+# nothing.
 # INVARIANT: the poll loop and --check both decide through this function, so the
 # QUIET-EXIT CHECK can never judge a seed differently from the poll it stands in for.
 iteration_marker() {
@@ -364,6 +420,8 @@ iteration_marker() {
     echo "STATE=CLOSED"
   elif [ "$cur_approval" = "true" ] && [ "$prev_approval" != "true" ]; then
     echo "REVIEWER_APPROVED"
+  elif failed_checks_rose; then
+    echo "CI_FAILED"
   elif snapshot_changed; then
     echo "CHANGED"
   fi
@@ -406,10 +464,13 @@ fi
 # STRICTLY, before any gh call or sleep: a partially-parsed seed would leave some
 # prev_ scalar empty and fire a spurious CHANGED, and an absent one would re-open
 # the #324 blind window. Two layers, both derived from SNAPSHOT_FIELDS: the shape
-# regex, then load_seed's field-count and non-empty checks.
+# regex, then load_seed's field-count and non-empty checks. The failed_checks
+# field must then be all digits, since failed_checks_rose compares it as a
+# base-10 integer.
 if [ "$MODE" = "poll" ] || [ "$MODE" = "check" ]; then
   [[ "$BASELINE_SEED" =~ $SEED_FORMAT_RE ]] || poll_fail
   load_seed "$BASELINE_SEED" || poll_fail
+  case "$prev_failed_checks" in ''|*[!0-9]*) poll_fail ;; esac
 fi
 
 # Timeout wrapper for gh API calls.
@@ -464,9 +525,11 @@ fail_count=0
 # totalCount but not the id token, CHANGED still fires and the reviewer
 # re-fetches all on wake. `FAILED_CHECKS` is the count of `statusCheckRollup`
 # contexts in a failed/errored state (FAILURE / ERROR / TIMED_OUT / CANCELLED /
-# ACTION_REQUIRED for CheckRun; FAILURE / ERROR for legacy StatusContext);
-# changes here fire CHANGED so `github-reviewer` step 3 (failed-CI fix
-# candidates) is wired to a wake signal independent of review activity. The
+# ACTION_REQUIRED for CheckRun; FAILURE / ERROR for legacy StatusContext); a
+# rise here fires CI_FAILED, dispatched to the reviewer without the prefilter,
+# so the reviewer's ci-check-failure fix candidates are wired to a wake signal
+# independent of review activity, and a drop fires CHANGED. A count that is not
+# all digits fails the capture, since the rise is a base-10 compare. The
 # reviewer does the full body-level classification on wake (thin poll, no
 # interpretation). Writes diagnostic stderr to /dev/null (never /tmp).
 compute_snapshot() {
@@ -610,8 +673,8 @@ query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
     # `checkRunCountsByState` and `statusContextCountsByState` avoids the
     # first-100-contexts blind spot the previous `contexts(first: 100)`
     # walk had: a failed check past page 1 still bumps FAILED_CHECKS, so
-    # `github-reviewer` step 3 (failed CI checks added as fix candidates)
-    # stays wired even on PRs with many checks. CheckRun states reported
+    # the ci-check-failure fix candidates of the reviewer (failed CI
+    # checks) stay wired even on PRs with many checks. CheckRun states reported
     # here are the post-completion conclusions surfaced via CheckRunState
     # (FAILURE / TIMED_OUT / CANCELLED / ACTION_REQUIRED — the first four
     # treated as failures; STARTUP_FAILURE is excluded as infrastructure
@@ -702,8 +765,10 @@ EOF
   else
     cur_approval="false"
   fi
-  # A well-formed snapshot always carries a non-empty PR state.
+  # A well-formed snapshot always carries a non-empty PR state and a digit-only
+  # failed-check count.
   [ -n "${cur_state:-}" ] || return 1
+  case "${cur_failed_checks:-}" in ''|*[!0-9]*) return 1 ;; esac
   return 0
 }
 
@@ -790,8 +855,11 @@ while true; do
   # An in-scope approval newly present is its own marker (the skill runs a
   # confirmation pass rather than treating it as a generic CHANGED delta). What
   # counts as "newly" on the FIRST iteration is set by ARM-KIND SEMANTICS above —
-  # terminal clean ONLY if nothing actionable remains (D14). Every marker but
-  # CHANGED ends the process here. Exiting on REVIEWER_APPROVED is safe because
+  # terminal clean ONLY if nothing actionable remains (D14). A FAILED_CHECKS
+  # rise is CI_FAILED, which the skill dispatches without the prefilter; any
+  # other non-approval delta, a drop included, is CHANGED. Only the markers in
+  # CONTINUING_MARKERS (CHANGED, CI_FAILED) keep the poll running; every other
+  # marker ends the process here. Exiting on REVIEWER_APPROVED is safe because
   # every exit from the confirmation pass diffs the pending seed before the watch
   # goes quiet. A productive return arms a fresh poll from it; a return that would
   # end clean or keep watching with no poll running runs --check against it first
@@ -799,7 +867,7 @@ while true; do
   iteration_marker_line="$(iteration_marker)"
   if [ -n "$iteration_marker_line" ]; then
     echo "$iteration_marker_line"
-    [ "$iteration_marker_line" = "CHANGED" ] || exit 0
+    marker_continues "$iteration_marker_line" || exit 0
   fi
   # No-change iteration: emit nothing.
 
