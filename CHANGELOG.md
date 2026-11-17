@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [10.0.2] - 2026-11-17
+
+### Fixed
+
+- The review loop now dispatches the reviewer when a PR's failed CI check count rises, even with no new review comment. The change-detect poll prints a new `CI_FAILED` marker on the rise, and the skill dispatches on it without the prefilter. Red CI that stays red does not re-dispatch.
+
+Issue: #400.
+
 ## [10.0.1] - 2026-11-17
 
 ### Fixed

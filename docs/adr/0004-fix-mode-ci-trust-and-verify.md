@@ -23,3 +23,13 @@ The trust-and-verify pattern is the standard practice in CI workflows: push the 
 - The `hivemind:github-review-loop` skill's next poll → reviewer confirmation pass → re-failure detection is the canonical verification path for CI re-run results
 - If a fix does not resolve the underlying CI failure, the skill catches it on the subsequent poll cycle and routes accordingly
 - No new exit reason is needed in fix-mode for the CI re-run scenario
+
+## Amendment 2026-11-17: the CI re-failure path is the poll's CI_FAILED marker (issue 400)
+
+Before this fix, the Consequences claim that the skill catches an unresolved CI failure on the subsequent poll cycle was false. The change-detect poll folded every non-terminal change into one `CHANGED` marker, and `prefilter.sh` judges only the review surfaces. A wake whose only change was the failed-check count reached the prefilter and was skipped as `PREFILTER_SKIP`. The running poll had already moved its baseline, so the CI failure was lost.
+
+The claim now holds through the `CI_FAILED` marker. The poll prints it when the failed-check count rises against the previous snapshot or the seed, and the skill dispatches the reviewer on it directly, without the prefilter. A drop in the count, or red CI that stays red, still arrives as `CHANGED` and goes to the prefilter, so a steady red run does not re-dispatch.
+
+A re-failure that keeps the same failed count across a push landing between two polls still raises no marker. This is an accepted residual, recorded in the accepted trade-offs of the `pr-change-detect-poll.sh` header. The next rise, or any other reviewer wake, picks it up, since the reviewer reads every failed check on each wake.
+
+The Consequences list above is left as written; this amendment states the mechanism that makes it hold.

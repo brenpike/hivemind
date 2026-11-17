@@ -14,8 +14,37 @@ it serves the post-comment state to every poll and asserts a `CHANGED` event. It
 unfixed script.
 
 The remaining cases pin the behavior the fix must not break: silence on no delta, `CHANGED` on
-each scalar class (`LATEST_NONSELF_ISSUE_COMMENT_ID`, a `*_TOTAL` tripwire alone, `FAILED_CHECKS`),
-`REVIEWER_APPROVED` on a first-poll approval, and the fail-closed `POLL_ERROR` paths.
+each review scalar class (`LATEST_NONSELF_ISSUE_COMMENT_ID`, a `*_TOTAL` tripwire alone),
+`CI_FAILED` on a `FAILED_CHECKS` rise (see CI route below), `REVIEWER_APPROVED` on a first-poll
+approval, and the fail-closed `POLL_ERROR` paths.
+
+- `delta:failed-checks` — one check run moving SUCCESS to FAILURE (`FAILED_CHECKS` 0 to 1) with no
+  review activity prints exactly `CI_FAILED` then `WATCH_TIMEOUT`: no `CHANGED` for that
+  iteration, nothing on the steady red poll after it, and the poll keeps running.
+
+## CI route (#400)
+
+`prefilter.sh` judges only the review surfaces, so a `CHANGED` wake whose only change is the
+failed-check count would be `PREFILTER_SKIP`, and the running poll has already moved its baseline.
+A rise in `FAILED_CHECKS` against the previous snapshot or the seed therefore prints its own
+non-terminal marker, `CI_FAILED`, which the skill dispatches without the prefilter. A drop, and
+any other delta, prints `CHANGED`; red CI that stays red at the same count prints nothing, so a
+steady red run never re-dispatches. One marker per iteration, in the order `STATE=MERGED`,
+`STATE=CLOSED`, `REVIEWER_APPROVED`, `CI_FAILED`, `CHANGED`. Red seeds are captured with
+`capture_seed` over `derive_fixture` variants; no committed fixture carries a failed check.
+
+- `ci:drop-fires-changed` — a red `re-arm` seed over the green pre-cycle-0 state prints exactly
+  `CHANGED` then `WATCH_TIMEOUT`, never `CI_FAILED`.
+- `ci:steady-red-with-comment-fires-changed` — the red seed over the same red count plus a new
+  non-self issue comment prints exactly `CHANGED` then `WATCH_TIMEOUT`, never `CI_FAILED`.
+- `ci:rise-with-comment-fires-ci-failed` — a rise and a comment delta in one iteration print exactly
+  `CI_FAILED` then `WATCH_TIMEOUT`, never `CHANGED`.
+- `ci:each-rise-fires-once` — a four-poll watch served 0, 1, 1, 2 failed checks prints exactly
+  `CI_FAILED`, `CI_FAILED`, `WATCH_TIMEOUT`: one per rise, nothing on the steady iteration.
+- `ci:approval-cofire-wins` — see Process lifetime below.
+- `ci:seed-non-digit-failed-checks-fails-closed` — a seed whose `failed_checks` field is `1a` or
+  `-1` (located through the `SNAPSHOT_FIELDS` declaration) prints exactly `POLL_ERROR` in poll mode
+  and `CHECK_ERROR` in `--check` mode, exit 1, with zero `gh` calls.
 
 ## Reviewer identity (ADR-0043)
 
@@ -139,11 +168,12 @@ as no activity and idle the poll past real feedback. `nodes: []` passes at every
 
 ## Process lifetime
 
-`CHANGED` is the only marker after which the poll keeps running. `REVIEWER_APPROVED` and every
-terminal marker are the last line the process prints, and `REVIEWER_APPROVED` exits 0. The
-skill's confirmation pass is a full fix pass, and any return that keeps watching arms a fresh poll
-from the pending `re-arm` seed, so a poll left running past the approval marker is an orphan
-that can trail a stale `CHANGED`. A return that would end clean, or keep watching with no poll
+`CHANGED` and `CI_FAILED` are the only markers after which the poll keeps running.
+`REVIEWER_APPROVED` and every terminal marker are the last line the process prints, and
+`REVIEWER_APPROVED` exits 0. The skill's confirmation pass is a full fix pass that also picks up
+failed checks, and any return that keeps watching arms a fresh poll from the pending `re-arm`
+seed, so a poll left running past the approval marker is an orphan that can trail a stale
+`CHANGED` or `CI_FAILED`. A return that would end clean, or keep watching with no poll
 running, first runs `--check` against the pending seed (see Quiet-exit check below).
 
 - `approval:marker-ends-poll-process` — (i) a lone approval edge (pre-cycle-0 state, reactions
@@ -152,14 +182,20 @@ running, first runs `--check` against the pending seed (see Quiet-exit check bel
   co-firing with a new comment delta prints exactly `REVIEWER_APPROVED`, with no trailing marker;
   (iii) discrimination: the same comment delta without an approval prints `CHANGED` and keeps
   polling to a last line of `WATCH_TIMEOUT`, so only the approval edge ends the process.
+- `delta:failed-checks` and `ci:each-rise-fires-once` — `CI_FAILED` keeps the poll running to a
+  last line of `WATCH_TIMEOUT`.
+- `ci:approval-cofire-wins` — an approval edge co-firing with a `FAILED_CHECKS` rise prints exactly
+  `REVIEWER_APPROVED`, exit 0, and the fake `gh` sees exactly two snapshot queries under the same
+  long watch window: the approval outranks `CI_FAILED` and ends the process.
 
 ## Quiet-exit check
 
 `pr-change-detect-poll.sh --check <OWNER> <REPO> <PR> <MAX_WATCH> <INTERVAL> <FILTER> <SELF> <SEED>`
 is the one-shot compare the skill runs against the pending seed before a watch goes quiet. It takes
 ONE capture through the poll's own query path, decides through the poll's own `iteration_marker`,
-and prints exactly one line (`STATE=MERGED`, `STATE=CLOSED`, `REVIEWER_APPROVED`, `CHANGED`, or
-`UNCHANGED`), exit 0. A missing or malformed seed is `CHECK_ERROR`, exit 1, before any `gh` call; a
+and prints exactly one line (`STATE=MERGED`, `STATE=CLOSED`, `REVIEWER_APPROVED`, `CI_FAILED`,
+`CHANGED`, or `UNCHANGED`), exit 0. A seed whose `failed_checks` field is not all digits is
+`CHECK_ERROR`, exit 1, before any `gh` call (`ci:seed-non-digit-failed-checks-fails-closed`). A missing or malformed seed is `CHECK_ERROR`, exit 1, before any `gh` call; a
 failed capture is `CHECK_ERROR`, exit 1, never retried. Each case reads the fake `gh` call counters
 to pin the number of captures.
 
@@ -169,11 +205,12 @@ to pin the number of captures.
   `POLL_ERROR`.
 - `check:no-delta-unchanged` — the same seed over the unchanged state prints exactly `UNCHANGED`,
   exit 0, in one capture.
-- `check:parity-with-poll-first-iteration` — for a `*_TOTAL` tripwire delta, a `FAILED_CHECKS`
-  delta, a merged PR, a closed PR, an approval rising against a `re-arm` seed captured with no
-  reaction, and no delta, the check's line equals the expected marker AND the first line a poll
-  armed with the same seed prints over the same state (its `WATCH_TIMEOUT` read as `UNCHANGED`);
-  each check exits 0 in one capture.
+- `check:parity-with-poll-first-iteration` — against a `re-arm` seed captured over the green
+  pre-cycle-0 state with no reaction: a `*_TOTAL` tripwire delta (`CHANGED`), a `FAILED_CHECKS`
+  rise (`CI_FAILED`), a merged PR, a closed PR, an approval rise, and no delta; and against a red
+  `re-arm` seed, the green state, a `FAILED_CHECKS` drop (`CHANGED`). For each row the check's line
+  equals the expected marker AND the first line a poll armed with the same seed prints over the
+  same state (its `WATCH_TIMEOUT` read as `UNCHANGED`); each check exits 0 in one capture.
 - `check:fails-closed` — a failed snapshot query, a missing seed, and a malformed seed each print
   exactly `CHECK_ERROR`, exit 1; the failed query is not retried, and neither seed failure reaches
   `gh`.
