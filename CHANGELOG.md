@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [10.0.3] - 2026-11-17
+
+### Fixed
+
+- The change-detect poll now reads every number it uses (the PR number, watch window, poll interval, failed-check count and the clock) through one checked source. A bad clock reading now ends the poll with `POLL_ERROR` at every clock read, not only before a sleep. `--snapshot` and `--check` no longer read the clock.
+
 ## [10.0.2] - 2026-11-17
 
 ### Fixed
