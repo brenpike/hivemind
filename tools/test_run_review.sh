@@ -54,10 +54,15 @@ else
   exit 2
 fi
 
-TMPDIR_TEST="$(mktemp -d)"
+# INVARIANT: the cleanup trap's target is set once, before the trap, and only from a directory
+# this run's mktemp created and canonicalized; a failed step exits first, so cleanup never removes
+# an empty, fallback or working-directory path.
+raw_tmpdir="$(mktemp -d)" || { echo "FAIL: mktemp -d failed" >&2; exit 2; }
+[ -n "$raw_tmpdir" ] && [ -d "$raw_tmpdir" ] || { echo "FAIL: mktemp -d gave no directory" >&2; exit 2; }
+TMPDIR_TEST="$(cd -- "$raw_tmpdir" && pwd -P)" && [ -n "$TMPDIR_TEST" ] && [ -d "$TMPDIR_TEST" ] \
+  || { echo "FAIL: cannot resolve scratch dir: $raw_tmpdir" >&2; exit 2; }
 cleanup() { rm -rf "$TMPDIR_TEST"; }
 trap cleanup EXIT
-TMPDIR_TEST="$(cd "$TMPDIR_TEST" && pwd -P)"
 
 unset HIVEMIND_LOCAL_REVIEWER GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
 HOST_PATH="$PATH"
