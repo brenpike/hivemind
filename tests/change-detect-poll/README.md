@@ -191,7 +191,8 @@ running, first runs `--check` against the pending seed (see Quiet-exit check bel
 ## Watch window
 
 No poll sleep outruns the watch window. Every sleep, the failed-capture retry included, goes
-through the poll's one helper, `sleep_to_next_poll`, which reads the clock once and sleeps the
+through the poll's one helper, `sleep_to_next_poll`, which reads the clock once through
+`read_clock` and sleeps the
 smaller of the poll interval and the seconds left to the deadline, or not at all when none is
 left, so the loop top prints `WATCH_TIMEOUT` on time. An interval longer than the window is a
 legitimate input: the skill's Window deadline re-arm passes the remaining budget as the window
@@ -210,6 +211,43 @@ exact.
 - `watch:one-sleep-primitive` — structural, like `seed:complete-serialization`: the executable,
   non-comment lines of the poll hold exactly one `sleep` command, inside `sleep_to_next_poll`, so
   a second raw sleep goes red.
+
+## Checked numbers
+
+The poll checks each number where it is read, never where it is used. `read_decimal <name>
+<value>` is the only bounded-decimal check (1 to 18 digits, so Bash's 64-bit arithmetic cannot
+wrap) and the only base-10 coercion. `read_clock <name>` holds the only `date` command and routes
+its reading through `read_decimal`. The PR number, watch window, poll interval, seed
+`failed_checks`, capture `FAILED_CHECKS` and all three clock reads go through them. A failed or bad
+clock reading is `POLL_ERROR`, exit 1. `--snapshot` and `--check` never read the clock.
+
+The fake `date` counts its calls in the state dir's `date.n`, which `new_state` zeroes. When the
+state dir carries `date.seq` (`set_seq "$st" date <entry>...`), call N serves line N: `FAIL` exits
+non-zero with no output, `CLOCK` reads the virtual clock, and any other line, an empty one
+included, is printed as the reading. Calls past the list, and states with no `date.seq`, read the
+virtual clock unchanged.
+
+- `clock:bad-reading-fails-closed` — each bad reading (`FAIL`, empty, `abc`, `-1`,
+  `9999999999999999999`) served on clock read N, for N = 1 to 4, makes a poll over the steady
+  pre-cycle-0 state armed with the shared seed print exactly `POLL_ERROR`, exit 1, after exactly N
+  clock reads. Reads 1 to 4 are arm time, the first loop top, the first `sleep_to_next_poll` and
+  the second loop top. On N = 1 the fake `gh` sees zero calls. The unfixed script idles to
+  `WATCH_TIMEOUT`.
+- `clock:snapshot-and-check-never-read-clock` — with a `FAIL` `date.seq`, `--snapshot` prints its
+  `BASELINE=` line, exit 0, and `--check` with the shared seed prints `UNCHANGED`, exit 0. Each
+  leaves `date.n` at 0.
+- `numbers:one-clock-read` — structural, like `watch:one-sleep-primitive`: the executable,
+  non-comment lines of the poll hold exactly one `date` command, inside `read_clock`.
+- `numbers:one-checked-source` — structural: a digit-class pattern and `10#` appear on executable
+  lines only inside `read_decimal`. Every variable operand of `$(( ))` or of a
+  `-eq`/`-ne`/`-gt`/`-ge`/`-lt`/`-le` test outside `read_decimal` is a `read_decimal` or
+  `read_clock` target, or on the runner's `NUMBER_INTERNAL_NAMES` list of script-internal integers
+  (counters, and values computed only from checked numbers). `${#...}` and `$#` are exempt; a
+  positional operand never passes. The scan is line-local and documented beside
+  `poll_number_operands`. A new unchecked operand goes red; a legitimate new internal integer is
+  added to the list with its reason.
+- `validation:oversized-pr-number` — a 19-digit PR number is `POLL_ERROR`, exit 1, with zero `gh`
+  calls.
 
 ## Quiet-exit check
 

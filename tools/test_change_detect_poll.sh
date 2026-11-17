@@ -107,6 +107,17 @@
 # window, including a re-arm whose window is smaller than the interval. The executable lines of the
 # poll hold exactly one `sleep` command, inside that helper, so a second raw sleep goes red.
 #
+# THE CHECKED-NUMBER CONTRACT: every number the poll does arithmetic or a numeric test on is read
+# through one of two helpers. read_decimal is the only bounded-decimal check (1 to 18 digits) and
+# the only base-10 coercion; read_clock holds the only `date` command and routes its reading
+# through read_decimal. A failed or bad clock reading, at any of the three clock reads (arm time,
+# the loop-top deadline check, sleep_to_next_poll), is POLL_ERROR, exit 1, and a 19-digit PR number
+# is POLL_ERROR before any gh call. `--snapshot` and `--check` never read the clock. Two structural
+# cases hold the rule: the executable lines hold exactly one `date` command, inside read_clock; and
+# the bounded-decimal pattern and `10#` appear only inside read_decimal, while every variable
+# operand of `$(( ))` or of a numeric test is a read_decimal or read_clock target or on a short
+# named list of script-internal integers, so a new unchecked number goes red.
+#
 # Usage:
 #   ./tools/test_change_detect_poll.sh
 
@@ -290,13 +301,31 @@ chmod +x "$STUB_BIN/gh"
 # before poll N reads epoch + N-1 and MAX_WATCH counts polls. The real deadline arithmetic
 # still runs; only the clock's source is faked. Any other `date` call exits non-zero so a new use
 # of the clock cannot silently read the virtual one.
+#
+# The fake counts its calls in the state dir's `date.n`, which new_state zeroes, so a case reads
+# how many clock reads a run made. When the state dir carries `date.seq`, call N serves line N:
+# the literal `FAIL` exits non-zero with no output, the literal `CLOCK` reads the virtual clock,
+# and any other line, an empty one included, is printed as the reading. Calls past the list, and
+# every call in a state with no `date.seq`, read the virtual clock unchanged.
 cat > "$STUB_BIN/date" <<'STUB'
 #!/usr/bin/env bash
 set -u
 [ "$#" -eq 1 ] && [ "$1" = "+%s" ] || { echo "fake date: unsupported call: $*" >&2; exit 1; }
 [ -n "${FAKE_GH_STATE_DIR:-}" ] || { echo "fake date: FAKE_GH_STATE_DIR unset" >&2; exit 1; }
-capture_count=$(cat "$FAKE_GH_STATE_DIR/graphql.n") || exit 1
-printf '%s\n' "$((1700000000 + capture_count))"
+call_number=$(cat "$FAKE_GH_STATE_DIR/date.n") || exit 1
+call_number=$((call_number + 1))
+printf '%s' "$call_number" > "$FAKE_GH_STATE_DIR/date.n" || exit 1
+seq_file="$FAKE_GH_STATE_DIR/date.seq"
+reading="CLOCK"
+if [ -f "$seq_file" ] && [ "$call_number" -le "$(wc -l < "$seq_file")" ]; then
+  reading=$(sed -n "${call_number}p" "$seq_file")
+fi
+[ "$reading" != "FAIL" ] || exit 1
+if [ "$reading" = "CLOCK" ]; then
+  capture_count=$(cat "$FAKE_GH_STATE_DIR/graphql.n") || exit 1
+  reading="$((1700000000 + capture_count))"
+fi
+printf '%s\n' "$reading"
 STUB
 chmod +x "$STUB_BIN/date"
 
@@ -324,11 +353,13 @@ new_state() {
   printf '0' > "$dir/graphql.n"
   printf '0' > "$dir/latestreviews.n"
   printf '0' > "$dir/reactions.n"
+  printf '0' > "$dir/date.n"
   : > "$dir/sleep.calls"
   printf '%s' "$dir"
 }
 
-# set_seq <state_dir> <graphql|latestreviews|reactions> <entry>...: the per-call fixture sequence.
+# set_seq <state_dir> <graphql|latestreviews|reactions|date> <entry>...: the per-call fixture (or
+# clock reading) sequence.
 set_seq() {
   local dir="$1" kind="$2"
   shift 2
@@ -2096,6 +2127,249 @@ if [ "$(printf '%s\n' "$sleep_commands" | grep -c .)" = "1" ] \
   pass "watch:one-sleep-primitive" "the poll's only sleep command is inside sleep_to_next_poll"
 else
   failed "watch:one-sleep-primitive" "expected exactly one sleep command, inside sleep_to_next_poll, got line:in_helper=[$(printf '%s' "$sleep_commands" | tr '\n' ' ')]"
+fi
+
+# ── 43. every number is read through one checked source ──────────────────────────────
+# The poll checks each number where it is read, never where it is used: read_decimal is the only
+# bounded-decimal check and base-10 coercion, and read_clock holds the only `date` command. The
+# fake `date` serves `date.seq` and counts its calls in `date.n`.
+#   (a) each bad reading (FAIL, empty, abc, -1, 19 digits) served on clock read N, N = 1 to 4, over
+#       the steady pre-cycle-0 state armed with the shared seed, prints exactly POLL_ERROR, exit 1,
+#       after exactly N clock reads. Reads 1 to 4 are arm time, the first loop top, the first
+#       sleep_to_next_poll and the second loop top. On N = 1 the fake gh sees zero calls.
+#   (b) with every clock read failing, --snapshot prints its BASELINE= line and --check with the
+#       shared seed prints UNCHANGED, each exit 0 with zero clock reads.
+#   (c) STRUCTURAL: the executable, non-comment lines of the poll hold exactly one `date` command,
+#       inside read_clock.
+#   (d) STRUCTURAL: a digit-class pattern and `10#` appear on executable lines only inside
+#       read_decimal, and every variable operand of `$(( ))` or of a -eq/-ne/-gt/-ge/-lt/-le test
+#       outside read_decimal is a read_decimal or read_clock target or on NUMBER_INTERNAL_NAMES.
+#       `${#...}` and `$#` are exempt. A positional operand is never on the list.
+#   (e) a 19-digit PR number is POLL_ERROR, exit 1, with zero gh calls.
+CLOCK_BAD_READINGS=(FAIL "" abc -1 9999999999999999999)
+CLOCK_BAD_READ_COUNT=4
+# NUMBER_INTERNAL_NAMES: script-internal integers, each a counter or computed only from checked
+# numbers. `i` and `fail_count` are counters; `deadline` is the arm-time clock plus the window;
+# `seconds_left` is the deadline less a clock reading; `nap_seconds` is the interval or
+# `seconds_left`.
+NUMBER_INTERNAL_NAMES=(i fail_count deadline seconds_left nap_seconds)
+
+# clock_poll_outcome <state_name> <bad_reading> <read_number>: a poll armed with the shared seed
+# over the steady pre-cycle-0 state, its clock reads 1 to <read_number> - 1 serving the virtual
+# clock and read <read_number> serving <bad_reading>, as `<status>:<date_calls>:<gh_calls>:<out>`.
+clock_poll_outcome() {
+  local st out status read_index
+  local -a clock_entries=()
+  st="$(new_state "$1")"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  for ((read_index = 1; read_index < $3; read_index++)); do
+    clock_entries+=(CLOCK)
+  done
+  clock_entries+=("$2")
+  set_seq "$st" date "${clock_entries[@]}"
+  out="$(arm_poll "$st" "$SEED")"
+  status=$?
+  printf '%s:%s:%s:%s' "$status" "$(cat "$st/date.n")" "$(gh_call_counts "$st")" \
+    "$(printf '%s' "$out" | tr '\n' ';')"
+}
+
+# poll_date_commands: `<line>:<in_helper>` for each `date` command on an executable, non-comment
+# line of the poll, <in_helper> 1 inside read_clock and 0 elsewhere.
+poll_date_commands() {
+  awk '
+    /^read_clock\(\) \{/ { in_helper = 1 }
+    /^[[:space:]]*#/ { next }
+    /(^|[^[:alnum:]_-])date([[:space:]]|$)/ { print NR ":" in_helper + 0 }
+    in_helper && /^\}/ { in_helper = 0 }
+  ' "$POLL"
+}
+
+# poll_number_checks: `<kind>:<line>:<in_helper>` for each digit-class pattern (<kind> `pattern`)
+# and each `10#` coercion (<kind> `coerce`) on an executable, non-comment line of the poll,
+# <in_helper> 1 inside read_decimal and 0 elsewhere.
+poll_number_checks() {
+  awk '
+    /^read_decimal\(\) \{/ { in_helper = 1 }
+    /^[[:space:]]*#/ { next }
+    /\[[!^]?0-9\]|\[\[:digit:\]\]/ { print "pattern:" NR ":" in_helper + 0 }
+    /10#/ { print "coerce:" NR ":" in_helper + 0 }
+    in_helper && /^\}/ { in_helper = 0 }
+  ' "$POLL"
+}
+
+# poll_number_operands: `<line>:<operand>` for each variable operand of `$(( ))` or of a numeric
+# test on an executable, non-comment line of the poll outside read_decimal. INVARIANT: the scan is
+# line-local. An arithmetic expansion is read from `$((` to its balancing `))`; every name token in
+# it is an operand, and a token starting with a digit is a literal. A numeric test operand is the
+# whitespace-separated word on each side of the operator; its `$name` and `${name...}` references
+# are operands, and so is the word itself when it is a bare name. `${#...}` and `$#` are removed
+# first; a positional reference is reported as `$<digits>`.
+poll_number_operands() {
+  awk '
+    function strip_exempt(text) {
+      gsub(/\$\{#[^}]*\}/, "", text)
+      gsub(/\$#/, "", text)
+      return text
+    }
+    function report_positionals(text) {
+      while (match(text, /\$\{?[0-9]+/)) {
+        token = substr(text, RSTART, RLENGTH)
+        gsub(/[{]/, "", token)
+        print NR ":" token
+        text = substr(text, RSTART + RLENGTH)
+      }
+    }
+    function report_arithmetic(expr) {
+      expr = strip_exempt(expr)
+      report_positionals(expr)
+      gsub(/\$\{?[0-9]+/, "", expr)
+      while (match(expr, /[A-Za-z0-9_]+/)) {
+        token = substr(expr, RSTART, RLENGTH)
+        if (token !~ /^[0-9]/) print NR ":" token
+        expr = substr(expr, RSTART + RLENGTH)
+      }
+    }
+    function report_test_word(word) {
+      word = strip_exempt(word)
+      report_positionals(word)
+      bare = word
+      gsub(/["\047]/, "", bare)
+      if (bare ~ /^[A-Za-z_][A-Za-z0-9_]*$/) print NR ":" bare
+      while (match(word, /\$\{?[A-Za-z_][A-Za-z0-9_]*/)) {
+        token = substr(word, RSTART, RLENGTH)
+        gsub(/[${]/, "", token)
+        print NR ":" token
+        word = substr(word, RSTART + RLENGTH)
+      }
+    }
+    /^read_decimal\(\) \{/ { in_helper = 1 }
+    /^[[:space:]]*#/ { next }
+    in_helper { if (/^\}/) in_helper = 0; next }
+    {
+      rest = $0
+      while ((start = index(rest, "$((")) > 0) {
+        rest = substr(rest, start + 3)
+        depth = 2
+        expr = ""
+        for (pos = 1; pos <= length(rest) && depth > 0; pos++) {
+          ch = substr(rest, pos, 1)
+          if (ch == "(") depth++
+          if (ch == ")") depth--
+          expr = expr ch
+        }
+        report_arithmetic(expr)
+        rest = substr(rest, pos)
+      }
+      for (field = 2; field < NF; field++) {
+        if ($field ~ /^-(eq|ne|gt|ge|lt|le)$/) {
+          report_test_word($(field - 1))
+          report_test_word($(field + 1))
+        }
+      }
+    }
+  ' "$POLL"
+}
+
+# poll_checked_targets: every variable name a read_decimal or read_clock call assigns on an
+# executable, non-comment line of the poll, one per line.
+poll_checked_targets() {
+  grep -vE '^[[:space:]]*#' "$POLL" \
+    | grep -oE '(^|[^[:alnum:]_])read_(decimal|clock)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' \
+    | awk '{ print $NF }' \
+    | sort -u
+}
+
+# unchecked_number_operands: each `<line>:<operand>` from poll_number_operands whose operand is
+# neither a checked target nor on NUMBER_INTERNAL_NAMES.
+unchecked_number_operands() {
+  local allowed_names
+  allowed_names="$(poll_checked_targets; printf '%s\n' "${NUMBER_INTERNAL_NAMES[@]}")"
+  poll_number_operands | awk -F: 'NR == FNR { allowed[$0] = 1; next } !($2 in allowed)' \
+    <(printf '%s\n' "$allowed_names") -
+}
+
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  clock_ok=1
+  clock_detail=""
+  for clock_bad_index in "${!CLOCK_BAD_READINGS[@]}"; do
+    clock_bad_value="${CLOCK_BAD_READINGS[$clock_bad_index]}"
+    for ((clock_read = 1; clock_read <= CLOCK_BAD_READ_COUNT; clock_read++)); do
+      clock_outcome="$(clock_poll_outcome "clock-bad-$clock_bad_index-$clock_read" \
+        "$clock_bad_value" "$clock_read")"
+      clock_expected="1:$clock_read:$(cut -d: -f3 <<<"$clock_outcome"):POLL_ERROR"
+      [ "$clock_read" -ne 1 ] || clock_expected="1:1:0 0 0:POLL_ERROR"
+      if [ "$clock_outcome" != "$clock_expected" ]; then
+        clock_ok=0
+        clock_detail="$clock_detail reading=[$clock_bad_value] read=$clock_read: status:date_calls:gh_calls:out=$clock_outcome"
+      fi
+    done
+  done
+  if [ "$clock_ok" -eq 1 ]; then
+    pass "clock:bad-reading-fails-closed" "a failed, empty, non-digit, negative or 19-digit reading on clock read 1 to 4 -> POLL_ERROR, exit 1, after exactly that many reads"
+  else
+    failed "clock:bad-reading-fails-closed" "$clock_detail"
+  fi
+
+  st="$(new_state clock-snapshot)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  set_seq "$st" date FAIL
+  snapshot_out="$(run_poll "$st" --snapshot initial "$OWNER" "$REPO_NAME" "$PR_NUMBER" \
+    "$MAX_WATCH" "$POLL_INTERVAL" "$REVIEWER_FILTER" "$SELF_LOGIN")"
+  snapshot_status=$?
+  snapshot_date_calls="$(cat "$st/date.n")"
+  st="$(new_state clock-check)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  set_seq "$st" date FAIL
+  check_out="$(run_check "$st" "$SEED")"
+  check_status=$?
+  check_date_calls="$(cat "$st/date.n")"
+  if [ "$(printf '%s\n' "$snapshot_out" | grep -c .)" = "1" ] \
+    && printf '%s\n' "$snapshot_out" | grep -q '^BASELINE=.' && [ "$snapshot_status" -eq 0 ] \
+    && [ "$snapshot_date_calls" = "0" ] && [ "$check_out" = "UNCHANGED" ] \
+    && [ "$check_status" -eq 0 ] && [ "$check_date_calls" = "0" ]; then
+    pass "clock:snapshot-and-check-never-read-clock" "--snapshot printed BASELINE= and --check printed UNCHANGED, each exit 0 with zero clock reads"
+  else
+    failed "clock:snapshot-and-check-never-read-clock" "snapshot: status=$snapshot_status date_calls=$snapshot_date_calls out=$(printf '%s' "$snapshot_out" | tr '\n' ';') check: status=$check_status date_calls=$check_date_calls out=$(printf '%s' "$check_out" | tr '\n' ';')"
+  fi
+
+  st="$(new_state oversized-pr)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(run_poll "$st" "$OWNER" "$REPO_NAME" "1234567890123456789" "$MAX_WATCH" "$POLL_INTERVAL" \
+    "$REVIEWER_FILTER" "$SELF_LOGIN" "$SEED")"
+  status=$?
+  calls="$(gh_call_counts "$st")"
+  if [ "$out" = "POLL_ERROR" ] && [ "$status" -eq 1 ] && [ "$calls" = "0 0 0" ]; then
+    pass "validation:oversized-pr-number" "19-digit PR number -> POLL_ERROR, exit 1, zero gh calls"
+  else
+    failed "validation:oversized-pr-number" "status=$status calls=$calls out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+else
+  skipped "clock:bad-reading-fails-closed" "$SKIP_REASON"
+  skipped "clock:snapshot-and-check-never-read-clock" "$SKIP_REASON"
+  skipped "validation:oversized-pr-number" "$SKIP_REASON"
+fi
+
+date_commands="$(poll_date_commands)"
+if [ "$(printf '%s\n' "$date_commands" | grep -c .)" = "1" ] \
+  && printf '%s\n' "$date_commands" | grep -qx '[0-9]*:1'; then
+  pass "numbers:one-clock-read" "the poll's only date command is inside read_clock"
+else
+  failed "numbers:one-clock-read" "expected exactly one date command, inside read_clock, got line:in_helper=[$(printf '%s' "$date_commands" | tr '\n' ' ')]"
+fi
+
+number_checks="$(poll_number_checks)"
+number_checks_outside="$(printf '%s\n' "$number_checks" | grep -v ':1$' | grep .)"
+unchecked_operands="$(unchecked_number_operands)"
+if printf '%s\n' "$number_checks" | grep -q '^pattern:[0-9]*:1$' \
+  && printf '%s\n' "$number_checks" | grep -q '^coerce:[0-9]*:1$' \
+  && [ -z "$number_checks_outside" ] && [ -z "$unchecked_operands" ]; then
+  pass "numbers:one-checked-source" "the digit check and 10# live only in read_decimal, and every numeric operand is checked or a named internal integer"
+else
+  failed "numbers:one-checked-source" "checks outside read_decimal=[$(printf '%s' "$number_checks_outside" | tr '\n' ' ')] all checks=[$(printf '%s' "$number_checks" | tr '\n' ' ')] unchecked operands line:name=[$(printf '%s' "$unchecked_operands" | tr '\n' ' ')]"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
