@@ -13,6 +13,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [10.0.0] - 2026-11-17
+
+### Added
+
+- `HIVEMIND_PR_REVIEWERS`: comma- or space-separated Bot logins, `[bot]` optional. It adds to the automated reviewer set and never narrows it. Only Bot accounts count.
+- Any Bot that submitted a PR review or left a 👍 on the PR is an automated reviewer.
+- Approval also counts when a reviewer's latest review is COMMENTED with no inline comments.
+
+### Changed
+
+- `github-actions[bot]` counts as an automated reviewer only when listed in `HIVEMIND_PR_REVIEWERS`.
+- Approval is the same three signals for every reviewer: APPROVED, COMMENTED with no inline comments, or a 👍 on the PR. Review text is never read.
+
+### Removed
+
+- The hard-coded reviewer registry (Codex, Copilot, Claude).
+- BREAKING: reviewer_filter `codex-only` is now rejected. Use `<login>` mode with the bot's login, for example `chatgpt-codex-connector`.
+- The Codex Review Summary handled signal. An edited summary is reviewed again under the one handled-marker rule.
+
+Design record: ADR-0043. Issue: #576.
+
 ## [9.0.0] - 2026-11-16
 
 ### Added

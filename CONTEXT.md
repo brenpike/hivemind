@@ -188,15 +188,15 @@ The main-session skill (`hivemind:github-review-loop`, executed by the overlord)
 _Avoid_: watch mode, polling mode, monitor mode, continuous mode, background watch
 
 **Automated Reviewer**:
-A member of the reviewer identity registry (`plugin/skills/github-review-loop/scripts/reviewer-identity.jq`) — currently Codex, Copilot, and Claude. Identity is actor type `Bot` plus a recognized login form, never login alone: a bare login can collide with a human account (the human `claude` vs the `claude[bot]` app). Each member declares its own approval kind. `github-actions[bot]` is not a member (ADR-0033).
-_Avoid_: review bot, any bot, reviewer app
+A Bot account that has submitted a PR review on the watched PR or left a 👍 on the pull request object, plus any Bot login named in `HIVEMIND_PR_REVIEWERS`, which adds to that set and never narrows it. No reviewer product is named in code. Identity is actor type `Bot`, never login alone: a bare login can collide with a human account (the human `claude` vs the `claude[bot]` app). `github-actions[bot]` counts only when named in `HIVEMIND_PR_REVIEWERS` (ADR-0033).
+_Avoid_: review bot, any bot, reviewer app, reviewer registry
 
 **Reviewer Filter**:
-The `reviewer_filter` setting that scopes which comment authors the **GitHub Review Loop** treats as actionable: `automated` (default — every **Automated Reviewer**, Bot-gated), `codex-only` (Codex alone; the pre-ADR-0033 default, kept for migration), `all` (every author), or `<login>` (that one login, matched whatever its actor type). A keyword shadows a same-named login. The active filter also scopes which reviewers can produce a **Reviewer Approval**.
+The `reviewer_filter` setting that scopes which comment authors the **GitHub Review Loop** treats as actionable: `automated` (default — every **Automated Reviewer**, Bot-gated), `all` (every author), or `<login>` (that one login, matched whatever its actor type). A keyword shadows a same-named login. `codex-only` is retired and rejected. The active filter also scopes which reviewers can produce a **Reviewer Approval**.
 _Avoid_: author filter, bot filter
 
 **Reviewer Approval**:
-The terminal signal that an in-scope **Automated Reviewer** is satisfied with a PR: that reviewer's declared approval signal — the Codex 👍 `THUMBS_UP` reaction on the pull request object (👀 is never approval), or a Copilot `APPROVED` review. Claude declares no approval signal. Counts only from a reviewer in scope under the active **Reviewer Filter**. Surfaced to the loop as the `REVIEWER_APPROVED` marker. Terminal for the github-reviewer only when no unresolved non-self actionable items remain.
+The terminal signal that an in-scope **Automated Reviewer** is satisfied with a PR, with no product-specific signal: its latest review is `APPROVED`, or is `COMMENTED` with no inline review comments, or it left a 👍 `THUMBS_UP` reaction on the pull request object (👀 is never approval). A 👍 from any Bot account other than `github-actions[bot]` makes that Bot an **Automated Reviewer**. Review text is never read for approval. Counts only from a reviewer in scope under the active **Reviewer Filter**. Surfaced to the loop as the `REVIEWER_APPROVED` marker. Terminal for the github-reviewer only when no unresolved non-self actionable items remain.
 _Avoid_: codex approval, codex sign-off, thumbs-up comment
 
 **Remediation Doctrine**:

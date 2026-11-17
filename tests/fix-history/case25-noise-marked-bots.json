@@ -2,6 +2,9 @@
   "data": {
     "repository": {
       "pullRequest": {
+        "reactionGroups": [
+          { "content": "THUMBS_UP", "reactors": { "totalCount": 1, "nodes": [ { "login": "chatgpt-codex-connector", "__typename": "Bot" } ] } }
+        ],
         "reviewThreads": { "totalCount": 0, "nodes": [] },
         "comments": {
           "totalCount": 2,

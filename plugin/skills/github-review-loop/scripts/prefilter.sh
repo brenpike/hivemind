@@ -18,14 +18,18 @@
 #       ${SCRIPT_DIR}/fix-history-classify.jq
 #   which is the single source of truth for the skip/order semantics shared
 #   between this prefilter and the github-reviewer agent (so the two can never
-#   drift again). The filter in turn `include`s the reviewer identity registry
+#   drift again). The filter in turn `include`s the reviewer identity
 #   module ${SCRIPT_DIR}/reviewer-identity.jq, which owns every author-identity
-#   predicate (registry logins, bot-suffix stripping, Bot-type gating); prefilter
+#   predicate (the Automated Reviewer set derived from the PR's own evidence,
+#   bot-suffix stripping, Bot-type gating, the retired filter value); prefilter
 #   carries no identity logic of its own. prefilter feeds the captured GraphQL
 #   payload into
-#   `jq -L <scripts dir> -f fix-history-classify.jq --arg login --arg filter`
+#   `jq -L <scripts dir> -f fix-history-classify.jq --arg login --arg filter
+#   --arg reviewers`
 #   and projects the emitted per-comment stream down to its binary
-#   SKIP / DISPATCH decision.
+#   SKIP / DISPATCH decision. `--arg reviewers` carries the raw
+#   HIVEMIND_PR_REVIEWERS value (empty when unset) as DATA, never as program
+#   text; it only adds Bot logins to the derived set.
 #   prefilter KEEPS its own concerns: the gh fetch, the timeout wrapper, the
 #   fail-open posture, the three connection-level totalCount tripwires (read
 #   DIRECTLY off the raw payload — the filter does not emit them), and input
@@ -69,7 +73,18 @@
 #     or a thread's `comments.nodes`) and the script exits non-zero (DISPATCH).
 #   - Every GraphQL `author` selection requests `__typename` alongside `login`:
 #     the identity module requires the author account type (Bot vs User) for
-#     every registry filter mode.
+#     every filter mode.
+#   - The query also selects the Automated Reviewer evidence the classifier
+#     derives the set from: `latestReviews(first: 100)` authors and the
+#     `reactionGroups` reactors (first 100 per group; only THUMBS_UP is read).
+#     These pages are NOT walked: a Bot whose only evidence lies past them is
+#     out of the set (fail toward "not automated"), the residual recorded in
+#     reviewer-identity.jq §3.
+#   - The retired REVIEWER_FILTER value (reviewer-identity.jq
+#     `is_retired_filter`) is rejected before any gh call: emits
+#     `PREFILTER_ERROR=retired-filter` and exits non-zero. An identity module
+#     that jq cannot load for that check emits
+#     `PREFILTER_ERROR=unparseable-identity-module` and exits non-zero.
 #   - Fail-open on >50-node overflow in any of `reviewThreads`, `comments`, or
 #     `reviews`. The bound is reached when any connection's `totalCount`
 #     exceeds 50 nodes; the prefilter cannot reliably author-classify activity
@@ -89,7 +104,7 @@
 #     the poll-side `THREADS_TOTAL` / `COMMENTS_TOTAL` / `REVIEWS_TOTAL`
 #     scalars in `pr-change-detect-poll.sh`'s accepted-trade-off block and
 #     the same "wake unnecessarily > miss feedback" posture. Cost under
-#     `automated` (and the narrower `codex-only` / `<login>` modes): a >50
+#     `automated` (and the narrower `<login>` mode): a >50
 #     issue-comment burst from non-matching authors (humans, CI bots) will
 #     wake the reviewer once and return clean — acceptable vs silent drop.
 #   - The per-thread >20-comment overflow is owned by the shared filter: when a
@@ -132,9 +147,14 @@
 #   $1  OWNER             base-repo owner
 #   $2  REPO              base-repo name
 #   $3  PR_NUMBER         integer PR number
-#   $4  REVIEWER_FILTER   "automated" | "codex-only" | "all" | "<login>"
+#   $4  REVIEWER_FILTER   "automated" | "all" | "<login>"
 #                         (default "automated" when empty; mode semantics
-#                         live in reviewer-identity.jq §5)
+#                         and the retired value live in reviewer-identity.jq §5)
+#
+# Environment:
+#   HIVEMIND_PR_REVIEWERS optional; extra Bot logins, comma- or
+#                         whitespace-separated, passed to the classifier as
+#                         --arg reviewers
 #   $5  SELF_LOGIN        viewer login used to strip self-authored latest
 #                         comments from the actionable set (required)
 #
@@ -162,8 +182,8 @@ prefilter_fail() {
 [ -n "$OWNER" ] || prefilter_fail "missing-owner"
 [ -n "$REPO" ] || prefilter_fail "missing-repo"
 case "$PR_NUMBER" in ''|*[!0-9]*) prefilter_fail "invalid-pr-number" ;; esac
-# REVIEWER_FILTER defaults to automated when empty; any non-empty string is
-# accepted as a mode (automated | codex-only | all | <login>).
+# REVIEWER_FILTER defaults to automated when empty; any non-empty string other
+# than the retired value is accepted as a mode (automated | all | <login>).
 [ -n "$REVIEWER_FILTER" ] || REVIEWER_FILTER="automated"
 # SELF_LOGIN is required: without it the shared filter cannot strip
 # self-authored comments, and the self-echo storm this prefilter exists to
@@ -181,6 +201,11 @@ CLASSIFY_FILTER="$SCRIPT_DIR/fix-history-classify.jq"
 # The shared filter `include`s the identity module from $SCRIPT_DIR via -L;
 # fail open (DISPATCH) when it is missing, same posture as missing-filter.
 [ -f "$SCRIPT_DIR/reviewer-identity.jq" ] || prefilter_fail "missing-identity-module"
+# Reject the retired filter value before any gh call; the module holds its only literal.
+filter_retired="$(jq -n -r -L "$SCRIPT_DIR" --arg filter "$REVIEWER_FILTER" \
+  'include "reviewer-identity"; is_retired_filter($filter)' 2>/dev/null)" \
+  || prefilter_fail "unparseable-identity-module"
+[ "$filter_retired" != "true" ] || prefilter_fail "retired-filter"
 # The shared GraphQL response validator lives two levels up in skills/_shared; fail open
 # (DISPATCH) when it is missing or cannot be sourced, same posture as missing-filter.
 [ -f "$SCRIPT_DIR/../../_shared/graphql-response.sh" ] || prefilter_fail "missing-graphql-check"
@@ -215,7 +240,10 @@ fi
 # comments overflow to DISPATCH via the filter's thread_overflow flag), bounded
 # to the first 50 threads; plus the last 50 top-level PR comments and last 50
 # review summaries so the shared filter can classify non-self matching feedback
-# outside review threads. The connection-level totalCounts are fetched here too
+# outside review threads. The Automated Reviewer evidence (per-author latest
+# review authors and the pull request's reaction-group reactors, first 100 each)
+# is fetched for the classifier's set derivation. The connection-level
+# totalCounts are fetched here too
 # (NOT a filter concern) for the bash-side 50-node tripwires.
 #
 # The raw GraphQL JSON is captured verbatim into $response. It is then fed,
@@ -230,6 +258,8 @@ response=$( ( set -o pipefail; \
 query($owner: String!, $repo: String!, $pr: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $pr) {
+      latestReviews(first: 100) { nodes { author { login __typename } } }
+      reactionGroups { content reactors(first: 100) { nodes { __typename ... on Bot { login } ... on User { login } } } }
       comments(last: 50) {
         totalCount
         nodes { author { login __typename } body url reactionGroups { content viewerHasReacted } lastEditedAt reactions(content: EYES, last: 20) { nodes { content createdAt user { login __typename } } } }
@@ -281,7 +311,7 @@ shape_token="$(hivemind_review_surface_shape_check "$response")" || prefilter_fa
 dispatch_class=$( ( set -o pipefail; \
   printf '%s' "$response" \
   | jq -r -L "$SCRIPT_DIR" -f "$CLASSIFY_FILTER" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" \
-    2>/dev/null \
+    --arg reviewers "${HIVEMIND_PR_REVIEWERS-}" 2>/dev/null \
   | jq -rs 'any(.[]?; .classification == "actionable" or .classification == "followup-after-fix")' \
     2>/dev/null \
 ) ) || prefilter_fail "classify-failed"

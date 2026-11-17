@@ -47,20 +47,25 @@
 #     ARM KIND, not by which fields the token carries: `initial` surfaces it (#324 blind window),
 #     `re-arm` suppresses it (a stale approval must never short-circuit later pushback).
 #
-# THE REVIEWER-IDENTITY CONTRACT (ADR-0033): every login / filter / approver decision is the
-# shared `reviewer-identity.jq` registry's. The poll's approval scalar is true on EITHER a 👍 from
-# a Bot-account `pr-reaction-thumbs-up` registry member (Codex) OR a Bot-account `review-approved`
-# member (Copilot) whose latest review, as GitHub's per-author `latestReviews` reports it, is
-# APPROVED, both scoped by the active filter, and surfaces as `REVIEWER_APPROVED`. A Bot account is
-# the module's `is_bot`: typed `Bot`, OR a raw login ending in the reserved `[bot]` suffix — the
-# REST reactions endpoint types a bot reactor `User`, so the Codex 👍 arrives User-typed with a
-# `[bot]`-suffixed login, and the committed Codex reaction fixtures carry exactly that shape. The
-# approval is read from `latestReviews`, never rebuilt from the bounded `reviews` history window,
-# by an exhaustive paginated walk in its own query: `first: 100` is the page size, not a bound, and
-# a walk that fails on any page fails the capture. The fake gh models gh's GraphQL pagination
-# contract, so a walk that stops at page 1 or judges a partial walk goes red. Reactions and
-# latest-review rows travel as one JSON object per row, so a login carrying a delimiter byte
-# cannot forge the account type. An empty filter slot defaults to `automated`.
+# THE REVIEWER-IDENTITY CONTRACT (ADR-0043): every login / filter / approval decision is the
+# shared `reviewer-identity.jq` module's, and no reviewer product is named in code. Each capture
+# derives ONE Automated Reviewer set from the PR evidence it read (snapshot review authors,
+# `latestReviews` authors, 👍 reactors; Bot accounts only, `github-actions` only when listed) plus
+# HIVEMIND_PR_REVIEWERS. The poll's approval scalar is true when an Automated Reviewer in scope of
+# the active filter left a 👍 on the PR, or its latest review, as GitHub's per-author
+# `latestReviews` reports it, is APPROVED or COMMENTED with zero inline review comments; it
+# surfaces as `REVIEWER_APPROVED`. A Bot account is the module's `is_bot`: typed `Bot`, OR a raw
+# login ending in the reserved `[bot]` suffix — the REST reactions endpoint types a bot reactor
+# `User`, so a bot 👍 arrives User-typed with a `[bot]`-suffixed login, and the committed bot
+# reaction fixtures carry exactly that shape. The approval is read from `latestReviews`, never
+# rebuilt from the bounded `reviews` history window, by an exhaustive paginated walk in its own
+# query: `first: 100` is the page size, not a bound, and a walk that fails on any page fails the
+# capture. The fake gh models gh's GraphQL pagination contract, so a walk that stops at page 1 or
+# judges a partial walk goes red. Reactions and latest-review rows travel as one JSON object per
+# row, so a login carrying a delimiter byte cannot forge the account type. An empty filter slot
+# defaults to `automated`; the retired filter value is rejected in every mode before any gh call.
+# The suite unsets HIVEMIND_PR_REVIEWERS at the top, and a case that needs it sets it on its own
+# call only.
 #
 # THE GRAPHQL RESPONSE CONTRACT (#393): gh exits 0 on several GraphQL error envelopes, so an
 # exit-0 response is usable only when the shared plugin/skills/_shared/graphql-response.sh check
@@ -91,6 +96,8 @@
 #   ./tools/test_change_detect_poll.sh
 
 set -u
+# INVARIANT: an inherited HIVEMIND_PR_REVIEWERS would widen every case's Automated Reviewer set.
+unset HIVEMIND_PR_REVIEWERS
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
@@ -121,8 +128,17 @@ REPO_NAME="hive-repo"
 PR_NUMBER="4242"
 MAX_WATCH=3
 POLL_INTERVAL=1
-REVIEWER_FILTER="codex-only"
+REVIEWER_FILTER="automated"
+RETIRED_FILTER="codex-only"
 SELF_LOGIN="hive-author"
+# Bot login shapes the identity cases share: one per real-world naming pattern plus a generic one
+# and the CI identity. GraphQL reports each as a Bot-typed bare login; REST adds `[bot]` and types
+# the reactor `User`.
+CODEX_SHAPED_BOT="chatgpt-codex-connector"
+COPILOT_SHAPED_BOT="copilot-pull-request-reviewer"
+GENERIC_BOT="acme-review-helper"
+CI_BOT="github-actions"
+STATUS_BOT="coverage-reporter"
 
 PRE="$FIXTURES/graphql-pre-cycle0.json"
 BLIND="$FIXTURES/graphql-blind-window.json"
@@ -312,18 +328,23 @@ derive_fixture() {
   printf '%s' "$out"
 }
 
-# review_page <name> <first_user> <user_count> <has_next> [last_state]: one raw `latestReviews`
-# GraphQL page holding <user_count> distinct User-typed COMMENTED authors numbered from
-# <first_user>, followed, when <last_state> is given, by a Bot-typed Copilot review in that state.
+# review_page <name> <first_user> <user_count> <has_next> [last_state] [last_inline]: one raw
+# `latestReviews` GraphQL page holding <user_count> distinct User-typed COMMENTED authors (zero
+# inline comments each) numbered from <first_user>, followed, when <last_state> is given, by a
+# Bot-typed $COPILOT_SHAPED_BOT review in that state carrying <last_inline> inline comments
+# (default 0).
 review_page() {
   local out="$TMPDIR_TEST/$1.json"
-  jq -n --argjson first "$2" --argjson count "$3" --argjson next "$4" --arg last "${5:-}" '
+  jq -n --argjson first "$2" --argjson count "$3" --argjson next "$4" --arg last "${5:-}" \
+    --argjson inline "${6:-0}" --arg bot "$COPILOT_SHAPED_BOT" '
     {data: {repository: {pullRequest: {latestReviews: {
       pageInfo: {hasNextPage: $next, endCursor: (if $next then "cursor-\($first + $count)" else null end)},
       nodes: ([range($first; $first + $count)
-                | {state: "COMMENTED", author: {login: "octo-user-\(.)", __typename: "User"}}]
+                | {state: "COMMENTED", author: {login: "octo-user-\(.)", __typename: "User"},
+                   comments: {totalCount: 0}}]
               + (if $last == "" then []
-                 else [{state: $last, author: {login: "copilot-pull-request-reviewer", __typename: "Bot"}}]
+                 else [{state: $last, author: {login: $bot, __typename: "Bot"},
+                        comments: {totalCount: $inline}}]
                  end))}}}}}' > "$out" || return 1
   printf '%s' "$out"
 }
@@ -337,17 +358,19 @@ review_pages() {
   printf '%s' "$out"
 }
 
-# review_walk <name> <page_count> <last_state>: a `.pages` walk whose every page but the last
-# holds 100 distinct User-typed COMMENTED authors (hasNextPage true) and whose last page holds
-# only the Copilot review in <last_state> (hasNextPage false).
+# review_walk <name> <page_count> <last_state> [last_inline]: a `.pages` walk whose every page but
+# the last holds 100 distinct User-typed COMMENTED authors (hasNextPage true) and whose last page
+# holds only the $COPILOT_SHAPED_BOT review in <last_state> with <last_inline> inline comments
+# (hasNextPage false).
 review_walk() {
-  local name="$1" page_count="$2" last_state="$3" page_index page
+  local name="$1" page_count="$2" last_state="$3" last_inline="${4:-0}" page_index page
   local -a walk_pages=()
   for ((page_index = 1; page_index < page_count; page_index++)); do
     page="$(review_page "$name-$page_index" $(((page_index - 1) * 100)) 100 true)" || return 1
     walk_pages+=("$page")
   done
-  page="$(review_page "$name-$page_count" $(((page_count - 1) * 100)) 0 false "$last_state")" || return 1
+  page="$(review_page "$name-$page_count" $(((page_count - 1) * 100)) 0 false "$last_state" \
+    "$last_inline")" || return 1
   walk_pages+=("$page")
   review_pages "$name" "${walk_pages[@]}"
 }
@@ -436,6 +459,39 @@ identity_outcome_matches() {
     User) [ "$2" = "WATCH_TIMEOUT" ] ;;
     *) printf '%s\n' "$2" | grep -qx 'CHANGED' ;;
   esac
+}
+
+# bot_thumbs_up <name> <bare_login>: a raw REST reactions page holding one +1 from
+# `<bare_login>[bot]` in the REST bot-reactor shape (User-typed), derived from reactions-codex.json.
+bot_thumbs_up() {
+  derive_fixture "$1" "$REACT_CODEX" ".[0].user.login = \"$2[bot]\""
+}
+
+# bot_review_state <name> <login> <state> <comments_json>: the pre-cycle-0 state plus one Bot-typed
+# <login> review (databaseId 3011002) in `reviews` and, replacing any entry of that author, its
+# `latestReviews` entry in <state>. <comments_json> is the entry's `comments` value; `absent`
+# omits the key.
+bot_review_state() {
+  local comments_program=".comments = $4"
+  [ "$4" != "absent" ] || comments_program="."
+  derive_fixture "$1" "$PRE" "
+    .data.repository.pullRequest.reviews.totalCount = 2
+    | .data.repository.pullRequest.reviews.nodes += [{\"databaseId\":3011002,\"state\":\"$3\",\"author\":{\"login\":\"$2\",\"__typename\":\"Bot\"}}]
+    | .data.repository.pullRequest.latestReviews.nodes |= (map(select(.author.login != \"$2\"))
+        + [{\"state\":\"$3\",\"author\":{\"login\":\"$2\",\"__typename\":\"Bot\"}} | $comments_program])"
+}
+
+# seeded_poll_output <state_name> <graphql_entry> <reactions_entry> [filter]: the output of a poll
+# armed with an `initial` seed captured over the pre-cycle-0 state with no reaction, serving
+# <graphql_entry> and <reactions_entry> to every poll. <filter> follows arm_poll's
+# omitted-vs-empty rule; an HIVEMIND_PR_REVIEWERS set on the call reaches both runs.
+seeded_poll_output() {
+  local seed st filter="${4-$REVIEWER_FILTER}"
+  seed="$(capture_seed "$1-seed" initial "$PRE" "$REACT_NONE" "$filter")"
+  st="$(new_state "$1")"
+  set_seq "$st" graphql "$2"
+  set_seq "$st" reactions "$3"
+  arm_poll "$st" "$seed" "$filter"
 }
 
 # capture_fails_closed <state_name> <graphql_entry> <latestreviews_entry> <seed> <filter>: 0 when
@@ -835,27 +891,33 @@ else
 fi
 
 # ── 16. a human 👍 NEVER approves ────────────────────────────────────────────────────
-# reactions-human.json carries a User-typed +1 whose login IS the bare Codex registry login, plus a
-# User-typed `claude` +1. Neither login carries the reserved `[bot]` suffix, so neither is a Bot
-# account per the module's `is_bot`, and neither may approve under `automated`, `codex-only`, OR
-# `all` — `all` admits every login to the filter, which isolates the approver's Bot-account gate as
-# the only thing standing between a human 👍 and a terminal `clean`.
+# reactions-human.json carries a User-typed +1 whose login IS a bare bot login, plus a User-typed
+# `claude` +1. Neither login carries the reserved `[bot]` suffix, so neither is a Bot account per
+# the module's `is_bot`, and neither may approve under `automated` OR `all` — `all` admits every
+# login to the filter, which isolates the Automated Reviewer Bot-account gate as the only thing
+# standing between a human 👍 and a terminal `clean`. The third arm lists both logins in
+# HIVEMIND_PR_REVIEWERS: a configured login held by a User account still never approves.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   human_ok=1
   human_detail=""
-  for human_filter in automated codex-only all; do
-    human_seed="$(capture_seed "humanseed-$human_filter" initial "$PRE" "$REACT_NONE" "$human_filter")"
-    st="$(new_state "humanpoll-$human_filter")"
+  for human_arm in "automated|" "all|" "automated|$CODEX_SHAPED_BOT, claude"; do
+    IFS='|' read -r human_filter human_reviewers <<EOF
+$human_arm
+EOF
+    human_name="$human_filter-$([ -n "$human_reviewers" ] && echo listed || echo unlisted)"
+    human_seed="$(HIVEMIND_PR_REVIEWERS="$human_reviewers" \
+      capture_seed "humanseed-$human_name" initial "$PRE" "$REACT_NONE" "$human_filter")"
+    st="$(new_state "humanpoll-$human_name")"
     set_seq "$st" graphql "$PRE"
     set_seq "$st" reactions "$REACT_HUMAN"
-    out="$(arm_poll "$st" "$human_seed" "$human_filter")"
+    out="$(HIVEMIND_PR_REVIEWERS="$human_reviewers" arm_poll "$st" "$human_seed" "$human_filter")"
     if [ "$out" != "WATCH_TIMEOUT" ]; then
       human_ok=0
-      human_detail="$human_detail filter=$human_filter got=$(printf '%s' "$out" | tr '\n' ';') seed=$human_seed"
+      human_detail="$human_detail arm=$human_name got=$(printf '%s' "$out" | tr '\n' ';') seed=$human_seed"
     fi
   done
   if [ "$human_ok" -eq 1 ]; then
-    pass "approval:human-thumbs-up-never-approves" "human 👍 stayed silent under automated, codex-only and all"
+    pass "approval:human-thumbs-up-never-approves" "human 👍 stayed silent under automated and all, and with its logins listed in HIVEMIND_PR_REVIEWERS"
   else
     failed "approval:human-thumbs-up-never-approves" "$human_detail"
   fi
@@ -863,54 +925,62 @@ else
   skipped "approval:human-thumbs-up-never-approves" "$SKIP_REASON"
 fi
 
-# ── 17. a Copilot APPROVED review fires under `automated`, NOT under `codex-only` ─────
-# Copilot's registry approval kind is `review-approved`: a `latestReviews` entry in state APPROVED
-# for the Bot-typed `copilot-pull-request-reviewer` is the approval signal, no reaction involved.
-# The derived fixture adds that review to BOTH the `reviews` history and `latestReviews`, as GitHub
-# reports a fresh approval. Under `automated`
-# Copilot is in scope, so the first marker is REVIEWER_APPROVED. Under `codex-only` it is out of
-# scope: the review still moves REVIEWS_TOTAL (CHANGED) but must never approve.
+# ── 17. an APPROVED review fires under `automated` and its own `<login>`, NOT another's ─
+# A `latestReviews` entry in state APPROVED for the Bot-typed $COPILOT_SHAPED_BOT is the approval
+# signal, no reaction involved. The derived fixture adds that review to BOTH the `reviews` history
+# and `latestReviews`, as GitHub reports a fresh approval. Under `automated`, and under `<login>`
+# mode naming that bot, it is in scope, so the first marker is REVIEWER_APPROVED. Under `<login>`
+# mode naming a different reviewer it is out of scope: the review still moves REVIEWS_TOTAL
+# (CHANGED) but must never approve.
 COPILOT_APPROVED="$(derive_fixture copilot-approved "$PRE" \
-  '.data.repository.pullRequest.reviews.totalCount = 2
-   | .data.repository.pullRequest.reviews.nodes += [{"databaseId":3011002,"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}}]
-   | .data.repository.pullRequest.latestReviews.nodes += [{"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}}]')"
+  ".data.repository.pullRequest.reviews.totalCount = 2
+   | .data.repository.pullRequest.reviews.nodes += [{\"databaseId\":3011002,\"state\":\"APPROVED\",\"author\":{\"login\":\"$COPILOT_SHAPED_BOT\",\"__typename\":\"Bot\"}}]
+   | .data.repository.pullRequest.latestReviews.nodes += [{\"state\":\"APPROVED\",\"author\":{\"login\":\"$COPILOT_SHAPED_BOT\",\"__typename\":\"Bot\"},\"comments\":{\"totalCount\":0}}]")"
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
-  automated_seed="$(capture_seed copilotseed-automated initial "$PRE" "$REACT_NONE" automated)"
-  st="$(new_state copilot-automated)"
-  set_seq "$st" graphql "$PRE" "$COPILOT_APPROVED"
-  set_seq "$st" reactions "$REACT_NONE"
-  automated_out="$(arm_poll "$st" "$automated_seed" automated)"
-
-  st="$(new_state copilot-codexonly)"
-  set_seq "$st" graphql "$PRE" "$COPILOT_APPROVED"
-  set_seq "$st" reactions "$REACT_NONE"
-  codexonly_out="$(arm_poll "$st" "$SEED" codex-only)"
-
-  if [ "$(printf '%s\n' "$automated_out" | head -1)" = "REVIEWER_APPROVED" ] \
-    && ! printf '%s\n' "$codexonly_out" | grep -qx 'REVIEWER_APPROVED' \
-    && printf '%s\n' "$codexonly_out" | grep -qx 'CHANGED'; then
-    pass "approval:copilot-review-scoped-by-filter" "Copilot APPROVED fired under automated, only CHANGED under codex-only"
+  scope_ok=1
+  scope_detail=""
+  for scope_row in "automated|REVIEWER_APPROVED" "$COPILOT_SHAPED_BOT|REVIEWER_APPROVED" \
+    "$CODEX_SHAPED_BOT|CHANGED"; do
+    IFS='|' read -r scope_filter scope_expected <<EOF
+$scope_row
+EOF
+    scope_seed="$(capture_seed "scopeseed-$scope_filter" initial "$PRE" "$REACT_NONE" "$scope_filter")"
+    st="$(new_state "scope-$scope_filter")"
+    set_seq "$st" graphql "$PRE" "$COPILOT_APPROVED"
+    set_seq "$st" reactions "$REACT_NONE"
+    out="$(arm_poll "$st" "$scope_seed" "$scope_filter")"
+    if [ "$scope_expected" = "REVIEWER_APPROVED" ]; then
+      [ "$(printf '%s\n' "$out" | head -1)" = "REVIEWER_APPROVED" ] || scope_ok=0
+    elif printf '%s\n' "$out" | grep -qx 'REVIEWER_APPROVED' \
+      || ! printf '%s\n' "$out" | grep -qx 'CHANGED'; then
+      scope_ok=0
+    fi
+    scope_detail="$scope_detail filter=$scope_filter expected=$scope_expected got=$(printf '%s' "$out" | tr '\n' ';')"
+  done
+  if [ "$scope_ok" -eq 1 ]; then
+    pass "approval:review-scoped-by-filter" "APPROVED fired under automated and its own <login>, only CHANGED under another reviewer's <login>"
   else
-    failed "approval:copilot-review-scoped-by-filter" "automated=$(printf '%s' "$automated_out" | tr '\n' ';') codex-only=$(printf '%s' "$codexonly_out" | tr '\n' ';')"
+    failed "approval:review-scoped-by-filter" "$scope_detail"
   fi
 else
-  skipped "approval:copilot-review-scoped-by-filter" "$SKIP_REASON"
+  skipped "approval:review-scoped-by-filter" "$SKIP_REASON"
 fi
 
 # ── 18. an EMPTY filter slot behaves as `automated` ──────────────────────────────────
-# Over one mixed state — a Codex COMMENTED review, a Copilot APPROVED review, and a later
-# User-typed human review — `automated`, `codex-only` and `all` each yield a DIFFERENT seed token
-# (filtered review id and approval both move). The empty-slot token must equal the `automated`
-# one, and the discrimination check proves the comparison could have failed. Behaviorally, an
-# empty-slot arm then fires REVIEWER_APPROVED on the Copilot approval exactly as `automated` does.
+# Over one mixed state — a Bot COMMENTED review with inline comments, a Bot APPROVED review, and a
+# later User-typed human review — `automated`, `<login>` mode naming the COMMENTED bot, and `all`
+# each yield a DIFFERENT seed token (filtered review id and approval both move). The empty-slot
+# token must equal the `automated` one, and the discrimination check proves the comparison could
+# have failed. Behaviorally, an empty-slot arm then fires REVIEWER_APPROVED on the APPROVED review
+# exactly as `automated` does.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   mixed_reviews="$(derive_fixture mixed-reviews "$COPILOT_APPROVED" \
     '.data.repository.pullRequest.reviews.totalCount = 3
      | .data.repository.pullRequest.reviews.nodes += [{"databaseId":3011003,"state":"COMMENTED","author":{"login":"octo-human","__typename":"User"}}]
-     | .data.repository.pullRequest.latestReviews.nodes += [{"state":"COMMENTED","author":{"login":"octo-human","__typename":"User"}}]')"
+     | .data.repository.pullRequest.latestReviews.nodes += [{"state":"COMMENTED","author":{"login":"octo-human","__typename":"User"},"comments":{"totalCount":0}}]')"
   empty_token="$(capture_seed mixed-empty initial "$mixed_reviews" "$REACT_NONE" "")"
   automated_token="$(capture_seed mixed-automated initial "$mixed_reviews" "$REACT_NONE" automated)"
-  codexonly_token="$(capture_seed mixed-codexonly initial "$mixed_reviews" "$REACT_NONE" codex-only)"
+  login_token="$(capture_seed mixed-login initial "$mixed_reviews" "$REACT_NONE" "$CODEX_SHAPED_BOT")"
   all_token="$(capture_seed mixed-all initial "$mixed_reviews" "$REACT_NONE" all)"
 
   empty_seed="$(capture_seed emptyseed initial "$PRE" "$REACT_NONE" "")"
@@ -920,33 +990,33 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   empty_out="$(arm_poll "$st" "$empty_seed" "")"
 
   if [ -n "$empty_token" ] && [ "$empty_token" = "$automated_token" ] \
-    && [ "$automated_token" != "$codexonly_token" ] && [ "$automated_token" != "$all_token" ] \
+    && [ "$automated_token" != "$login_token" ] && [ "$automated_token" != "$all_token" ] \
     && [ "$(printf '%s\n' "$empty_out" | head -1)" = "REVIEWER_APPROVED" ]; then
-    pass "filter:empty-slot-is-automated" "empty-slot seed == automated seed (!= codex-only, != all); empty-slot arm fired REVIEWER_APPROVED"
+    pass "filter:empty-slot-is-automated" "empty-slot seed == automated seed (!= <login>, != all); empty-slot arm fired REVIEWER_APPROVED"
   else
-    failed "filter:empty-slot-is-automated" "empty=$empty_token automated=$automated_token codex-only=$codexonly_token all=$all_token poll=$(printf '%s' "$empty_out" | tr '\n' ';')"
+    failed "filter:empty-slot-is-automated" "empty=$empty_token automated=$automated_token login=$login_token all=$all_token poll=$(printf '%s' "$empty_out" | tr '\n' ';')"
   fi
 else
   skipped "filter:empty-slot-is-automated" "$SKIP_REASON"
 fi
 
-# ── 19. a SUPERSEDED Copilot APPROVED review never approves ─────────────────────────
-# Review approval is current state, not history: each approver is judged by its LATEST review,
-# which is the state GitHub reports in its `latestReviews` entry. A Copilot APPROVED followed by a
-# later Copilot CHANGES_REQUESTED, COMMENTED, or DISMISSED review (appended to `reviews`, and the
-# `latestReviews` entry taking that later state) must not fire REVIEWER_APPROVED under
-# `automated`, even on an `initial` arm (which surfaces any approval present when the watch
-# starts). The later review still moves the filtered review id, so CHANGED fires. The reverse
-# order (COMMENTED, then a later APPROVED) is the discrimination check: it must still fire, which
-# proves the assertion could pass.
+# ── 19. a SUPERSEDED APPROVED review never approves ─────────────────────────────────
+# Review approval is current state, not history: each reviewer is judged by its LATEST review,
+# which is the state GitHub reports in its `latestReviews` entry. An APPROVED followed by a later
+# CHANGES_REQUESTED, COMMENTED with inline comments, or DISMISSED review from the same bot
+# (appended to `reviews`, and the `latestReviews` entry taking that later state) must not fire
+# REVIEWER_APPROVED under `automated`, even on an `initial` arm (which surfaces any approval present
+# when the watch starts). The later review still moves the filtered review id, so CHANGED fires.
+# The reverse order (COMMENTED, then a later APPROVED) is the discrimination check: it must still
+# fire, which proves the assertion could pass.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   stale_ok=1
   stale_detail=""
   for later_state in CHANGES_REQUESTED COMMENTED DISMISSED; do
     stale_fixture="$(derive_fixture "copilot-stale-$later_state" "$COPILOT_APPROVED" \
       ".data.repository.pullRequest.reviews.totalCount = 3
-       | .data.repository.pullRequest.reviews.nodes += [{\"databaseId\":3011009,\"state\":\"$later_state\",\"author\":{\"login\":\"copilot-pull-request-reviewer\",\"__typename\":\"Bot\"}}]
-       | .data.repository.pullRequest.latestReviews.nodes |= map(if .author.login == \"copilot-pull-request-reviewer\" then .state = \"$later_state\" else . end)")"
+       | .data.repository.pullRequest.reviews.nodes += [{\"databaseId\":3011009,\"state\":\"$later_state\",\"author\":{\"login\":\"$COPILOT_SHAPED_BOT\",\"__typename\":\"Bot\"}}]
+       | .data.repository.pullRequest.latestReviews.nodes |= map(if .author.login == \"$COPILOT_SHAPED_BOT\" then .state = \"$later_state\" | .comments = {\"totalCount\":2} else . end)")"
     stale_seed="$(capture_seed "copilotstaleseed-$later_state" initial "$PRE" "$REACT_NONE" automated)"
     st="$(new_state "copilot-stale-$later_state")"
     set_seq "$st" graphql "$PRE" "$stale_fixture"
@@ -960,11 +1030,11 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   done
 
   reapproved="$(derive_fixture copilot-reapproved "$PRE" \
-    '.data.repository.pullRequest.reviews.totalCount = 3
+    ".data.repository.pullRequest.reviews.totalCount = 3
      | .data.repository.pullRequest.reviews.nodes += [
-         {"databaseId":3011002,"state":"COMMENTED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}},
-         {"databaseId":3011009,"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}}]
-     | .data.repository.pullRequest.latestReviews.nodes += [{"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}}]')"
+         {\"databaseId\":3011002,\"state\":\"COMMENTED\",\"author\":{\"login\":\"$COPILOT_SHAPED_BOT\",\"__typename\":\"Bot\"}},
+         {\"databaseId\":3011009,\"state\":\"APPROVED\",\"author\":{\"login\":\"$COPILOT_SHAPED_BOT\",\"__typename\":\"Bot\"}}]
+     | .data.repository.pullRequest.latestReviews.nodes += [{\"state\":\"APPROVED\",\"author\":{\"login\":\"$COPILOT_SHAPED_BOT\",\"__typename\":\"Bot\"},\"comments\":{\"totalCount\":0}}]")"
   reapproved_seed="$(capture_seed copilotreapprovedseed initial "$PRE" "$REACT_NONE" automated)"
   st="$(new_state copilot-reapproved)"
   set_seq "$st" graphql "$PRE" "$reapproved"
@@ -976,14 +1046,13 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   fi
 
   if [ "$stale_ok" -eq 1 ]; then
-    pass "approval:superseded-review-never-approves" "stale Copilot APPROVED stayed silent after CHANGES_REQUESTED/COMMENTED/DISMISSED; a latest APPROVED still fired"
+    pass "approval:superseded-review-never-approves" "stale APPROVED stayed silent after CHANGES_REQUESTED/COMMENTED with inline/DISMISSED; a latest APPROVED still fired"
   else
     failed "approval:superseded-review-never-approves" "$stale_detail"
   fi
 else
   skipped "approval:superseded-review-never-approves" "$SKIP_REASON"
 fi
-
 # ── 20. the issue-comment self filter keys on account type, not login alone ─────────
 # comments.nodes[1] is swapped for a higher-id comment whose login IS SELF_LOGIN, COMMENTS_TOTAL
 # unchanged, so only LATEST_NONSELF_ISSUE_COMMENT_ID can fire. Bot-typed: `is_self` is User-gated,
@@ -1047,7 +1116,7 @@ else
 fi
 
 # ── 22. an approval outside the `reviews` history window still approves ─────────────
-# The poll reads only the last 50 `reviews`; a busy PR pushes an approver's latest review out of
+# The poll reads only the last 50 `reviews`; a busy PR pushes a reviewer's latest review out of
 # that window. `REVIEWS_TOTAL` is 120 and no Copilot review sits in the window, but GitHub's
 # `latestReviews` still reports the Copilot APPROVED. The approval comes from `latestReviews`, so
 # the FIRST marker under `automated` is REVIEWER_APPROVED; an approval rebuilt from the window
@@ -1094,10 +1163,10 @@ else
 fi
 
 # ── 24. a User-typed APPROVED review NEVER approves ──────────────────────────────────
-# A User-typed account whose login IS the Copilot registry login submits an APPROVED review that
-# is its latest. Under `all` every login passes the filter, which isolates the approver's Bot-type
-# gate as the only thing standing between that human review and a terminal `clean`. The review
-# moves `REVIEWS_TOTAL`, so CHANGED fires.
+# A User-typed account whose login IS a Copilot-shaped bot login submits an APPROVED review that
+# is its latest. Under `all` every login passes the filter, which isolates the Automated Reviewer
+# Bot-type gate as the only thing standing between that human review and a terminal `clean`. The
+# review moves `REVIEWS_TOTAL`, so CHANGED fires.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   user_review_fixture="$(derive_fixture user-typed-review "$PRE" \
     '.data.repository.pullRequest.reviews.totalCount = 2
@@ -1119,16 +1188,16 @@ else
 fi
 
 # ── 25. a reaction login cannot forge the account type ───────────────────────────────
-# reactions-forged.json carries one User-typed +1 whose login is the Codex bot login followed by a
-# TAB and `Bot`. A transport that joins login and type with a delimiter and splits them again
-# reads that row as a Bot-typed Codex approval. The transport carries each row as a JSON object,
-# so the login stays one value and the type stays User; the login ends in `Bot`, not the reserved
-# `[bot]` suffix, so it is no Bot account per `is_bot`: no approval under `automated`,
-# `codex-only`, OR `all`.
+# reactions-forged.json carries one User-typed +1 whose login is a `[bot]`-suffixed bot login
+# followed by a TAB and `Bot`. A transport that joins login and type with a delimiter and splits
+# them again reads that row as a Bot-typed approval. The transport carries each row as a JSON
+# object, so the login stays one value and the type stays User; the login ends in `Bot`, not the
+# reserved `[bot]` suffix, so it is no Bot account per `is_bot`: no approval under `automated` OR
+# `all`.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   forged_ok=1
   forged_detail=""
-  for forged_filter in automated codex-only all; do
+  for forged_filter in automated all; do
     forged_seed="$(capture_seed "forgedseed-$forged_filter" initial "$PRE" "$REACT_NONE" "$forged_filter")"
     st="$(new_state "forgedpoll-$forged_filter")"
     set_seq "$st" graphql "$PRE"
@@ -1140,7 +1209,7 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
     fi
   done
   if [ "$forged_ok" -eq 1 ]; then
-    pass "approval:reaction-login-cannot-forge-type" "delimiter-forged login stayed silent under automated, codex-only and all"
+    pass "approval:reaction-login-cannot-forge-type" "delimiter-forged login stayed silent under automated and all"
   else
     failed "approval:reaction-login-cannot-forge-type" "$forged_detail"
   fi
@@ -1148,17 +1217,17 @@ else
   skipped "approval:reaction-login-cannot-forge-type" "$SKIP_REASON"
 fi
 
-# ── 26. a non-+1 reaction from the approver NEVER approves ───────────────────────────
-# reactions-codex-eyes.json carries one Codex bot `eyes` reaction in the REST shape (User-typed,
-# `[bot]`-suffixed login, so a Bot account per `is_bot`). Only a +1 is the Codex approval signal,
-# so the poll idles to WATCH_TIMEOUT.
+# ── 26. a non-+1 reaction from a bot NEVER approves ──────────────────────────────
+# reactions-codex-eyes.json carries one bot `eyes` reaction in the REST shape (User-typed,
+# `[bot]`-suffixed login, so a Bot account per `is_bot`). Only a +1 is a reaction approval signal,
+# and an `eyes` reactor is no Automated Reviewer evidence, so the poll idles to WATCH_TIMEOUT.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   st="$(new_state codex-eyes)"
   set_seq "$st" graphql "$PRE"
   set_seq "$st" reactions "$REACT_CODEX_EYES"
   out="$(arm_poll "$st" "$SEED")"
   if [ "$out" = "WATCH_TIMEOUT" ]; then
-    pass "approval:eyes-reaction-never-approves" "Codex bot eyes reaction stayed silent"
+    pass "approval:eyes-reaction-never-approves" "bot eyes reaction stayed silent"
   else
     failed "approval:eyes-reaction-never-approves" "expected only WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';')"
   fi
@@ -1167,12 +1236,12 @@ else
 fi
 
 # ── 27. the approval read walks EVERY latestReviews page ─────────────────────────────
-# A Bot-typed Copilot APPROVED sits on the LAST page of a 2-page and a 3-page `latestReviews`
-# walk, behind 100 / 200 distinct User-typed COMMENTED authors. The snapshot query's own
-# `latestReviews` holds exactly page 1, so a read bounded to one 100-author page finds no approval
-# and idles to WATCH_TIMEOUT. The approval read is an exhaustive paginated walk, so the FIRST
-# marker under `automated` is REVIEWER_APPROVED. Discrimination: the same walks ending in a
-# Copilot COMMENTED review idle to WATCH_TIMEOUT, which proves the assertion could pass.
+# A Bot-typed APPROVED sits on the LAST page of a 2-page and a 3-page `latestReviews` walk, behind
+# 100 / 200 distinct User-typed COMMENTED authors. The snapshot query's own `latestReviews` holds
+# exactly page 1, so a read bounded to one 100-author page finds no approval and idles to
+# WATCH_TIMEOUT. The approval read is an exhaustive paginated walk, so the FIRST marker under
+# `automated` is REVIEWER_APPROVED. Discrimination: the same walks ending in a COMMENTED review
+# with 3 inline comments idle to WATCH_TIMEOUT, which proves the assertion could pass.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   walk_ok=1
   walk_detail=""
@@ -1182,7 +1251,8 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   walk_seed="$(capture_seed walkseed initial "$PRE" "$REACT_NONE" automated)"
   for walk_page_count in 2 3; do
     for walk_last_state in APPROVED COMMENTED; do
-      walk_entry="$(review_walk "walk-$walk_page_count-$walk_last_state" "$walk_page_count" "$walk_last_state")"
+      walk_entry="$(review_walk "walk-$walk_page_count-$walk_last_state" "$walk_page_count" \
+        "$walk_last_state" 3)"
       st="$(new_state "walk-$walk_page_count-$walk_last_state")"
       set_seq "$st" graphql "$walk_main"
       set_seq "$st" latestreviews "$walk_entry"
@@ -1197,7 +1267,7 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
     done
   done
   if [ "$walk_ok" -eq 1 ]; then
-    pass "approval:latest-reviews-every-page-read" "last-page Copilot APPROVED fired REVIEWER_APPROVED first on 2- and 3-page walks; last-page COMMENTED stayed silent"
+    pass "approval:latest-reviews-every-page-read" "last-page APPROVED fired REVIEWER_APPROVED first on 2- and 3-page walks; last-page COMMENTED with inline stayed silent"
   else
     failed "approval:latest-reviews-every-page-read" "$walk_detail seed=$walk_seed"
   fi
@@ -1247,11 +1317,11 @@ else
   skipped "approval:latest-reviews-partial-walk-fails-closed" "$SKIP_REASON"
 fi
 
-# ── 29. the REST-typed Codex 👍 approves under every Codex-admitting filter ───────────
-# The REST reactions endpoint reports the Codex bot reactor as `user.type` `User` with the
+# ── 29. the REST-typed bot 👍 approves under every filter that admits it ─────────────
+# The REST reactions endpoint reports a bot reactor as `user.type` `User` with the
 # `[bot]`-suffixed login (reactions-codex.json is that verbatim shape). The module's `is_bot`
-# admits it by the reserved suffix, so under `automated` AND `codex-only` the FIRST marker is
-# REVIEWER_APPROVED. A gate on the account type alone rejects that row and idles to
+# admits it by the reserved suffix, so under `automated` AND `<login>` mode naming that bot the
+# FIRST marker is REVIEWER_APPROVED. A gate on the account type alone rejects that row and idles to
 # WATCH_TIMEOUT. The variant re-typing the same row `Bot` must approve too, so the suffix arm
 # widens the type arm rather than replacing it.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
@@ -1259,7 +1329,7 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   rest_detail=""
   react_codex_bot_typed="$(derive_fixture reactions-codex-bot-typed "$REACT_CODEX" '.[].user.type = "Bot"')"
   for rest_reactions in "$REACT_CODEX" "$react_codex_bot_typed"; do
-    for rest_filter in automated codex-only; do
+    for rest_filter in automated "$CODEX_SHAPED_BOT"; do
       rest_name="restpoll-$(basename "$rest_reactions" .json)-$rest_filter"
       rest_seed="$(capture_seed "$rest_name-seed" initial "$PRE" "$REACT_NONE" "$rest_filter")"
       st="$(new_state "$rest_name")"
@@ -1273,7 +1343,7 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
     done
   done
   if [ "$rest_ok" -eq 1 ]; then
-    pass "approval:rest-user-typed-bot-thumbs-up-approves" "User-typed and Bot-typed Codex bot 👍 fired REVIEWER_APPROVED first under automated and codex-only"
+    pass "approval:rest-user-typed-bot-thumbs-up-approves" "User-typed and Bot-typed bot 👍 fired REVIEWER_APPROVED first under automated and <login>"
   else
     failed "approval:rest-user-typed-bot-thumbs-up-approves" "$rest_detail"
   fi
@@ -1310,8 +1380,8 @@ else
 fi
 
 # ── 31. a latestReviews walk with a GraphQL `errors` value on ANY page fails CLOSED ───
-# A 2-page walk ends in an APPROVED review from the Bot-typed `review-approved` registry member
-# that `review_page` emits, served exit 0; on its own (case 27) that walk fires REVIEWER_APPROVED
+# A 2-page walk ends in an APPROVED review from the Bot-typed reviewer that `review_page`
+# emits, served exit 0; on its own (case 27) that walk fires REVIEWER_APPROVED
 # first under `automated`. Here one page also carries a
 # top-level `errors` value — page 2 (the page holding the approval) in one variant, page 1 in the
 # other. The shared graphql-response.sh pages check rejects the whole stream, so snapshot mode is
@@ -1595,6 +1665,179 @@ else
     check:parity-with-poll-first-iteration check:fails-closed; do
     skipped "$check_case_id" "$SKIP_REASON"
   done
+fi
+
+# ── 36. the retired filter value is rejected in every mode before any gh call ──────────
+# The module's `is_retired_filter` names one former filter value. Snapshot, check and poll mode
+# each print exactly their error marker (SNAPSHOT_ERROR / CHECK_ERROR / POLL_ERROR), exit 1, and
+# the fake gh sees no call at all (`0 0 0`): the rejection is an input gate, not a capture failure.
+retired_ok=1
+retired_detail=""
+for retired_mode in snapshot check poll; do
+  st="$(new_state "retired-$retired_mode")"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  case "$retired_mode" in
+    snapshot)
+      retired_expected="SNAPSHOT_ERROR"
+      out="$(run_poll "$st" --snapshot initial "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$MAX_WATCH" \
+        "$POLL_INTERVAL" "$RETIRED_FILTER" "$SELF_LOGIN")"
+      ;;
+    check)
+      retired_expected="CHECK_ERROR"
+      out="$(run_check "$st" "$SEED" "$RETIRED_FILTER")"
+      ;;
+    poll)
+      retired_expected="POLL_ERROR"
+      out="$(arm_poll "$st" "$SEED" "$RETIRED_FILTER")"
+      ;;
+  esac
+  status=$?
+  calls="$(gh_call_counts "$st")"
+  if [ "$out" != "$retired_expected" ] || [ "$status" -ne 1 ] || [ "$calls" != "0 0 0" ]; then
+    retired_ok=0
+    retired_detail="$retired_detail $retired_mode: status=$status calls=$calls out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+done
+if [ "$retired_ok" -eq 1 ]; then
+  pass "filter:retired-value-rejected" "retired filter -> SNAPSHOT_ERROR / CHECK_ERROR / POLL_ERROR, exit 1, zero gh calls"
+else
+  failed "filter:retired-value-rejected" "$retired_detail"
+fi
+
+# ── 37. every bot shape approves identically through every approval signal ──────────────
+# No reviewer product is named in code, so a Codex-shaped, a Copilot-shaped and a generic bot login
+# must behave the same. For each: a REST-shaped 👍 (User-typed `[bot]` login) on the pre-cycle-0
+# state, an APPROVED latest review, and a COMMENTED latest review with zero inline comments each
+# fire REVIEWER_APPROVED first under `automated` with no HIVEMIND_PR_REVIEWERS: the 👍 or the
+# review is itself the evidence that makes the bot an Automated Reviewer.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  shape_ok=1
+  shape_detail=""
+  for shape_login in "$CODEX_SHAPED_BOT" "$COPILOT_SHAPED_BOT" "$GENERIC_BOT"; do
+    shape_thumbs="$(bot_thumbs_up "shape-thumbs-$shape_login" "$shape_login")"
+    shape_approved="$(bot_review_state "shape-approved-$shape_login" "$shape_login" APPROVED '{"totalCount":0}')"
+    shape_commented="$(bot_review_state "shape-commented-$shape_login" "$shape_login" COMMENTED '{"totalCount":0}')"
+    for shape_signal in "thumbs|$PRE|$shape_thumbs" "approved|$shape_approved|$REACT_NONE" \
+      "commented-no-inline|$shape_commented|$REACT_NONE"; do
+      IFS='|' read -r shape_name shape_graphql shape_reactions <<EOF
+$shape_signal
+EOF
+      out="$(seeded_poll_output "shape-$shape_login-$shape_name" "$shape_graphql" "$shape_reactions")"
+      if [ "$(printf '%s\n' "$out" | head -1)" != "REVIEWER_APPROVED" ]; then
+        shape_ok=0
+        shape_detail="$shape_detail login=$shape_login signal=$shape_name got=$(printf '%s' "$out" | tr '\n' ';')"
+      fi
+    done
+  done
+  if [ "$shape_ok" -eq 1 ]; then
+    pass "approval:every-bot-shape-approves-identically" "Codex-shaped, Copilot-shaped and generic bots: 👍, APPROVED and COMMENTED with 0 inline each fired REVIEWER_APPROVED first"
+  else
+    failed "approval:every-bot-shape-approves-identically" "$shape_detail"
+  fi
+else
+  skipped "approval:every-bot-shape-approves-identically" "$SKIP_REASON"
+fi
+
+# ── 38. a COMMENTED review with inline comments, or an unknown inline count, never approves ─
+# A COMMENTED latest review approves only with exactly zero inline review comments. A count above
+# zero, a `comments` key that is absent, a null `comments`, and a null `totalCount` are each no
+# approval under `automated` OR `all`; the new review still moves REVIEWS_TOTAL, so CHANGED fires.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  inline_ok=1
+  inline_detail=""
+  inline_index=0
+  for inline_comments in '{"totalCount":2}' absent null '{"totalCount":null}'; do
+    inline_index=$((inline_index + 1))
+    inline_fixture="$(bot_review_state "inline-$inline_index" "$GENERIC_BOT" COMMENTED "$inline_comments")"
+    for inline_filter in automated all; do
+      out="$(seeded_poll_output "inline-$inline_index-$inline_filter" "$inline_fixture" "$REACT_NONE" "$inline_filter")"
+      if printf '%s\n' "$out" | grep -qx 'REVIEWER_APPROVED' \
+        || ! printf '%s\n' "$out" | grep -qx 'CHANGED'; then
+        inline_ok=0
+        inline_detail="$inline_detail comments=$inline_comments filter=$inline_filter got=$(printf '%s' "$out" | tr '\n' ';')"
+      fi
+    done
+  done
+  if [ "$inline_ok" -eq 1 ]; then
+    pass "approval:commented-with-inline-or-unknown-never-approves" "COMMENTED with 2 inline, absent, null comments or null totalCount fired CHANGED, never REVIEWER_APPROVED"
+  else
+    failed "approval:commented-with-inline-or-unknown-never-approves" "$inline_detail"
+  fi
+else
+  skipped "approval:commented-with-inline-or-unknown-never-approves" "$SKIP_REASON"
+fi
+
+# ── 39. the CI identity approves only when listed in HIVEMIND_PR_REVIEWERS ──────────────
+# `github-actions` is dropped from the evidence-derived set. Unlisted, its REST-shaped 👍 idles to
+# WATCH_TIMEOUT and its APPROVED latest review fires only CHANGED, under `automated` AND `all`.
+# Listed (with the `[bot]` suffix in one arm, bare among comma- and space-separated logins in the
+# other), each fires REVIEWER_APPROVED first. A listed value shaped like jq program text is data,
+# never code: it neither errors the capture nor admits the unlisted CI identity.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  ci_ok=1
+  ci_detail=""
+  ci_thumbs="$(bot_thumbs_up ci-thumbs "$CI_BOT")"
+  ci_approved="$(bot_review_state ci-approved "$CI_BOT" APPROVED '{"totalCount":0}')"
+  for ci_row in "unlisted-thumbs-automated||automated|$PRE|$ci_thumbs|WATCH_TIMEOUT" \
+    "unlisted-thumbs-all||all|$PRE|$ci_thumbs|WATCH_TIMEOUT" \
+    "unlisted-review-automated||automated|$ci_approved|$REACT_NONE|CHANGED" \
+    "unlisted-review-all||all|$ci_approved|$REACT_NONE|CHANGED" \
+    "program-text-review|\") or true or (\"|automated|$ci_approved|$REACT_NONE|CHANGED" \
+    "listed-thumbs|$CI_BOT[bot]|automated|$PRE|$ci_thumbs|REVIEWER_APPROVED" \
+    "listed-review|$GENERIC_BOT, $CI_BOT other-bot|automated|$ci_approved|$REACT_NONE|REVIEWER_APPROVED"; do
+    IFS='|' read -r ci_name ci_reviewers ci_filter ci_graphql ci_reactions ci_expected <<EOF
+$ci_row
+EOF
+    out="$(HIVEMIND_PR_REVIEWERS="$ci_reviewers" \
+      seeded_poll_output "ci-$ci_name" "$ci_graphql" "$ci_reactions" "$ci_filter")"
+    case "$ci_expected" in
+      WATCH_TIMEOUT) [ "$out" = "WATCH_TIMEOUT" ] || ci_ok=0 ;;
+      CHANGED)
+        if printf '%s\n' "$out" | grep -qx 'REVIEWER_APPROVED' \
+          || ! printf '%s\n' "$out" | grep -qx 'CHANGED'; then
+          ci_ok=0
+        fi
+        ;;
+      REVIEWER_APPROVED) [ "$(printf '%s\n' "$out" | head -1)" = "REVIEWER_APPROVED" ] || ci_ok=0 ;;
+    esac
+    ci_detail="$ci_detail $ci_name: expected=$ci_expected got=$(printf '%s' "$out" | tr '\n' ';')"
+  done
+  if [ "$ci_ok" -eq 1 ]; then
+    pass "approval:ci-identity-only-when-listed" "unlisted CI 👍 / APPROVED never approved under automated or all; listed CI fired REVIEWER_APPROVED; program-text value stayed data"
+  else
+    failed "approval:ci-identity-only-when-listed" "$ci_detail"
+  fi
+else
+  skipped "approval:ci-identity-only-when-listed" "$SKIP_REASON"
+fi
+
+# ── 40. a status bot's comment wakes the reviewer but never approves ───────────────────
+# A Bot that only posts a plain PR comment (coverage, deploy preview) submits no review and leaves
+# no 👍, so it is no Automated Reviewer. Its new issue comment moves
+# LATEST_NONSELF_ISSUE_COMMENT_ID and COMMENTS_TOTAL, so CHANGED fires; REVIEWER_APPROVED never
+# does, under `automated` OR `all`.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  status_ok=1
+  status_detail=""
+  status_comment="$(derive_fixture status-bot-comment "$PRE" \
+    ".data.repository.pullRequest.comments.totalCount = 3
+     | .data.repository.pullRequest.comments.nodes += [{\"databaseId\":2411003,\"author\":{\"login\":\"$STATUS_BOT\",\"__typename\":\"Bot\"}}]")"
+  for status_filter in automated all; do
+    out="$(seeded_poll_output "status-bot-$status_filter" "$status_comment" "$REACT_NONE" "$status_filter")"
+    if printf '%s\n' "$out" | grep -qx 'REVIEWER_APPROVED' \
+      || ! printf '%s\n' "$out" | grep -qx 'CHANGED'; then
+      status_ok=0
+      status_detail="$status_detail filter=$status_filter got=$(printf '%s' "$out" | tr '\n' ';')"
+    fi
+  done
+  if [ "$status_ok" -eq 1 ]; then
+    pass "approval:status-bot-comment-changes-never-approves" "status bot comment fired CHANGED, never REVIEWER_APPROVED, under automated and all"
+  else
+    failed "approval:status-bot-comment-changes-never-approves" "$status_detail"
+  fi
+else
+  skipped "approval:status-bot-comment-changes-never-approves" "$SKIP_REASON"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────

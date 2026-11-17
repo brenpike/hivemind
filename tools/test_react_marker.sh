@@ -20,9 +20,13 @@
 # pr-binding-refused, a failed lookup is pr-binding-lookup-failed, and a detached HEAD is
 # pr-binding-no-branch, each with no reaction sent.
 #
-# The noise-mode cases (#568) pass --noise <reviewer_filter> and assert the binding node's author
-# decides: a Bot account inside the filter is marked; a human, a Bot outside the filter or a null
-# author is noise-author-refused with no mutation sent. They also cover missing-value-for-noise,
+# The noise-mode cases (#568, #576) pass --noise <reviewer_filter> and assert the binding node's
+# author and the PR's review evidence decide: a Bot account inside the filter, over the Automated
+# Reviewer set derived from the PR's latestReviews authors, THUMBS_UP reactors, a review node's own
+# author and HIVEMIND_PR_REVIEWERS, is marked; a human, a Bot with no evidence that is not
+# configured, github-actions unless configured, or a null author is noise-author-refused with no
+# mutation sent. The retired filter value is retired-filter before any gh call. They also cover
+# missing-value-for-noise,
 # missing-identity-module, the capture seam skipping the author check, and fix mode marking a
 # human-authored node. The re-mark refresh cases assert a viewer EYES already on the node is removed
 # (removeReaction) before addReaction, and that a removal lacking positive proof is react-failed with
@@ -40,6 +44,10 @@
 #   ./tools/test_react_marker.sh
 
 set -u
+
+# The noise author check reads HIVEMIND_PR_REVIEWERS; a value inherited from the caller's
+# environment would change which Bots count as Automated Reviewers.
+unset HIVEMIND_PR_REVIEWERS
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
@@ -262,16 +270,39 @@ chmod +x "$FAIL_GH_SHIM_DIR/gh"
 CODEX_BOT_AUTHOR='{"login":"chatgpt-codex-connector","__typename":"Bot"}'
 COPILOT_BOT_AUTHOR='{"login":"copilot-pull-request-reviewer","__typename":"Bot"}'
 OTHER_BOT_AUTHOR='{"login":"fixture-lint-app","__typename":"Bot"}'
+STATUS_BOT_AUTHOR='{"login":"fixture-coverage-app","__typename":"Bot"}'
+ACTIONS_BOT_AUTHOR='{"login":"github-actions","__typename":"Bot"}'
 HUMAN_AUTHOR='{"login":"fixture-human","__typename":"User"}'
 VIEWER_EYES_GROUPS='[{"content":"THUMBS_UP","viewerHasReacted":false},{"content":"EYES","viewerHasReacted":true}]'
 OTHER_EYES_GROUPS='[{"content":"EYES","viewerHasReacted":false}]'
+NO_LATEST_REVIEWS='{"nodes":[]}'
 
-# bound_node_body <typename> [author json] [reactionGroups json]: a binding response whose node is
-# <typename> on the OPEN fixture PR, authored by <author json> (default the Codex Bot) and carrying
-# <reactionGroups json> (default []).
+# latest_reviews_json <author json...>: a PR latestReviews selection whose nodes are authored by the
+# given authors.
+latest_reviews_json() {
+  local nodes="" author
+  for author in "$@"; do nodes="${nodes:+$nodes,}{\"author\":$author}"; done
+  printf '{"nodes":[%s]}' "$nodes"
+}
+
+# pr_reaction_groups_json <content> <reactor json...>: a PR reactionGroups selection holding one
+# <content> group whose reactors are the given reactor nodes.
+pr_reaction_groups_json() {
+  local content="$1" nodes="" reactor
+  shift
+  for reactor in "$@"; do nodes="${nodes:+$nodes,}$reactor"; done
+  printf '[{"content":"%s","reactors":{"nodes":[%s]}}]' "$content" "$nodes"
+}
+
+# bound_node_body <typename> [author json] [reactionGroups json] [latestReviews json]
+# [PR reactionGroups json]: a binding response whose node is <typename> on the OPEN fixture PR,
+# authored by <author json> (default the Codex Bot) and carrying <reactionGroups json> (default []).
+# The PR carries the review evidence <latestReviews json> (default no reviews) and
+# <PR reactionGroups json> (default []).
 bound_node_body() {
-  printf '{"data":{"node":{"__typename":"%s","pullRequest":{"state":"OPEN","headRefName":"%s","headRepository":{"id":"%s"}},"author":%s,"reactionGroups":%s}}}' \
-    "$1" "$FIXTURE_BRANCH" "$FIXTURE_REPO_ID" "${2:-$CODEX_BOT_AUTHOR}" "${3:-[]}"
+  printf '{"data":{"node":{"__typename":"%s","pullRequest":{"state":"OPEN","headRefName":"%s","headRepository":{"id":"%s"},"latestReviews":%s,"reactionGroups":%s},"author":%s,"reactionGroups":%s}}}' \
+    "$1" "$FIXTURE_BRANCH" "$FIXTURE_REPO_ID" "${4:-$NO_LATEST_REVIEWS}" "${5:-[]}" \
+    "${2:-$CODEX_BOT_AUTHOR}" "${3:-[]}"
 }
 
 # set_gh_part <part> <exit status> <body>: set one shim response (repo | binding | unreact | react)
@@ -575,20 +606,26 @@ else
   failed "binding:no-branch-detached-head" "gh reached: repo=$repo_reached binding=$binding_reached stderr=$live_stderr"
 fi
 
-# ── NOISE MODE (#568): --noise <reviewer_filter> marks only an automated author's node ──
+# ── NOISE MODE (#568, #576): --noise <reviewer_filter> marks only an automated author's node ──
 # Each case runs the live path from the bound repo with a binding whose node is on the fixture PR, so
-# only the noise author check decides. The check reads only author.login and author.__typename
-# through reviewer-identity.jq: is_bot and reviewer_matches_filter with an empty self login.
+# only the noise author check decides. The check reads author.login and author.__typename through
+# reviewer-identity.jq: is_bot and reviewer_matches_filter with an empty self login over the set
+# automated_reviewer_set builds from the PR's latestReviews authors, the reactors of its THUMBS_UP
+# group, a review node's own author and HIVEMIND_PR_REVIEWERS.
 
-# run_noise_case <name> <filter> <surface> <author json>: a bound live case in noise mode with
-# <filter> as the --noise value, the binding node authored by <author json>.
+# run_noise_case <name> <filter> <surface> <author json> [latestReviews json] [PR reactionGroups json]
+# [env assignments...]: a bound live case in noise mode with <filter> as the --noise value, the
+# binding node authored by <author json> on a PR carrying the given review evidence (default none),
+# run with the env assignments.
 run_noise_case() {
-  local node_id="$TOPLEVEL_NODE" node_type="IssueComment"
-  if [ "$3" = review ]; then node_id="$REVIEW_NODE"; node_type="PullRequestReview"; fi
-  new_gh_case "$1" "$3"
-  set_gh_part binding 0 "$(bound_node_body "$node_type" "$4")"
-  MARKER_FLAGS=(--noise "$2")
-  run_bound_case "$BOUND_REPO" "$node_id" "$3"
+  local name="$1" filter="$2" surface="$3" author="$4" latest_reviews="${5:-$NO_LATEST_REVIEWS}"
+  local pr_groups="${6:-[]}" node_id="$TOPLEVEL_NODE" node_type="IssueComment"
+  shift 6 2>/dev/null || shift "$#"
+  if [ "$surface" = review ]; then node_id="$REVIEW_NODE"; node_type="PullRequestReview"; fi
+  new_gh_case "$name" "$surface"
+  set_gh_part binding 0 "$(bound_node_body "$node_type" "$author" '[]' "$latest_reviews" "$pr_groups")"
+  MARKER_FLAGS=(--noise "$filter")
+  run_bound_case "$BOUND_REPO" "$node_id" "$surface" "$@"
   MARKER_FLAGS=()
 }
 
@@ -603,14 +640,54 @@ assert_noise_refused() {
   fi
 }
 
-run_noise_case noise-codex-automated "" toplevel "$CODEX_BOT_AUTHOR"
-assert_live_success "noise:accepted-codex-bot-comment-automated" "Codex Bot IssueComment, empty filter (automated) -> exit 0, reaction sent"
+run_noise_case noise-codex-thumbs-up "" toplevel "$CODEX_BOT_AUTHOR" \
+  "$NO_LATEST_REVIEWS" "$(pr_reaction_groups_json THUMBS_UP "$CODEX_BOT_AUTHOR")"
+assert_live_success "noise:accepted-codex-shaped-thumbs-up-automated" "Codex-shaped Bot comment, THUMBS_UP on the PR, empty filter (automated) -> exit 0, reaction sent"
 
-run_noise_case noise-copilot-review-automated automated review "$COPILOT_BOT_AUTHOR"
-assert_live_success "noise:accepted-copilot-bot-review-automated" "Copilot Bot review, filter automated -> exit 0, reaction sent"
+run_noise_case noise-copilot-own-review automated review "$COPILOT_BOT_AUTHOR"
+assert_live_success "noise:accepted-copilot-shaped-own-review-automated" "Copilot-shaped Bot review node, no other evidence, filter automated -> exit 0, reaction sent"
+
+run_noise_case noise-copilot-latest-review automated toplevel "$COPILOT_BOT_AUTHOR" \
+  "$(latest_reviews_json "$COPILOT_BOT_AUTHOR")"
+assert_live_success "noise:accepted-copilot-shaped-latest-review-automated" "Copilot-shaped Bot comment, Bot in latestReviews, filter automated -> exit 0, reaction sent"
+
+run_noise_case noise-generic-bot-review automated toplevel "$OTHER_BOT_AUTHOR" \
+  "$(latest_reviews_json "$HUMAN_AUTHOR" "$OTHER_BOT_AUTHOR")"
+assert_live_success "noise:accepted-generic-bot-with-review-automated" "generic Bot comment, Bot in latestReviews, filter automated -> exit 0, reaction sent"
 
 run_noise_case noise-other-bot-all all toplevel "$OTHER_BOT_AUTHOR"
-assert_live_success "noise:accepted-non-registry-bot-all" "non-registry Bot, filter all -> exit 0, reaction sent"
+assert_live_success "noise:accepted-bot-without-evidence-all" "Bot with no evidence, filter all -> exit 0, reaction sent"
+
+run_noise_case noise-status-bot-configured automated toplevel "$STATUS_BOT_AUTHOR" \
+  "$NO_LATEST_REVIEWS" '[]' "HIVEMIND_PR_REVIEWERS=other-app, fixture-coverage-app[bot]"
+assert_live_success "noise:accepted-configured-bot-automated" "Bot with no evidence named in HIVEMIND_PR_REVIEWERS, filter automated -> exit 0, reaction sent"
+
+run_noise_case noise-actions-configured automated toplevel "$ACTIONS_BOT_AUTHOR" \
+  "$(latest_reviews_json "$ACTIONS_BOT_AUTHOR")" '[]' "HIVEMIND_PR_REVIEWERS=github-actions[bot]"
+assert_live_success "noise:accepted-github-actions-configured" "github-actions Bot named in HIVEMIND_PR_REVIEWERS, filter automated -> exit 0, reaction sent"
+
+run_noise_case noise-status-bot-no-evidence automated toplevel "$STATUS_BOT_AUTHOR" \
+  "$(latest_reviews_json "$CODEX_BOT_AUTHOR")" "$(pr_reaction_groups_json THUMBS_UP "$COPILOT_BOT_AUTHOR")"
+assert_noise_refused "noise:refused-status-bot-without-evidence" "Bot with no review or THUMBS_UP of its own, filter automated -> exit 1 noise-author-refused, no mutation"
+
+run_noise_case noise-status-bot-other-reaction automated toplevel "$STATUS_BOT_AUTHOR" \
+  "$NO_LATEST_REVIEWS" "$(pr_reaction_groups_json HOORAY "$STATUS_BOT_AUTHOR")"
+assert_noise_refused "noise:refused-bot-non-thumbs-up-reaction" "Bot whose only PR reaction is HOORAY, filter automated -> exit 1 noise-author-refused, no mutation"
+
+run_noise_case noise-actions-review automated toplevel "$ACTIONS_BOT_AUTHOR" \
+  "$(latest_reviews_json "$ACTIONS_BOT_AUTHOR")" "$(pr_reaction_groups_json THUMBS_UP "$ACTIONS_BOT_AUTHOR")"
+assert_noise_refused "noise:refused-github-actions-unconfigured" "github-actions Bot with a review and THUMBS_UP, not configured, filter automated -> exit 1 noise-author-refused, no mutation"
+
+run_noise_case noise-actions-own-review automated review "$ACTIONS_BOT_AUTHOR"
+assert_noise_refused "noise:refused-github-actions-own-review-unconfigured" "github-actions Bot review node, not configured, filter automated -> exit 1 noise-author-refused, no mutation"
+
+run_noise_case noise-human-reviewed automated toplevel "$HUMAN_AUTHOR" \
+  "$(latest_reviews_json "$HUMAN_AUTHOR")" "$(pr_reaction_groups_json THUMBS_UP "$HUMAN_AUTHOR")"
+assert_noise_refused "noise:refused-human-with-evidence-automated" "human with a review and THUMBS_UP, filter automated -> exit 1 noise-author-refused, no mutation"
+
+run_noise_case noise-human-configured automated toplevel "$HUMAN_AUTHOR" \
+  "$NO_LATEST_REVIEWS" '[]' "HIVEMIND_PR_REVIEWERS=fixture-human"
+assert_noise_refused "noise:refused-configured-login-held-by-human" "human whose login is in HIVEMIND_PR_REVIEWERS, filter automated -> exit 1 noise-author-refused, no mutation"
 
 run_noise_case noise-human-all all toplevel "$HUMAN_AUTHOR"
 assert_noise_refused "noise:refused-human-all" "human author, filter all -> exit 1 noise-author-refused, no mutation"
@@ -618,14 +695,43 @@ assert_noise_refused "noise:refused-human-all" "human author, filter all -> exit
 run_noise_case noise-human-own-login fixture-human toplevel "$HUMAN_AUTHOR"
 assert_noise_refused "noise:refused-human-own-login-filter" "human author, filter naming that login -> exit 1 noise-author-refused, no mutation"
 
-run_noise_case noise-other-bot-automated automated toplevel "$OTHER_BOT_AUTHOR"
-assert_noise_refused "noise:refused-non-registry-bot-automated" "non-registry Bot, filter automated -> exit 1 noise-author-refused, no mutation"
-
-run_noise_case noise-copilot-codex-only codex-only review "$COPILOT_BOT_AUTHOR"
-assert_noise_refused "noise:refused-copilot-codex-only" "Copilot Bot, filter codex-only -> exit 1 noise-author-refused, no mutation"
-
 run_noise_case noise-null-author automated toplevel null
 assert_noise_refused "noise:refused-null-author" "null author -> exit 1 noise-author-refused, no mutation"
+
+# The retired filter value is rejected before any git or gh call, the capture seam included.
+new_gh_case noise-retired-filter review
+MARKER_FLAGS=(--noise codex-only)
+run_bound_case "$BOUND_REPO" "$REVIEW_NODE" review
+MARKER_FLAGS=()
+if [ "$live_status" -eq 1 ] && [ "$live_stderr" = "REACTMARKER_ERROR=retired-filter" ] \
+   && [ "$repo_reached" = no ] && [ "$binding_reached" = no ] && [ "$live_reached" = no ] \
+   && [ ! -f "$case_dir/calls.log" ]; then
+  pass "noise:rejected-retired-filter" "--noise codex-only -> exit 1 retired-filter, gh never reached"
+else
+  failed "noise:rejected-retired-filter" "status=$live_status stderr=$live_stderr calls=$(call_order)"
+fi
+
+cap="$(fresh_capture noise-retired-capture)"
+new_gh_case noise-retired-capture toplevel
+out="$(PATH="$FAIL_GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" REACTMARKER_TEST_MODE=1 \
+  REACTMARKER_CAPTURE_FILE="$cap" \
+  bash "$REACT_MARKER" --noise codex-only "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
+status=$?
+if [ "$status" -eq 1 ] && [ "$out" = "REACTMARKER_ERROR=retired-filter" ] && [ ! -s "$cap" ] \
+   && [ "$(reached_flag gh)" = no ]; then
+  pass "noise:rejected-retired-filter-capture-seam" "--noise codex-only under the capture seam -> exit 1 retired-filter, nothing captured"
+else
+  failed "noise:rejected-retired-filter-capture-seam" "status=$status out=$out cap=$(cat "$cap") gh=$(reached_flag gh)"
+fi
+
+# The binding query selects the PR evidence the noise author check reads.
+run_noise_case noise-query-evidence automated review "$COPILOT_BOT_AUTHOR"
+if grep -qF 'latestReviews(first: 100) { nodes { author { login __typename } } }' "$case_dir/binding.args" \
+   && grep -qF 'reactionGroups { content reactors(first: 100) { nodes { __typename ... on Bot { login } ... on User { login } } } }' "$case_dir/binding.args"; then
+  pass "noise:binding-query-selects-evidence" "binding query selects latestReviews authors and PR reaction reactors"
+else
+  failed "noise:binding-query-selects-evidence" "args=$(cat "$case_dir/binding.args" 2>/dev/null)"
+fi
 
 # A binding refusal still wins over the author check: a Codex Bot node on another PR is
 # pr-binding-refused, never marked.

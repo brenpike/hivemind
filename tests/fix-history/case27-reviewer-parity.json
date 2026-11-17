@@ -1,0 +1,347 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "totalCount": 3,
+          "nodes": [
+            {
+              "id": "PRRT_case27rrrrrrrrrrr1",
+              "isResolved": false,
+              "comments": {
+                "totalCount": 3,
+                "nodes": [
+                  {
+                    "id": "PRRC_case27comment2700",
+                    "databaseId": 2700,
+                    "author": {
+                      "login": "chatgpt-codex-connector",
+                      "__typename": "Bot"
+                    },
+                    "body": "Finding 2700: unchecked input."
+                  },
+                  {
+                    "id": "PRRC_case27comment2701",
+                    "databaseId": 2701,
+                    "author": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    },
+                    "body": "Fixed in abc1234."
+                  },
+                  {
+                    "id": "PRRC_case27comment2702",
+                    "databaseId": 2702,
+                    "author": {
+                      "login": "chatgpt-codex-connector",
+                      "__typename": "Bot"
+                    },
+                    "body": "Follow-up 2702: still unchecked on the error path."
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_case27rrrrrrrrrrr2",
+              "isResolved": false,
+              "comments": {
+                "totalCount": 3,
+                "nodes": [
+                  {
+                    "id": "PRRC_case27comment2710",
+                    "databaseId": 2710,
+                    "author": {
+                      "login": "copilot-pull-request-reviewer",
+                      "__typename": "Bot"
+                    },
+                    "body": "Finding 2710: unchecked input."
+                  },
+                  {
+                    "id": "PRRC_case27comment2711",
+                    "databaseId": 2711,
+                    "author": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    },
+                    "body": "Fixed in abc1234."
+                  },
+                  {
+                    "id": "PRRC_case27comment2712",
+                    "databaseId": 2712,
+                    "author": {
+                      "login": "copilot-pull-request-reviewer",
+                      "__typename": "Bot"
+                    },
+                    "body": "Follow-up 2712: still unchecked on the error path."
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_case27rrrrrrrrrrr3",
+              "isResolved": false,
+              "comments": {
+                "totalCount": 3,
+                "nodes": [
+                  {
+                    "id": "PRRC_case27comment2720",
+                    "databaseId": 2720,
+                    "author": {
+                      "login": "acme-review-bot",
+                      "__typename": "Bot"
+                    },
+                    "body": "Finding 2720: unchecked input."
+                  },
+                  {
+                    "id": "PRRC_case27comment2721",
+                    "databaseId": 2721,
+                    "author": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    },
+                    "body": "Fixed in abc1234."
+                  },
+                  {
+                    "id": "PRRC_case27comment2722",
+                    "databaseId": 2722,
+                    "author": {
+                      "login": "acme-review-bot",
+                      "__typename": "Bot"
+                    },
+                    "body": "Follow-up 2722: still unchecked on the error path."
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "comments": {
+          "totalCount": 6,
+          "nodes": [
+            {
+              "id": "IC_kwDOcase27comment2703",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "Top-level finding 2703: flaky retry.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2703",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "IC_kwDOcase27comment2705",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "Notice 2705: no further issues.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2705",
+              "lastEditedAt": null,
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "IC_kwDOcase27comment2713",
+              "author": {
+                "login": "copilot-pull-request-reviewer",
+                "__typename": "Bot"
+              },
+              "body": "Top-level finding 2713: flaky retry.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2713",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "IC_kwDOcase27comment2715",
+              "author": {
+                "login": "copilot-pull-request-reviewer",
+                "__typename": "Bot"
+              },
+              "body": "Notice 2715: no further issues.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2715",
+              "lastEditedAt": null,
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "IC_kwDOcase27comment2723",
+              "author": {
+                "login": "acme-review-bot",
+                "__typename": "Bot"
+              },
+              "body": "Top-level finding 2723: flaky retry.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2723",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "IC_kwDOcase27comment2725",
+              "author": {
+                "login": "acme-review-bot",
+                "__typename": "Bot"
+              },
+              "body": "Notice 2725: no further issues.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2725",
+              "lastEditedAt": null,
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "reviews": {
+          "totalCount": 6,
+          "nodes": [
+            {
+              "id": "PRR_kwDOcase27review2704",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "Review summary 2704: two findings.",
+              "state": "COMMENTED",
+              "url": "https://github.com/o/r/pull/1#pullrequestreview-2704",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "PRR_kwDOcase27review2706",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "Review 2706: approved.",
+              "state": "APPROVED",
+              "url": "https://github.com/o/r/pull/1#pullrequestreview-2706",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "PRR_kwDOcase27review2714",
+              "author": {
+                "login": "copilot-pull-request-reviewer",
+                "__typename": "Bot"
+              },
+              "body": "Review summary 2714: two findings.",
+              "state": "COMMENTED",
+              "url": "https://github.com/o/r/pull/1#pullrequestreview-2714",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "PRR_kwDOcase27review2716",
+              "author": {
+                "login": "copilot-pull-request-reviewer",
+                "__typename": "Bot"
+              },
+              "body": "Review 2716: approved.",
+              "state": "APPROVED",
+              "url": "https://github.com/o/r/pull/1#pullrequestreview-2716",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "PRR_kwDOcase27review2724",
+              "author": {
+                "login": "acme-review-bot",
+                "__typename": "Bot"
+              },
+              "body": "Review summary 2724: two findings.",
+              "state": "COMMENTED",
+              "url": "https://github.com/o/r/pull/1#pullrequestreview-2724",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "PRR_kwDOcase27review2726",
+              "author": {
+                "login": "acme-review-bot",
+                "__typename": "Bot"
+              },
+              "body": "Review 2726: approved.",
+              "state": "APPROVED",
+              "url": "https://github.com/o/r/pull/1#pullrequestreview-2726",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

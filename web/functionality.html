@@ -507,7 +507,7 @@
             </article>
             <article class="panel card" role="region" aria-labelledby="lifecycle-watch-heading">
               <h3 class="xg" id="lifecycle-watch-heading">Default PR watch</h3>
-              <p>Watching is the default. It is off only when your original request explicitly says not to watch the PR, or when <code>HIVEMIND_SKIP_PR_WATCH</code> is set. When a script run opened or reused a PR, the overlord runs <code>pr-feedback-remediation</code> with intake <code>watch</code> on the state machine for that PR, a new run with its own run ledger. <code>hivemind:github-review-loop</code> dispatches the <code>github-reviewer</code> to fix, push, reply to, and resolve feedback from the Codex, Copilot, or Claude reviewer bots (<code>reviewer_filter</code> defaults to <code>automated</code>) until approval, merge, close, or an idle hour. <code>max_watch_duration</code> (default <code>3600</code> seconds) is an idle window, re-armed after each remediation cycle. A reviewer question or a high-severity rejection goes to the question gate. The gate asks you only an Ask Set question and takes any other with its recommendation; the answer goes back to the GitHub reviewer. Agents never merge. <code>merge-advised</code> is advice to you.</p>
+              <p>Watching is the default. It is off only when your original request explicitly says not to watch the PR, or when <code>HIVEMIND_SKIP_PR_WATCH</code> is set. When a script run opened or reused a PR, the overlord runs <code>pr-feedback-remediation</code> with intake <code>watch</code> on the state machine for that PR, a new run with its own run ledger. <code>hivemind:github-review-loop</code> dispatches the <code>github-reviewer</code> to fix, push, reply to, and resolve feedback from any automated reviewer bot (<code>reviewer_filter</code> defaults to <code>automated</code>: every Bot account that reviewed or 👍'd the PR, plus those named in <code>HIVEMIND_PR_REVIEWERS</code>, which adds logins and never narrows; <code>github-actions[bot]</code> counts only when listed) until approval, merge, close, or an idle hour. <code>max_watch_duration</code> (default <code>3600</code> seconds) is an idle window, re-armed after each remediation cycle. A reviewer question or a high-severity rejection goes to the question gate. The gate asks you only an Ask Set question and takes any other with its recommendation; the answer goes back to the GitHub reviewer. Agents never merge. <code>merge-advised</code> is advice to you.</p>
             </article>
           </div>
         </div>
@@ -676,6 +676,10 @@
                   <td>Picks the local review tool. Unset: the <code>codex-plugin</code> preset when the Codex plugin is installed, else local review is skipped with a warning in the PR body and final report. <code>codex-plugin</code>: that preset. Otherwise a JSON argv list, written as a string and run with no shell. An element that is exactly <code>{prompt}</code> gets the whole prompt as one argument; with none, the prompt goes on stdin. Examples: <code>["codex","exec","--sandbox","read-only","-"]</code> and <code>["copilot","-p","{prompt}","-s","--no-ask-user","--deny-tool=write","--deny-tool=shell"]</code>. Any other value skips local review. <code>HIVEMIND_LOCAL_REVIEW_MODEL</code> is removed: set the model in the tool's own config, or in your argv list.</td>
                 </tr>
                 <tr>
+                  <td><code>HIVEMIND_PR_REVIEWERS</code></td>
+                  <td>Names more Bot logins for the post-PR watch to treat as automated reviewers, comma- or space-separated, the <code>[bot]</code> suffix optional. It adds to the bots that reviewed or 👍'd the PR and never narrows that set. <code>github-actions[bot]</code> counts only when listed. Use it for a bot that only posts plain PR comments.</td>
+                </tr>
+                <tr>
                   <td><code>HIVEMIND_SKIP_PR_WATCH</code></td>
                   <td>When set to any non-empty value, the overlord never watches PRs after opening them. Unset or empty: the default post-PR watch runs.</td>
                 </tr>
@@ -689,6 +693,7 @@
           <div class="code-panel" role="region" aria-label="Example env block in settings.json" tabindex="0">
             <pre><code><span class="t-dim">{</span>
   <span class="t-key">"env"</span><span class="t-dim">: {</span>
+    <span class="t-str">"HIVEMIND_PR_REVIEWERS"</span><span class="t-dim">: </span><span class="t-hot">"my-review-bot"</span><span class="t-dim">,</span>
     <span class="t-str">"HIVEMIND_SKIP_PR_WATCH"</span><span class="t-dim">: </span><span class="t-hot">"1"</span>
   <span class="t-dim">}</span>
 <span class="t-dim">}</span></code></pre>
