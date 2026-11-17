@@ -332,14 +332,14 @@ The set is per PR and judged on Bot accounts only, through the `is_bot` predicat
 
 `HIVEMIND_PR_REVIEWERS` names more Bot logins, comma- or space-separated, the `[bot]` suffix optional. It only adds to the set and never narrows it. Every listed login is still Bot-gated, so a human account with the same bare login never matches. It covers a bot that only posts plain PR comments. `github-actions[bot]` is in the set only when listed there, and is excluded otherwise even when it submits a review. The `codex-only` `reviewer_filter` mode is retired and rejected at the input gate; use `automated` or `<login>` mode.
 
-The PR-level evidence for the set is two selections on `pullRequest`, read as paginated walks checked through `hivemind_graphql_pages_check` (see [Shell and Parsing Rules](#shell-and-parsing-rules)):
+The PR-level evidence for the set is two selections on `pullRequest`. In `fetch-normalize.sh`, `prefilter.sh` and `react-marker.sh` they are single reads, not paginated walks:
 
 ```graphql
 latestReviews(first: 100) { nodes { author { login __typename } } }
 reactionGroups { content reactors(first: 100) { nodes { __typename ... on Bot { login } ... on User { login } } } }
 ```
 
-`reactionGroups` reactors are typed by GraphQL, so a Bot reactor arrives as `Bot`: verified live 2026-11-17, `chatgpt-codex-connector` on PR 583 returned typed `Bot`. A reactor that is neither a `Bot` nor a `User` selects no `login` and never enters the set. `first: 100` is a page size, not a bound; a reactor list whose `pageInfo` reports more pages is walked to the end.
+`reactionGroups` reactors are typed by GraphQL, so a Bot reactor arrives as `Bot`: verified live 2026-11-17, `chatgpt-codex-connector` on PR 583 returned typed `Bot`. A reactor that is neither a `Bot` nor a `User` selects no `login` and never enters the set. In those three scripts `first: 100` is a bound: they read no further page, and a missing evidence field reads as empty. On a PR with more than 100 review authors or 👍 reactors, a Bot whose only evidence lies past the bound is not in their set; the error only narrows the set, never trusting a wrong author. ADR-0043 (Consequences) records this known limit. The poll (`pr-change-detect-poll.sh`) is different: its `latestReviews` read is a paginated walk checked through `hivemind_graphql_pages_check` (see [Shell and Parsing Rules](#shell-and-parsing-rules)), and its 👍 reactors come from the paginated REST reactions endpoint.
 
 ### Approval signals
 
