@@ -6,13 +6,15 @@
 # single-source-of-truth classification predicate:
 #   plugin/skills/github-review-loop/scripts/fix-history-classify.jq
 # over fixed GraphQL-payload fixtures under tests/fix-history/, and asserts the emitted classified
-# stream equals an expected set. The filter is a PURE function of stdin + --arg login/--arg filter,
-# so every case is deterministic and offline.
+# stream equals an expected set. The filter is a PURE function of stdin + --arg login/--arg filter/
+# --arg reviewers, so every case is deterministic and offline.
 #
-# It also tests the reviewer identity registry the filter includes:
+# It also tests the reviewer identity module the filter includes:
 #   plugin/skills/github-review-loop/scripts/reviewer-identity.jq
-# for registry integrity (unique ids, non-empty logins, approval kind in the closed enum), for the
-# Bot-account truth table of `is_bot` and the predicates gated on it, and for CLOSURE: no registry login and no `[bot]` strip literal may be inlined in a consumer script.
+# through truth tables for each of its defs (configured-reviewer parsing, case folding, the
+# github-actions rule, the Bot gate on configured logins, the filter modes, review approval, the
+# retired filter value), and for CLOSURE: no `[bot]` strip literal and no login-only self compare may
+# be inlined in a consumer script.
 #
 # Mirrors tools/test_shared_libs.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any-
 # fail convention. Read-only: the only writes are scratch files in a disposable tmpdir removed on EXIT.
@@ -21,6 +23,9 @@
 #   ./tools/test_fix_history_classify.sh
 
 set -u
+
+# The suite passes every configured-reviewer value explicitly; an inherited setting must not leak in.
+unset HIVEMIND_PR_REVIEWERS
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
@@ -51,26 +56,28 @@ canon() {
   jq -s -c 'sort_by((.databaseId // -1), (.url // ""), (.thread_id // ""), .surface, .classification)'
 }
 
-# run_case <case> <fixture-basename> <login> <filter> <expected-canonical-json>
+# run_case <case> <fixture-basename> <login> <filter> <expected-canonical-json> [reviewers]
 # Feed the fixture through the filter with the given args, canonicalize, and exact-match against
-# the expected canonical JSON. `-L "$MODULE_DIR"` resolves the filter's `include "reviewer-identity"`.
+# the expected canonical JSON. [reviewers] is the raw configured-reviewer value (default empty).
+# `-L "$MODULE_DIR"` resolves the filter's `include "reviewer-identity"`.
 # A jq failure (filter error / invalid fixture / unresolved include) fails the case loudly.
 run_case() {
-  local case_name="$1" fixture="$2" login="$3" filt="$4" expected="$5"
+  local case_name="$1" fixture="$2" login="$3" filt="$4" expected="$5" reviewers="${6:-}"
   local path="$FIX_DIR/$fixture"
   if [ ! -f "$path" ]; then
     failed "$case_name" "fixture missing: $path"
     return
   fi
   local actual
-  if ! actual="$(jq -c -L "$MODULE_DIR" -f "$FILTER" --arg login "$login" --arg filter "$filt" < "$path" | canon)"; then
-    failed "$case_name" "jq filter failed on fixture $fixture (login=$login filter=$filt)"
+  if ! actual="$(jq -c -L "$MODULE_DIR" -f "$FILTER" --arg login "$login" --arg filter "$filt" \
+      --arg reviewers "$reviewers" < "$path" | canon)"; then
+    failed "$case_name" "jq filter failed on fixture $fixture (login=$login filter=$filt reviewers=$reviewers)"
     return
   fi
   if [ "$actual" = "$expected" ]; then
-    pass "$case_name" "($fixture login=$login filter=$filt)"
+    pass "$case_name" "($fixture login=$login filter=$filt reviewers=$reviewers)"
   else
-    failed "$case_name" "($fixture login=$login filter=$filt)
+    failed "$case_name" "($fixture login=$login filter=$filt reviewers=$reviewers)
     expected: $expected
     actual:   $actual"
   fi
@@ -135,12 +142,12 @@ run_case "case07:review-summary" "case07-review-summary.json" "selfuser" "all" \
 run_case "case08:bot-suffixed-bot-not-self" "case08-bot-normalization.json" "selfuser" "all" \
   '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case08ffffffffffff","id":"PRRC_case08comment800","databaseId":800,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case08ffffffffffff","id":"PRRC_case08comment801","databaseId":801,"url":null,"classification":"handled"}]'
 
-# ── Case 9: reviewer_filter — codex-only vs all on one payload ────────────────────
-# Same payload, two filters. codex-only matches ONLY the Bot-typed chatgpt-codex-connector (900). all
-# matches any non-self author (900 + the User-typed human reviewer 901). Every author node carries
-# `__typename` because the registry modes require a Bot-typed author. No self disposition on the thread → both are
-# FIRST-TIME findings on a never-disposed thread → actionable (per case 4).
-run_case "case09:reviewer-filter-codex-only" "case09-reviewer-filter.json" "selfuser" "codex-only" \
+# ── Case 9: reviewer_filter — automated vs all on one payload ─────────────────────
+# Same payload, two filters. automated matches ONLY the Bot-typed chatgpt-codex-connector (900): its
+# review-thread comment makes it an Automated Reviewer, while the User-typed human reviewer (901) fails
+# the Bot gate. all matches any non-self author (900 + 901). No self disposition on the thread → both
+# are FIRST-TIME findings on a never-disposed thread → actionable (per case 4).
+run_case "case09:reviewer-filter-automated" "case09-reviewer-filter.json" "selfuser" "automated" \
   '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case09gggggggggggg","id":"PRRC_case09comment900","databaseId":900,"url":null,"classification":"actionable"}]'
 run_case "case09:reviewer-filter-all" "case09-reviewer-filter.json" "selfuser" "all" \
   '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case09gggggggggggg","id":"PRRC_case09comment900","databaseId":900,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case09gggggggggggg","id":"PRRC_case09comment901","databaseId":901,"url":null,"classification":"actionable"}]'
@@ -277,35 +284,37 @@ run_case "case17:terminal-defer-no-later-comment" "case17-fix-then-defer-no-late
 run_case "case18:both-markers-one-body-tie" "case18-both-markers-one-body.json" "selfuser" "all" \
   '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case18oooooooooooo","id":"PRRC_case18comment1800","databaseId":1800,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case18oooooooooooo","id":"PRRC_case18comment1802","databaseId":1802,"url":null,"classification":"actionable"}]'
 
-# ── Case 19: registry filter modes over every reviewer identity class ────────────
-# One unresolved thread, no self disposition, so every emitted record is a FIRST-TIME actionable
-# finding and the assertions isolate WHICH authors each filter mode admits:
-#   1900 chatgpt-codex-connector Bot      registry (codex)
-#   1901 copilot-pull-request-reviewer Bot registry (copilot, GraphQL spelling)
-#   1902 Copilot Bot                      registry (copilot, REST spelling)
-#   1903 claude Bot                       registry (claude)
-#   1904 claude User                      HUMAN sharing the claude login; the Bot gate excludes it
-#   1905 dependabot Bot                   Bot outside the registry
-#   1906 github-actions Bot               Bot deliberately excluded from the registry (generic CI)
-#   1907 human-reviewer User              human
-#   1908 selfuser User                    self; stripped by every mode
-# automated → exactly the four registry Bot records. codex-only → 1900 only. all → every non-self
-# author (1900..1907). The legacy `<login>` mode stays type-agnostic: `claude` selects both the Bot
-# (1903) and the human User (1904).
-run_case "case19:automated-registry-bots-only" "case19-automated-reviewers.json" "selfuser" "automated" \
+# ── Case 19: filter modes over every reviewer identity class ─────────────────────
+# One unresolved thread, no self disposition, so every emitted thread record is a FIRST-TIME
+# actionable finding and the assertions isolate WHICH authors each filter mode admits:
+#   1900 chatgpt-codex-connector Bot       review-thread author → Automated Reviewer
+#   1901 copilot-pull-request-reviewer Bot review-thread author → Automated Reviewer
+#   1902 Copilot Bot                       review-thread author (mixed case) → Automated Reviewer
+#   1903 claude Bot                        review-thread author → Automated Reviewer
+#   1904 claude User                       HUMAN sharing the claude login; the Bot gate excludes it
+#   1905 dependabot Bot                    top-level comment only, no review: a status bot, out
+#   1906 github-actions Bot                review-thread author, but the generic CI identity: out
+#                                          unless configured
+#   1907 human-reviewer User               human
+#   1908 selfuser User                     self; stripped by every mode
+# automated → 1900..1903. automated with github-actions configured → also 1906. all → every non-self
+# author (1900..1907). The `<login>` mode stays type-agnostic: `claude` selects both the Bot (1903)
+# and the human User (1904).
+run_case "case19:automated-review-bots-only" "case19-automated-reviewers.json" "selfuser" "automated" \
   '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1900","databaseId":1900,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1901","databaseId":1901,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1902","databaseId":1902,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1903","databaseId":1903,"url":null,"classification":"actionable"}]'
-run_case "case19:codex-only" "case19-automated-reviewers.json" "selfuser" "codex-only" \
-  '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1900","databaseId":1900,"url":null,"classification":"actionable"}]'
+run_case "case19:automated-github-actions-configured" "case19-automated-reviewers.json" "selfuser" "automated" \
+  '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1900","databaseId":1900,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1901","databaseId":1901,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1902","databaseId":1902,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1903","databaseId":1903,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1906","databaseId":1906,"url":null,"classification":"actionable"}]' \
+  "github-actions"
 run_case "case19:all-non-self" "case19-automated-reviewers.json" "selfuser" "all" \
-  '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1900","databaseId":1900,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1901","databaseId":1901,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1902","databaseId":1902,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1903","databaseId":1903,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1904","databaseId":1904,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1905","databaseId":1905,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1906","databaseId":1906,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1907","databaseId":1907,"url":null,"classification":"actionable"}]'
-run_case "case19:legacy-login-type-agnostic" "case19-automated-reviewers.json" "selfuser" "claude" \
+  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase19comment1905","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-1905","classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1900","databaseId":1900,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1901","databaseId":1901,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1902","databaseId":1902,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1903","databaseId":1903,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1904","databaseId":1904,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1906","databaseId":1906,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1907","databaseId":1907,"url":null,"classification":"actionable"}]'
+run_case "case19:login-type-agnostic" "case19-automated-reviewers.json" "selfuser" "claude" \
   '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1903","databaseId":1903,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1904","databaseId":1904,"url":null,"classification":"actionable"}]'
 
 # ── Case 20: self identity is User type + login, never login alone ───────────────
 # The viewer runs as the human User `claude`; the Claude app Bot's bare login is also `claude`.
 # Self is ONLY the User-typed `claude` (module `is_self`). Four unresolved threads plus top-level:
-#   T1 2000 claude Bot finding → emitted (registry Bot), first-time → actionable. A login-only self
-#        key dropped it.
+#   T1 2000 claude Bot finding → emitted (an Automated Reviewer through its review-thread comment),
+#        first-time → actionable. A login-only self key dropped it.
 #   T2 FORGERY: 2010 codex finding; 2011 claude Bot `Fixed in abc1234.`; 2012 claude Bot with the
 #        defer sentinel at byte 0. Neither Bot reply is a self disposition, so 2010 → actionable;
 #        2011 → handled by its OWN body marker; 2012 → actionable (the sentinel is never read off a
@@ -316,53 +325,22 @@ run_case "case19:legacy-login-type-agnostic" "case19-automated-reviewers.json" "
 #        self, so no disposition → 2030 actionable. 2031 is not Bot-typed, so `automated` omits it;
 #        `all` emits it, handled by its own body marker.
 #   Top-level: 2041 claude Bot `Addresses: <2040>` is not a self harvest, so 2040 → actionable and
-#        2041 itself → actionable (a registry Bot comment); 2043 claude User `Addresses: <2042>` is
+#        2041 itself → actionable (an Automated Reviewer's comment); 2043 claude User `Addresses: <2042>` is
 #        the self harvest → 2042 handled, 2043 not emitted.
 run_case "case20:self-identity-automated" "case20-self-identity-login-collision.json" "claude" "automated" \
   '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2040","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2040","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2041","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2041","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2042","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2042","classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq1","id":"PRRC_case20comment2000","databaseId":2000,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2010","databaseId":2010,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2011","databaseId":2011,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2012","databaseId":2012,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq3","id":"PRRC_case20comment2020","databaseId":2020,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq3","id":"PRRC_case20comment2022","databaseId":2022,"url":null,"classification":"followup-after-fix"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq4","id":"PRRC_case20comment2030","databaseId":2030,"url":null,"classification":"actionable"}]'
 run_case "case20:self-identity-all" "case20-self-identity-login-collision.json" "claude" "all" \
   '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2040","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2040","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2041","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2041","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2042","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2042","classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq1","id":"PRRC_case20comment2000","databaseId":2000,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2010","databaseId":2010,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2011","databaseId":2011,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2012","databaseId":2012,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq3","id":"PRRC_case20comment2020","databaseId":2020,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq3","id":"PRRC_case20comment2022","databaseId":2022,"url":null,"classification":"followup-after-fix"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq4","id":"PRRC_case20comment2030","databaseId":2030,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq4","id":"PRRC_case20comment2031","databaseId":2031,"url":null,"classification":"handled"}]'
 
-# ── Case 21: Codex Review Summary, completed with no findings ────────────────────
-# Codex registry Bot top-level comment, body starting with the summary marker, state
-# `code_review.has_any_findings:false` and an unused `security_review` (all null). No self EYES, no
-# `Addresses:` harvest. The parsed state reports no findings on any review entry → handled.
-run_case "case21:codex-summary-no-findings" "case21-codex-summary-no-findings.json" "selfuser" "automated" \
-  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase21comment2100","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2100","classification":"handled"}]'
-
-# ── Case 22: Codex Review Summary, code review still running ─────────────────────
-# State `code_review.status:"running"` with `has_any_findings:true`, so only the running arm can make
-# it handled. A running review has posted no finding yet → handled.
-run_case "case22:codex-summary-running" "case22-codex-summary-running.json" "selfuser" "automated" \
-  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase22comment2200","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2200","classification":"handled"}]'
-
-# ── Case 23: Codex summary WITH findings, and a non-Codex copy of the markers ────
-# 2300 Codex Bot summary: `code_review` clear but `security_review.has_any_findings:true`, so one
-# review entry reports findings → today's rule, no EYES / `Addresses:` → actionable.
-# 2301 human User `mallory` whose body copies both markers with a no-findings state → actionable
-# (the markers are read only off the Codex registry bot account).
-run_case "case23:codex-summary-findings" "case23-codex-summary-findings.json" "selfuser" "all" \
-  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase23comment2300","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2300","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase23comment2301","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2301","classification":"actionable"}]'
-
-# ── Case 24: Codex summary with an unparseable or missing state ──────────────────
-# 2400 Codex Bot summary whose state JSON is truncated (does not parse); 2401 Codex Bot summary with
-# no state marker at all. The parse is total, so the filter does not error; both fall back to
-# today's rule → actionable.
-# 2402-2408 Codex Bot summaries whose state parses to a shape outside the allowlist: an empty object,
-# a completed code_review with no has_any_findings, a non-boolean has_any_findings, a primitive
-# security_review entry, an unknown status, a completed entry with no has_any_findings beside a
-# clear code_review, and a top-level string. None is a known clear shape → actionable.
-run_case "case24:codex-summary-bad-state" "case24-codex-summary-bad-state.json" "selfuser" "automated" \
-  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2400","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2400","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2401","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2401","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2402","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2402","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2403","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2403","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2404","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2404","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2405","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2405","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2406","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2406","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2407","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2407","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase24comment2408","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2408","classification":"actionable"}]'
-
 # ── Case 25: our EYES mark handles noise from every reviewer, no reviewer-specific code ──
 # Three no-finding notices, each with our EYES mark (viewerHasReacted:true) and a self EYES reaction
 # node at 12:00:00Z, none edited after the mark:
-#   2500 Codex Bot top-level "no major issues", lastEditedAt null (never edited).
-#   2501 Bot outside the registry, top-level, edited at 11:59:59Z (one second before the mark).
+#   2500 Codex Bot top-level "no major issues", lastEditedAt null (never edited). Codex is an
+#        Automated Reviewer through its THUMBS_UP on the PR object.
+#   2501 status Bot, top-level only, edited at 11:59:59Z (one second before the mark).
 #   2502 Copilot Bot COMMENTED review "generated no comments", edited at 11:30:00Z.
-# all → all three handled. automated → the registry Bots 2500 and 2502 handled; 2501 is not a
-# registry author, so the filter does not emit it.
+# all → all three handled. automated → the Automated Reviewers 2500 and 2502 handled; 2501 has no
+# review and no THUMBS_UP, so the filter does not emit it.
 run_case "case25:noise-marked-bots-all" "case25-noise-marked-bots.json" "selfuser" "all" \
   '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase25comment2500","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2500","classification":"handled"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase25comment2501","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2501","classification":"handled"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase25review2502","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-2502","classification":"handled"}]'
 run_case "case25:noise-marked-bots-automated" "case25-noise-marked-bots.json" "selfuser" "automated" \
@@ -390,49 +368,63 @@ run_case "case25:noise-marked-bots-automated" "case25-noise-marked-bots.json" "s
 run_case "case26:marked-then-edited" "case26-marked-then-edited.json" "selfuser" "all" \
   '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2600","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2600","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2601","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2601","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2602","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2602","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2603","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2603","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2604","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2604","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2605","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2605","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2607","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2607","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2608","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2608","classification":"handled"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2610","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2610","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2611","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2611","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase26comment2612","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2612","classification":"actionable"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase26review2606","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-2606","classification":"actionable"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase26review2609","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-2609","classification":"handled"}]'
 
-# ── Registry integrity ───────────────────────────────────────────────────────────
-# Each rule is a jq predicate over a registry ARRAY on its input, evaluated with the module
-# included (so `approval_kinds` resolves). It must hold for the real `automated_reviewers` AND be
-# FALSE for a synthetic registry that breaks exactly that rule, proving the predicate bites.
+# ── Case 27: reviewer parity — no product gets its own rule ──────────────────────
+# Three reviewer Bots of different product shapes (chatgpt-codex-connector, base 2700;
+# copilot-pull-request-reviewer, base 2710; a generic acme-review-bot, base 2720) each leave the same
+# items at the same offsets from their base:
+#   +0 thread finding, +1 self `Fixed in <SHA>.`, +2 follow-up → +0 handled, +2 followup-after-fix.
+#   +3 unmarked top-level finding → actionable. +5 top-level notice with our unedited EYES → handled.
+#   +4 unmarked COMMENTED review → actionable. +6 APPROVED review → no record.
+# automated and all give the same stream, and the parity check asserts the three per-bot projections
+# (offset, surface, classification) are identical.
+CASE27_EXPECTED='[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase27comment2703","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2703","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase27comment2705","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2705","classification":"handled"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase27comment2713","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2713","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase27comment2715","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2715","classification":"handled"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase27comment2723","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2723","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase27comment2725","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2725","classification":"handled"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase27review2704","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-2704","classification":"actionable"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase27review2714","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-2714","classification":"actionable"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase27review2724","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-2724","classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case27rrrrrrrrrrr1","id":"PRRC_case27comment2700","databaseId":2700,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case27rrrrrrrrrrr1","id":"PRRC_case27comment2702","databaseId":2702,"url":null,"classification":"followup-after-fix"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case27rrrrrrrrrrr2","id":"PRRC_case27comment2710","databaseId":2710,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case27rrrrrrrrrrr2","id":"PRRC_case27comment2712","databaseId":2712,"url":null,"classification":"followup-after-fix"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case27rrrrrrrrrrr3","id":"PRRC_case27comment2720","databaseId":2720,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case27rrrrrrrrrrr3","id":"PRRC_case27comment2722","databaseId":2722,"url":null,"classification":"followup-after-fix"}]'
+run_case "case27:reviewer-parity-automated" "case27-reviewer-parity.json" "selfuser" "automated" "$CASE27_EXPECTED"
+run_case "case27:reviewer-parity-all" "case27-reviewer-parity.json" "selfuser" "all" "$CASE27_EXPECTED"
+if parity_groups="$(printf '%s' "$CASE27_EXPECTED" | jq -c '
+    map((.databaseId // (.url | sub("^.*[-#]"; "") | tonumber)) as $n
+        | {bot: (($n - 2700) / 10 | floor), row: [($n % 10), .surface, .classification]})
+    | group_by(.bot) | map(map(.row) | sort) | unique | length')" && [ "$parity_groups" = "1" ]; then
+  pass "case27:per-bot-projection-identical" "three reviewer shapes classify identically"
+else
+  failed "case27:per-bot-projection-identical" "per-bot projections differ (distinct groups: ${parity_groups:-error})"
+fi
 
-# registry_rule <case> <jq-predicate-over-registry-array> <violating-registry-json>
-registry_rule() {
-  local case_name="$1" predicate="$2" bad_registry="$3"
-  if ! jq -n -e -L "$MODULE_DIR" "include \"reviewer-identity\"; automated_reviewers | ($predicate)" >/dev/null 2>&1; then
-    failed "$case_name" "real registry violates: $predicate"
-    return
-  fi
-  if jq -n -e -L "$MODULE_DIR" --argjson reg "$bad_registry" "include \"reviewer-identity\"; \$reg | ($predicate)" >/dev/null 2>&1; then
-    failed "$case_name" "predicate did not reject violating registry: $bad_registry"
-    return
-  fi
-  pass "$case_name" "real registry holds; violating registry rejected"
-}
+# ── Case 28: what makes a Bot an Automated Reviewer ──────────────────────────────
+# Evidence rows are review authors, review-thread comment authors, per-author latest review authors
+# and THUMBS_UP reactors on the PR object; HIVEMIND_PR_REVIEWERS adds to them.
+#   2800 coverage-bot Bot, top-level only: a status bot with no review and no THUMBS_UP → out.
+#   2801 thumbs-bot Bot, admitted by its THUMBS_UP on the PR object alone → actionable.
+#   2802 github-actions Bot COMMENTED review (also in latestReviews) → out unless configured.
+#   2803 plain-bot Bot, top-level only → out unless configured.
+#   2804 review-bot Bot review-thread finding → actionable.
+#   2805 plain-bot User (a human holding the configured login) → out even when configured.
+#   2806 eyes-bot Bot whose only PR reaction is EYES, never evidence → out.
+#   2807 latest-bot Bot, evidenced by its latestReviews entry alone → actionable.
+# The THUMBS_UP group also holds a User reactor (human-fan), which the Bot gate drops.
+# Configured `PLAIN-bot[bot], github-actions` (mixed case, suffix, comma and space) adds 2802 and 2803
+# without removing the evidence bots 2801, 2804 and 2807.
+run_case "case28:evidence-default" "case28-reviewer-evidence.json" "selfuser" "automated" \
+  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase28comment2801","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2801","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase28comment2807","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2807","classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case28ssssssssssss","id":"PRRC_case28comment2804","databaseId":2804,"url":null,"classification":"actionable"}]'
+run_case "case28:evidence-configured" "case28-reviewer-evidence.json" "selfuser" "automated" \
+  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase28comment2801","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2801","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase28comment2803","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2803","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase28comment2807","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2807","classification":"actionable"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase28review2802","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-2802","classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case28ssssssssssss","id":"PRRC_case28comment2804","databaseId":2804,"url":null,"classification":"actionable"}]' \
+  "PLAIN-bot[bot], github-actions"
 
-registry_rule "registry:non-empty" \
-  'type == "array" and length > 0' \
-  '[]'
-registry_rule "registry:ids-unique-non-empty" \
-  '[.[].id] | all(.[]; type == "string" and length > 0) and length == (unique | length)' \
-  '[{"id":"codex","logins":["a"],"approval":null},{"id":"codex","logins":["b"],"approval":null}]'
-registry_rule "registry:logins-non-empty-strings" \
-  'all(.[]; (.logins | type == "array" and length > 0) and all(.logins[]; type == "string" and length > 0))' \
-  '[{"id":"codex","logins":[],"approval":null}]'
-registry_rule "registry:logins-unique-across-entries" \
-  '[.[].logins[]] | length == (unique | length)' \
-  '[{"id":"a","logins":["x"],"approval":null},{"id":"b","logins":["x"],"approval":null}]'
-registry_rule "registry:logins-stored-stripped" \
-  'all(.[].logins[]; endswith("[bot]") | not)' \
-  '[{"id":"codex","logins":["chatgpt-codex-connector[bot]"],"approval":null}]'
-registry_rule "registry:approval-in-enum-or-null" \
-  'approval_kinds as $kinds | all(.[]; .approval == null or (.approval as $kind | any($kinds[]; . == $kind)))' \
-  '[{"id":"codex","logins":["a"],"approval":"thumbs-up"}]'
+# ── Case 29: retired Codex summary markers carry no meaning ──────────────────────
+# Codex is an Automated Reviewer through its THUMBS_UP. Each top-level comment starts with the old
+# summary marker and carries an old state comment; the filter reads neither:
+#   2900 completed, no findings, no mark → actionable.
+#   2901 running → actionable.
+#   2902 completed, no findings, our unedited EYES mark → handled by the one handled-marker rule.
+#   2903 same, edited after the mark → actionable.
+#   2904 a human copying the markers → actionable under all; not emitted under automated.
+run_case "case29:summary-markers-inert-automated" "case29-summary-markers-inert.json" "selfuser" "automated" \
+  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase29comment2900","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2900","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase29comment2901","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2901","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase29comment2902","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2902","classification":"handled"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase29comment2903","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2903","classification":"actionable"}]'
+run_case "case29:summary-markers-inert-all" "case29-summary-markers-inert.json" "selfuser" "all" \
+  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase29comment2900","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2900","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase29comment2901","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2901","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase29comment2902","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2902","classification":"handled"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase29comment2903","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2903","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase29comment2904","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2904","classification":"actionable"}]'
 
-# ── Bot-account truth table ──────────────────────────────────────────────────────
-# `is_bot` is the module's Bot-account test: typed `Bot`, OR a raw login ending in the reserved
-# `[bot]` suffix (the REST reactions endpoint types a bot reactor `User`). Each row evaluates one
-# module call with the module included and exact-matches the boolean it must return. A suffix that
-# is not at the end (the tab-forged login) and a bare login without a `Bot` type are NOT bots.
+# ── Identity module truth tables ─────────────────────────────────────────────────
+# Each row evaluates one module call with the module included and exact-matches the JSON it must
+# return.
 
 # identity_row <case> <expected-json> <jq-call-over-the-module>
 identity_row() {
@@ -448,38 +440,103 @@ identity_row() {
   fi
 }
 
-identity_row "is-bot:suffix-user-typed" 'true' 'is_bot("chatgpt-codex-connector[bot]"; "User")'
-identity_row "is-bot:suffix-null-typed" 'true' 'is_bot("chatgpt-codex-connector[bot]"; null)'
-identity_row "is-bot:bare-bot-typed" 'true' 'is_bot("chatgpt-codex-connector"; "Bot")'
+# `is_bot`: typed `Bot`, OR a raw login ending in the reserved `[bot]` suffix (the REST reactions
+# endpoint types a bot reactor `User`). A suffix that is not at the end (the tab-forged login) and a
+# bare login without a `Bot` type are NOT bots.
+identity_row "is-bot:suffix-user-typed" 'true' 'is_bot("review-bot[bot]"; "User")'
+identity_row "is-bot:suffix-null-typed" 'true' 'is_bot("review-bot[bot]"; null)'
+identity_row "is-bot:bare-bot-typed" 'true' 'is_bot("review-bot"; "Bot")'
 identity_row "is-bot:bare-user-typed" 'false' 'is_bot("claude"; "User")'
 identity_row "is-bot:bare-null-typed" 'false' 'is_bot("claude"; null)'
-identity_row "is-bot:tab-forged-suffix" 'false' 'is_bot("chatgpt-codex-connector[bot]\tBot"; "User")'
+identity_row "is-bot:tab-forged-suffix" 'false' 'is_bot("review-bot[bot]\tBot"; "User")'
 identity_row "is-bot:null-login-null-type" 'false' 'is_bot(null; null)'
-identity_row "approver:suffix-user-typed-thumbs-up" 'true' \
-  'reviewer_is_approver("chatgpt-codex-connector[bot]"; "User"; "pr-reaction-thumbs-up")'
-identity_row "approver:bare-user-typed-thumbs-up" 'false' \
-  'reviewer_is_approver("chatgpt-codex-connector"; "User"; "pr-reaction-thumbs-up")'
-identity_row "filter:automated-suffix-user-typed" 'true' \
-  'reviewer_matches_filter("claude[bot]"; "User"; "selfuser"; "automated")'
-identity_row "filter:automated-bare-user-typed" 'false' \
-  'reviewer_matches_filter("claude"; "User"; "selfuser"; "automated")'
 
-# ── CLOSURE: no inlined identity literal in a consumer ───────────────────────────
-# Every registry login (derived from the module, never hard-coded here) and the `[bot]` strip
-# literal must live ONLY in reviewer-identity.jq. A consumer that inlines either is a second source
-# of truth the registry cannot govern.
+# `configured_reviewers`: split on commas and whitespace, empties dropped, one `[bot]` stripped,
+# lowercased.
+identity_row "configured:comma-space-mix" '["a","b","c","d"]' 'configured_reviewers("a, b  c[bot],,D[bot]")'
+identity_row "configured:tab-newline" '["a","b"]' 'configured_reviewers("\ta\nb\n")'
+identity_row "configured:empty" '[]' 'configured_reviewers("")'
+identity_row "configured:separators-only" '[]' 'configured_reviewers(" , ,\t")'
+identity_row "configured:null" '[]' 'configured_reviewers(null)'
+identity_row "configured:bare-suffix-dropped" '[]' 'configured_reviewers("[bot]")'
+identity_row "configured:one-suffix-stripped" '["x[bot]"]' 'configured_reviewers("x[bot][bot]")'
+identity_row "configured:uppercase-folded" '["review-bot"]' 'configured_reviewers("Review-Bot[bot]")'
+
+# `automated_reviewer_set`: Bot evidence rows plus configured logins, lowercased, deduplicated,
+# github-actions only when configured.
+identity_row "set:bot-rows-only" '["a","c"]' \
+  'automated_reviewer_set([{login:"A",type:"Bot"},{login:"b",type:"User"},{login:"c[bot]",type:"User"}]; "")'
+identity_row "set:case-dedupe" '["a"]' \
+  'automated_reviewer_set([{login:"A",type:"Bot"},{login:"a[bot]",type:null}]; "A[bot]")'
+identity_row "set:github-actions-evidence-dropped" '["a"]' \
+  'automated_reviewer_set([{login:"github-actions",type:"Bot"},{login:"a",type:"Bot"}]; "")'
+identity_row "set:github-actions-configured" '["a","github-actions"]' \
+  'automated_reviewer_set([{login:"github-actions",type:"Bot"},{login:"a",type:"Bot"}]; "GitHub-Actions[bot]")'
+identity_row "set:configured-adds-never-narrows" '["a","b"]' \
+  'automated_reviewer_set([{login:"a",type:"Bot"}]; "b")'
+identity_row "set:malformed-rows-ignored" '["a"]' \
+  'automated_reviewer_set([null,5,"x",{login:null,type:"Bot"},{login:7,type:"Bot"},{type:"Bot"},{login:"a",type:"Bot"}]; "")'
+identity_row "set:null-evidence" '["b"]' 'automated_reviewer_set(null; "b")'
+
+# `is_automated_reviewer`: a Bot account whose folded login is in the set.
+identity_row "automated:bot-in-set" 'true' 'is_automated_reviewer("review-bot"; "Bot"; ["review-bot"])'
+identity_row "automated:case-folded" 'true' 'is_automated_reviewer("Review-Bot"; "Bot"; ["review-bot"])'
+identity_row "automated:suffix-user-typed" 'true' 'is_automated_reviewer("review-bot[bot]"; "User"; ["review-bot"])'
+identity_row "automated:user-same-login" 'false' 'is_automated_reviewer("review-bot"; "User"; ["review-bot"])'
+identity_row "automated:bare-null-typed" 'false' 'is_automated_reviewer("review-bot"; null; ["review-bot"])'
+identity_row "automated:bot-not-in-set" 'false' 'is_automated_reviewer("other-bot"; "Bot"; ["review-bot"])'
+identity_row "automated:null-login" 'false' 'is_automated_reviewer(null; "Bot"; ["review-bot"])'
+
+# Bot gate on configured logins: configuring a login never admits a human User holding it.
+identity_row "filter:configured-bot-admitted" 'true' \
+  'reviewer_matches_filter("plain-bot"; "Bot"; "selfuser"; "automated"; automated_reviewer_set([]; "plain-bot"))'
+identity_row "filter:configured-login-user-refused" 'false' \
+  'reviewer_matches_filter("plain-bot"; "User"; "selfuser"; "automated"; automated_reviewer_set([]; "plain-bot"))'
+identity_row "filter:configured-github-actions-admitted" 'true' \
+  'reviewer_matches_filter("github-actions[bot]"; "Bot"; "selfuser"; "automated"; automated_reviewer_set([]; "github-actions"))'
+identity_row "filter:github-actions-unconfigured-refused" 'false' \
+  'reviewer_matches_filter("github-actions"; "Bot"; "selfuser"; "automated"; automated_reviewer_set([{login:"github-actions",type:"Bot"}]; ""))'
+
+# `reviewer_matches_filter` modes.
+identity_row "filter:automated-suffix-user-typed" 'true' \
+  'reviewer_matches_filter("claude[bot]"; "User"; "selfuser"; "automated"; ["claude"])'
+identity_row "filter:automated-bare-user-typed" 'false' \
+  'reviewer_matches_filter("claude"; "User"; "selfuser"; "automated"; ["claude"])'
+identity_row "filter:all-human" 'true' 'reviewer_matches_filter("someone"; "User"; "selfuser"; "all"; [])'
+identity_row "filter:all-self-refused" 'false' 'reviewer_matches_filter("selfuser"; "User"; "selfuser"; "all"; [])'
+identity_row "filter:login-exact" 'true' 'reviewer_matches_filter("review-bot[bot]"; "Bot"; "selfuser"; "review-bot"; [])'
+identity_row "filter:login-case-sensitive" 'false' 'reviewer_matches_filter("Review-Bot"; "Bot"; "selfuser"; "review-bot"; [])'
+identity_row "filter:login-type-agnostic" 'true' 'reviewer_matches_filter("someone"; "User"; "selfuser"; "someone"; [])'
+identity_row "filter:keyword-shadows-login" 'false' 'reviewer_matches_filter("automated"; "User"; "selfuser"; "automated"; [])'
+identity_row "filter:retired-value-matches-nothing" 'false' \
+  'reviewer_matches_filter("chatgpt-codex-connector"; "Bot"; "selfuser"; "codex-only"; ["chatgpt-codex-connector"])'
+
+# `is_review_approval`: APPROVED, or COMMENTED with zero inline comments; null or missing is not.
+identity_row "approval:approved" 'true' 'is_review_approval("APPROVED"; 0)'
+identity_row "approval:approved-with-inline" 'true' 'is_review_approval("APPROVED"; 3)'
+identity_row "approval:commented-no-inline" 'true' 'is_review_approval("COMMENTED"; 0)'
+identity_row "approval:commented-with-inline" 'false' 'is_review_approval("COMMENTED"; 2)'
+identity_row "approval:commented-null-inline" 'false' 'is_review_approval("COMMENTED"; null)'
+identity_row "approval:changes-requested" 'false' 'is_review_approval("CHANGES_REQUESTED"; 0)'
+identity_row "approval:dismissed" 'false' 'is_review_approval("DISMISSED"; 0)'
+identity_row "approval:null-state" 'false' 'is_review_approval(null; 0)'
+
+# `is_retired_filter`: only the exact retired value.
+identity_row "retired:codex-only" 'true' 'is_retired_filter("codex-only")'
+identity_row "retired:case-sensitive" 'false' 'is_retired_filter("Codex-Only")'
+identity_row "retired:automated" 'false' 'is_retired_filter("automated")'
+identity_row "retired:all" 'false' 'is_retired_filter("all")'
+identity_row "retired:null" 'false' 'is_retired_filter(null)'
+
+# ── CLOSURE: no inlined `[bot]` strip literal in a consumer ──────────────────────
+# The `[bot]` strip literal must live ONLY in reviewer-identity.jq. A consumer that inlines it is a
+# second source of truth the module cannot govern.
 #
-# Matching choice:
-#   - logins: `grep -wF` — fixed-string, CASE-SENSITIVE, whole-word. Case-sensitivity keeps the
-#     current `${CLAUDE_PLUGIN_ROOT}` path refs green while `claude` / `Copilot` are caught; the
-#     whole-word bound (hyphen is a non-word char, so hyphenated logins match as a unit) catches the
-#     login in ANY syntactic form — `== "claude"`, `"Copilot"`, a bare bash `= claude` — not only
-#     a quoted jq literal. Prose mentioning a login in these files also trips it; that is
-#     intentional, as the module header is the one place the identity semantics are described.
-#   - strip literal: ERE `\[bot\\*\]` — matches `[bot]` with zero or more backslashes before the
-#     closing bracket, so it catches the bare `[bot]` text AND both the jq-escaped `\\[bot\\]` and
-#     single-escaped `\[bot\]` regex spellings.
-# Both matchers are proven to bite against a scratch canary carrying each forbidden construct, and
+# Matching choice: ERE `\[bot\\*\]` — matches `[bot]` with zero or more backslashes before the
+# closing bracket, so it catches the bare `[bot]` text AND both the jq-escaped `\\[bot\\]` and
+# single-escaped `\[bot\]` regex spellings. Prose mentioning the suffix in these files also trips it;
+# that is intentional, as the module header is the one place the identity semantics are described.
+# The matcher is proven to bite against a scratch canary carrying each forbidden construct, and
 # proven not to over-match the legitimate constructs these files contain today.
 CLOSURE_TARGETS=(
   "$MODULE_DIR/fix-history-classify.jq"
@@ -491,69 +548,48 @@ CLOSURE_TARGETS=(
 )
 BOT_STRIP_ERE='\[bot\\*\]'
 
-REGISTRY_LOGINS=()
-if registry_logins_text="$(jq -n -r -L "$MODULE_DIR" 'include "reviewer-identity"; automated_reviewers[].logins[]')"; then
-  while IFS= read -r registry_login; do
-    [ -n "$registry_login" ] && REGISTRY_LOGINS+=("$registry_login")
-  done <<< "$registry_logins_text"
-fi
-
 # print_closure_hits <file>
-# Print every hit of a registry login or the `[bot]` strip literal in <file>, one per line, as
-# `login=<login>:<lineno>:<text>` or `bot-strip:<lineno>:<text>`.
+# Print every hit of the `[bot]` strip literal in <file>, one per line, as `bot-strip:<lineno>:<text>`.
 print_closure_hits() {
-  local target="$1" login
-  for login in "${REGISTRY_LOGINS[@]}"; do
-    grep -nwF -- "$login" "$target" | sed "s/^/login=$login:/"
-  done
-  grep -nE -- "$BOT_STRIP_ERE" "$target" | sed 's/^/bot-strip:/'
+  grep -nE -- "$BOT_STRIP_ERE" "$1" | sed 's/^/bot-strip:/'
   return 0
 }
 
-if [ "${#REGISTRY_LOGINS[@]}" -eq 0 ]; then
-  failed "closure:logins-derived" "no logins derived from $IDENTITY_MODULE (closure would be vacuous)"
+CANARY_HIT="$WORKDIR/closure-canary-hit.jq"
+printf '%s\n' 'sub("\\[bot\\]$"; "")' 'test("\[bot\]$")' '# strips the [bot] suffix' > "$CANARY_HIT"
+canary_lines="$(wc -l < "$CANARY_HIT" | tr -d ' ')"
+canary_hit_lines="$(print_closure_hits "$CANARY_HIT" | cut -d: -f2 | sort -un | wc -l | tr -d ' ')"
+if [ "$canary_hit_lines" = "$canary_lines" ]; then
+  pass "closure:canary-bites" "every one of $canary_lines forbidden canary lines detected"
 else
-  pass "closure:logins-derived" "${#REGISTRY_LOGINS[@]} registry logins derived from the module"
-
-  CANARY_HIT="$WORKDIR/closure-canary-hit.jq"
-  for registry_login in "${REGISTRY_LOGINS[@]}"; do
-    printf 'select(.author.login == "%s")\n' "$registry_login"
-  done > "$CANARY_HIT"
-  printf '%s\n' 'sub("\\[bot\\]$"; "")' 'test("\[bot\]$")' '# strips the [bot] suffix' >> "$CANARY_HIT"
-  canary_lines="$(wc -l < "$CANARY_HIT" | tr -d ' ')"
-  canary_hit_lines="$(print_closure_hits "$CANARY_HIT" | cut -d: -f2 | sort -un | wc -l | tr -d ' ')"
-  if [ "$canary_hit_lines" = "$canary_lines" ]; then
-    pass "closure:canary-bites" "every one of $canary_lines forbidden canary lines detected"
-  else
-    failed "closure:canary-bites" "detected $canary_hit_lines of $canary_lines forbidden canary lines"
-  fi
-
-  CANARY_CLEAN="$WORKDIR/closure-canary-clean.sh"
-  printf '%s\n' '# ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh' \
-    'REVIEWER_FILTER="codex-only"' 'include "reviewer-identity";' > "$CANARY_CLEAN"
-  canary_clean_hits="$(print_closure_hits "$CANARY_CLEAN")"
-  if [ -z "$canary_clean_hits" ]; then
-    pass "closure:canary-no-overmatch" "legitimate constructs produce no closure hit"
-  else
-    failed "closure:canary-no-overmatch" "false-positive closure hits:
-$canary_clean_hits"
-  fi
-
-  for closure_target in "${CLOSURE_TARGETS[@]}"; do
-    closure_rel="${closure_target#"$REPO_ROOT"/}"
-    if [ ! -f "$closure_target" ]; then
-      failed "closure:$closure_rel" "closure target missing"
-      continue
-    fi
-    closure_hits="$(print_closure_hits "$closure_target")"
-    if [ -z "$closure_hits" ]; then
-      pass "closure:$closure_rel" "no inlined registry login or [bot] strip literal"
-    else
-      failed "closure:$closure_rel" "inlined identity literal(s):
-$closure_hits"
-    fi
-  done
+  failed "closure:canary-bites" "detected $canary_hit_lines of $canary_lines forbidden canary lines"
 fi
+
+CANARY_CLEAN="$WORKDIR/closure-canary-clean.sh"
+printf '%s\n' '# ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh' \
+  'REVIEWER_FILTER="automated"' 'include "reviewer-identity";' > "$CANARY_CLEAN"
+canary_clean_hits="$(print_closure_hits "$CANARY_CLEAN")"
+if [ -z "$canary_clean_hits" ]; then
+  pass "closure:canary-no-overmatch" "legitimate constructs produce no closure hit"
+else
+  failed "closure:canary-no-overmatch" "false-positive closure hits:
+$canary_clean_hits"
+fi
+
+for closure_target in "${CLOSURE_TARGETS[@]}"; do
+  closure_rel="${closure_target#"$REPO_ROOT"/}"
+  if [ ! -f "$closure_target" ]; then
+    failed "closure:$closure_rel" "closure target missing"
+    continue
+  fi
+  closure_hits="$(print_closure_hits "$closure_target")"
+  if [ -z "$closure_hits" ]; then
+    pass "closure:$closure_rel" "no inlined [bot] strip literal"
+  else
+    failed "closure:$closure_rel" "inlined identity literal(s):
+$closure_hits"
+  fi
+done
 
 # ── CLOSURE: no login-only self compare in a consumer ────────────────────────────
 # Self identity is the module's `is_self` (User type + raw login). A consumer that compares an
@@ -587,7 +623,7 @@ fi
 SELF_CANARY_CLEAN="$WORKDIR/self-compare-canary-clean.sh"
 printf '%s\n' 'jq -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER"' \
   '| select(is_self(.author.login; .author.__typename; $login))' \
-  'def matches_filter($a; $t): reviewer_matches_filter($a; $t; $login; $filter);' > "$SELF_CANARY_CLEAN"
+  'def matches_filter($a; $t): reviewer_matches_filter($a; $t; $login; $filter; $reviewer_set);' > "$SELF_CANARY_CLEAN"
 self_canary_clean_hits="$(print_self_compare_hits "$SELF_CANARY_CLEAN")"
 if [ -z "$self_canary_clean_hits" ]; then
   pass "self-compare:canary-no-overmatch" "legitimate \$login uses produce no self-compare hit"

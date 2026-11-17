@@ -823,6 +823,8 @@ This amendment covers https://github.com/brenpike/hivemind/issues/464, the compa
 
 **Recorded decision: a running Codex review keeps the summary handled.** Issue 464 scope item 7 asks that a Codex Review Summary not be actionable on every fetch, and the user confirmed this reading in the answer to the branch's local review question. A Codex Review Summary from the Codex bot account whose state reports `code_review.status` `running` is handled, even when a review entry already reports `has_any_findings` `true`. Bounded impact: the summary carries no finding, because Codex posts each finding as its own review or thread comment, which the classifier reads on its own surface. A clean exit still needs an in-scope approval and the quiet-exit check. Trunk dispatched a summary once and hid its later edits behind `EYES`, so trunk did not wait for Codex either. A summary edited to a findings state that is no longer running is actionable again on the next fetch. A later finding contests this decision, and is a repeat of it, when it asks to treat a running summary as pending or to hold a clean or approval exit while Codex runs.
 
+Superseded by ADR-0043: the Codex summary signal is dropped, and an edited summary re-arms under the one handled-marker rule.
+
 **Measured lengths.** Each length is the JavaScript string length of the committed built script, measured with node, and each prose count is `countProseCharacters` in `tools/build_workflows.mjs`.
 
 | Script | On main at 1672b65 | After issue 464 | Literals after issue 464 | Prose budget |

@@ -1,0 +1,133 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reactionGroups": [
+          {
+            "content": "THUMBS_UP",
+            "reactors": {
+              "totalCount": 1,
+              "nodes": [
+                {
+                  "login": "chatgpt-codex-connector",
+                  "__typename": "Bot"
+                }
+              ]
+            }
+          }
+        ],
+        "reviewThreads": {
+          "totalCount": 0,
+          "nodes": []
+        },
+        "comments": {
+          "totalCount": 5,
+          "nodes": [
+            {
+              "id": "IC_kwDOcase29comment2900",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "<!-- codex-pull-request-review-summary -->\n### Codex Review\n<!-- codex-review-state:v1 {\"code_review\":{\"status\":\"completed\",\"has_any_findings\":false},\"security_review\":{\"status\":null,\"has_any_findings\":null}} -->",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2900",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "IC_kwDOcase29comment2901",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "<!-- codex-pull-request-review-summary -->\n### Codex Review\n<!-- codex-review-state:v1 {\"code_review\":{\"status\":\"running\",\"has_any_findings\":true}} -->",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2901",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "IC_kwDOcase29comment2902",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "<!-- codex-pull-request-review-summary -->\n### Codex Review\n<!-- codex-review-state:v1 {\"code_review\":{\"status\":\"completed\",\"has_any_findings\":false},\"security_review\":{\"status\":null,\"has_any_findings\":null}} -->",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2902",
+              "lastEditedAt": null,
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "IC_kwDOcase29comment2903",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "<!-- codex-pull-request-review-summary -->\n### Codex Review\n<!-- codex-review-state:v1 {\"code_review\":{\"status\":\"completed\",\"has_any_findings\":false},\"security_review\":{\"status\":null,\"has_any_findings\":null}} -->",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2903",
+              "lastEditedAt": "2026-11-10T12:05:00Z",
+              "reactionGroups": [
+                {
+                  "content": "EYES",
+                  "viewerHasReacted": true
+                }
+              ],
+              "reactions": {
+                "nodes": [
+                  {
+                    "content": "EYES",
+                    "createdAt": "2026-11-10T12:00:00Z",
+                    "user": {
+                      "login": "selfuser",
+                      "__typename": "User"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "IC_kwDOcase29comment2904",
+              "author": {
+                "login": "mallory",
+                "__typename": "User"
+              },
+              "body": "<!-- codex-pull-request-review-summary -->\n### Codex Review\n<!-- codex-review-state:v1 {\"code_review\":{\"status\":\"completed\",\"has_any_findings\":false},\"security_review\":{\"status\":null,\"has_any_findings\":null}} -->",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2904",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            }
+          ]
+        },
+        "reviews": {
+          "totalCount": 0,
+          "nodes": []
+        }
+      }
+    }
+  }
+}

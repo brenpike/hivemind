@@ -129,7 +129,7 @@ You → <span class="t-key">Overlord</span>
             <p class="kicker kicker--problem xs">Problem</p>
             <p>Without a built-in review step, code reaches the PR, or production, without being challenged. Adding an external review step is manual work that gets skipped under pressure.</p>
             <p class="kicker kicker--solution xs">Solution</p>
-            <p>Two separate review layers. <strong>Local pre-PR review</strong> needs a review tool, the optional codex companion by default or any review CLI, such as Copilot CLI, set with <code>HIVEMIND_LOCAL_REVIEWER</code>: the <code>local-reviewer</code> runs an adversarial review loop on the branch diff, fixing simple findings and escalating complex ones, before any PR exists. When no reviewer can run, local review is skipped with a warning on the PR. A local review fix that fails its check is undone, with only its own files restored to the last commit. <strong>The post-PR watch</strong> is the default and does not need a local review tool: after opening the PR, the overlord runs <code>github-review-loop</code>, which fixes, pushes, replies to, and resolves actionable feedback from Codex, Copilot, or Claude reviewer bots until approval, merge, or close. Agents never merge.</p>
+            <p>Two separate review layers. <strong>Local pre-PR review</strong> needs a review tool, the optional codex companion by default or any review CLI, such as Copilot CLI, set with <code>HIVEMIND_LOCAL_REVIEWER</code>: the <code>local-reviewer</code> runs an adversarial review loop on the branch diff, fixing simple findings and escalating complex ones, before any PR exists. When no reviewer can run, local review is skipped with a warning on the PR. A local review fix that fails its check is undone, with only its own files restored to the last commit. <strong>The post-PR watch</strong> is the default and does not need a local review tool: after opening the PR, the overlord runs <code>github-review-loop</code>, which fixes, pushes, replies to, and resolves actionable feedback from any automated reviewer bot, such as Codex or Copilot, until approval, merge, or close. Agents never merge.</p>
             <p><strong>Gates hold on one commit.</strong> In a workflow-script run, validation (with its version check) and local review are gates, and the PR step pushes only a commit every configured gate held on. A later commit, such as a validation fix round or a local-review fix, reruns every gate that ended on an earlier commit. The reruns are bounded; at the bound the run opens a draft PR and no longer asks. A gate not configured for the run is listed on the PR.</p>
             <p class="kicker kicker--benefit xs">Benefit</p>
             <p>A review gate built into the flow, not bolted on after the fact. The PR carries the commit the gates held on.</p>
@@ -148,7 +148,7 @@ You → <span class="t-key">Overlord</span>
 Push the commit every gate held on
 PR opened  (watched by default)
  └─▶ <span class="t-key">github-review-loop</span>
-      ├─▶ Codex / Copilot / Claude bot feedback
+      ├─▶ Automated reviewer bot feedback
       ├─▶ Fix, push, reply, resolve
       └─▶ Until approval, merge, or close</code></pre>
           </div>

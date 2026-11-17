@@ -334,7 +334,7 @@ run_suites() {
 #   plugin/skills/_shared/*.sh, tests/brood/**          -> test_shared_libs
 #   plugin/skills/github-review-loop/scripts/*.jq      -> test_fix_history_classify, test_fetch_normalize,
 #                                                         test_shared_libs, test_change_detect_poll,
-#                                                         test_prefilter
+#                                                         test_prefilter, test_react_marker
 #   plugin/skills/github-review-loop/scripts/prefilter.sh, tests/fix-history/*
 #                                      -> test_prefilter
 #   plugin/skills/github-review-loop/scripts/*.sh       -> test_shared_libs (glob-closure test)
@@ -814,6 +814,7 @@ map_path() {
     add_selected "$SUITE_TEST_SHARED" "$p (jq module executed by shared fetch core)"
     add_selected "$SUITE_TEST_CHANGE_DETECT_POLL" "$p (jq module executed by change-detect poll)"
     add_selected "$SUITE_TEST_PREFILTER" "$p (jq module executed by prefilter)"
+    add_selected "$SUITE_TEST_REACT_MARKER" "$p (jq module included by react-marker)"
     matched=1
   fi
 

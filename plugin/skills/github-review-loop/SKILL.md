@@ -27,7 +27,7 @@ Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` whole, `${CLA
 | `pr` | (required) | PR number or URL. |
 | `working_branch` | (required) | Branch the reviewer pushes fixes to. |
 | `base` | (required) | PR base/target branch. |
-| `reviewer_filter` | `automated` | Actionable reviewer identities (`automated` \| `codex-only` \| `all` \| `<author>`). |
+| `reviewer_filter` | `automated` | Actionable reviewer identities (`automated` \| `all` \| `<author>`); `codex-only` is rejected: use `<author>`. |
 | `max_watch_duration` | `3600` | Idle-window seconds per Monitor arm (1h). |
 | `max_remediation_cycles` | `$(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh" floor)` | Max real remediation rounds (findings_resolved ≥ 1). |
 | `poll_interval` | `60` | Seconds between polls. |
@@ -60,7 +60,8 @@ rejected.
 **1. Preflight.** Run `bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/preflight.sh"`
 with `pr`, `working_branch`, `base` as positional args. Any `PREFLIGHT_ERROR=`
 line or non-zero exit → terminal `blocked`. Confirm git state is not unsafe per
-`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State).
+`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State). A `codex-only`
+`reviewer_filter` is retired: terminal `blocked`; point the user to `<author>` mode.
 
 **2. Capture baseline.** Before cycle 0 dispatches anything, capture the poll's
 baseline seed:
@@ -109,12 +110,11 @@ token, so carrying a seed forward carries its kind. The kind decides whether an
 in-scope reviewer approval that predates the arm surfaces: `initial` (step 2) yes,
 so it fires `REVIEWER_APPROVED` on the first poll; `re-arm` (step 5) no, because the
 reviewer pass about to run consumes that state, so a stale approval predating the
-pass must never re-fire. The two capture sites of the Seed-Advance invariant map
-one-to-one onto the two kinds.
+pass must never re-fire.
 
 **Seed-Advance invariant.** The baseline seed advances only where a reviewer pass is
 about to consume the state it snapshots. There are exactly two capture sites: step
-2, before cycle 0, and step 5, before a dispatch. There is no third. The QUIET-EXIT
+2, before cycle 0, and step 5, before a dispatch. The QUIET-EXIT
 CHECK (step 6) is not a capture site: `--check` reads a pending seed, prints no seed,
 and leaves the baseline where it was. An arm boundary (step 4) and a post-dispatch
 re-arm (step 6) are not capture sites: each must reuse the seed it already carries,
@@ -241,15 +241,12 @@ oscillation guard and never a quiet window); any reviewer `planner-escalation` /
 `root-cluster-suspected` / `merge-advised`; PR merged or closed; in-scope reviewer
 approval with nothing actionable remaining, confirmed by the QUIET-EXIT CHECK (step
 6). Cycle arithmetic, ceiling, terminal-vs-cycle, and `same-finding-repeat` mapping:
-`${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`. Multi-token
-precedence order:
-`${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/exit-precedence.sh`.
+`${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`.
 
 No local ledger is persisted: GitHub is the ledger, and its handled markers make
 re-invocation idempotent on restart. The markers (a `Fixed in <SHA>` reply, a
-`<!-- hivemind-defer-v1 -->` defer reply, an `EYES` reaction from
-`${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/react-marker.sh`, a
-findings-free Codex Review Summary) and their signal contract:
+`<!-- hivemind-defer-v1 -->` defer reply and an `EYES` reaction from
+`${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/react-marker.sh`) and their signal contract:
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/fix-history-classify.jq`
 (header §1).
 
@@ -270,7 +267,7 @@ Seen comments | New actionable comments); `Routed: github-reviewer: <count>`;
 ## Safety
 
 - Never merge, close, or approve PRs.
-- Never request external review or re-review.
+- Never request a review or re-review. A reviewer that needs a request is set up in the repo or requested by the user; otherwise the watch ends through its idle window.
 - Do not start a second Monitor.
 - Never wrap the poll in an `until`/`while`/`grep -q EXIT=` loop: the Monitor is the wait primitive; read its emitted lines directly.
 - Never claim the watch is still active in a returned report: a returned run reports `Monitoring: stopped`.

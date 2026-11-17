@@ -22,7 +22,7 @@ mode: fix
 pr: <number or URL>
 working_branch: <branch>
 base: <branch>
-reviewer_filter: automated | codex-only | all | <author>  # optional; default automated
+reviewer_filter: automated | all | <author>  # optional; default automated
 target: <comment URL or ID>  # optional; absent = all unresolved
 user_answer:  # optional; the user's answer to a question this review asked
   candidate_url: <URL of the candidate the question was about>

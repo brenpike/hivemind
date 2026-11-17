@@ -1,0 +1,188 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reactionGroups": [
+          {
+            "content": "THUMBS_UP",
+            "reactors": {
+              "totalCount": 2,
+              "nodes": [
+                {
+                  "login": "thumbs-bot",
+                  "__typename": "Bot"
+                },
+                {
+                  "login": "human-fan",
+                  "__typename": "User"
+                }
+              ]
+            }
+          },
+          {
+            "content": "EYES",
+            "reactors": {
+              "totalCount": 1,
+              "nodes": [
+                {
+                  "login": "eyes-bot",
+                  "__typename": "Bot"
+                }
+              ]
+            }
+          }
+        ],
+        "latestReviews": {
+          "nodes": [
+            {
+              "state": "COMMENTED",
+              "author": {
+                "login": "github-actions",
+                "__typename": "Bot"
+              }
+            },
+            {
+              "state": "APPROVED",
+              "author": {
+                "login": "latest-bot",
+                "__typename": "Bot"
+              }
+            }
+          ]
+        },
+        "reviewThreads": {
+          "totalCount": 1,
+          "nodes": [
+            {
+              "id": "PRRT_case28ssssssssssss",
+              "isResolved": false,
+              "comments": {
+                "totalCount": 1,
+                "nodes": [
+                  {
+                    "id": "PRRC_case28comment2804",
+                    "databaseId": 2804,
+                    "author": {
+                      "login": "review-bot",
+                      "__typename": "Bot"
+                    },
+                    "body": "Review bot finding: missing guard."
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "comments": {
+          "totalCount": 6,
+          "nodes": [
+            {
+              "id": "IC_kwDOcase28comment2800",
+              "author": {
+                "login": "coverage-bot",
+                "__typename": "Bot"
+              },
+              "body": "Coverage report: 91% (+0.2%).",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2800",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "IC_kwDOcase28comment2801",
+              "author": {
+                "login": "thumbs-bot",
+                "__typename": "Bot"
+              },
+              "body": "Thumbs bot: looks fine to me.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2801",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "IC_kwDOcase28comment2803",
+              "author": {
+                "login": "plain-bot",
+                "__typename": "Bot"
+              },
+              "body": "Plain bot: please split this function.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2803",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "IC_kwDOcase28comment2805",
+              "author": {
+                "login": "plain-bot",
+                "__typename": "User"
+              },
+              "body": "Human named plain-bot: drive-by nit.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2805",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "IC_kwDOcase28comment2806",
+              "author": {
+                "login": "eyes-bot",
+                "__typename": "Bot"
+              },
+              "body": "Eyes bot: taking a look.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2806",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            },
+            {
+              "id": "IC_kwDOcase28comment2807",
+              "author": {
+                "login": "latest-bot",
+                "__typename": "Bot"
+              },
+              "body": "Latest bot: one more nit.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2807",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            }
+          ]
+        },
+        "reviews": {
+          "totalCount": 1,
+          "nodes": [
+            {
+              "id": "PRR_kwDOcase28review2802",
+              "author": {
+                "login": "github-actions",
+                "__typename": "Bot"
+              },
+              "body": "CI review step: lint warnings found.",
+              "state": "COMMENTED",
+              "url": "https://github.com/o/r/pull/1#pullrequestreview-2802",
+              "lastEditedAt": null,
+              "reactionGroups": [],
+              "reactions": {
+                "nodes": []
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

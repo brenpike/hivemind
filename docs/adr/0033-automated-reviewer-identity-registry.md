@@ -1,6 +1,6 @@
 # Automated reviewer identity is one Bot-gated registry, and the default filter is every registered reviewer
 
-**Status:** accepted — 2026-10-01
+**Status:** accepted — 2026-10-01; superseded in part by ADR-0043 (registry, codex-only, per-reviewer approval kinds)
 
 ## Context
 

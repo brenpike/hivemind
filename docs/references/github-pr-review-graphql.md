@@ -20,7 +20,7 @@ Resolvable pull request review threads are GraphQL objects. Do not try to resolv
 - [Surface-to-Delivery Contract](#surface-to-delivery-contract) — canonical mapping of feedback surface to mutation(s) used
 - [Reaction Marker](#reaction-marker) — self-authored `EYES` reaction that marks a fixed, deferred or noise non-thread surface handled while it is unchanged since marked
 - [Author Filtering](#author-filtering) — `reviewer_filter` modes, the Bot-type + login identity rule for scoping feedback to reviewer identities, and the User-type + login self rule
-- [Reviewer Approval Detection](#reviewer-approval-detection) — in-scope automated-reviewer approval signals (paginated PR 👍 reaction lookup, paginated per-author `latestReviews` APPROVED lookup)
+- [Reviewer Approval Detection](#reviewer-approval-detection) — the per-PR Automated Reviewer set and the three approval signals (paginated PR 👍 reaction lookup, paginated per-author `latestReviews` lookup for `APPROVED` and comment-free `COMMENTED`)
 
 ## Shell and Parsing Rules
 
@@ -194,7 +194,7 @@ All queries must apply both filters before yielding results as actionable feedba
 
 The Fetch Review Threads (unresolved summary output) and Fetch Top-Level PR Comments templates apply both filters inline. The Fetch Reviews and Fetch Thread Comments (Paginated) templates return raw nodes — consuming agents must apply both filters to their results before yielding as actionable feedback. For Fetch Reviews, also filter to `state` values `CHANGES_REQUESTED` or `COMMENTED`.
 
-An `APPROVED` review is never actionable feedback, and these filters do not detect approval. Approval is per reviewer: an `APPROVED` review state is approval only from a reviewer whose approval kind is `review-approved` (Copilot); Codex never files an `APPROVED` review — its approval is a 👍 reaction on the PR object. Both are scoped by the active `reviewer_filter` (see [Reviewer Approval Detection](#reviewer-approval-detection)).
+An `APPROVED` review is never actionable feedback, and these filters do not detect approval. Approval is the same three signals for every Automated Reviewer: its latest review is `APPROVED`, its latest review is `COMMENTED` with no inline review comments, or it left a 👍 on the PR object. All are scoped by the active `reviewer_filter` (see [Reviewer Approval Detection](#reviewer-approval-detection)).
 
 ## Reply to Review Thread
 
@@ -281,7 +281,7 @@ mutation($nodeId: ID!) {
 
 The removal's proof: gh exits 0, the response check passes, and `.data.removeReaction.reactionGroups` is an array with no `EYES` group whose `viewerHasReacted` is true. Without that proof the script fails `react-failed` and sends no `addReaction`. A duplicate `addReaction` is never relied on: it would keep the old reaction and its old `createdAt`.
 
-**Noise mode.** `react-marker.sh --noise "$reviewer_filter" NODE_ID SURFACE CANDIDATE_URL` marks a comment or review skipped as noise. After the PR binding, the node's GitHub-reported author must pass `is_bot` and `reviewer_matches_filter` against the `--noise` value, both from `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq`. A human, a Bot outside the filter, or a null author is refused with no mutation sent. The check reads only the author, never the body or URL. Fix mode makes no author check, so a human's fixed comment can be marked.
+**Noise mode.** `react-marker.sh --noise "$reviewer_filter" NODE_ID SURFACE CANDIDATE_URL` marks a comment or review skipped as noise. After the PR binding, the node's GitHub-reported author must pass `is_bot` and `reviewer_matches_filter` against the `--noise` value, both from `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq`; the filter is judged against the per-PR Automated Reviewer set (see [Reviewer Approval Detection](#reviewer-approval-detection)). A human, a Bot outside the filter, or a null author is refused with no mutation sent. The check reads only the author, never the body or URL. Fix mode makes no author check, so a human's fixed comment can be marked.
 
 New reason tokens: `missing-value-for-noise` (`--noise` with no value), `missing-identity-module` (noise mode without `reviewer-identity.jq`, before any gh call), `noise-author-refused`. A failed fixed or deferred mark blocks the reviewer with `marker-write-failed`. A failed noise mark leaves the candidate unmarked and never blocks.
 
@@ -301,18 +301,18 @@ reactionGroups { content viewerHasReacted } lastEditedAt reactions(content: EYES
 
 Both times must match `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$` and compare as strings. Equal times are not handled. A missing `lastEditedAt` key, no self `EYES` reaction node, or a malformed time is not handled; the surface stays actionable. So a reviewer that edits a marked comment in place, adding findings to an old body, makes it actionable again. The `reactions` page holds the last 20 `EYES` reactions; a self reaction outside it reads as absent, which fails toward actionable. `fix-history-classify.jq` owns the rule.
 
-`viewerHasReacted` is scoped to the authenticated `gh` viewer (OUR identity), and the mark time is read only from a self reaction node. So a human or Codex reacting with the same 👀 emoji from ANOTHER account never false-positives our handled signal and cannot refresh our mark past an edit.
+`viewerHasReacted` is scoped to the authenticated `gh` viewer (OUR identity), and the mark time is read only from a self reaction node. So a human or a bot reacting with the same 👀 emoji from ANOTHER account never false-positives our handled signal and cannot refresh our mark past an edit.
 
-The legacy `Addresses: <url>` harvest, the thread `Fixed in` and defer dispositions, and the Codex summary signal are unchanged; the edit gate covers only the `EYES` mark on `toplevel` and `review`.
+The legacy `Addresses: <url>` harvest and the thread `Fixed in` and defer dispositions are unchanged; the edit gate covers only the `EYES` mark on `toplevel` and `review`. No reviewer-product summary signal exists: a summary comment a reviewer edits in place re-arms under this one rule (ADR-0043).
 
 ### Disambiguation — two different `EYES` subjects
 
-The `EYES` marker here is OUR self-authored reaction on a per-COMMENT / per-REVIEW node. It is a DISJOINT subject from the 👀 reaction noted in [Reviewer Approval Detection](#reviewer-approval-detection), which is Codex's reaction on the PR OBJECT meaning "still running" — never approval. The two share an emoji but never the same subject:
+The `EYES` marker here is OUR self-authored reaction on a per-COMMENT / per-REVIEW node. It is a DISJOINT subject from any 👀 (`eyes`) reaction a reviewer bot leaves on the PR OBJECT. The two share an emoji but never the same subject:
 
 - **This marker:** `EYES` reaction on an `IssueComment` / `PullRequestReview` node, authored by our viewer, detected via `reactionGroups { content viewerHasReacted }` and the self reaction's `createdAt` on that node → surface handled while unchanged since marked.
-- **Codex "still running" (existing):** `eyes` reaction on the PR object, authored by Codex, detected via the REST reactions endpoint → never approval.
+- **A reviewer's `eyes` on the PR object:** authored by a reviewer bot, detected via the REST reactions endpoint or the PR-level `reactionGroups` evidence selection → never approval, and the approval lookup's `+1` filter excludes it. The 👀 is not read as a "still running" signal either (ADR-0043).
 
-A reader must not conflate them: per-node viewer-scoped handled marker vs PR-object Codex-authored progress signal.
+A reader must not conflate them: per-node viewer-scoped handled marker vs PR-object reviewer-authored reaction.
 
 ## Author Filtering
 
@@ -320,16 +320,40 @@ Agents read this section, so it lives in the installed plugin: `${CLAUDE_PLUGIN_
 
 ## Reviewer Approval Detection
 
-An automated reviewer's approval is the signal that lets a watched PR end cleanly. Each registry entry in `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq` declares its approval kind. Approval counts only from an approver of that kind that is a Bot account per the module's `is_bot` that is also in scope under the active `reviewer_filter`, so a filtered-out reviewer never ends the loop it was filtered out of.
+An automated reviewer's approval is the signal that lets a watched PR end cleanly. No reviewer product is named in code: one rule set covers every Automated Reviewer (ADR-0043, which supersedes the registry and per-reviewer approval kinds of ADR-0033). Products appear below only as examples.
 
-| Approval kind | Reviewer | Signal |
-|---------------|----------|--------|
-| `pr-reaction-thumbs-up` | Codex | a 👍 (`+1`) reaction on the PR object |
-| `review-approved` | Copilot | its per-author `latestReviews` entry has `state` `APPROVED` |
+### Automated Reviewer set
 
-Claude declares no approval kind; a Claude-reviewed loop ends through the idle watch window, never through an approval signal. Approval never overrides open feedback: while unresolved non-self actionable items remain, the PR is not clean.
+The set is per PR and judged on Bot accounts only, through the `is_bot` predicate in `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq`. A Bot is in the set when any of these holds:
 
-### PR 👍 reaction (`pr-reaction-thumbs-up`)
+- it authored a review, or a review-thread comment, on the PR;
+- it holds an entry in the PR's `latestReviews` connection;
+- it left a 👍 (`THUMBS_UP`) reaction on the PR object.
+
+`HIVEMIND_PR_REVIEWERS` names more Bot logins, comma- or space-separated, the `[bot]` suffix optional. It only adds to the set and never narrows it. Every listed login is still Bot-gated, so a human account with the same bare login never matches. It covers a bot that only posts plain PR comments. `github-actions[bot]` is in the set only when listed there, and is excluded otherwise even when it submits a review. The `codex-only` `reviewer_filter` mode is retired and rejected at the input gate; use `automated` or `<login>` mode.
+
+The PR-level evidence for the set is two selections on `pullRequest`, read as paginated walks checked through `hivemind_graphql_pages_check` (see [Shell and Parsing Rules](#shell-and-parsing-rules)):
+
+```graphql
+latestReviews(first: 100) { nodes { author { login __typename } } }
+reactionGroups { content reactors(first: 100) { nodes { __typename ... on Bot { login } ... on User { login } } } }
+```
+
+`reactionGroups` reactors are typed by GraphQL, so a Bot reactor arrives as `Bot`: verified live 2026-11-17, `chatgpt-codex-connector` on PR 583 returned typed `Bot`. A reactor that is neither a `Bot` nor a `User` selects no `login` and never enters the set. `first: 100` is a page size, not a bound; a reactor list whose `pageInfo` reports more pages is walked to the end.
+
+### Approval signals
+
+Approval counts only from an Automated Reviewer in scope under the active `reviewer_filter`, so a filtered-out reviewer never ends the loop it was filtered out of. Any one signal is a Reviewer Approval:
+
+| Signal | Evidence |
+|--------|----------|
+| latest review `APPROVED` | the author's `latestReviews` entry has `state` `APPROVED` |
+| latest review `COMMENTED`, no inline comments | the author's `latestReviews` entry has `state` `COMMENTED` and `comments.totalCount == 0` |
+| 👍 on the PR object | a `+1` reaction on the PR from the Bot |
+
+A 👍 from any Bot other than `github-actions[bot]` also makes that Bot an Automated Reviewer, so a clean-PR 👍 ends the watch with no review and no configuration. Review text is never read for approval. Approval never overrides open feedback: while unresolved non-self actionable items remain, the PR is not clean. A reviewer that posts no review and no 👍 leaves the watch to end through its idle window; the loop never requests a review.
+
+### PR 👍 reaction
 
 Read the paginated REST reactions endpoint so the approver's reaction is found even when the PR has more than one page of reactions. The `gh --jq` filter is transport only: it emits one JSON object `{login, type}` per `+1` reaction, carrying `user.type` verbatim, and makes no identity decision. REST reports a bot reactor typed `User`, so the transport never reads or rewrites `type`; the module's `is_bot` decides Bot-ness from the type or the reserved `[bot]` login suffix.
 
@@ -338,13 +362,13 @@ gh api --paginate "repos/OWNER/REPO/issues/PR_NUMBER/reactions" \
   --jq '.[] | select(.content == "+1") | {login: .user.login, type: .user.type} | tojson'
 ```
 
-Each row is `tojson`-encoded because `gh` prints a string result raw and uncolored, one per line, while an object result may be colorized; the encoded row is plain JSON text whatever the output stream. The rows are JSON values, parsed by jq, never split: slurp every row from every page into one array (`jq -s`) and match them all at once through the module's `reviewer_is_approver` (kind `pr-reaction-thumbs-up`) and `reviewer_matches_filter` predicates, which decide Bot-ness through `is_bot`. No delimiter is ever cut out of a row, so no byte of a login can be read as a field boundary or forge the account type. Empty output slurps to an empty array (no approval); a row that is not JSON is a jq error and fails the lookup rather than reading as no approval.
+Each row is `tojson`-encoded because `gh` prints a string result raw and uncolored, one per line, while an object result may be colorized; the encoded row is plain JSON text whatever the output stream. The rows are JSON values, parsed by jq, never split: slurp every row from every page into one array (`jq -s`) and match them all at once through the module's approver and `reviewer_matches_filter` predicates, which decide Bot-ness through `is_bot`. No delimiter is ever cut out of a row, so no byte of a login can be read as a field boundary or forge the account type. Empty output slurps to an empty array (no approval); a row that is not JSON is a jq error and fails the lookup rather than reading as no approval.
 
-REST content `+1` is the 👍 reaction. The 👀 `eyes` reaction (REST content `eyes`) is Codex's "still running" signal on the PR object — never treat it as approval (the `+1` filter already excludes it).
+REST content `+1` is the 👍 reaction. The 👀 `eyes` reaction (REST content `eyes`) is never approval (the `+1` filter already excludes it).
 
-### APPROVED review (`review-approved`)
+### Latest review (`APPROVED` or comment-free `COMMENTED`)
 
-Read the PR's `latestReviews` connection. GitHub keeps one entry per author: that author's latest submitted review, never a pending one. Approval fires when some entry has `state` `APPROVED` and its author passes the module's `reviewer_is_approver` (kind `review-approved`) and `reviewer_matches_filter` predicates.
+Read the PR's `latestReviews` connection. GitHub keeps one entry per author: that author's latest submitted review, never a pending one. Approval fires when some entry is `APPROVED`, or is `COMMENTED` with `comments.totalCount == 0`, and its author passes the module's approver and `reviewer_matches_filter` predicates. Verified live 2026-11-17: `latestReviews` returned a bot `COMMENTED` review with its `comments.totalCount` (PR 566).
 
 ```bash
 gh api graphql --paginate \
@@ -357,15 +381,13 @@ query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
     pullRequest(number: $pr) {
       latestReviews(first: 100, after: $endCursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { state author { login __typename } }
+        nodes { state author { login __typename } comments { totalCount } }
       }
     }
   }
 }'
 ```
 
-Because an author holds one entry, a later `COMMENTED`, `CHANGES_REQUESTED`, or `DISMISSED` review from the same approver supersedes its earlier `APPROVED`, which then never counts. Never rebuild an approver's latest review from the `reviews` history (see [Fetch Reviews](#fetch-reviews)): a bounded page of that history can hold neither the approval nor the review that superseded it, so a verdict rebuilt from it would depend on how many reviews the PR has.
+Because an author holds one entry, a later `CHANGES_REQUESTED` or `DISMISSED` review, or a `COMMENTED` review with inline comments, from the same approver supersedes its earlier approval, which then never counts. Never rebuild an approver's latest review from the `reviews` history (see [Fetch Reviews](#fetch-reviews)): a bounded page of that history can hold neither the approval nor the review that superseded it, so a verdict rebuilt from it would depend on how many reviews the PR has.
 
-`first: 100` is a page size, not a bound. `gh api graphql --paginate` passes each page's `pageInfo.endCursor` back as `$endCursor` and walks until `hasNextPage` is false, so every entry is read however many distinct reviewers the PR has. `gh` follows only the first `pageInfo` in a response, so the query holds exactly one paginated connection. The walk carries no `--jq`: a `--jq` filter runs on an errored page and hides the failure. Capture the raw pages, check every page through `hivemind_graphql_pages_check` (see [Shell and Parsing Rules](#shell-and-parsing-rules)), then extract the rows locally with `jq -c '.data.repository.pullRequest.latestReviews.nodes[] | {state, login: .author.login, type: .author.__typename}'`: one `{state, login, type}` object per entry on every page, no identity decision. Slurp every row from every page into one array (`jq -s`) and judge approval once over the whole array. A successful walk of an empty connection slurps to an empty array (no approval). A failed page, a response carrying GraphQL errors (including a message-less error object, on which `gh` exits 0), or a null or missing `latestReviews` connection fails the read; never default it to empty or read it as not-approved.
-
-Codex never files an `APPROVED` review. When the reviewer's `APPROVED` capability is unavailable or not opted into, this kind never fires and the loop ends through the watch window instead.
+`first: 100` is a page size, not a bound. `gh api graphql --paginate` passes each page's `pageInfo.endCursor` back as `$endCursor` and walks until `hasNextPage` is false, so every entry is read however many distinct reviewers the PR has. `gh` follows only the first `pageInfo` in a response, so the query holds exactly one paginated connection. The walk carries no `--jq`: a `--jq` filter runs on an errored page and hides the failure. Capture the raw pages, check every page through `hivemind_graphql_pages_check` (see [Shell and Parsing Rules](#shell-and-parsing-rules)), then extract the rows locally with `jq -c '.data.repository.pullRequest.latestReviews.nodes[] | {state, login: .author.login, type: .author.__typename, comments: .comments.totalCount}'`: one `{state, login, type, comments}` object per entry on every page, no identity decision. Slurp every row from every page into one array (`jq -s`) and judge approval once over the whole array. A successful walk of an empty connection slurps to an empty array (no approval). A failed page, a response carrying GraphQL errors (including a message-less error object, on which `gh` exits 0), or a null or missing `latestReviews` connection fails the read; never default it to empty or read it as not-approved.

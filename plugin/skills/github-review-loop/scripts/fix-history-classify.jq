@@ -16,7 +16,7 @@
 # and the single LATEST disposition by databaseId governs every comment in that
 # thread (see Classification labels in §3).
 #
-# This is a PURE function of stdin + two --arg values. It performs NO network
+# This is a PURE function of stdin + three --arg values. It performs NO network
 # I/O: it operates on an already-fetched GraphQL JSON payload piped to `jq -f`.
 # No `env`, no shelling out, no `input`/`inputs`, no side effects.
 #
@@ -52,7 +52,7 @@
 # an unedited mark, or one placed after the last edit, keeps it handled.
 # This is VIEWER-SCOPED: `viewerHasReacted` is true only for the authenticated
 # gh viewer's OWN reaction, and the mark time is read only off a self reaction
-# node, so a human or Codex reacting 👀 (EYES) from another account does NOT
+# node, so a human or a reviewer bot reacting 👀 (EYES) from another account does NOT
 # false-positive as handled and cannot refresh our mark past an edit.
 # `EYES` is the single marker constant emitted by react-marker.sh's addReaction.
 # The `reactions` page is bounded: a self reaction outside the fetched page
@@ -70,36 +70,15 @@
 # set). Either signal — self EYES reaction OR legacy `Addresses:` harvest — marks
 # a non-thread node handled.
 #
-# CODEX SUMMARY HANDLED SIGNAL (toplevel only): Codex keeps one Review Summary
-# comment per PR and edits it in place. Such a comment is ALSO `handled` when ALL
-# of these hold:
-#   - its author is the Codex registry bot account (reviewer-identity.jq, the
-#     `codex-only` filter mode, so a Bot account per `is_bot` and never self);
-#   - its body STARTS with `<!-- codex-pull-request-review-summary -->`;
-#   - it carries a `<!-- codex-review-state:v1 {json} -->` state whose JSON parses
-#     to an object with a `code_review` object; and
-#   - either `code_review.status == "running"`, or `code_review.status ==
-#     "completed"` and every review entry of the object (`code_review`,
-#     `security_review`, ...) is an object that is completed with
-#     `has_any_findings == false`, or unused with `status` and `has_any_findings`
-#     both present and null. This is an allowlist of known shapes: any other
-#     shape (an empty object, a missing or non-boolean `has_any_findings`, an
-#     unknown status, a primitive entry) is not handled.
-# The summary itself carries no finding: Codex posts each finding as its own
-# review or thread comment, which this filter classifies on its own surface.
-# A running code review keeps the summary handled even when findings are already
-# reported, by the user's decision recorded in
-# docs/adr/0037-standard-delivery-on-script-engine.md, Amendment 2026-10-27:
-# workflow cost outside the planner (issue 464), "Recorded decision: a running
-# Codex review keeps the summary handled".
-# A summary whose state is missing, does not parse, has an unexpected shape, or
-# reports findings falls back to the two signals above (self EYES or `Addresses:`), else actionable.
-# The parse is total (`try`/`catch`), so a malformed state never errors the
-# filter. The same markers from any other author (a human, another bot, or any
-# account that is not a Bot per `is_bot`) stay actionable: the markers alone are
-# forgeable, the bot account is not. The state is re-read on every fetch, so
-# a summary edited in place to a findings state turns actionable again unless a
-# self EYES or `Addresses:` signal covers it.
+# AUTOMATED REVIEWER SET: the `automated` filter mode matches an author only
+# when it is a Bot account in the Automated Reviewer set. The set is derived
+# ONCE per payload from the evidence fields in §2 (per-author latest review
+# authors, review authors, review-thread comment authors, and the reactors of
+# the pull request's THUMBS_UP reaction group) plus the configured logins in
+# --arg reviewers, by the module's `automated_reviewer_set`. Every evidence
+# field is read null-safe: an absent or null field is no evidence, never a
+# runtime error, because a consumer that turns a filter error into an empty
+# record stream would read an errored payload as a clean PR.
 #
 # 2. INPUT CONTRACT (exact GraphQL fields read)
 # ---------------------------------------------
@@ -145,18 +124,31 @@
 #       .reactions(content: EYES).nodes[]
 #           { content createdAt user { login __typename } }
 #                                  # self EYES createdAt = mark time (§1)
+#   EVIDENCE fields (AUTOMATED REVIEWER SET in §1; each optional, null-safe):
+#   .data.repository.pullRequest.latestReviews.nodes[]
+#       .author.login, .author.__typename    # per-author latest review author
+#   .data.repository.pullRequest.reviews.nodes[]
+#       .author.login, .author.__typename    # review author (also read above)
+#   .data.repository.pullRequest.reviewThreads.nodes[].comments.nodes[]
+#       .author.login, .author.__typename    # review-thread comment author
+#   .data.repository.pullRequest.reactionGroups[]
+#       .content                   # only the "THUMBS_UP" group is read
+#       .reactors.nodes[]
+#           .login, .__typename    # a reactor on the pull request object
+# The evidence pages are bounded (first 100 per connection); see the module
+# header for the residuals.
 #
-# `author.__typename` is a CONTRACT field on every surface: the registry filter
-# modes (`automated`, `codex-only`) match only a Bot account per the module's
-# `is_bot`, so a payload omitting it matches those modes only through the login's
-# reserved bot suffix (otherwise fail closed toward "not automated").
+# `author.__typename` is a CONTRACT field on every surface: the `automated`
+# filter mode matches only a Bot account per the module's `is_bot`, so a payload
+# omitting it matches that mode only through the login's reserved bot suffix
+# (otherwise fail closed toward "not automated").
 # It is ALSO the self identity key: an author is self only when its
 # `__typename` is "User" AND its raw login equals --arg login (module
 # `is_self`), so a payload omitting `__typename` never reads as self — its
 # comment stays a candidate and its fix/defer/`Addresses:` markers are never
 # honored as a self disposition (fail toward "actionable"). A Bot sharing the
 # viewer's bare login is likewise never self.
-# Identity semantics (registry, type gate, self key, filter modes) are owned by
+# Identity semantics (reviewer set, type gate, self key, filter modes) are owned by
 # the reviewer-identity.jq module this filter includes; see its header.
 #
 # Connection-level tripwires (reviewThreads/comments/reviews `.totalCount`) are
@@ -222,16 +214,13 @@
 #                      reaction's `createdAt`), for every author the filter
 #                      admits, OR (legacy backward-compat) the node's own
 #                      `url` is in the `Addresses: <url>` harvest set of a self-
-#                      authored top-level comment. toplevel ONLY: OR the node is a
-#                      Codex Review Summary whose state reports no findings or a
-#                      running code review (CODEX SUMMARY HANDLED SIGNAL in §1).
+#                      authored top-level comment.
 #                      A missing/empty reactionGroups, an EYES group with
 #                      viewerHasReacted == false, no EYES group at all, or a mark
 #                      that fails the unchanged-since-marked gate (no
 #                      `lastEditedAt` key, edited at or after the mark, no self
 #                      EYES reaction node, malformed time), AND no legacy
-#                      `Addresses:` harvest match AND no clear Codex summary
-#                      state => not handled (actionable).
+#                      `Addresses:` harvest match => not handled (actionable).
 #   followup-after-fix in-thread ONLY, and ONLY when the thread's LATEST
 #                      disposition is a FIX: databaseId > that disposition's id
 #                      AND own body has no marker. A non-self comment that
@@ -292,13 +281,18 @@
 #                                 authored comments are excluded from every
 #                                 filter mode and are the only source of fix /
 #                                 defer / `Addresses:` dispositions.
-#   --arg filter  REVIEWER_FILTER "automated" | "codex-only" | "all" |
-#                                 "<login>"; mode semantics are owned by
-#                                 reviewer-identity.jq (its §5).
+#   --arg filter  REVIEWER_FILTER "automated" | "all" | "<login>"; mode
+#                                 semantics are owned by reviewer-identity.jq
+#                                 (its §5). The caller's input gate rejects a
+#                                 retired value; this filter does not.
+#   --arg reviewers HIVEMIND_PR_REVIEWERS raw value (may be empty); the
+#                                 configured logins added to the Automated
+#                                 Reviewer set (module `configured_reviewers`).
 #
 # CALLER OBLIGATION: this filter does `include "reviewer-identity";`, so every
 # caller MUST pass the module search path, i.e. the directory holding this file:
-#   jq -L <scripts dir> -f fix-history-classify.jq --arg login ... --arg filter ...
+#   jq -L <scripts dir> -f fix-history-classify.jq --arg login ... --arg filter ... \
+#     --arg reviewers ...
 # Without `-L` the include fails to resolve and jq exits non-zero.
 #
 # 5. PLACEMENT
@@ -310,18 +304,27 @@
 
 include "reviewer-identity";
 
-# Identity-match predicate for the active REVIEWER_FILTER, binding this filter's
-# --arg globals ($login = self, $filter = mode) onto the module predicate. The
-# caller passes the RAW author login and its account type; the module strips the
-# bot suffix itself.
-def matches_filter($a; $t): reviewer_matches_filter($a; $t; $login; $filter);
+# Automated Reviewer evidence rows (AUTOMATED REVIEWER SET in the header), read
+# off the pullRequest object on the input as `{login, type}` rows. Null-safe on
+# every field: an absent, null or wrongly typed field yields no row, never an
+# error.
+def reviewer_evidence_rows:
+  [ ( .latestReviews?.nodes?[]?,
+      .reviews?.nodes?[]?,
+      .reviewThreads?.nodes?[]?.comments?.nodes?[]? )
+    | .author? | objects
+    | {login: .login, type: .__typename} ]
+  + [ .reactionGroups?[]?
+      | select(.content? == "THUMBS_UP")
+      | .reactors?.nodes?[]? | objects
+      | {login: .login, type: .__typename} ];
 
 # Self mark presence. True IFF a toplevel/review node's own `reactionGroups`
 # carries an EYES group whose viewerHasReacted is true — i.e. a self-authored
 # EYES reaction by the authenticated gh viewer (react-marker.sh's marker). It is
 # necessary, not sufficient: has_unchanged_self_eyes_mark adds the edit gate.
 # VIEWER-SCOPED: viewerHasReacted is true only for our viewer's own reaction, so
-# an EYES from a human / Codex on another account does not register.
+# an EYES from a human / a reviewer bot on another account does not register.
 # Null-safe: a node lacking `reactionGroups` is treated as not handled.
 def has_self_eyes_reaction:
   ((.reactionGroups // [])
@@ -358,50 +361,18 @@ def has_unchanged_self_eyes_mark:
                and $edited < $marked))
   ) catch false;
 
-# Codex Review Summary state: the parsed JSON of the node body's
-# `<!-- codex-review-state:v1 {json} -->` marker, or null when the marker is
-# absent or its JSON does not parse. Total: any error in the extract or the parse
-# yields null, never a filter error.
-def codex_summary_state:
-  try (
-    ([(.body // "") | capture("<!-- codex-review-state:v1 (?<state>.*?) -->") | .state]
-     | .[0]) as $raw
-    | if $raw == null then null else ($raw | fromjson) end
-  ) catch null;
-
-# One review entry of a Codex state, in a shape known to report no findings: an
-# object that is either completed with `has_any_findings` the boolean false, or
-# unused with both keys present and null. Any other shape is not clear.
-def is_clear_codex_entry:
-  type == "object"
-  and ((.status == "completed" and .has_any_findings == false)
-       or (has("status") and .status == null
-           and has("has_any_findings") and .has_any_findings == null));
-
-# A Codex state, in a shape known to be handled: an object whose `code_review` is
-# an object that is running, or that is completed with no findings while every
-# review entry is clear per is_clear_codex_entry. This is an allowlist: any other
-# shape, an empty object or a primitive entry included, is not handled.
-def is_clear_codex_state:
-  type == "object"
-  and (.code_review | type) == "object"
-  and (.code_review.status == "running"
-       or (.code_review.status == "completed"
-           and ([.[] | is_clear_codex_entry] | all)));
-
-# Codex summary handled predicate (CODEX SUMMARY HANDLED SIGNAL in the header).
-# True only for a Codex registry bot author (`codex-only` mode, never self) whose
-# body starts with the summary marker and whose state passes is_clear_codex_state.
-# A missing, unparseable, or unexpected state is false, so the node keeps the
-# EYES / `Addresses:` rule.
-def is_clear_codex_summary:
-  . as $c
-  | reviewer_matches_filter($c.author.login; $c.author.__typename; $login; "codex-only")
-    and (($c.body // "") | startswith("<!-- codex-pull-request-review-summary -->"))
-    and (codex_summary_state | is_clear_codex_state);
-
 .data.repository.pullRequest as $pr |
 $pr.reviewThreads as $rt |
+
+# The Automated Reviewer set, derived ONCE per payload (module
+# `automated_reviewer_set`) from the evidence rows plus --arg reviewers.
+automated_reviewer_set($pr | reviewer_evidence_rows; $reviewers) as $reviewer_set |
+
+# Identity-match predicate for the active REVIEWER_FILTER, binding this filter's
+# --arg globals ($login = self, $filter = mode) and the derived $reviewer_set
+# onto the module predicate. The caller passes the RAW author login and its
+# account type; the module strips the bot suffix itself.
+def matches_filter($a; $t): reviewer_matches_filter($a; $t; $login; $filter; $reviewer_set);
 
 # LEGACY backward-compat harvest: the set of candidate URLs that self-authored
 # top-level comments have already addressed via `Addresses: <url>`. PRs processed
@@ -551,7 +522,6 @@ $pr.reviewThreads as $rt |
       classification: (
         if ($c | has_unchanged_self_eyes_mark) then "handled"
         elif ($addressed_urls | index($u)) != null then "handled"
-        elif ($c | is_clear_codex_summary) then "handled"
         else "actionable"
         end
       )
