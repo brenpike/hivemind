@@ -466,6 +466,16 @@ iteration_marker() {
 read_decimal PR_NUMBER "$PR_NUMBER" || poll_fail
 read_decimal MAX_WATCH_SECONDS "$MAX_WATCH_SECONDS" || poll_fail
 read_decimal POLL_INTERVAL_SECONDS "$POLL_INTERVAL_SECONDS" || poll_fail
+# RECORDED DECISION (duration bounds): callers are trusted to pass sane watch
+# window and poll interval values. The 18-digit limit only keeps the deadline
+# arithmetic from overflowing; it is not an operational cap, so a huge window or
+# interval makes a poll that runs or sleeps for that long. That is a caller
+# misconfiguration, outside the threat model, and is not hardened against: no
+# upper cap is enforced. The poll still ends on time for the window it is given.
+# Decided by the run, not the user, as a review call per
+# ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Review Calls), on local
+# review finding 858d54db. A later finding asking for a duration cap repeats this
+# decision.
 # Reject a zero (or otherwise non-positive) poll interval: `sleep 0` would make
 # the loop re-poll immediately and hammer gh api until timeout, risking rate
 # limits. Require at least one second between polls before entering the loop.
