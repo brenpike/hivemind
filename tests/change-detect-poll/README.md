@@ -227,25 +227,52 @@ non-zero with no output, `CLOCK` reads the virtual clock, and any other line, an
 included, is printed as the reading. Calls past the list, and states with no `date.seq`, read the
 virtual clock unchanged.
 
+When the state dir carries the flag file `date.padded` (`new_state` leaves it absent), every
+virtual-clock reading, a `CLOCK` entry or a call past the list, is printed left-padded with zeros
+to 18 digits.
+
+No case scans the poll's text for numbers. Bash evaluates a number in many syntax forms
+(arithmetic expansion, `(( ))`, `let`, `declare -i`, `[[ -eq ]]`, subscripts, substring offsets),
+so a list of allowed forms cannot be complete. Running the poll at each source is
+form-independent: a hostile reading evaluated before its check, in any form, leaves the canary
+file behind, and a zero-padded reading used without the base-10 coercion changes the output. The
+sources are the PR number, the window and interval arguments, the seed's `failed_checks` field, a
+capture's check count and the clock. A new source of numbers is a new row of that grid.
+`numbers:one-clock-read` and `watch:one-sleep-primitive` are placement pins for one command word
+each, `date` and `sleep`; they are not a safety proof, and the rows below prove the rule.
+
+The canary payload is `ARITH_PAYLOAD`, `BASH_VERSINFO[$(touch <canary>)]`: arithmetic evaluation
+runs its subscript, which creates `ARITH_CANARY`. Its base name is `BASH_VERSINFO`, an array every
+Bash sets, because the poll runs under `set -u` and an unset base name would abort the evaluation
+before the subscript runs.
+
 - `clock:bad-reading-fails-closed` — each bad reading (`FAIL`, empty, `abc`, `-1`,
-  `9999999999999999999`) served on clock read N, for N = 1 to 4, makes a poll over the steady
-  pre-cycle-0 state armed with the shared seed print exactly `POLL_ERROR`, exit 1, after exactly N
-  clock reads. Reads 1 to 4 are arm time, the first loop top, the first `sleep_to_next_poll` and
-  the second loop top. On N = 1 the fake `gh` sees zero calls. The unfixed script idles to
-  `WATCH_TIMEOUT`.
+  `9999999999999999999`, the arithmetic payload `ARITH_PAYLOAD`) served on clock read N, for N = 1
+  to 4, makes a poll over the steady pre-cycle-0 state armed with the shared seed print exactly
+  `POLL_ERROR`, exit 1, after exactly N clock reads. Reads 1 to 4 are arm time, the first loop top,
+  the first `sleep_to_next_poll` and the second loop top. On N = 1 the fake `gh` sees zero calls.
+  The unfixed script idles to `WATCH_TIMEOUT`.
 - `clock:snapshot-and-check-never-read-clock` — with a `FAIL` `date.seq`, `--snapshot` prints its
   `BASELINE=` line, exit 0, and `--check` with the shared seed prints `UNCHANGED`, exit 0. Each
   leaves `date.n` at 0.
-- `numbers:one-clock-read` — structural, like `watch:one-sleep-primitive`: the executable,
-  non-comment lines of the poll hold exactly one `date` command, inside `read_clock`.
-- `numbers:one-checked-source` — structural: a digit-class pattern and `10#` appear on executable
-  lines only inside `read_decimal`. Every variable operand of `$(( ))` or of a
-  `-eq`/`-ne`/`-gt`/`-ge`/`-lt`/`-le` test outside `read_decimal` is a `read_decimal` or
-  `read_clock` target, or on the runner's `NUMBER_INTERNAL_NAMES` list of script-internal integers
-  (counters, and values computed only from checked numbers). `${#...}` and `$#` are exempt; a
-  positional operand never passes. The scan is line-local and documented beside
-  `poll_number_operands`. A new unchecked operand goes red; a legitimate new internal integer is
-  added to the list with its reason.
+- `numbers:one-clock-read` — structural placement pin, like `watch:one-sleep-primitive`: the
+  executable, non-comment lines of the poll hold exactly one `date` command, inside `read_clock`.
+- `numbers:no-source-evaluated-before-check` — `ARITH_PAYLOAD`, `abc`, `-1` and empty, each served
+  as the PR number, the window and the interval of a poll over the steady pre-cycle-0 state armed
+  with the shared seed, print exactly `POLL_ERROR`, exit 1, with zero `gh` calls and no sleep.
+  `ARITH_PAYLOAD` served as the seed's `failed_checks` field, through an exported variable whose
+  name is the field value (the seed shape allows only `[A-Za-z0-9_-]`, and arithmetic on a name
+  runs its value), is `POLL_ERROR` in poll mode and `CHECK_ERROR` in `--check` mode, exit 1, with
+  zero `gh` calls. `ARITH_CANARY` does not exist after every row ran, the clock rows of
+  `clock:bad-reading-fails-closed` included.
+- `numbers:leading-zero-readings-behave-as-decimal` — a poll over the steady pre-cycle-0 state
+  armed with the shared seed, window 12 and interval 9, prints exactly `WATCH_TIMEOUT`, exit 0, and
+  sleeps 9, 9, 9, 8, 7, 6, 5, 4, 3, 2, 1. The padded run, with the PR number, window and interval
+  zero-padded (`004242`, `0012`, `0009`), the seed's `failed_checks` field padded (`000`) and
+  `date.padded` set, gives identical output, status, `gh` calls and sleeps.
+- `numbers:bad-capture-count-fails-closed` — a capture whose `checkRunCountsByState` holds a
+  `FAILURE` count of `-1`, or of the 19 digits `1234567890123456789`, is `SNAPSHOT_ERROR` in
+  snapshot mode and `POLL_ERROR` in poll mode, exit 1.
 - `validation:oversized-pr-number` — a 19-digit PR number is `POLL_ERROR`, exit 1, with zero `gh`
   calls.
 
