@@ -545,6 +545,37 @@ run_live_fail_case "live-closed:ci-status0-non-array" "ci-not-array" \
   "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-valid-empty.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
   "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-non-array.json" "FETCHNORM_LIVE_CI_STATUS=0" \
   -- o r 5 all selfuser
+# No-checks row (#560) fail-CLOSED neighbours. gh's no-checks state is status 1 + blank stdout + ONE
+# `no checks reported on the '<branch>' branch` stderr line; every near-miss below keeps its token.
+# 7c. STATUS=1 + blank body + NO stderr -> ci-not-array (a blank body alone is never the no-checks row).
+run_live_fail_case "live-closed:ci-status1-blank-no-stderr" "ci-not-array" \
+  "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-valid-empty.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
+  "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-blank.json" "FETCHNORM_LIVE_CI_STATUS=1" \
+  -- o r 5 all selfuser
+# 7d. STATUS=1 + blank body + another gh error on stderr -> ci-not-array.
+run_live_fail_case "live-closed:ci-status1-blank-other-stderr" "ci-not-array" \
+  "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-valid-empty.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
+  "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-blank.json" "FETCHNORM_LIVE_CI_STATUS=1" \
+  "FETCHNORM_LIVE_CI_STDERR_FILE=$FN_DIR/live-ci-stderr-other.txt" \
+  -- o r 5 all selfuser
+# 7e. STATUS=1 + blank body + the no-checks line PLUS an extra line -> ci-not-array (exactly one line).
+run_live_fail_case "live-closed:ci-status1-blank-no-checks-extra-line" "ci-not-array" \
+  "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-valid-empty.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
+  "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-blank.json" "FETCHNORM_LIVE_CI_STATUS=1" \
+  "FETCHNORM_LIVE_CI_STDERR_FILE=$FN_DIR/live-ci-stderr-no-checks-extra.txt" \
+  -- o r 5 all selfuser
+# 7f. STATUS=4 (auth) + blank body + the no-checks line -> ci-operational-failure (the row is status 1 only).
+run_live_fail_case "live-closed:ci-auth4-blank-no-checks" "ci-operational-failure" \
+  "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-valid-empty.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
+  "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-blank.json" "FETCHNORM_LIVE_CI_STATUS=4" \
+  "FETCHNORM_LIVE_CI_STDERR_FILE=$FN_DIR/live-ci-stderr-no-checks.txt" \
+  -- o r 5 all selfuser
+# 7g. STATUS=1 + a NON-array body + the no-checks line -> ci-not-array (the row needs a blank body).
+run_live_fail_case "live-closed:ci-status1-non-array-no-checks" "ci-not-array" \
+  "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-valid-empty.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
+  "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-non-array.json" "FETCHNORM_LIVE_CI_STATUS=1" \
+  "FETCHNORM_LIVE_CI_STDERR_FILE=$FN_DIR/live-ci-stderr-no-checks.txt" \
+  -- o r 5 all selfuser
 # 8. seam file unreadable -> live-seam-file-not-found (an explicitly-set seam path that does not exist
 #    is an input error, distinct from the fail-open empty path).
 run_live_fail_case "live-closed:seam-file-not-found" "live-seam-file-not-found" \
@@ -571,6 +602,14 @@ run_live_failopen_case "live-open:ci-failing-status1" \
   "$EXPECTED_DIR/live-ci-failing.json" \
   "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-valid-empty.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
   "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-array.json" "FETCHNORM_LIVE_CI_STATUS=1" \
+  -- o r 5 all selfuser
+# 11a. NO-CHECKS (#560): STATUS=1 + blank body + gh's one `no checks reported on the '<branch>'
+#      branch` stderr line (branch name holds a quote) -> [] exit 0, zero CI candidates.
+run_live_failopen_case "live-open:ci-no-checks-status1" \
+  "$EXPECTED_DIR/live-ci-empty.json" \
+  "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-valid-empty.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
+  "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-blank.json" "FETCHNORM_LIVE_CI_STATUS=1" \
+  "FETCHNORM_LIVE_CI_STDERR_FILE=$FN_DIR/live-ci-stderr-no-checks.txt" \
   -- o r 5 all selfuser
 # Connection-shape gate must NOT over-reject (#322). Both shapes below are legitimate live responses.
 # 11b. every requested connection PRESENT but EMPTY (`nodes: []`, including `reviewThreads.nodes: []`,

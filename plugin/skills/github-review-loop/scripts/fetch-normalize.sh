@@ -145,7 +145,10 @@
 #     NOT a JSON array, or a non-allowlisted status — fails CLOSED (non-zero + a
 #     stable FETCHNORM_ERROR reason). All three allowlisted CI statuses share ONE
 #     uniform `type=="array"` parse (iter-3 closure — no per-status carve-out may
-#     skip the check). RS-001 closed the EXIT boundary; RS2-001 + iter-3 close the
+#     skip the check). The ONE non-array CI shape accepted is gh's no-checks
+#     state: status 1, blank stdout, and stderr that is exactly gh's single
+#     `no checks reported on the '<branch>' branch` line (§5a). It yields `[]`,
+#     zero CI candidates. RS-001 closed the EXIT boundary; RS2-001 + iter-3 close the
 #     CONTENT boundary: an operational failure must never masquerade as "zero
 #     candidates".
 #   - >50-node connection overflow is NOT silently dropped. The three
@@ -252,14 +255,26 @@
 #   check runs SECOND (its precondition is a body that passed the envelope check),
 #   so an `.errors` response keeps its own stable reason string.
 #
-# CI mode (validate_live_response ci <body> <status>):
+# CI mode (validate_live_response ci <body> <status> <stderr>):
 #   - status is an ALLOWLIST of the documented check-carrying exit states whose
-#     stdout is the expected JSON array: 0 (all pass; [] or absent) and the
+#     stdout is the expected JSON array: 0 (all pass; `[]`) and the
 #     checks-failing/pending states 1 and 8. Allowlist, NOT a reject-list — an
 #     unknown/new exit code fails CLOSED by default (closed-by-construction).
 #   - ALL allowlisted statuses (0, 1, 8) share ONE uniform `type=="array"` parse
 #     (iter-3 closure). No per-status carve-out may skip the check. A non-array
-#     body at ANY allowlisted status (incl. 0) -> ci-not-array.
+#     body at ANY allowlisted status (incl. 0) -> ci-not-array, except the
+#     no-checks row below.
+#   - NO-CHECKS row (the third legitimate state, beside all-pass and
+#     failing/pending): a PR with no checks makes gh exit 1 with empty stdout and
+#     print `no checks reported on the '<branch>' branch` on stderr, before any
+#     --json export. Status 1, stdout empty or whitespace only, AND <stderr> with
+#     trailing newlines trimmed equal to exactly one line matching
+#     `^no checks reported on the '.*' branch$` -> PASSES; fetch_ci_payload emits
+#     `[]`. Any other stderr (empty, another gh error, the no-checks line plus any
+#     extra line), a non-blank non-array body, or the no-checks text at status 0
+#     or 8 -> ci-not-array; at any non-allowlisted status -> ci-operational-failure.
+#     gh's `no required checks reported` and `no commit found on the pull request`
+#     messages are NOT recognized (this script never passes --required).
 #   - any NON-allowlisted non-zero status (auth=4, cancelled=2, network, unknown)
 #     -> ci-operational-failure (EVEN IF stdout happens to be a valid JSON array;
 #     the prior shape-only `type=="array"` trust wrongly accepted auth-4 + []).
@@ -296,11 +311,15 @@
 #   FETCHNORM_LIVE_GRAPHQL_STATUS  simulated gh exit status (default 0)
 #   FETCHNORM_LIVE_CI_FILE         raw `gh pr checks` response body file
 #   FETCHNORM_LIVE_CI_STATUS       simulated gh exit status (default 0)
+#   FETCHNORM_LIVE_CI_STDERR_FILE  raw `gh pr checks` stderr file (unset -> empty
+#                                  stderr)
 # When FETCHNORM_TEST_MODE="1" AND the *_FILE var is set + non-empty, the helper
 # reads that file as the live response and uses *_STATUS as the live exit code
 # INSTEAD of invoking gh, then routes the result THROUGH validate_live_response. The
-# *_STATUS vars are read ONLY inside that already-gated branch (no separate gate).
-# An unreadable seam file is an input error (live-seam-file-not-found). The seams
+# *_STATUS vars and FETCHNORM_LIVE_CI_STDERR_FILE are read ONLY inside that
+# already-gated branch (no separate gate). An unreadable seam file, including a set
+# but missing FETCHNORM_LIVE_CI_STDERR_FILE, is an input error
+# (live-seam-file-not-found). The seams
 # are checked ONLY inside the live helpers, which the --payload-file path never
 # reaches.
 
@@ -312,8 +331,9 @@
 set -u
 # INVARIANT: trap body ends with guaranteed-zero `:` so a failing rm never clobbers the
 # script's own exit code under set -e (mirrors ADR-0020 thin-entrypoint convention).
-# No temp files are created today; the trap is here for explicit hygiene so future
-# additions cannot accidentally leak.
+# The only temp file (fetch_ci_payload's gh stderr capture) is removed by that function
+# itself: it runs in a command-substitution subshell this trap does not cover. The trap
+# is here for explicit hygiene so future additions cannot accidentally leak.
 trap ':' EXIT
 
 OWNER=""
@@ -497,16 +517,17 @@ read_payload_source() {
   fi
 }
 
-# validate_live_response <mode> <body> <status>: the SINGLE shared live-response
-# operational-failure gate (closed-by-construction). Invoked by BOTH live helpers
-# over the RAW live response BEFORE the value crosses the command-substitution
-# boundary. LIVE PATH ONLY — injected --payload-file content is TRUSTED and never
+# validate_live_response <mode> <body> <status> [<stderr>]: the SINGLE shared
+# live-response operational-failure gate (closed-by-construction). Invoked by BOTH
+# live helpers over the RAW live response BEFORE the value crosses the
+# command-substitution boundary. <stderr> is read in ci mode only. LIVE PATH ONLY —
+# injected --payload-file content is TRUSTED and never
 # reaches here. On a detected operational failure it emits the stable
 # FETCHNORM_ERROR marker on stdout and RETURNS non-zero (the caller propagates via
 # the return-code boundary, never `exit`). On success returns 0 and emits nothing
 # (the caller is responsible for emitting the validated body). See §5a.
 validate_live_response() {
-  local mode="$1" body="$2" status="$3"
+  local mode="$1" body="$2" status="$3" stderr_text="${4-}"
   case "$mode" in
     graphql)
       # Envelope gate via the shared validator: accept ONLY exactly one JSON object
@@ -540,7 +561,23 @@ validate_live_response() {
           # INVARIANT: every allowlisted status (incl. 0) must produce a JSON
           # array. Status 0 with `[]` or a non-empty array passes; status 0 with
           # a non-array body (e.g. an error object) is an operational failure.
-          if printf '%s' "$body" | jq -e 'type == "array"' >/dev/null 2>&1; then
+          # INVARIANT: a blank body is never an array. jq 1.6 `-e` exits 0 on empty
+          # input (no output), so the blank test must precede the jq parse.
+          if [[ "$body" == *[![:space:]]* ]] \
+             && printf '%s' "$body" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            return 0
+          fi
+          # NO-CHECKS row (§5a): status 1 + blank stdout + stderr, trailing newlines
+          # trimmed, that is exactly gh's one no-checks line. Every other non-array
+          # shape stays ci-not-array.
+          while [ "${stderr_text%$'\n'}" != "$stderr_text" ]; do
+            stderr_text="${stderr_text%$'\n'}"
+          done
+          local no_checks_re="^no checks reported on the '.*' branch\$"
+          if [ "$status" = "1" ] \
+             && [[ "$body" != *[![:space:]]* ]] \
+             && [[ "$stderr_text" != *$'\n'* ]] \
+             && [[ "$stderr_text" =~ $no_checks_re ]]; then
             return 0
           fi
           echo "FETCHNORM_ERROR=ci-not-array"
@@ -615,11 +652,19 @@ fetch_graphql_payload() {
 # when stdout parses as the expected JSON array (the documented checks-state
 # case); otherwise propagate as a live-fetch failure via the return-code boundary
 # (a real error must never fail-OPEN to zero CI candidates). Exit 0 (all checks
-# pass; output is `[]` or absent) yields zero CI candidates. INVARIANT: runs
+# pass; output is `[]`) yields zero CI candidates. The third legitimate state is
+# a PR with no checks: gh exits 1 with blank stdout and prints its one
+# `no checks reported on the '<branch>' branch` line on stderr. gh's stderr is
+# therefore captured SEPARATELY (never merged into the body, never discarded) and
+# passed to the gate, which alone accepts that row; this helper then emits `[]`
+# (zero CI candidates). The live capture uses a temp file this helper removes
+# itself on every return path (the main EXIT trap does not run in this
+# command-substitution subshell); a temp-file failure fails closed as
+# ci-operational-failure, never to `[]`. INVARIANT: runs
 # inside command substitution — failure crosses via return code, never `exit`.
 # (F2)
 fetch_ci_payload() {
-  local ci_out ci_status
+  local ci_out ci_status ci_err="" ci_err_file
   # LIVE-RESPONSE TEST SEAM (§5b): inject a raw response + status THROUGH the gate
   # instead of invoking gh. Activates ONLY when FETCHNORM_TEST_MODE="1" AND the
   # *_FILE var is set+non-empty — a stray file var ALONE never diverts (fail-closed
@@ -629,6 +674,13 @@ fetch_ci_payload() {
       echo "FETCHNORM_ERROR=live-seam-file-not-found"
       return 1
     fi
+    if [ -n "${FETCHNORM_LIVE_CI_STDERR_FILE:-}" ]; then
+      if [ ! -f "$FETCHNORM_LIVE_CI_STDERR_FILE" ]; then
+        echo "FETCHNORM_ERROR=live-seam-file-not-found"
+        return 1
+      fi
+      ci_err="$(cat "$FETCHNORM_LIVE_CI_STDERR_FILE")"
+    fi
     ci_out="$(cat "$FETCHNORM_LIVE_CI_FILE")"
     ci_status="${FETCHNORM_LIVE_CI_STATUS:-0}"
   else
@@ -637,15 +689,33 @@ fetch_ci_payload() {
     case "$PR_NUMBER" in
       ''|*[!0-9]*) echo "FETCHNORM_ERROR=invalid-pr-number"; return 1 ;;
     esac
+    if ! ci_err_file="$(mktemp "${TMPDIR:-/tmp}/hivemind-fetchnorm-ci-stderr.XXXXXX" 2>/dev/null)" \
+       || [ -z "$ci_err_file" ]; then
+      echo "FETCHNORM_ERROR=ci-operational-failure"
+      return 1
+    fi
     ci_out="$("${GH_TIMEOUT[@]}" gh pr checks "$PR_NUMBER" --repo "$OWNER/$REPO" \
-      --json bucket,name,description,link,state,workflow 2>/dev/null)"
+      --json bucket,name,description,link,state,workflow 2>"$ci_err_file")"
     ci_status=$?
+    if ! ci_err="$(cat "$ci_err_file" 2>/dev/null)"; then
+      rm -f "$ci_err_file"
+      echo "FETCHNORM_ERROR=ci-operational-failure"
+      return 1
+    fi
+    rm -f "$ci_err_file"
   fi
   # RESPONSE-CONTENT gate (RS2-001): status-ALLOWLIST + array-shape over the live
-  # response. Replaces the prior shape-only `type=="array"` trust that wrongly
-  # accepted auth(4)/cancelled(2) + a valid JSON array. See §5a.
-  if ! validate_live_response ci "$ci_out" "$ci_status"; then
+  # response, plus the no-checks row read from gh's stderr. Replaces the prior
+  # shape-only `type=="array"` trust that wrongly accepted auth(4)/cancelled(2) +
+  # a valid JSON array. See §5a.
+  if ! validate_live_response ci "$ci_out" "$ci_status" "$ci_err"; then
     return 1
+  fi
+  # INVARIANT: the gate accepts a blank body ONLY on its no-checks row, so a blank
+  # body here is that row and is emitted as the empty check list.
+  if [[ "$ci_out" != *[![:space:]]* ]]; then
+    printf '[]'
+    return 0
   fi
   printf '%s' "$ci_out"
 }
