@@ -144,7 +144,8 @@
 #                    (see ARM-KIND SEMANTICS below). ENDS THIS PROCESS (exit 0)
 #                    but is NOT a loop terminal: the skill confirms via the
 #                    reviewer before any terminal
-#   WATCH_TIMEOUT    max_watch_duration elapsed (terminal)
+#   WATCH_TIMEOUT    max_watch_duration elapsed (terminal); no sleep passes
+#                    the deadline, so it is never late by more than one capture
 #   POLL_ERROR       repeated query failure, a missing/malformed seed, or a
 #                    retired reviewer filter value (terminal; skill returns
 #                    blocked)
@@ -176,7 +177,9 @@
 #   $2  REPO                    base-repo name
 #   $3  PR_NUMBER               integer PR number
 #   $4  MAX_WATCH_SECONDS       integer seconds before WATCH_TIMEOUT
-#   $5  POLL_INTERVAL_SECONDS   integer seconds between polls
+#   $5  POLL_INTERVAL_SECONDS   integer seconds between polls; a sleep never
+#                               passes the deadline, so the last one before
+#                               WATCH_TIMEOUT is cut to the seconds left
 #   $6  REVIEWER_FILTER         "automated" | "all" | "<login>"
 #                               (default "automated" when empty; modes are
 #                               defined by reviewer-identity.jq). A value the
@@ -484,9 +487,9 @@ fi
 
 # Timeout wrapper for gh API calls.
 # Normal gh graphql/reactions completes in 1-5s; 45s is generous against
-# transient slowness yet bounds a true hang far below Monitor's
-# max_watch_duration, so two consecutive timeouts surface POLL_ERROR well
-# inside any watch window.
+# transient slowness yet bounds a true hang. The bound is 45s per gh call, not
+# derived from the time left: a capture runs several gh calls, so a window
+# shorter than one capture can end that late, past the deadline.
 GH_CALL_TIMEOUT_SECONDS=45
 # Prefer coreutils `timeout`; fall back to macOS Homebrew `gtimeout`; degrade
 # gracefully to no wrapper when neither exists (preserves current unguarded
@@ -840,6 +843,23 @@ if [ "$MODE" = "check" ]; then
   exit 0
 fi
 
+# sleep_to_next_poll: hold the only sleep in this script. Reads the clock once
+# and sleeps the smaller of POLL_INTERVAL_SECONDS and the seconds left to the
+# deadline; with none left it returns without sleeping, so the loop top emits
+# WATCH_TIMEOUT. A clock reading that is not a bounded decimal is POLL_ERROR.
+# INVARIANT: no poll sleep passes the deadline, for every accepted interval and
+# window, including a re-arm whose window is smaller than the interval.
+sleep_to_next_poll() {
+  local now_seconds seconds_left nap_seconds
+  now_seconds="$(date +%s)"
+  is_bounded_decimal "$now_seconds" || poll_fail
+  seconds_left=$((deadline - 10#$now_seconds))
+  [ "$seconds_left" -gt 0 ] || return 0
+  nap_seconds="$POLL_INTERVAL_SECONDS"
+  [ "$seconds_left" -lt "$nap_seconds" ] && nap_seconds="$seconds_left"
+  sleep "$nap_seconds"
+}
+
 while true; do
   if [ "$(date +%s)" -ge "$deadline" ]; then
     echo "WATCH_TIMEOUT"
@@ -856,7 +876,7 @@ while true; do
       echo "POLL_ERROR"
       exit 1
     fi
-    sleep "$POLL_INTERVAL_SECONDS"
+    sleep_to_next_poll
     continue
   fi
   fail_count=0
@@ -882,5 +902,5 @@ while true; do
 
   advance_snapshot
 
-  sleep "$POLL_INTERVAL_SECONDS"
+  sleep_to_next_poll
 done
