@@ -761,6 +761,38 @@ else
   failed "validation:bad-pr-number" "status=$status out=$(printf '%s' "$out" | tr '\n' ';')"
 fi
 
+# A 19-digit watch window or poll interval would wrap Bash's 64-bit arithmetic, so each is
+# rejected before any gh call: POLL_ERROR, exit 1, zero gh calls.
+oversized_ok=1
+oversized_detail=""
+for oversized_arg in watch interval; do
+  st="$(new_state "oversized-$oversized_arg")"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  oversized_watch="$MAX_WATCH"
+  oversized_interval="$POLL_INTERVAL"
+  if [ "$oversized_arg" = "watch" ]; then
+    oversized_watch="1234567890123456789"
+  else
+    oversized_interval="1234567890123456789"
+  fi
+  out="$(run_poll "$st" "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$oversized_watch" "$oversized_interval" \
+    "$REVIEWER_FILTER" "$SELF_LOGIN" "$SEED")"
+  status=$?
+  calls="$(gh_call_counts "$st")"
+  if [ "$out" != "POLL_ERROR" ] || [ "$status" -ne 1 ] || [ "$calls" != "0 0 0" ]; then
+    oversized_ok=0
+    oversized_detail="$oversized_detail $oversized_arg: status=$status calls=$calls out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+done
+if [ -z "$SEED" ]; then
+  skipped "validation:oversized-seconds" "no seed captured"
+elif [ "$oversized_ok" -eq 1 ]; then
+  pass "validation:oversized-seconds" "19-digit watch window or poll interval -> POLL_ERROR, exit 1, zero gh calls"
+else
+  failed "validation:oversized-seconds" "$oversized_detail"
+fi
+
 # ── 10. repeated unusable query response fails CLOSED ───────────────────────────────
 # A GraphQL error response (null pullRequest) makes the snapshot pipeline fail; two consecutive
 # failures are terminal POLL_ERROR, exit 1 — the retry-once path is unchanged by the seed.
@@ -1867,8 +1899,9 @@ fi
 #   (d) a running poll served 0, 1, 1, 2 failed checks prints CI_FAILED once per rise and nothing
 #       on the steady iteration.
 #   (e) an approval edge co-firing with a rise prints REVIEWER_APPROVED only and ends the process.
-#   (f) a seed whose failed_checks field is not all digits is POLL_ERROR / CHECK_ERROR, exit 1,
-#       with zero gh calls.
+#   (f) a seed whose failed_checks field is not all digits, or is 19 digits (past the 18-digit
+#       bound that keeps Bash's 64-bit arithmetic from wrapping), is POLL_ERROR / CHECK_ERROR,
+#       exit 1, with zero gh calls.
 
 # ci_route_poll <state_name> <seed> <max_watch> <graphql_entry>...: a poll armed with <seed> under
 # a <max_watch>-poll window, serving the graphql entries in order and no reaction to every poll.
@@ -1937,7 +1970,7 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   ci_seed_ok=1
   ci_seed_detail=""
   ci_failed_checks_pos=$(($(declared_fields | grep -nx 'failed_checks' | cut -d: -f1) + 1))
-  for ci_bad_value in 1a -1; do
+  for ci_bad_value in 1a -1 1234567890123456789; do
     ci_bad_seed="$(printf '%s' "$SEED" | awk -F'|' -v OFS='|' -v pos="$ci_failed_checks_pos" \
       -v bad="$ci_bad_value" '{$pos = bad; print}')"
     for ci_seed_mode in poll check; do
@@ -1960,7 +1993,7 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
     done
   done
   if [ "$ci_seed_ok" -eq 1 ]; then
-    pass "ci:seed-non-digit-failed-checks-fails-closed" "non-digit failed_checks seed field -> POLL_ERROR / CHECK_ERROR, exit 1, zero gh calls"
+    pass "ci:seed-non-digit-failed-checks-fails-closed" "non-digit or oversized failed_checks seed field -> POLL_ERROR / CHECK_ERROR, exit 1, zero gh calls"
   else
     failed "ci:seed-non-digit-failed-checks-fails-closed" "$ci_seed_detail"
   fi

@@ -197,8 +197,8 @@
 #                               an optional seed would let a caller silently
 #                               regress to the self-baselining blind window, so
 #                               a missing, malformed, or incomplete value, or a
-#                               failed_checks field that is not all digits, is
-#                               POLL_ERROR (CHECK_ERROR in --check mode) before
+#                               failed_checks field that is not a bounded
+#                               decimal (is_bounded_decimal), is POLL_ERROR (CHECK_ERROR in --check mode) before
 #                               any gh call.
 #
 # P18 FLOOR EXCEPTION (ADR-0020 / CHECK13 allowlisted): `set -u` only — `set -e`/`pipefail`
@@ -292,6 +292,15 @@ poll_fail() {
   exit 1
 }
 
+# is_bounded_decimal: 0 when the value is 1 to 18 decimal digits.
+# INVARIANT: every caller- or API-sourced value that reaches shell arithmetic or
+# a numeric test passes this first. Bash arithmetic is signed 64-bit and wraps
+# silently; 18 digits stay below 2^63 with room for the epoch the deadline adds,
+# so no accepted value can wrap.
+is_bounded_decimal() {
+  [[ "${1:-}" =~ ^[0-9]{1,18}$ ]]
+}
+
 # Resolve the sibling identity module RELATIVE to this script's own location
 # (ADR-0020 C1): the poll runs as a direct sibling of reviewer-identity.jq, and
 # every snapshot jq program loads it by search path. The shared GraphQL response
@@ -379,8 +388,8 @@ snapshot_changed() {
 
 # failed_checks_rose: 0 when the current FAILED_CHECKS count is greater than the
 # previous one, compared as base-10 integers so a leading zero is never read as
-# octal. Both values are digit-only: the seed is validated before any gh call and
-# compute_snapshot fails a capture whose count is not all digits.
+# octal. Both values are bounded decimals: the seed is validated before any gh
+# call and compute_snapshot fails a capture whose count is not one.
 failed_checks_rose() {
   [ "$((10#$cur_failed_checks))" -gt "$((10#$prev_failed_checks))" ]
 }
@@ -430,10 +439,10 @@ iteration_marker() {
 [ -n "$OWNER" ] || poll_fail
 [ -n "$REPO" ] || poll_fail
 case "$PR_NUMBER" in ''|*[!0-9]*) poll_fail ;; esac
-case "$MAX_WATCH_SECONDS" in ''|*[!0-9]*) poll_fail ;; esac
-case "$POLL_INTERVAL_SECONDS" in ''|*[!0-9]*) poll_fail ;; esac
-# Base-10-coerce before any arithmetic / numeric comparison. The digit-only case
-# guards above guarantee decimal digits, but bash reads a leading-zero value as
+is_bounded_decimal "$MAX_WATCH_SECONDS" || poll_fail
+is_bounded_decimal "$POLL_INTERVAL_SECONDS" || poll_fail
+# Base-10-coerce before any arithmetic / numeric comparison. The bounded-decimal
+# guards above guarantee decimal digits that cannot wrap, but bash reads a leading-zero value as
 # octal in $(( )) and [ -ge ] — 08/09 error under set -u, 060 mis-scales to 48s.
 MAX_WATCH_SECONDS=$((10#$MAX_WATCH_SECONDS))
 POLL_INTERVAL_SECONDS=$((10#$POLL_INTERVAL_SECONDS))
@@ -465,12 +474,12 @@ fi
 # prev_ scalar empty and fire a spurious CHANGED, and an absent one would re-open
 # the #324 blind window. Two layers, both derived from SNAPSHOT_FIELDS: the shape
 # regex, then load_seed's field-count and non-empty checks. The failed_checks
-# field must then be all digits, since failed_checks_rose compares it as a
-# base-10 integer.
+# field must then be a bounded decimal, since failed_checks_rose compares it as
+# a base-10 integer.
 if [ "$MODE" = "poll" ] || [ "$MODE" = "check" ]; then
   [[ "$BASELINE_SEED" =~ $SEED_FORMAT_RE ]] || poll_fail
   load_seed "$BASELINE_SEED" || poll_fail
-  case "$prev_failed_checks" in ''|*[!0-9]*) poll_fail ;; esac
+  is_bounded_decimal "$prev_failed_checks" || poll_fail
 fi
 
 # Timeout wrapper for gh API calls.
@@ -529,7 +538,7 @@ fail_count=0
 # rise here fires CI_FAILED, dispatched to the reviewer without the prefilter,
 # so the reviewer's ci-check-failure fix candidates are wired to a wake signal
 # independent of review activity, and a drop fires CHANGED. A count that is not
-# all digits fails the capture, since the rise is a base-10 compare. The
+# a bounded decimal fails the capture, since the rise is a base-10 compare. The
 # reviewer does the full body-level classification on wake (thin poll, no
 # interpretation). Writes diagnostic stderr to /dev/null (never /tmp).
 compute_snapshot() {
@@ -765,10 +774,10 @@ EOF
   else
     cur_approval="false"
   fi
-  # A well-formed snapshot always carries a non-empty PR state and a digit-only
-  # failed-check count.
+  # A well-formed snapshot always carries a non-empty PR state and a
+  # bounded-decimal failed-check count.
   [ -n "${cur_state:-}" ] || return 1
-  case "${cur_failed_checks:-}" in ''|*[!0-9]*) return 1 ;; esac
+  is_bounded_decimal "${cur_failed_checks:-}" || return 1
   return 0
 }
 
