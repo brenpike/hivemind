@@ -331,9 +331,9 @@
 set -u
 # INVARIANT: trap body ends with guaranteed-zero `:` so a failing rm never clobbers the
 # script's own exit code under set -e (mirrors ADR-0020 thin-entrypoint convention).
-# The only temp file (fetch_ci_payload's gh stderr capture) is removed by that function
-# itself: it runs in a command-substitution subshell this trap does not cover. The trap
-# is here for explicit hygiene so future additions cannot accidentally leak.
+# The only temp file (fetch_ci_payload's gh stderr capture) is removed by that function's
+# own EXIT trap: it runs in a command-substitution subshell this trap does not cover. The
+# trap is here for explicit hygiene so future additions cannot accidentally leak.
 trap ':' EXIT
 
 OWNER=""
@@ -657,9 +657,10 @@ fetch_graphql_payload() {
 # `no checks reported on the '<branch>' branch` line on stderr. gh's stderr is
 # therefore captured SEPARATELY (never merged into the body, never discarded) and
 # passed to the gate, which alone accepts that row; this helper then emits `[]`
-# (zero CI candidates). The live capture uses a temp file this helper removes
-# itself on every return path (the main EXIT trap does not run in this
-# command-substitution subshell); a temp-file failure fails closed as
+# (zero CI candidates). The live capture uses a temp file this helper's own
+# subshell EXIT trap removes on every exit, a catchable signal included (the main
+# EXIT trap does not run in this command-substitution subshell; SIGKILL leaves it
+# behind, as for any temp file); a temp-file failure fails closed as
 # ci-operational-failure, never to `[]`. INVARIANT: runs
 # inside command substitution — failure crosses via return code, never `exit`.
 # (F2)
@@ -694,15 +695,17 @@ fetch_ci_payload() {
       echo "FETCHNORM_ERROR=ci-operational-failure"
       return 1
     fi
+    # INVARIANT: this subshell's own EXIT trap removes the capture on every exit,
+    # a catchable signal during gh included; the path is expanded now, since the
+    # local is out of scope when the trap runs. Body ends with `:` (see main trap).
+    trap "rm -f -- $(printf '%q' "$ci_err_file"); :" EXIT
     ci_out="$("${GH_TIMEOUT[@]}" gh pr checks "$PR_NUMBER" --repo "$OWNER/$REPO" \
       --json bucket,name,description,link,state,workflow 2>"$ci_err_file")"
     ci_status=$?
     if ! ci_err="$(cat "$ci_err_file" 2>/dev/null)"; then
-      rm -f "$ci_err_file"
       echo "FETCHNORM_ERROR=ci-operational-failure"
       return 1
     fi
-    rm -f "$ci_err_file"
   fi
   # RESPONSE-CONTENT gate (RS2-001): status-ALLOWLIST + array-shape over the live
   # response, plus the no-checks row read from gh's stderr. Replaces the prior
