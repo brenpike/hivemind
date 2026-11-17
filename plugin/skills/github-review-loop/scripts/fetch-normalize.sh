@@ -180,7 +180,7 @@
 #   $5  SELF_LOGIN        viewer login               (required — self strip)
 #
 #   HIVEMIND_PR_REVIEWERS (env, optional)  extra Automated Reviewer logins, comma- or
-#                         whitespace-separated, `[bot]` optional. Passed verbatim to
+#                         whitespace-separated. Passed verbatim to
 #                         the classifier as --arg reviewers (unset -> ""); it only
 #                         ADDS to the set derived from the PR evidence (ADR-0043).
 #

@@ -14,7 +14,9 @@
 # through truth tables for each of its defs (configured-reviewer parsing, case folding, the
 # github-actions rule, the Bot gate on configured logins, the filter modes, review approval, the
 # retired filter value), and for CLOSURE: no `[bot]` strip literal and no login-only self compare may
-# be inlined in a consumer script.
+# be inlined in a consumer script, no known reviewer product login may appear in the module or a
+# consumer, `github-actions` may appear only in the module, and the retired-filter literal may appear
+# only on the module's `is_retired_filter` line.
 #
 # Mirrors tools/test_shared_libs.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any-
 # fail convention. Read-only: the only writes are scratch files in a disposable tmpdir removed on EXIT.
@@ -644,6 +646,135 @@ for closure_target in "${CLOSURE_TARGETS[@]}"; do
   else
     failed "self-compare:$closure_rel" "login-only self compare(s); route through is_self:
 $self_compare_hits"
+  fi
+done
+
+# ── CLOSURE: no reviewer product, CI or retired-filter literal outside its home ───
+# The Automated Reviewer set is derived from PR evidence, so no reviewer product login may be named
+# in the module or a consumer; the logins below are TEST DATA held only here. `github-actions` is the
+# module's CI-identity exclusion and may appear only in the module. The retired filter value is
+# named only by the module's `is_retired_filter` line; consumers call that def, never the literal.
+# Matching choice: case-insensitive (GitHub logins are case-insensitive). Product logins match as
+# whole words (`grep -w`), so a hyphenated login inside prose (`claude-mem`) still hits while an
+# identifier such as `CLAUDE_PLUGIN_ROOT` does not. `codex` and `github-actions` match as plain
+# substrings, so `codex_only` or `chatgpt-codex-connector` cannot slip past a word bound. Prose
+# mentioning any of these in a target trips it; that is intentional.
+REVIEWER_PRODUCT_LOGIN_ERE='chatgpt-codex-connector|copilot-pull-request-reviewer|copilot|claude|coderabbitai|gemini-code-assist|sourcery-ai|greptile-apps|qodo-merge-pro'
+CI_IDENTITY_ERE='github-actions'
+RETIRED_LITERAL_ERE='codex'
+RETIRED_HOME_ERE='^[0-9]+:def is_retired_filter\('
+LITERAL_TARGETS=("$IDENTITY_MODULE" "${CLOSURE_TARGETS[@]}")
+
+# print_literal_hits <grep-mode-flags> <ere> <file>
+# Print every case-insensitive hit of <ere> in <file> as `<lineno>:<text>`, one per line. Exits 0 on
+# hits or no hits and non-zero only when grep itself fails (exit 2), so a read error is never a pass.
+print_literal_hits() {
+  local grep_status
+  grep -ni"$1"E -- "$2" "$3"
+  grep_status=$?
+  [ "$grep_status" -le 1 ]
+}
+
+# print_retired_hits <file>
+# Print every retired-literal hit in <file> as `<lineno>:<text>`; in the module, the one home line
+# (`def is_retired_filter(`) is exempt. Non-zero only when the underlying grep fails.
+print_retired_hits() {
+  local retired_hits
+  retired_hits="$(print_literal_hits '' "$RETIRED_LITERAL_ERE" "$1")" || return 1
+  if [ "$1" = "$IDENTITY_MODULE" ]; then
+    printf '%s\n' "$retired_hits" | grep -vE -- "$RETIRED_HOME_ERE" | grep -v '^$'
+  else
+    printf '%s\n' "$retired_hits" | grep -v '^$'
+  fi
+  return 0
+}
+
+# assert_canary_hits <case> <expected-hit-count> <hits> <grep-status>
+# Pass when the canary grep succeeded and produced exactly <expected-hit-count> distinct hit lines.
+assert_canary_hits() {
+  local hit_lines
+  if [ "$4" -ne 0 ]; then
+    failed "$1" "canary grep failed"
+    return 0
+  fi
+  hit_lines="$(printf '%s\n' "$3" | grep -v '^$' | cut -d: -f1 | sort -un | wc -l | tr -d ' ')"
+  if [ "$hit_lines" = "$2" ]; then
+    pass "$1" "detected exactly $2 canary hit lines"
+  else
+    failed "$1" "detected $hit_lines canary hit lines, expected $2:
+$3"
+  fi
+}
+
+LITERAL_CANARY_HIT="$WORKDIR/literal-canary-hit.sh"
+printf '%s\n' 'select(.login == "chatgpt-codex-connector")' '["Copilot", "copilot-pull-request-reviewer[bot]"]' \
+  '# reviews from claude-mem or CodeRabbitAI' 'def x: "gemini-code-assist[bot]";' > "$LITERAL_CANARY_HIT"
+literal_canary_hits="$(print_literal_hits 'w' "$REVIEWER_PRODUCT_LOGIN_ERE" "$LITERAL_CANARY_HIT")"
+assert_canary_hits "product-login:canary-bites" 4 "$literal_canary_hits" "$?"
+
+LITERAL_CANARY_CLEAN="$WORKDIR/literal-canary-clean.sh"
+printf '%s\n' '# ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh' \
+  'automated_reviewer_set(.; $reviewers)' 'REVIEWER_FILTER="automated"' 'include "reviewer-identity";' \
+  > "$LITERAL_CANARY_CLEAN"
+literal_canary_hits="$(print_literal_hits 'w' "$REVIEWER_PRODUCT_LOGIN_ERE" "$LITERAL_CANARY_CLEAN")"
+assert_canary_hits "product-login:canary-no-overmatch" 0 "$literal_canary_hits" "$?"
+
+CI_CANARY_HIT="$WORKDIR/ci-canary-hit.sh"
+printf '%s\n' 'select(. != "github-actions")' '["GitHub-Actions[bot]"]' > "$CI_CANARY_HIT"
+ci_canary_hits="$(print_literal_hits '' "$CI_IDENTITY_ERE" "$CI_CANARY_HIT")"
+assert_canary_hits "ci-identity:canary-bites" 2 "$ci_canary_hits" "$?"
+
+CI_CANARY_CLEAN="$WORKDIR/ci-canary-clean.sh"
+printf '%s\n' '# .github/workflows/policy-check.yml' 'github_actions_run=1' > "$CI_CANARY_CLEAN"
+ci_canary_hits="$(print_literal_hits '' "$CI_IDENTITY_ERE" "$CI_CANARY_CLEAN")"
+assert_canary_hits "ci-identity:canary-no-overmatch" 0 "$ci_canary_hits" "$?"
+
+RETIRED_CANARY="$WORKDIR/retired-canary.sh"
+printf '%s\n' 'def is_retired_filter($filter): $filter == "codex-only";' '[ "$f" = codex_only ] && exit' \
+  '# Codex reviews' > "$RETIRED_CANARY"
+retired_canary_hits="$(print_retired_hits "$RETIRED_CANARY")"
+assert_canary_hits "retired-literal:consumer-canary-bites" 3 "$retired_canary_hits" "$?"
+
+RETIRED_MODULE_CANARY="$WORKDIR/reviewer-identity.jq"
+printf '%s\n' 'def is_retired_filter($filter): $filter == "codex-only";' \
+  'def is_filter_ok($filter): $filter != "codex-only";' > "$RETIRED_MODULE_CANARY"
+retired_canary_hits="$(IDENTITY_MODULE="$RETIRED_MODULE_CANARY" print_retired_hits "$RETIRED_MODULE_CANARY")"
+assert_canary_hits "retired-literal:module-canary-bites-off-home-line" 1 "$retired_canary_hits" "$?"
+case "$retired_canary_hits" in
+  2:*) pass "retired-literal:module-canary-home-line-exempt" "only the off-home line is reported" ;;
+  *) failed "retired-literal:module-canary-home-line-exempt" "unexpected module canary hits: $retired_canary_hits" ;;
+esac
+
+for literal_target in "${LITERAL_TARGETS[@]}"; do
+  literal_rel="${literal_target#"$REPO_ROOT"/}"
+  if [ ! -f "$literal_target" ]; then
+    failed "literal-closure:$literal_rel" "closure target missing"
+    continue
+  fi
+  if ! product_hits="$(print_literal_hits 'w' "$REVIEWER_PRODUCT_LOGIN_ERE" "$literal_target")"; then
+    failed "product-login:$literal_rel" "grep failed"
+  elif [ -z "$product_hits" ]; then
+    pass "product-login:$literal_rel" "no reviewer product login"
+  else
+    failed "product-login:$literal_rel" "reviewer product login(s); derive reviewers from PR evidence:
+$product_hits"
+  fi
+  if ! retired_hits="$(print_retired_hits "$literal_target")"; then
+    failed "retired-literal:$literal_rel" "grep failed"
+  elif [ -z "$retired_hits" ]; then
+    pass "retired-literal:$literal_rel" "no retired-filter literal outside the module's is_retired_filter line"
+  else
+    failed "retired-literal:$literal_rel" "retired-filter literal(s); call is_retired_filter:
+$retired_hits"
+  fi
+  [ "$literal_target" != "$IDENTITY_MODULE" ] || continue
+  if ! ci_hits="$(print_literal_hits '' "$CI_IDENTITY_ERE" "$literal_target")"; then
+    failed "ci-identity:$literal_rel" "grep failed"
+  elif [ -z "$ci_hits" ]; then
+    pass "ci-identity:$literal_rel" "no github-actions literal outside the module"
+  else
+    failed "ci-identity:$literal_rel" "github-actions literal(s); the module owns the CI identity rule:
+$ci_hits"
   fi
 done
 
