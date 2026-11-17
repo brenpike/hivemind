@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A before/after working-tree check around the reviewer run: local review is blocked when the reviewer modifies the working tree.
 - The local reviewer gets the time left in the 600 s review call after the before-snapshot, which keeps room for the after-check.
 - Local review is skipped as `tool-missing` when neither `timeout` nor `gtimeout` is installed.
+- `run-review.sh` never deletes recursively: it removes only the files it created and its empty temp folder, and only paths its own `mktemp` created.
 
 ### Changed
 

@@ -8,7 +8,7 @@ uses inside a mktemp dir, so this directory holds no fixture files. It exists so
 
 Each case runs the real, unmodified script from a scratch git repository. The
 repository's `feature` branch changes one file, adds one and deletes one against
-`main`, and every case passes `--base main`. The suite controls only three
+`main`, and every case passes `--base main`. The suite controls only four
 settings:
 
 - `PATH`: a fake-tool directory comes first. It holds a pass-through `timeout`,
@@ -18,7 +18,12 @@ settings:
   the rest. The host `PATH` follows for git and jq. The curated cases replace
   the host `PATH` with symlinks to the host tools the script and the fakes call,
   without `timeout` or `gtimeout`. A slow fake `git` sleeps 3 seconds on the
-  snapshot's `ls-files --others`, then runs the real git.
+  snapshot's `ls-files --others`, then runs the real git. In the cleanup
+  cases a fake `mktemp` answers the work-folder call or the large-diff call
+  with an existing decoy path, either exiting 1 or exiting 0 with a non-empty
+  decoy, and passes every other call to the real `mktemp`.
+- `TMPDIR`: a scratch folder under the suite's mktemp dir, where the script
+  makes its work folder.
 - `HOME`: a scratch home. Only the preset cases put a fake Codex companion under
   `.claude/plugins/cache/openai-codex/codex/<version>/scripts/`.
 - `HIVEMIND_LOCAL_REVIEWER`: unset, empty, `codex-plugin`, a malformed value, or
@@ -54,3 +59,12 @@ Covered behavior:
   it, and it is gone after the run.
 - Preset: the companion's argv, focus handling, the newest companion by mtime,
   and the `.result` object.
+- Cleanup: when the work-folder or the large-diff `mktemp` fails but prints an
+  existing path, or exits 0 with a non-empty folder or file, the run is blocked
+  and the decoy and its sentinel file survive. A normal run and a large-diff run
+  leave their `TMPDIR` empty and no large-diff file. After every case, the
+  shared `TMPDIR` holds no `run-review.*` folder.
+- Static checks: `run-review.sh` holds no recursive `rm` (`-r`, `-R`, `-rf`,
+  `-fr` or `--recursive`), and every `$work_dir/<name>` it writes is in its
+  `WORK_FILE_NAMES` list (snapshot prefixes by each `<prefix>.<suffix>`). Each
+  check is also run on a copy with an appended violation, which it must flag.

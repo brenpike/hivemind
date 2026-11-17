@@ -5,14 +5,17 @@
 #
 # OFFLINE bash TEST: needs only bash, git, jq and a sha256 tool. It never runs a real reviewer:
 # no codex, no copilot, no real node. Each case runs the REAL script, unmodified, from a scratch
-# git repository under a mktemp dir, with exactly three settings under test control:
+# git repository under a mktemp dir, with exactly four settings under test control:
 #   - PATH: one fake-tool dir first (a fake `timeout`, and a fake `node` in the pass-through dir),
 #     then the host PATH for git and jq. The pass-through `timeout` checks its `-k 5 <deadline>`
 #     prefix (all-digit deadline), logs its argv and the epoch second of its call, and execs the
 #     rest; the expiring ones exit 124 or 137 without running anything. The curated-PATH cases
 #     replace the host PATH with a dir of symlinks to the host tools the script, containment.sh
 #     and the fakes call, with no `timeout` or `gtimeout` among them. A slow fake `git` sleeps 3
-#     seconds on the snapshot's `ls-files --others`, then runs the real git.
+#     seconds on the snapshot's `ls-files --others`, then runs the real git. A fake `mktemp`
+#     answers the work-folder or the large-diff call with an existing decoy path (exit 1, or exit
+#     0 with a non-empty decoy) and passes every other call to the real mktemp.
+#   - TMPDIR: a scratch folder under the test tmpdir, where the script makes its work folder.
 #   - HOME: a scratch home. Only the preset cases install a fake Codex companion under it; the
 #     fake `node` runs that companion with bash.
 #   - HIVEMIND_LOCAL_REVIEWER: unset, empty, `codex-plugin`, a malformed value, or a JSON argv
@@ -28,7 +31,9 @@
 # before-snapshot reserve; bare and fenced JSON, prose, two fences and schema violations;
 # out-of-diff filtering and its count; the finding_id formula against precomputed digests and
 # its field framing; tracked edit, untracked file and HEAD move each blocked with the change left
-# in place; the large-diff patch file; the preset argv and its `.result`.
+# in place; the large-diff patch file; the preset argv and its `.result`; cleanup removes only
+# what the run created (decoy paths from a fake mktemp survive, no work folder or patch file is
+# left) and the script holds no recursive delete and names every work file it writes.
 #
 # Mirrors tools/test_prefilter.sh's pass/fail counter, per-case assertion and
 # exit-nonzero-on-any-fail convention. The only writes are under a tmpdir removed on EXIT.
@@ -157,7 +162,7 @@ chmod +x "$BIN_SLOW_GIT/git"
 
 # INVARIANT: the curated bin holds every host tool the script, containment.sh and the fakes call,
 # and never `timeout` or `gtimeout`, so a curated-PATH run sees no timeout tool at all.
-CURATED_REQUIRED_TOOLS=(bash env date dirname basename jq git mktemp wc cat rm mkdir readlink xargs cmp grep cp)
+CURATED_REQUIRED_TOOLS=(bash env date dirname basename jq git mktemp wc cat rm rmdir mkdir readlink xargs cmp grep cp)
 CURATED_OPTIONAL_TOOLS=(sha256sum shasum)
 for tool_name in "${CURATED_REQUIRED_TOOLS[@]}"; do
   tool_path="$(type -P "$tool_name")" || { echo "FAIL: host tool missing: $tool_name" >&2; exit 2; }
@@ -340,9 +345,14 @@ reviewer_setting() {
 RUN_SEQ=0
 # RR_PATH_TAIL: the PATH after the fake-tool dir; the host PATH except in run_review_curated.
 RR_PATH_TAIL="$HOST_PATH"
+# RR_TMPDIR: the TMPDIR every run gets; the shared run folder except in the cleanup cases.
+RUN_TMPDIR="$TMPDIR_TEST/run-tmp"
+mkdir -p "$RUN_TMPDIR" || exit 2
+RR_TMPDIR="$RUN_TMPDIR"
 
 # run_review <cwd> <home> <bin dir> <unset|set> <setting> [script args...]: run the real script
-# from <cwd> with PATH <bin dir>:RR_PATH_TAIL; sets RR_OUT, RR_ERR (file paths) and RR_RC.
+# from <cwd> with PATH <bin dir>:RR_PATH_TAIL and TMPDIR RR_TMPDIR; sets RR_OUT, RR_ERR (file
+# paths) and RR_RC.
 run_review() {
   local run_cwd="$1" run_home="$2" bin_dir="$3" setting_mode="$4" setting="$5"
   shift 5
@@ -351,11 +361,11 @@ run_review() {
   RR_ERR="$TMPDIR_TEST/runs/$RUN_SEQ.err"
   RR_RC=0
   if [ "$setting_mode" = unset ]; then
-    (cd "$run_cwd" && HOME="$run_home" PATH="$bin_dir:$RR_PATH_TAIL" bash "$RUN_REVIEW" "$@") \
+    (cd "$run_cwd" && HOME="$run_home" PATH="$bin_dir:$RR_PATH_TAIL" TMPDIR="$RR_TMPDIR" bash "$RUN_REVIEW" "$@") \
       >"$RR_OUT" 2>"$RR_ERR" || RR_RC=$?
   else
     (cd "$run_cwd" && HIVEMIND_LOCAL_REVIEWER="$setting" HOME="$run_home" PATH="$bin_dir:$RR_PATH_TAIL" \
-      bash "$RUN_REVIEW" "$@") >"$RR_OUT" 2>"$RR_ERR" || RR_RC=$?
+      TMPDIR="$RR_TMPDIR" bash "$RUN_REVIEW" "$@") >"$RR_OUT" 2>"$RR_ERR" || RR_RC=$?
   fi
 }
 
@@ -957,6 +967,153 @@ run_preset_reply_case preset-prose "$(write_reply preset-prose "$(printf 'Done.\
 assert_blocked "preset:prose-blocked" 'unexpected output shape'
 run_preset_reply_case preset-schema "$(write_reply preset-schema '{"result":{"verdict":"approve"}}')"
 assert_blocked "preset:schema-violation-blocked" 'output does not match schema'
+
+# ── Cleanup: only what the run created ─────────────────────────────────────────
+
+REAL_MKTEMP="$(type -P mktemp)" || { echo "FAIL: mktemp is not an executable on PATH" >&2; exit 2; }
+DECOYS="$TMPDIR_TEST/decoys"
+SENTINEL_TEXT='DECOY_SENTINEL_CONTENT'
+mkdir -p "$DECOYS" || exit 2
+
+# write_fake_mktemp <bin dir> <dir|file> <decoy path> <exit code>: a fake mktemp that answers the
+# `mktemp -d` call (dir) or any other call (file) by printing <decoy path> and exiting <exit
+# code>, and passes every other call to the real mktemp; plus a pass-through timeout.
+write_fake_mktemp() {
+  local bin_dir="$1" target_kind="$2" decoy_path="$3" exit_code="$4"
+  mkdir -p "$bin_dir" || return 1
+  write_pass_timeout "$bin_dir/timeout" || return 1
+  cat >"$bin_dir/mktemp" <<STUB || return 1
+#!/usr/bin/env bash
+call_kind=file
+[ "\${1:-}" = -d ] && call_kind=dir
+if [ "\$call_kind" = $(printf '%q' "$target_kind") ]; then
+  printf '%s\n' $(printf '%q' "$decoy_path")
+  exit $exit_code
+fi
+exec $(printf '%q' "$REAL_MKTEMP") "\$@"
+STUB
+  chmod +x "$bin_dir/mktemp"
+}
+
+# make_decoy_dir <name>: an existing folder holding one sentinel file; prints its path.
+make_decoy_dir() {
+  local decoy="$DECOYS/$1"
+  mkdir -p "$decoy" && printf '%s\n' "$SENTINEL_TEXT" >"$decoy/sentinel" || return 1
+  printf '%s\n' "$decoy"
+}
+
+# make_decoy_file <name>: an existing file holding the sentinel text; prints its path.
+make_decoy_file() {
+  local decoy="$DECOYS/$1"
+  printf '%s\n' "$SENTINEL_TEXT" >"$decoy" || return 1
+  printf '%s\n' "$decoy"
+}
+
+# decoy_dir_intact <dir>: the folder and its sentinel file still exist, the sentinel unchanged.
+decoy_dir_intact() { [ -d "$1" ] && [ -f "$1/sentinel" ] && [ "$(cat "$1/sentinel")" = "$SENTINEL_TEXT" ]; }
+
+# decoy_file_intact <file>: the file still exists with the sentinel text unchanged.
+decoy_file_intact() { [ -f "$1" ] && [ "$(cat "$1")" = "$SENTINEL_TEXT" ]; }
+
+# dir_has_no_entries <dir>: <dir> exists and holds nothing, dot files included.
+dir_has_no_entries() { [ -d "$1" ] && [ -z "$(ls -A -- "$1")" ]; }
+
+# no_run_work_dirs <dir>: no run-review.* work folder is left in <dir>.
+no_run_work_dirs() { ! compgen -G "$1/run-review.*" >/dev/null; }
+
+# run_decoy_dir_case <name> <exit code>: one run whose work-folder mktemp prints an existing
+# decoy folder and exits <exit code>; sets DECOY.
+run_decoy_dir_case() {
+  local bin_dir="$FAKES/bin-$1" repo
+  DECOY="$(make_decoy_dir "$1")" || return 1
+  write_fake_mktemp "$bin_dir" dir "$DECOY" "$2" || return 1
+  repo="$(new_repo "$1")" || return 1
+  run_review "$repo" "$EMPTY_HOME" "$bin_dir" set "$(reviewer_setting "$(new_capture "$1")" reply "$BARE_REPLY" no)" --base main
+}
+
+# run_decoy_patch_case <name> <exit code>: one large-diff run whose diff-file mktemp prints an
+# existing decoy file and exits <exit code>; sets DECOY and REPO.
+run_decoy_patch_case() {
+  local bin_dir="$FAKES/bin-$1"
+  DECOY="$(make_decoy_file "$1")" || return 1
+  write_fake_mktemp "$bin_dir" file "$DECOY" "$2" || return 1
+  REPO="$(new_repo "$1" "$LARGE_TEMPLATE_REPO")" || return 1
+  run_review "$REPO" "$EMPTY_HOME" "$bin_dir" set "$(reviewer_setting "$(new_capture "$1")" read-patch "$BARE_REPLY" no)" --base main
+}
+
+run_decoy_dir_case cleanup-dir-fail 1
+assert_blocked "cleanup:dir-mktemp-fail-blocked" 'cannot create a private work folder'
+assert_check "cleanup:dir-mktemp-fail-decoy-kept" "a failed mktemp's existing folder and its file survive" \
+  decoy_dir_intact "$DECOY"
+run_decoy_dir_case cleanup-dir-not-empty 0
+assert_blocked "cleanup:dir-not-empty-blocked" 'cannot create a private work folder'
+assert_check "cleanup:dir-not-empty-decoy-kept" "a non-empty folder from mktemp and its file survive" \
+  decoy_dir_intact "$DECOY"
+
+run_decoy_patch_case cleanup-patch-fail 1
+assert_blocked "cleanup:patch-mktemp-fail-blocked" 'cannot prepare the review diff file'
+assert_check "cleanup:patch-mktemp-fail-decoy-kept" "a failed mktemp's existing file survives" \
+  decoy_file_intact "$DECOY"
+run_decoy_patch_case cleanup-patch-not-empty 0
+assert_blocked "cleanup:patch-not-empty-blocked" 'cannot prepare the review diff file'
+assert_check "cleanup:patch-not-empty-decoy-kept" "a non-empty file from mktemp survives" \
+  decoy_file_intact "$DECOY"
+
+RR_TMPDIR="$TMPDIR_TEST/run-tmp-normal"
+mkdir -p "$RR_TMPDIR" || exit 2
+REPO="$(new_repo cleanup-normal)" || exit 2
+run_review "$REPO" "$EMPTY_HOME" "$BIN_PASS" set "$(reviewer_setting "$(new_capture cleanup-normal)" reply "$BARE_REPLY" no)" --base main
+assert_success "cleanup:normal-success" '.base == "main"'
+assert_check "cleanup:normal-no-work-dir" "a normal run leaves no run-review.* folder" no_run_work_dirs "$RR_TMPDIR"
+assert_check "cleanup:normal-tmpdir-empty" "a normal run leaves nothing in TMPDIR" dir_has_no_entries "$RR_TMPDIR"
+assert_check "cleanup:normal-no-patch" "a normal run leaves no patch file" no_run_patch_files "$REPO"
+
+RR_TMPDIR="$TMPDIR_TEST/run-tmp-large"
+mkdir -p "$RR_TMPDIR" || exit 2
+REPO="$(new_repo cleanup-large "$LARGE_TEMPLATE_REPO")" || exit 2
+run_review "$REPO" "$EMPTY_HOME" "$BIN_PASS" set "$(reviewer_setting "$(new_capture cleanup-large)" read-patch "$BARE_REPLY" no)" --base main
+assert_success "cleanup:large-success" '.base == "main"'
+assert_check "cleanup:large-tmpdir-empty" "a large-diff run leaves nothing in TMPDIR" dir_has_no_entries "$RR_TMPDIR"
+assert_check "cleanup:large-no-patch" "a large-diff run leaves no patch file" no_run_patch_files "$REPO"
+RR_TMPDIR="$RUN_TMPDIR"
+
+# has_recursive_rm <file>: <file> holds an rm call with a recursive flag (-r, -R, -rf, -fr, ...
+# or --recursive).
+has_recursive_rm() {
+  grep -Eq '(^|[^[:alnum:]_.-])rm[[:space:]]+(-[^[:space:]]*[[:space:]]+)*(-[[:alnum:]]*[rR][[:alnum:]]*|--recursive)([[:space:]]|$)' "$1"
+}
+
+# work_names_listed <file>: every `$work_dir/<name>` in <file> is in its WORK_FILE_NAMES list,
+# or is a snapshot prefix whose `<name>.<suffix>` is listed for every `$prefix.<suffix>` it uses.
+work_names_listed() {
+  local listed used_names suffixes name suffix
+  listed="$(sed -n '/^WORK_FILE_NAMES=($/,/^)$/p' "$1" | sed '1d;$d' | tr -s ' \t' '\n\n' | grep -v '^$')"
+  used_names="$(grep -o '\$work_dir/[A-Za-z0-9._-]*' "$1" | sed 's|^\$work_dir/||' | grep -v '^$' | sort -u)"
+  suffixes="$(grep -o '\$prefix\.[A-Za-z0-9_-]*' "$1" | sed 's|^\$prefix\.||' | sort -u)"
+  [ -n "$listed" ] && [ -n "$used_names" ] && [ -n "$suffixes" ] || return 1
+  while IFS= read -r name; do
+    printf '%s\n' "$listed" | grep -Fxq -- "$name" && continue
+    while IFS= read -r suffix; do
+      printf '%s\n' "$listed" | grep -Fxq -- "$name.$suffix" || { echo "unlisted work file: $name" >&2; return 1; }
+    done <<<"$suffixes"
+  done <<<"$used_names"
+}
+
+STATIC_PROBES="$TMPDIR_TEST/static-probes"
+mkdir -p "$STATIC_PROBES" || exit 2
+cp "$RUN_REVIEW" "$STATIC_PROBES/with-rm-rf.sh" && printf '  rm -fr -- "$work_dir"\n' >>"$STATIC_PROBES/with-rm-rf.sh" || exit 2
+cp "$RUN_REVIEW" "$STATIC_PROBES/with-unlisted.sh" && printf ': >"$work_dir/unlisted.txt"\n' >>"$STATIC_PROBES/with-unlisted.sh" || exit 2
+assert_check "static:no-recursive-rm" "run-review.sh holds no recursive rm" eval '! has_recursive_rm "$RUN_REVIEW"'
+assert_check "static:recursive-rm-probe" "the recursive rm check flags an appended rm -fr" \
+  has_recursive_rm "$STATIC_PROBES/with-rm-rf.sh"
+assert_check "static:work-files-listed" "every work file the script writes is in WORK_FILE_NAMES" \
+  work_names_listed "$RUN_REVIEW"
+assert_check "static:unlisted-probe" "the list check flags an appended unlisted work file" \
+  eval '! work_names_listed "$STATIC_PROBES/with-unlisted.sh" 2>/dev/null'
+
+# Every run of the suite shared RUN_TMPDIR; none may leave a work folder there.
+assert_check "cleanup:suite-no-work-dir" "no run of the suite left a run-review.* folder" \
+  dir_has_no_entries "$RUN_TMPDIR"
 
 # ── Summary ────────────────────────────────────────────────────────────────────
 echo

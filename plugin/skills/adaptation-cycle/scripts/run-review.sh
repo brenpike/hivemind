@@ -56,7 +56,11 @@
 #   twice the before-snapshot time (its whole seconds plus one) as the reserve for the
 #   after-check, less the 5-second kill grace. A deadline under MIN_REVIEW_SECONDS (60) is
 #   `skipped: timed-out` without running the reviewer. stdout and stderr go to files in a private
-#   mktemp folder that the EXIT trap removes.
+#   mktemp folder. The EXIT trap removes only the files the script writes there, each by its name
+#   in WORK_FILE_NAMES, then the folder itself only when it is empty, and the large-diff file;
+#   it never deletes recursively. It acts only on a path mktemp created (exit 0) and the checks
+#   confirmed: the folder a real, empty directory, the diff file an empty regular file, neither
+#   a symlink. A path that fails them is the creation blocker and is left in place.
 #
 # BEFORE/AFTER CHECK: before the run the script records HEAD, `git status --porcelain=v1 -z
 #   --untracked-files=all --no-renames`, and for every path of `git ls-files -z --cached --others
@@ -127,12 +131,28 @@ SECONDS=0
 work_dir=''
 patch_path=''
 
+# INVARIANT: every file the script writes in $work_dir is named here (snapshot files as
+# <prefix>.<suffix>); cleanup removes exactly these names, so a name missing here leaves the
+# folder behind instead of being deleted with it.
+WORK_FILE_NAMES=(
+  argv.nul candidate.json changed-paths.txt changed.nul ids.txt kept.json prompt.txt
+  review-input-pointer.txt review-input.txt review.json stderr stdout
+  before.hashes before.head before.kinds before.list before.regular before.snap before.status
+  after.hashes after.head after.kinds after.list after.regular after.snap after.status
+)
+readonly WORK_FILE_NAMES
+
 remove_private_files() {
+  local name work_paths=()
   if [ -n "$patch_path" ] && { [ -f "$patch_path" ] || [ -L "$patch_path" ]; }; then
     rm -f -- "$patch_path" 2>/dev/null || :
   fi
-  if [ -n "$work_dir" ]; then
-    rm -rf -- "$work_dir" 2>/dev/null || :
+  if [ -n "$work_dir" ] && [ -d "$work_dir" ] && [ ! -L "$work_dir" ]; then
+    for name in "${WORK_FILE_NAMES[@]}"; do
+      work_paths+=("$work_dir/$name")
+    done
+    rm -f -- "${work_paths[@]}" 2>/dev/null || :
+    rmdir -- "$work_dir" 2>/dev/null || :
   fi
   :
 }
@@ -261,8 +281,19 @@ else
   blocker 'no sha256 tool found'
 fi
 
-work_dir="$(mktemp -d "${TMPDIR:-/tmp}/run-review.XXXXXX" 2>/dev/null)" || blocker 'cannot create a private work folder'
-[ -n "$work_dir" ] && [ -d "$work_dir" ] || blocker 'cannot create a private work folder'
+# dir_is_empty <dir>: true when <dir> holds no entry, dot files included.
+dir_is_empty() {
+  local entries=()
+  shopt -s nullglob dotglob
+  entries=("$1"/*)
+  shopt -u nullglob dotglob
+  [ "${#entries[@]}" -eq 0 ]
+}
+
+new_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/run-review.XXXXXX" 2>/dev/null)" || blocker 'cannot create a private work folder'
+[ -n "$new_work_dir" ] && [ -d "$new_work_dir" ] && [ ! -L "$new_work_dir" ] && dir_is_empty "$new_work_dir" \
+  || blocker 'cannot create a private work folder'
+work_dir="$new_work_dir"
 
 git diff --name-only -z --no-renames --diff-filter=d "$base...HEAD" >"$work_dir/changed.nul" 2>/dev/null || blocker 'cannot compute the branch diff'
 
@@ -308,6 +339,7 @@ write_review_input() {
 # file when the review input is over the inline limit.
 build_generic_prompt() {
   local input_path="$work_dir/review-input.txt" input_bytes guidance input_text_path canon_root patch_rel
+  local new_patch_path
   write_review_input >"$input_path" 2>/dev/null || blocker 'cannot compute the branch diff'
   input_bytes="$(wc -c <"$input_path")" || blocker 'cannot compute the branch diff'
   input_bytes=$((input_bytes + 0))
@@ -318,7 +350,10 @@ build_generic_prompt() {
     canon_root="$(hivemind_assert_contained "$repo_root" "$PATCH_DIR_REL" 2>/dev/null)" || blocker 'cannot prepare the review diff file'
     [ -n "$canon_root" ] || blocker 'cannot prepare the review diff file'
     mkdir -p -- "$canon_root/$PATCH_DIR_REL" || blocker 'cannot prepare the review diff file'
-    patch_path="$(mktemp "$canon_root/$PATCH_DIR_REL/review-diff.XXXXXXXXXX")" || blocker 'cannot prepare the review diff file'
+    new_patch_path="$(mktemp "$canon_root/$PATCH_DIR_REL/review-diff.XXXXXXXXXX")" || blocker 'cannot prepare the review diff file'
+    [ -n "$new_patch_path" ] && [ -f "$new_patch_path" ] && [ ! -L "$new_patch_path" ] && [ ! -s "$new_patch_path" ] \
+      || blocker 'cannot prepare the review diff file'
+    patch_path="$new_patch_path"
     patch_rel="$PATCH_DIR_REL/${patch_path##*/}"
     cat -- "$input_path" >"$patch_path" || blocker 'cannot prepare the review diff file'
     guidance="The change is too large to inline. Before you review, read the file $patch_rel at the repository root with your file-read tool: it holds the commit log, diff stat and full diff. Read other repository files as needed for context, without changing anything."
