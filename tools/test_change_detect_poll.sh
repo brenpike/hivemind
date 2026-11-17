@@ -77,9 +77,17 @@
 # the shared plugin/skills/_shared/review-surface-shape.sh check, while a genuinely empty PR (every
 # `nodes` list `[]`) still yields a valid baseline.
 #
-# THE PROCESS-LIFETIME CONTRACT: `CHANGED` is the only marker after which the poll keeps running.
-# `REVIEWER_APPROVED` and every terminal marker are the last line the process prints, so an
-# approval co-firing with a delta never trails a later `CHANGED` from an orphaned poll.
+# THE PROCESS-LIFETIME CONTRACT: `CHANGED` and `CI_FAILED` are the only markers after which the
+# poll keeps running. `REVIEWER_APPROVED` and every terminal marker are the last line the process
+# prints, so an approval co-firing with a delta never trails a later `CHANGED` or `CI_FAILED` from
+# an orphaned poll.
+#
+# THE CI ROUTE CONTRACT (#400): a RISE in FAILED_CHECKS against the previous snapshot or the seed
+# prints `CI_FAILED`, never `CHANGED`, so the skill dispatches the reviewer without the prefilter.
+# A drop, or red CI that stays red at the same count, never prints `CI_FAILED`: a drop and any
+# other delta print `CHANGED`. One marker per iteration, in the order STATE=MERGED, STATE=CLOSED,
+# REVIEWER_APPROVED, CI_FAILED, CHANGED. A seed whose failed_checks field is not all digits fails
+# closed before any gh call.
 #
 # THE QUIET-EXIT CHECK CONTRACT: a return that would end the watch clean, or keep watching with no
 # poll running, first runs
@@ -87,10 +95,17 @@
 #     <SEED>
 # against the pending seed. It takes ONE capture through the poll's own query path, decides through
 # the poll's own `iteration_marker`, and prints exactly one line (`STATE=MERGED`, `STATE=CLOSED`,
-# `REVIEWER_APPROVED`, `CHANGED`, or `UNCHANGED`), exit 0, so its line equals the line a poll armed
+# `REVIEWER_APPROVED`, `CI_FAILED`, `CHANGED`, or `UNCHANGED`), exit 0, so its line equals the line a poll armed
 # with the same seed prints first over the same state, with that poll's `WATCH_TIMEOUT` read as
 # `UNCHANGED`. A missing or malformed seed is `CHECK_ERROR`, exit 1, before any gh call; a failed
 # capture is `CHECK_ERROR`, exit 1, never retried.
+#
+# THE WATCH-LIFETIME CONTRACT: no poll sleep outruns the watch window. Every sleep, the
+# failed-capture retry included, goes through the poll's one helper, sleep_to_next_poll, which
+# sleeps the smaller of the poll interval and the seconds left to the deadline, or not at all when
+# none is left, so the loop top prints `WATCH_TIMEOUT` on time for every accepted interval and
+# window, including a re-arm whose window is smaller than the interval. The executable lines of the
+# poll hold exactly one `sleep` command, inside that helper, so a second raw sleep goes red.
 #
 # Usage:
 #   ./tools/test_change_detect_poll.sh
@@ -290,7 +305,7 @@ chmod +x "$STUB_BIN/date"
 # deadline per snapshot query, so a real `sleep` adds no coverage and costs about one second per
 # poll across every case. The fake returns at once and appends its argument to the state dir's
 # `sleep.calls`, one line per call, so a case that needs the interval count reads it from there
-# (sleep_call_count). Any call that is not one integer argument exits non-zero so a new use of
+# (sleep_call_count) and a case that needs each duration reads the file itself. Any call that is not one integer argument exits non-zero so a new use of
 # `sleep` cannot silently pass through.
 cat > "$STUB_BIN/sleep" <<'STUB'
 #!/usr/bin/env bash
@@ -626,8 +641,11 @@ fi
 
 # ── 3c. scalar delta: FAILED_CHECKS ─────────────────────────────────────────────────
 # CI regresses with no review activity at all: one rollup check run moves SUCCESS -> FAILURE, so
-# FAILED_CHECKS goes 0 -> 1. Keeps github-reviewer step 3 (failed-CI fix candidates) wired to a
-# wake signal.
+# FAILED_CHECKS goes 0 -> 1. A rise is its own marker, CI_FAILED, which the skill dispatches to the
+# reviewer without the prefilter (#400); the prefilter judges only the review surfaces and would
+# skip a wake whose only change is the failed-check count. The rise prints CI_FAILED and no CHANGED,
+# the steady red poll after it prints nothing, and CI_FAILED keeps the poll running to
+# WATCH_TIMEOUT.
 delta_checks="$(derive_fixture delta-checks "$PRE" \
   '.data.repository.pullRequest.statusCheckRollup.contexts.checkRunCountsByState =
      [{"state":"SUCCESS","count":2},{"state":"FAILURE","count":1}]')"
@@ -635,11 +653,10 @@ st="$(new_state deltachecks)"
 set_seq "$st" graphql "$PRE" "$delta_checks"
 set_seq "$st" reactions "$REACT_NONE"
 out="$(arm_poll "$st" "$SEED")"
-changed_count="$(printf '%s\n' "$out" | grep -cx 'CHANGED')"
-if [ "$changed_count" -ge 1 ]; then
-  pass "delta:failed-checks" "FAILED_CHECKS 0->1 fired CHANGED"
+if [ "$out" = "$(printf 'CI_FAILED\nWATCH_TIMEOUT')" ]; then
+  pass "delta:failed-checks" "FAILED_CHECKS 0->1 fired CI_FAILED, no CHANGED, polled on to WATCH_TIMEOUT"
 else
-  failed "delta:failed-checks" "expected CHANGED, got=$(printf '%s' "$out" | tr '\n' ';')"
+  failed "delta:failed-checks" "expected exactly CI_FAILED;WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';')"
 fi
 
 # ── 4. Codex 👍 present at the first poll emits REVIEWER_APPROVED ────────────────────
@@ -749,6 +766,38 @@ if [ "$status" -ne 0 ] && printf '%s\n' "$out" | grep -qx 'POLL_ERROR'; then
   pass "validation:bad-pr-number" "non-integer PR number -> POLL_ERROR exit=$status"
 else
   failed "validation:bad-pr-number" "status=$status out=$(printf '%s' "$out" | tr '\n' ';')"
+fi
+
+# A 19-digit watch window or poll interval would wrap Bash's 64-bit arithmetic, so each is
+# rejected before any gh call: POLL_ERROR, exit 1, zero gh calls.
+oversized_ok=1
+oversized_detail=""
+for oversized_arg in watch interval; do
+  st="$(new_state "oversized-$oversized_arg")"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  oversized_watch="$MAX_WATCH"
+  oversized_interval="$POLL_INTERVAL"
+  if [ "$oversized_arg" = "watch" ]; then
+    oversized_watch="1234567890123456789"
+  else
+    oversized_interval="1234567890123456789"
+  fi
+  out="$(run_poll "$st" "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$oversized_watch" "$oversized_interval" \
+    "$REVIEWER_FILTER" "$SELF_LOGIN" "$SEED")"
+  status=$?
+  calls="$(gh_call_counts "$st")"
+  if [ "$out" != "POLL_ERROR" ] || [ "$status" -ne 1 ] || [ "$calls" != "0 0 0" ]; then
+    oversized_ok=0
+    oversized_detail="$oversized_detail $oversized_arg: status=$status calls=$calls out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+done
+if [ -z "$SEED" ]; then
+  skipped "validation:oversized-seconds" "no seed captured"
+elif [ "$oversized_ok" -eq 1 ]; then
+  pass "validation:oversized-seconds" "19-digit watch window or poll interval -> POLL_ERROR, exit 1, zero gh calls"
+else
+  failed "validation:oversized-seconds" "$oversized_detail"
 fi
 
 # ── 10. repeated unusable query response fails CLOSED ───────────────────────────────
@@ -1566,6 +1615,7 @@ fi
 #   (c) parity: over each delta class, a derived MERGED and CLOSED state, an approval rise, and no
 #       delta, the check's line equals the expected marker AND the first line of a poll armed with
 #       the same seed over the same state (its WATCH_TIMEOUT read as UNCHANGED); exit 0, one capture.
+#       A failed-check rise is CI_FAILED, and a drop against a red re-arm seed is CHANGED.
 #   (d) fail-closed: a failed snapshot query (no retry), a missing seed, and a malformed seed (no gh
 #       call) each print exactly CHECK_ERROR, exit 1.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
@@ -1598,40 +1648,44 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   parity_ok=1
   parity_detail=""
   parity_seed="$(capture_seed checkparityseed re-arm "$PRE" "$REACT_NONE")"
+  parity_red_seed="$(capture_seed checkparityredseed re-arm "$delta_checks" "$REACT_NONE")"
   state_merged="$(derive_fixture state-merged "$PRE" '.data.repository.pullRequest.state = "MERGED"')"
   state_closed="$(derive_fixture state-closed "$PRE" '.data.repository.pullRequest.state = "CLOSED"')"
-  for parity_row in "totals|$delta_total|$REACT_NONE|CHANGED" \
-    "checks|$delta_checks|$REACT_NONE|CHANGED" \
-    "merged|$state_merged|$REACT_NONE|STATE=MERGED" \
-    "closed|$state_closed|$REACT_NONE|STATE=CLOSED" \
-    "approval|$PRE|$REACT_CODEX|REVIEWER_APPROVED" \
-    "nodelta|$PRE|$REACT_NONE|UNCHANGED"; do
-    IFS='|' read -r parity_name parity_graphql parity_reactions parity_expected <<EOF
+  # INVARIANT: the seed is the LAST row field: it carries `|` itself, and `read` hands the last
+  # name the remainder of the line.
+  for parity_row in "totals|$delta_total|$REACT_NONE|CHANGED|$parity_seed" \
+    "checks|$delta_checks|$REACT_NONE|CI_FAILED|$parity_seed" \
+    "checks-drop|$PRE|$REACT_NONE|CHANGED|$parity_red_seed" \
+    "merged|$state_merged|$REACT_NONE|STATE=MERGED|$parity_seed" \
+    "closed|$state_closed|$REACT_NONE|STATE=CLOSED|$parity_seed" \
+    "approval|$PRE|$REACT_CODEX|REVIEWER_APPROVED|$parity_seed" \
+    "nodelta|$PRE|$REACT_NONE|UNCHANGED|$parity_seed"; do
+    IFS='|' read -r parity_name parity_graphql parity_reactions parity_expected parity_row_seed <<EOF
 $parity_row
 EOF
     st="$(new_state "check-parity-$parity_name")"
     set_seq "$st" graphql "$parity_graphql"
     set_seq "$st" reactions "$parity_reactions"
-    check_out="$(run_check "$st" "$parity_seed")"
+    check_out="$(run_check "$st" "$parity_row_seed")"
     status=$?
     calls="$(gh_call_counts "$st")"
 
     st="$(new_state "check-parity-$parity_name-poll")"
     set_seq "$st" graphql "$parity_graphql"
     set_seq "$st" reactions "$parity_reactions"
-    poll_first="$(arm_poll "$st" "$parity_seed" | head -1)"
+    poll_first="$(arm_poll "$st" "$parity_row_seed" | head -1)"
     [ "$poll_first" != "WATCH_TIMEOUT" ] || poll_first="UNCHANGED"
 
     if [ "$check_out" != "$poll_first" ] || [ "$check_out" != "$parity_expected" ] \
       || [ "$status" -ne 0 ] || [ "$calls" != "1 1 1" ]; then
       parity_ok=0
-      parity_detail="$parity_detail $parity_name: expected=$parity_expected check=$(printf '%s' "$check_out" | tr '\n' ';') poll_first=$poll_first status=$status calls=$calls"
+      parity_detail="$parity_detail $parity_name: expected=$parity_expected check=$(printf '%s' "$check_out" | tr '\n' ';') poll_first=$poll_first status=$status calls=$calls seed=$parity_row_seed"
     fi
   done
   if [ "$parity_ok" -eq 1 ]; then
-    pass "check:parity-with-poll-first-iteration" "totals, checks, merged, closed, approval rise, no delta: check line == poll first line == expected, exit 0, one capture"
+    pass "check:parity-with-poll-first-iteration" "totals, checks rise (CI_FAILED), checks drop (CHANGED), merged, closed, approval rise, no delta: check line == poll first line == expected, exit 0, one capture"
   else
-    failed "check:parity-with-poll-first-iteration" "$parity_detail seed=$parity_seed"
+    failed "check:parity-with-poll-first-iteration" "$parity_detail"
   fi
 
   check_fail_ok=1
@@ -1838,6 +1892,210 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   fi
 else
   skipped "approval:status-bot-comment-changes-never-approves" "$SKIP_REASON"
+fi
+
+# ── 41. the CI route: a FAILED_CHECKS rise is CI_FAILED, a drop or steady red is CHANGED ──
+# The prefilter judges only the review surfaces, so a wake whose only change is the failed-check
+# count would be PREFILTER_SKIP, and the running poll has already moved its baseline (#400). A rise
+# therefore prints its own marker, CI_FAILED, which the skill dispatches without the prefilter;
+# a drop and every other delta stay CHANGED, so a steady red run never re-dispatches. Red seeds are
+# captured over the derived red state; no committed fixture changes.
+#   (a) a red seed over the green state (a drop) prints CHANGED, never CI_FAILED.
+#   (b) a red seed over the same red count plus a new non-self comment prints CHANGED only.
+#   (c) a rise and a comment delta in one iteration print CI_FAILED, never CHANGED.
+#   (d) a running poll served 0, 1, 1, 2 failed checks prints CI_FAILED once per rise and nothing
+#       on the steady iteration.
+#   (e) an approval edge co-firing with a rise prints REVIEWER_APPROVED only and ends the process.
+#   (f) a seed whose failed_checks field is not all digits, or is 19 digits (past the 18-digit
+#       bound that keeps Bash's 64-bit arithmetic from wrapping), is POLL_ERROR / CHECK_ERROR,
+#       exit 1, with zero gh calls.
+
+# ci_route_poll <state_name> <seed> <max_watch> <graphql_entry>...: a poll armed with <seed> under
+# a <max_watch>-poll window, serving the graphql entries in order and no reaction to every poll.
+ci_route_poll() {
+  local st seed="$2" max_watch="$3"
+  st="$(new_state "$1")"
+  shift 3
+  set_seq "$st" graphql "$@"
+  set_seq "$st" reactions "$REACT_NONE"
+  run_poll "$st" "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$max_watch" "$POLL_INTERVAL" \
+    "$REVIEWER_FILTER" "$SELF_LOGIN" "$seed"
+}
+
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  ci_red_seed="$(capture_seed ci-red-seed re-arm "$delta_checks" "$REACT_NONE")"
+  ci_red_comment="$(derive_fixture ci-red-comment "$delta_checks" \
+    '.data.repository.pullRequest.comments.totalCount = 3
+     | .data.repository.pullRequest.comments.nodes += [{"databaseId":2411003,"author":{"login":"chatgpt-codex-connector","__typename":"Bot"}}]')"
+  ci_checks_two="$(derive_fixture ci-checks-two "$PRE" \
+    '.data.repository.pullRequest.statusCheckRollup.contexts.checkRunCountsByState =
+       [{"state":"SUCCESS","count":1},{"state":"FAILURE","count":2}]')"
+  ci_changed_then_timeout="$(printf 'CHANGED\nWATCH_TIMEOUT')"
+  ci_failed_then_timeout="$(printf 'CI_FAILED\nWATCH_TIMEOUT')"
+
+  out="$(ci_route_poll ci-drop "$ci_red_seed" "$MAX_WATCH" "$PRE")"
+  if [ "$out" = "$ci_changed_then_timeout" ]; then
+    pass "ci:drop-fires-changed" "red seed over green state fired CHANGED, never CI_FAILED"
+  else
+    failed "ci:drop-fires-changed" "expected exactly CHANGED;WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';') seed=$ci_red_seed"
+  fi
+
+  out="$(ci_route_poll ci-steady-red-comment "$ci_red_seed" "$MAX_WATCH" "$ci_red_comment")"
+  if [ "$out" = "$ci_changed_then_timeout" ]; then
+    pass "ci:steady-red-with-comment-fires-changed" "same red count plus a new comment fired CHANGED only"
+  else
+    failed "ci:steady-red-with-comment-fires-changed" "expected exactly CHANGED;WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';') seed=$ci_red_seed"
+  fi
+
+  out="$(ci_route_poll ci-rise-comment "$SEED" "$MAX_WATCH" "$PRE" "$ci_red_comment")"
+  if [ "$out" = "$ci_failed_then_timeout" ]; then
+    pass "ci:rise-with-comment-fires-ci-failed" "rise plus comment delta in one iteration fired CI_FAILED, never CHANGED"
+  else
+    failed "ci:rise-with-comment-fires-ci-failed" "expected exactly CI_FAILED;WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  out="$(ci_route_poll ci-each-rise "$SEED" 4 "$PRE" "$delta_checks" "$delta_checks" "$ci_checks_two")"
+  if [ "$out" = "$(printf 'CI_FAILED\nCI_FAILED\nWATCH_TIMEOUT')" ]; then
+    pass "ci:each-rise-fires-once" "failed checks 0, 1, 1, 2 fired CI_FAILED on each rise and nothing on the steady poll"
+  else
+    failed "ci:each-rise-fires-once" "expected exactly CI_FAILED;CI_FAILED;WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  st="$(new_state ci-approval-cofire)"
+  set_seq "$st" graphql "$PRE" "$delta_checks"
+  set_seq "$st" reactions "$REACT_NONE" "$REACT_CODEX"
+  out="$(run_poll "$st" "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$LIFETIME_MAX_WATCH" "$POLL_INTERVAL" \
+    "$REVIEWER_FILTER" "$SELF_LOGIN" "$SEED")"
+  status=$?
+  graphql_calls="$(cat "$st/graphql.n")"
+  if [ "$out" = "REVIEWER_APPROVED" ] && [ "$status" -eq 0 ] && [ "$graphql_calls" = "2" ]; then
+    pass "ci:approval-cofire-wins" "approval co-firing with a rise printed REVIEWER_APPROVED only, exit 0, no later poll"
+  else
+    failed "ci:approval-cofire-wins" "expected exactly REVIEWER_APPROVED exit 0 graphql_calls=2, got status=$status graphql_calls=$graphql_calls out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  ci_seed_ok=1
+  ci_seed_detail=""
+  ci_failed_checks_pos=$(($(declared_fields | grep -nx 'failed_checks' | cut -d: -f1) + 1))
+  for ci_bad_value in 1a -1 1234567890123456789; do
+    ci_bad_seed="$(printf '%s' "$SEED" | awk -F'|' -v OFS='|' -v pos="$ci_failed_checks_pos" \
+      -v bad="$ci_bad_value" '{$pos = bad; print}')"
+    for ci_seed_mode in poll check; do
+      st="$(new_state "ci-bad-seed-$ci_bad_value-$ci_seed_mode")"
+      set_seq "$st" graphql "$PRE"
+      set_seq "$st" reactions "$REACT_NONE"
+      if [ "$ci_seed_mode" = "poll" ]; then
+        ci_seed_expected="POLL_ERROR"
+        out="$(arm_poll "$st" "$ci_bad_seed")"
+      else
+        ci_seed_expected="CHECK_ERROR"
+        out="$(run_check "$st" "$ci_bad_seed")"
+      fi
+      status=$?
+      calls="$(gh_call_counts "$st")"
+      if [ "$out" != "$ci_seed_expected" ] || [ "$status" -ne 1 ] || [ "$calls" != "0 0 0" ]; then
+        ci_seed_ok=0
+        ci_seed_detail="$ci_seed_detail $ci_seed_mode/$ci_bad_value: status=$status calls=$calls out=$(printf '%s' "$out" | tr '\n' ';') seed=$ci_bad_seed"
+      fi
+    done
+  done
+  if [ "$ci_seed_ok" -eq 1 ]; then
+    pass "ci:seed-non-digit-failed-checks-fails-closed" "non-digit or oversized failed_checks seed field -> POLL_ERROR / CHECK_ERROR, exit 1, zero gh calls"
+  else
+    failed "ci:seed-non-digit-failed-checks-fails-closed" "$ci_seed_detail"
+  fi
+else
+  for ci_case_id in ci:drop-fires-changed ci:steady-red-with-comment-fires-changed \
+    ci:rise-with-comment-fires-ci-failed ci:each-rise-fires-once ci:approval-cofire-wins \
+    ci:seed-non-digit-failed-checks-fails-closed; do
+    skipped "$ci_case_id" "$SKIP_REASON"
+  done
+fi
+
+# ── 42. the watch window bounds every poll sleep ─────────────────────────────────────
+# A sleep is the smaller of the poll interval and the seconds left to the deadline, so no sleep
+# outruns the window and WATCH_TIMEOUT is never late. A re-arm whose window is smaller than the
+# interval is a legitimate input (SKILL.md Window deadline), not a rejected one. The fake clock
+# reads epoch plus the snapshot-query count and the fake sleep records each argument, so the
+# recorded sleeps are exact.
+#   (a) a steady state under a 5-poll window with interval 3600, and again with the 18-digit
+#       interval, prints exactly WATCH_TIMEOUT and sleeps 4, 3, 2, 1: each sleep is the time left.
+#       Interval 2 sleeps 2, 2, 2, 1: an interval below the time left passes through unchanged.
+#   (b) a failed first capture then the steady state, interval 3600, sleeps 4 first and prints
+#       exactly WATCH_TIMEOUT, not POLL_ERROR.
+#   (c) STRUCTURAL: the executable, non-comment lines of the poll hold exactly one `sleep` command,
+#       inside sleep_to_next_poll, so a second raw sleep goes red.
+WINDOW_MAX_WATCH=5
+
+# window_poll <state_dir> <interval>: a poll armed with the shared seed under the 5-poll window.
+window_poll() {
+  run_poll "$1" "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$WINDOW_MAX_WATCH" "$2" \
+    "$REVIEWER_FILTER" "$SELF_LOGIN" "$SEED"
+}
+
+# recorded_sleeps <state_dir>: every argument the fake `sleep` recorded, comma-joined in order.
+recorded_sleeps() {
+  paste -sd, "$1/sleep.calls"
+}
+
+# poll_sleep_commands: `<line>:<in_helper>` for each `sleep` command on an executable,
+# non-comment line of the poll, <in_helper> 1 inside sleep_to_next_poll and 0 elsewhere.
+poll_sleep_commands() {
+  awk '
+    /^sleep_to_next_poll\(\) \{/ { in_helper = 1 }
+    /^[[:space:]]*#/ { next }
+    /(^|[^[:alnum:]_-])sleep([[:space:]]|$)/ { print NR ":" in_helper + 0 }
+    in_helper && /^\}/ { in_helper = 0 }
+  ' "$POLL"
+}
+
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  window_ok=1
+  window_detail=""
+  for window_case in 3600:4,3,2,1 999999999999999999:4,3,2,1 2:2,2,2,1; do
+    window_interval="${window_case%%:*}"
+    window_expected="${window_case#*:}"
+    st="$(new_state "window-$window_interval")"
+    set_seq "$st" graphql "$PRE"
+    set_seq "$st" reactions "$REACT_NONE"
+    out="$(window_poll "$st" "$window_interval")"
+    status=$?
+    window_sleeps="$(recorded_sleeps "$st")"
+    if [ "$out" != "WATCH_TIMEOUT" ] || [ "$status" -ne 0 ] \
+      || [ "$window_sleeps" != "$window_expected" ]; then
+      window_ok=0
+      window_detail="$window_detail interval=$window_interval: status=$status sleeps=$window_sleeps expected=$window_expected out=$(printf '%s' "$out" | tr '\n' ';')"
+    fi
+  done
+  if [ "$window_ok" -eq 1 ]; then
+    pass "watch:sleep-never-outruns-window" "interval 3600 or 18 digits sleeps 4,3,2,1 to WATCH_TIMEOUT; interval 2 sleeps 2,2,2,1"
+  else
+    failed "watch:sleep-never-outruns-window" "$window_detail"
+  fi
+
+  st="$(new_state window-failed-capture)"
+  set_seq "$st" graphql FAIL "$PRE"
+  set_seq "$st" latestreviews "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(window_poll "$st" 3600)"
+  status=$?
+  window_first_sleep="$(head -1 "$st/sleep.calls")"
+  if [ "$out" = "WATCH_TIMEOUT" ] && [ "$status" -eq 0 ] && [ "$window_first_sleep" = "4" ]; then
+    pass "watch:failed-capture-sleep-clamped" "failed first capture slept 4, not 3600, then idled to WATCH_TIMEOUT"
+  else
+    failed "watch:failed-capture-sleep-clamped" "expected WATCH_TIMEOUT exit 0 first sleep 4, got status=$status first_sleep=$window_first_sleep sleeps=$(recorded_sleeps "$st") out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+else
+  skipped "watch:sleep-never-outruns-window" "$SKIP_REASON"
+  skipped "watch:failed-capture-sleep-clamped" "$SKIP_REASON"
+fi
+
+sleep_commands="$(poll_sleep_commands)"
+if [ "$(printf '%s\n' "$sleep_commands" | grep -c .)" = "1" ] \
+  && printf '%s\n' "$sleep_commands" | grep -qx '[0-9]*:1'; then
+  pass "watch:one-sleep-primitive" "the poll's only sleep command is inside sleep_to_next_poll"
+else
+  failed "watch:one-sleep-primitive" "expected exactly one sleep command, inside sleep_to_next_poll, got line:in_helper=[$(printf '%s' "$sleep_commands" | tr '\n' ' ')]"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────

@@ -11,6 +11,14 @@
 # where the latest non-self thread comment already carries a self-authored
 # `Fixed in <SHA>.` reply but no thread resolution has been recorded yet.
 #
+# Boundary:
+#   The prefilter judges the review surfaces only (threads, comments,
+#   reviews); it never reads CI check state. A rise in the failed-check count
+#   reaches the skill as the poll's own `CI_FAILED` marker, which dispatches
+#   the reviewer without running this prefilter. A `CHANGED` wake from a drop
+#   in that count, or from CI that stays red, is judged here on the review
+#   surfaces alone.
+#
 # Architecture:
 #   The per-comment / per-thread "already handled by our own fix-reply?"
 #   classification is NO LONGER inlined here. It is DELEGATED to the shared,

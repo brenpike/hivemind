@@ -71,8 +71,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/pr-change-detect-p
 ```
 
 `--snapshot` first, then the arm kind (`initial` here; see Arm kind), then the same 7
-positional args the Monitor arm uses, all required and validated, so pass the
-concrete values the arm will use. stdout is exactly one `BASELINE=<seed>` line; keep
+positional args the Monitor arm uses, all required, with the concrete values the arm
+will use. stdout is exactly one `BASELINE=<seed>` line; keep
 the bare token (`sed -n 's/^BASELINE=//p' | head -1`). A `SNAPSHOT_ERROR` line or
 non-zero exit → retry once; a second failure is terminal `blocked`. Never arm the
 Monitor with an empty or absent seed.
@@ -115,8 +115,8 @@ pass must never re-fire.
 **Seed-Advance invariant.** The baseline seed advances only where a reviewer pass is
 about to consume the state it snapshots. There are exactly two capture sites: step
 2, before cycle 0, and step 5, before a dispatch. The QUIET-EXIT
-CHECK (step 6) is not a capture site: `--check` reads a pending seed, prints no seed,
-and leaves the baseline where it was. An arm boundary (step 4) and a post-dispatch
+CHECK (step 6) is not a capture site: `--check` reads a pending seed and prints none.
+An arm boundary (step 4) and a post-dispatch
 re-arm (step 6) are not capture sites: each must reuse the seed it already carries,
 and a fresh `--snapshot` at either is forbidden. The resulting duplicate wakes, and
 re-fires on our own `Fixed in <SHA>` replies, are absorbed by `prefilter.sh` as
@@ -125,16 +125,17 @@ re-fires on our own `Fixed in <SHA>` replies, are absorbed by `prefilter.sh` as
 **5. Per event.** `CHANGED` → run
 `bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh" <OWNER> <REPO> <PR_NUMBER> <reviewer_filter> <SELF_LOGIN>`:
 `PREFILTER_SKIP` → keep Monitor armed, no dispatch, no cycle/`Routed` increment.
-`PREFILTER_DISPATCH` or `PREFILTER_ERROR=<reason>` → dispatch reviewer fix mode (no
-`target`); `PREFILTER_ERROR` is fail-open. Handle the return per step 6.
+`PREFILTER_DISPATCH` or `PREFILTER_ERROR=<reason>` (fail-open) → dispatch reviewer fix
+mode (no `target`); handle the return per step 6. `CI_FAILED` (the failed-check count
+rose) → that dispatch without `prefilter.sh`, counted like `PREFILTER_DISPATCH`.
 `REVIEWER_APPROVED` → confirmation pass (no `target`); use only the latest poll's
 approval: a stale prior approval must never short-circuit later pushback.
 If the reviewer finds nothing actionable, the loop ends `clean` only after the QUIET-EXIT CHECK (step 6) reports nothing new since the pending seed.
 The pending seed's `re-arm` kind keeps an approval present at the pre-dispatch
 capture from firing again in that check or on the re-armed poll. Only after that check, map
 the terminal via `loop-state.sh cycle-decision <current_count> <max_cycles> 0 approval-clean`
-(`approval-clean` emits `EXIT_REASON=clean`). If actionable items remain, the reviewer
-processes them and returns a normal fix-mode exit_reason, handled per step 6. The
+(`approval-clean` emits `EXIT_REASON=clean`). If items remain actionable, handle the
+return per step 6. The
 poll exits right after printing `REVIEWER_APPROVED`, so no poll runs during the
 confirmation pass: skip every stop-Monitor instruction for that pass's return and
 handle it per step 6's no-poll-running rules. `STATE=MERGED` → `pr-merged`.
@@ -144,11 +145,11 @@ timeout from an arm a productive return supersedes, which step 6 discards.
 `bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh" token-map <signal>`.
 
 Pre-dispatch seed. Before spawning the reviewer for any dispatch in this step, the
-`PREFILTER_DISPATCH` / `PREFILTER_ERROR` fix pass and the `REVIEWER_APPROVED`
-confirmation pass alike, capture a pending seed per step 2's `--snapshot` procedure
-with `re-arm` as the arm kind, and hold it. This is capture site 2 of the Seed-Advance
-invariant. For a dispatch made while a poll is running, the Monitor stays armed
-meanwhile. When no poll is running (the confirmation pass, or a dispatch the
+`PREFILTER_DISPATCH` / `PREFILTER_ERROR` / `CI_FAILED` fix pass and the
+`REVIEWER_APPROVED` confirmation pass alike, capture a pending seed per step 2's
+`--snapshot` procedure with `re-arm` as the arm kind, and hold it. This is capture
+site 2 of the Seed-Advance invariant. A running poll stays armed during the dispatch.
+When no poll is running (the confirmation pass, or a dispatch the
 QUIET-EXIT CHECK routed), the pass's activity is caught only afterwards, by diffing this
 pending seed in the next arm's first poll or in the QUIET-EXIT CHECK. A
 `SNAPSHOT_ERROR` or non-zero exit: retry once, then terminal `blocked`.
@@ -172,7 +173,7 @@ and `merge-advised` no-increment. When multiple tokens fire, delegate to
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/exit-precedence.sh`). When any
 guard fires, stop the Monitor if one is running and emit one terminal report. A poll
 is running from the start of its arm until it prints any marker other than `CHANGED`
-(or its arm expires, step 4); `--check` never leaves one running.
+or `CI_FAILED` (or its arm expires, step 4); `--check` never leaves one running.
 
 A productive cycle (`findings_resolved ≥ 1` returned with `EXIT_REASON=none`) re-arms
 the idle window: stop the Monitor if a poll is running and arm per step 4 with the
@@ -182,13 +183,13 @@ site: the pending seed is never replaced by a fresh one.
 Superseded-arm timeout. The pre-dispatch arm stays armed across a dispatch made while
 a poll is running (step 5), so its `max_watch_duration` can elapse while the reviewer
 runs and queue a `WATCH_TIMEOUT` for the arm this productive return supersedes.
-Discard that `WATCH_TIMEOUT` before re-arming: it must not map to
-`watch-window-elapsed` and must not be passed to `loop-state.sh resolve-precedence`.
-Discard the timeout token only, never that arm's `CHANGED` events. The discard
+Discard that `WATCH_TIMEOUT` before re-arming: never map it to
+`watch-window-elapsed` or pass it to `loop-state.sh resolve-precedence`.
+Discard the timeout token only, never that arm's `CHANGED` or `CI_FAILED` events. The discard
 applies to the productive return only; on a non-productive return and on every
 terminal, `WATCH_TIMEOUT` is handled per step 5.
-Gating: only a productive cycle resets the idle window. A `PREFILTER_SKIP` event is
-not a productive cycle, does not dispatch, and must not reset the idle window. A
+Gating: only a productive cycle resets the idle window. A `PREFILTER_SKIP` event
+does not dispatch and never resets it. A
 non-productive return (`findings_resolved = 0` with `EXIT_REASON=none`) keeps
 watching on the current window, which does not reset. If a poll is still running,
 leave it armed and discard the pending seed.
@@ -213,7 +214,8 @@ line: the marker, or `UNCHANGED`. `UNCHANGED` → finish the return: the
 `approval-clean` terminal (step 5), or the arm for the remaining budget (Gating
 above). `CHANGED` → run `prefilter.sh` per step 5: `PREFILTER_SKIP` counts as
 `UNCHANGED`; `PREFILTER_DISPATCH` or `PREFILTER_ERROR` dispatches per step 5, with a
-new pending seed. `REVIEWER_APPROVED` → confirmation pass (step 5). `STATE=MERGED` /
+new pending seed. `CI_FAILED` dispatches per step 5, with a new pending seed.
+`REVIEWER_APPROVED` → confirmation pass (step 5). `STATE=MERGED` /
 `STATE=CLOSED` → the `token-map` terminal (step 5). `CHECK_ERROR` or non-zero exit →
 retry once, then terminal `blocked`. A confirmation return the check routes elsewhere
 ends no cycle and maps no terminal. Only the moment between the check and the
