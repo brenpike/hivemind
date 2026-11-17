@@ -100,6 +100,13 @@
 # `UNCHANGED`. A missing or malformed seed is `CHECK_ERROR`, exit 1, before any gh call; a failed
 # capture is `CHECK_ERROR`, exit 1, never retried.
 #
+# THE WATCH-LIFETIME CONTRACT: no poll sleep outruns the watch window. Every sleep, the
+# failed-capture retry included, goes through the poll's one helper, sleep_to_next_poll, which
+# sleeps the smaller of the poll interval and the seconds left to the deadline, or not at all when
+# none is left, so the loop top prints `WATCH_TIMEOUT` on time for every accepted interval and
+# window, including a re-arm whose window is smaller than the interval. The executable lines of the
+# poll hold exactly one `sleep` command, inside that helper, so a second raw sleep goes red.
+#
 # Usage:
 #   ./tools/test_change_detect_poll.sh
 
@@ -298,7 +305,7 @@ chmod +x "$STUB_BIN/date"
 # deadline per snapshot query, so a real `sleep` adds no coverage and costs about one second per
 # poll across every case. The fake returns at once and appends its argument to the state dir's
 # `sleep.calls`, one line per call, so a case that needs the interval count reads it from there
-# (sleep_call_count). Any call that is not one integer argument exits non-zero so a new use of
+# (sleep_call_count) and a case that needs each duration reads the file itself. Any call that is not one integer argument exits non-zero so a new use of
 # `sleep` cannot silently pass through.
 cat > "$STUB_BIN/sleep" <<'STUB'
 #!/usr/bin/env bash
@@ -2003,6 +2010,92 @@ else
     ci:seed-non-digit-failed-checks-fails-closed; do
     skipped "$ci_case_id" "$SKIP_REASON"
   done
+fi
+
+# ── 42. the watch window bounds every poll sleep ─────────────────────────────────────
+# A sleep is the smaller of the poll interval and the seconds left to the deadline, so no sleep
+# outruns the window and WATCH_TIMEOUT is never late. A re-arm whose window is smaller than the
+# interval is a legitimate input (SKILL.md Window deadline), not a rejected one. The fake clock
+# reads epoch plus the snapshot-query count and the fake sleep records each argument, so the
+# recorded sleeps are exact.
+#   (a) a steady state under a 5-poll window with interval 3600, and again with the 18-digit
+#       interval, prints exactly WATCH_TIMEOUT and sleeps 4, 3, 2, 1: each sleep is the time left.
+#       Interval 2 sleeps 2, 2, 2, 1: an interval below the time left passes through unchanged.
+#   (b) a failed first capture then the steady state, interval 3600, sleeps 4 first and prints
+#       exactly WATCH_TIMEOUT, not POLL_ERROR.
+#   (c) STRUCTURAL: the executable, non-comment lines of the poll hold exactly one `sleep` command,
+#       inside sleep_to_next_poll, so a second raw sleep goes red.
+WINDOW_MAX_WATCH=5
+
+# window_poll <state_dir> <interval>: a poll armed with the shared seed under the 5-poll window.
+window_poll() {
+  run_poll "$1" "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$WINDOW_MAX_WATCH" "$2" \
+    "$REVIEWER_FILTER" "$SELF_LOGIN" "$SEED"
+}
+
+# recorded_sleeps <state_dir>: every argument the fake `sleep` recorded, comma-joined in order.
+recorded_sleeps() {
+  paste -sd, "$1/sleep.calls"
+}
+
+# poll_sleep_commands: `<line>:<in_helper>` for each `sleep` command on an executable,
+# non-comment line of the poll, <in_helper> 1 inside sleep_to_next_poll and 0 elsewhere.
+poll_sleep_commands() {
+  awk '
+    /^sleep_to_next_poll\(\) \{/ { in_helper = 1 }
+    /^[[:space:]]*#/ { next }
+    /(^|[^[:alnum:]_-])sleep([[:space:]]|$)/ { print NR ":" in_helper + 0 }
+    in_helper && /^\}/ { in_helper = 0 }
+  ' "$POLL"
+}
+
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  window_ok=1
+  window_detail=""
+  for window_case in 3600:4,3,2,1 999999999999999999:4,3,2,1 2:2,2,2,1; do
+    window_interval="${window_case%%:*}"
+    window_expected="${window_case#*:}"
+    st="$(new_state "window-$window_interval")"
+    set_seq "$st" graphql "$PRE"
+    set_seq "$st" reactions "$REACT_NONE"
+    out="$(window_poll "$st" "$window_interval")"
+    status=$?
+    window_sleeps="$(recorded_sleeps "$st")"
+    if [ "$out" != "WATCH_TIMEOUT" ] || [ "$status" -ne 0 ] \
+      || [ "$window_sleeps" != "$window_expected" ]; then
+      window_ok=0
+      window_detail="$window_detail interval=$window_interval: status=$status sleeps=$window_sleeps expected=$window_expected out=$(printf '%s' "$out" | tr '\n' ';')"
+    fi
+  done
+  if [ "$window_ok" -eq 1 ]; then
+    pass "watch:sleep-never-outruns-window" "interval 3600 or 18 digits sleeps 4,3,2,1 to WATCH_TIMEOUT; interval 2 sleeps 2,2,2,1"
+  else
+    failed "watch:sleep-never-outruns-window" "$window_detail"
+  fi
+
+  st="$(new_state window-failed-capture)"
+  set_seq "$st" graphql FAIL "$PRE"
+  set_seq "$st" latestreviews "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(window_poll "$st" 3600)"
+  status=$?
+  window_first_sleep="$(head -1 "$st/sleep.calls")"
+  if [ "$out" = "WATCH_TIMEOUT" ] && [ "$status" -eq 0 ] && [ "$window_first_sleep" = "4" ]; then
+    pass "watch:failed-capture-sleep-clamped" "failed first capture slept 4, not 3600, then idled to WATCH_TIMEOUT"
+  else
+    failed "watch:failed-capture-sleep-clamped" "expected WATCH_TIMEOUT exit 0 first sleep 4, got status=$status first_sleep=$window_first_sleep sleeps=$(recorded_sleeps "$st") out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+else
+  skipped "watch:sleep-never-outruns-window" "$SKIP_REASON"
+  skipped "watch:failed-capture-sleep-clamped" "$SKIP_REASON"
+fi
+
+sleep_commands="$(poll_sleep_commands)"
+if [ "$(printf '%s\n' "$sleep_commands" | grep -c .)" = "1" ] \
+  && printf '%s\n' "$sleep_commands" | grep -qx '[0-9]*:1'; then
+  pass "watch:one-sleep-primitive" "the poll's only sleep command is inside sleep_to_next_poll"
+else
+  failed "watch:one-sleep-primitive" "expected exactly one sleep command, inside sleep_to_next_poll, got line:in_helper=[$(printf '%s' "$sleep_commands" | tr '\n' ' ')]"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────

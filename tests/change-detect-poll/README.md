@@ -188,6 +188,29 @@ running, first runs `--check` against the pending seed (see Quiet-exit check bel
   `REVIEWER_APPROVED`, exit 0, and the fake `gh` sees exactly two snapshot queries under the same
   long watch window: the approval outranks `CI_FAILED` and ends the process.
 
+## Watch window
+
+No poll sleep outruns the watch window. Every sleep, the failed-capture retry included, goes
+through the poll's one helper, `sleep_to_next_poll`, which reads the clock once and sleeps the
+smaller of the poll interval and the seconds left to the deadline, or not at all when none is
+left, so the loop top prints `WATCH_TIMEOUT` on time. An interval longer than the window is a
+legitimate input: the skill's Window deadline re-arm passes the remaining budget as the window
+while the interval stays fixed. The fake `date` reads a fixed epoch plus the snapshot-query count,
+and the fake `sleep` records its one integer argument to `sleep.calls`, so the recorded sleeps are
+exact.
+
+- `watch:sleep-never-outruns-window` — the steady pre-cycle-0 state armed with the shared seed
+  under a 5-poll window prints exactly `WATCH_TIMEOUT` and sleeps 4, 3, 2, 1 with interval 3600 and
+  with the 18-digit interval `999999999999999999`: each sleep is the time left, none above the
+  window. Interval 2 sleeps 2, 2, 2, 1: an interval below the time left passes through unchanged,
+  so a clamp to a constant fails. The unfixed script records 3600.
+- `watch:failed-capture-sleep-clamped` — a failed first snapshot query then the steady state (with
+  its own `latestreviews` sequence, per the mirror caveat under Fixtures), interval 3600, sleeps 4
+  first and prints exactly `WATCH_TIMEOUT`, not `POLL_ERROR`.
+- `watch:one-sleep-primitive` — structural, like `seed:complete-serialization`: the executable,
+  non-comment lines of the poll hold exactly one `sleep` command, inside `sleep_to_next_poll`, so
+  a second raw sleep goes red.
+
 ## Quiet-exit check
 
 `pr-change-detect-poll.sh --check <OWNER> <REPO> <PR> <MAX_WATCH> <INTERVAL> <FILTER> <SELF> <SEED>`
