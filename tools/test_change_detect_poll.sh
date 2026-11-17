@@ -114,12 +114,15 @@
 # the only base-10 coercion; read_clock holds the only `date` command and routes its reading
 # through read_decimal. A failed or bad clock reading, at any of the three clock reads (arm time,
 # the loop-top deadline check, sleep_to_next_poll), is POLL_ERROR, exit 1, and a 19-digit PR number
-# is POLL_ERROR before any gh call. `--snapshot` and `--check` never read the clock. Two structural
-# cases hold the rule: the executable lines hold exactly one `date` command, inside read_clock; and
-# the bounded-decimal pattern and `10#` appear only inside read_decimal, while every variable
-# operand of `$(( ))` or of a numeric test is a read_decimal or read_clock target or on a short
-# named list of script-internal integers, each written only as a literal, an arithmetic expansion
-# or a copy of a checked or listed name, so a new unchecked number goes red.
+# is POLL_ERROR before any gh call. `--snapshot` and `--check` never read the clock. No scan of the
+# poll's text decides whether a number is checked: Bash evaluates a number in many syntax forms, so
+# a list of them cannot be complete. The rule is held by running the poll with hostile and
+# zero-padded readings at every source the contract names (the PR number, window and interval
+# arguments, the seed's failed_checks field, a capture's check count, the clock). A hostile reading
+# that arithmetic would run creates a canary file when any form evaluates it before its check, and
+# a zero-padded reading changes the output when any use skips the base-10 coercion. A new source of
+# numbers is a new row of that grid. One structural case remains: the executable lines hold exactly
+# one `date` command, inside read_clock.
 #
 # Usage:
 #   ./tools/test_change_detect_poll.sh
@@ -309,7 +312,9 @@ chmod +x "$STUB_BIN/gh"
 # how many clock reads a run made. When the state dir carries `date.seq`, call N serves line N:
 # the literal `FAIL` exits non-zero with no output, the literal `CLOCK` reads the virtual clock,
 # and any other line, an empty one included, is printed as the reading. Calls past the list, and
-# every call in a state with no `date.seq`, read the virtual clock unchanged.
+# every call in a state with no `date.seq`, read the virtual clock unchanged. When the state dir
+# carries the flag file `date.padded` (new_state leaves it absent), every virtual-clock reading, a
+# `CLOCK` entry or a call past the list, is printed left-padded with zeros to 18 digits.
 cat > "$STUB_BIN/date" <<'STUB'
 #!/usr/bin/env bash
 set -u
@@ -327,6 +332,7 @@ fi
 if [ "$reading" = "CLOCK" ]; then
   capture_count=$(cat "$FAKE_GH_STATE_DIR/graphql.n") || exit 1
   reading="$((1700000000 + capture_count))"
+  [ ! -f "$FAKE_GH_STATE_DIR/date.padded" ] || reading="$(printf '%018d' "$reading")"
 fi
 printf '%s\n' "$reading"
 STUB
@@ -357,6 +363,7 @@ new_state() {
   printf '0' > "$dir/latestreviews.n"
   printf '0' > "$dir/reactions.n"
   printf '0' > "$dir/date.n"
+  rm -f "$dir/date.padded"
   : > "$dir/sleep.calls"
   printf '%s' "$dir"
 }
@@ -1944,6 +1951,13 @@ fi
 #       bound that keeps Bash's 64-bit arithmetic from wrapping), is POLL_ERROR / CHECK_ERROR,
 #       exit 1, with zero gh calls.
 
+# seed_with_failed_checks <value>: the shared seed with its failed_checks field set to <value>.
+seed_with_failed_checks() {
+  local field_pos
+  field_pos=$(($(declared_fields | grep -nx 'failed_checks' | cut -d: -f1) + 1))
+  printf '%s' "$SEED" | awk -F'|' -v OFS='|' -v pos="$field_pos" -v value="$1" '{$pos = value; print}'
+}
+
 # ci_route_poll <state_name> <seed> <max_watch> <graphql_entry>...: a poll armed with <seed> under
 # a <max_watch>-poll window, serving the graphql entries in order and no reaction to every poll.
 ci_route_poll() {
@@ -2010,10 +2024,8 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
 
   ci_seed_ok=1
   ci_seed_detail=""
-  ci_failed_checks_pos=$(($(declared_fields | grep -nx 'failed_checks' | cut -d: -f1) + 1))
   for ci_bad_value in 1a -1 1234567890123456789; do
-    ci_bad_seed="$(printf '%s' "$SEED" | awk -F'|' -v OFS='|' -v pos="$ci_failed_checks_pos" \
-      -v bad="$ci_bad_value" '{$pos = bad; print}')"
+    ci_bad_seed="$(seed_with_failed_checks "$ci_bad_value")"
     for ci_seed_mode in poll check; do
       st="$(new_state "ci-bad-seed-$ci_bad_value-$ci_seed_mode")"
       set_seq "$st" graphql "$PRE"
@@ -2134,30 +2146,43 @@ fi
 
 # ── 43. every number is read through one checked source ──────────────────────────────
 # The poll checks each number where it is read, never where it is used: read_decimal is the only
-# bounded-decimal check and base-10 coercion, and read_clock holds the only `date` command. The
-# fake `date` serves `date.seq` and counts its calls in `date.n`.
-#   (a) each bad reading (FAIL, empty, abc, -1, 19 digits) served on clock read N, N = 1 to 4, over
-#       the steady pre-cycle-0 state armed with the shared seed, prints exactly POLL_ERROR, exit 1,
-#       after exactly N clock reads. Reads 1 to 4 are arm time, the first loop top, the first
-#       sleep_to_next_poll and the second loop top. On N = 1 the fake gh sees zero calls.
+# bounded-decimal check and base-10 coercion, and read_clock holds the only `date` command. No scan
+# of the poll's text decides whether a number is checked: Bash evaluates a number in many syntax
+# forms (arithmetic expansion, `(( ))`, `let`, `declare -i`, `[[ -eq ]]`, subscripts, substring
+# offsets), so a list of them cannot be complete. The rule is held by running the poll with
+# hostile and zero-padded readings at every source the contract names: the PR number, window and
+# interval arguments, the seed's failed_checks field, a capture's check count and the clock. A new
+# source of numbers is a new row. ARITH_PAYLOAD is a reading that arithmetic evaluation runs: it
+# creates ARITH_CANARY, so any syntax form that evaluates a reading before its check leaves the
+# canary behind. Its base name is BASH_VERSINFO, an array every Bash sets, because the poll runs
+# under `set -u` and an unset base name would abort the evaluation before the subscript runs. A zero-padded reading changes the output when any use skips the base-10 coercion.
+# The fake `date` serves `date.seq`, counts its calls in `date.n`, and pads with `date.padded`.
+#   (a) each bad reading (FAIL, empty, abc, -1, 19 digits, ARITH_PAYLOAD) served on clock read N,
+#       N = 1 to 4, over the steady pre-cycle-0 state armed with the shared seed, prints exactly
+#       POLL_ERROR, exit 1, after exactly N clock reads. Reads 1 to 4 are arm time, the first loop
+#       top, the first sleep_to_next_poll and the second loop top. On N = 1 the fake gh sees zero
+#       calls.
 #   (b) with every clock read failing, --snapshot prints its BASELINE= line and --check with the
 #       shared seed prints UNCHANGED, each exit 0 with zero clock reads.
-#   (c) STRUCTURAL: the executable, non-comment lines of the poll hold exactly one `date` command,
+#   (c) a 19-digit PR number is POLL_ERROR, exit 1, with zero gh calls.
+#   (d) STRUCTURAL: the executable, non-comment lines of the poll hold exactly one `date` command,
 #       inside read_clock.
-#   (d) STRUCTURAL: a digit-class pattern and `10#` appear on executable lines only inside
-#       read_decimal, and every variable operand of `$(( ))` or of a -eq/-ne/-gt/-ge/-lt/-le test
-#       outside read_decimal is a read_decimal or read_clock target or on NUMBER_INTERNAL_NAMES.
-#       `${#...}` and `$#` are exempt. A positional operand is never on the list. Each name on
-#       NUMBER_INTERNAL_NAMES is written only as a literal, an arithmetic expansion or a copy of
-#       one checked or listed name, so a list entry cannot carry an unchecked value.
-#   (e) a 19-digit PR number is POLL_ERROR, exit 1, with zero gh calls.
-CLOCK_BAD_READINGS=(FAIL "" abc -1 9999999999999999999)
+#   (e) ARITH_PAYLOAD, abc, -1 and empty, each served as the PR number, the window and the
+#       interval of a seeded poll over the steady state, print exactly POLL_ERROR, exit 1, zero gh
+#       calls. ARITH_PAYLOAD served as the seed's failed_checks field, through an exported variable
+#       whose name is the field value (the seed shape allows only [A-Za-z0-9_-], and arithmetic on
+#       a name runs its value), is POLL_ERROR in poll mode and CHECK_ERROR in --check mode, exit
+#       1, zero gh calls. ARITH_CANARY does not exist after every row, (a) included, ran.
+#   (f) a seeded poll over the steady state with window 12 and interval 9 prints exactly
+#       WATCH_TIMEOUT, exit 0, and sleeps 9,9,9,8,7,6,5,4,3,2,1. The same poll with the PR number,
+#       window and interval zero-padded (004242, 0012, 0009), the seed's failed_checks field
+#       padded (000) and every clock reading padded gives identical output, status and sleeps.
+#   (g) a capture whose checkRunCountsByState holds a FAILURE count of -1, or of 19 digits, is
+#       SNAPSHOT_ERROR in snapshot mode and POLL_ERROR in poll mode.
+ARITH_CANARY="$TMPDIR_TEST/arith-canary"
+ARITH_PAYLOAD="BASH_VERSINFO[\$(touch $(printf '%q' "$ARITH_CANARY"))]"
+CLOCK_BAD_READINGS=(FAIL "" abc -1 9999999999999999999 "$ARITH_PAYLOAD")
 CLOCK_BAD_READ_COUNT=4
-# NUMBER_INTERNAL_NAMES: script-internal integers, each a counter or computed only from checked
-# numbers. `i` and `fail_count` are counters; `deadline` is the arm-time clock plus the window;
-# `seconds_left` is the deadline less a clock reading; `nap_seconds` is the interval or
-# `seconds_left`.
-NUMBER_INTERNAL_NAMES=(i fail_count deadline seconds_left nap_seconds)
 
 # clock_poll_outcome <state_name> <bad_reading> <read_number>: a poll armed with the shared seed
 # over the steady pre-cycle-0 state, its clock reads 1 to <read_number> - 1 serving the virtual
@@ -2187,177 +2212,6 @@ poll_date_commands() {
     /^[[:space:]]*#/ { next }
     /(^|[^[:alnum:]_-])date([[:space:]]|$)/ { print NR ":" in_helper + 0 }
     in_helper && /^\}/ { in_helper = 0 }
-  ' "$POLL"
-}
-
-# poll_number_checks: `<kind>:<line>:<in_helper>` for each digit-class pattern (<kind> `pattern`)
-# and each `10#` coercion (<kind> `coerce`) on an executable, non-comment line of the poll,
-# <in_helper> 1 inside read_decimal and 0 elsewhere.
-poll_number_checks() {
-  awk '
-    /^read_decimal\(\) \{/ { in_helper = 1 }
-    /^[[:space:]]*#/ { next }
-    /\[[!^]?0-9\]|\[\[:digit:\]\]/ { print "pattern:" NR ":" in_helper + 0 }
-    /10#/ { print "coerce:" NR ":" in_helper + 0 }
-    in_helper && /^\}/ { in_helper = 0 }
-  ' "$POLL"
-}
-
-# poll_number_operands: `<line>:<operand>` for each variable operand of `$(( ))` or of a numeric
-# test on an executable, non-comment line of the poll outside read_decimal. INVARIANT: the scan is
-# line-local. An arithmetic expansion is read from `$((` to its balancing `))`; every name token in
-# it is an operand, and a token starting with a digit is a literal. A numeric test operand is the
-# whitespace-separated word on each side of the operator; its `$name` and `${name...}` references
-# are operands, and so is the word itself when it is a bare name. `${#...}` and `$#` are removed
-# first; a positional reference is reported as `$<digits>`.
-poll_number_operands() {
-  awk '
-    function strip_exempt(text) {
-      gsub(/\$\{#[^}]*\}/, "", text)
-      gsub(/\$#/, "", text)
-      return text
-    }
-    function report_positionals(text) {
-      while (match(text, /\$\{?[0-9]+/)) {
-        token = substr(text, RSTART, RLENGTH)
-        gsub(/[{]/, "", token)
-        print NR ":" token
-        text = substr(text, RSTART + RLENGTH)
-      }
-    }
-    function report_arithmetic(expr) {
-      expr = strip_exempt(expr)
-      report_positionals(expr)
-      gsub(/\$\{?[0-9]+/, "", expr)
-      while (match(expr, /[A-Za-z0-9_]+/)) {
-        token = substr(expr, RSTART, RLENGTH)
-        if (token !~ /^[0-9]/) print NR ":" token
-        expr = substr(expr, RSTART + RLENGTH)
-      }
-    }
-    function report_test_word(word) {
-      word = strip_exempt(word)
-      report_positionals(word)
-      bare = word
-      gsub(/["\047]/, "", bare)
-      if (bare ~ /^[A-Za-z_][A-Za-z0-9_]*$/) print NR ":" bare
-      while (match(word, /\$\{?[A-Za-z_][A-Za-z0-9_]*/)) {
-        token = substr(word, RSTART, RLENGTH)
-        gsub(/[${]/, "", token)
-        print NR ":" token
-        word = substr(word, RSTART + RLENGTH)
-      }
-    }
-    /^read_decimal\(\) \{/ { in_helper = 1 }
-    /^[[:space:]]*#/ { next }
-    in_helper { if (/^\}/) in_helper = 0; next }
-    {
-      rest = $0
-      while ((start = index(rest, "$((")) > 0) {
-        rest = substr(rest, start + 3)
-        depth = 2
-        expr = ""
-        for (pos = 1; pos <= length(rest) && depth > 0; pos++) {
-          ch = substr(rest, pos, 1)
-          if (ch == "(") depth++
-          if (ch == ")") depth--
-          expr = expr ch
-        }
-        report_arithmetic(expr)
-        rest = substr(rest, pos)
-      }
-      for (field = 2; field < NF; field++) {
-        if ($field ~ /^-(eq|ne|gt|ge|lt|le)$/) {
-          report_test_word($(field - 1))
-          report_test_word($(field + 1))
-        }
-      }
-    }
-  ' "$POLL"
-}
-
-# poll_checked_targets: every variable name a read_decimal or read_clock call assigns on an
-# executable, non-comment line of the poll, one per line.
-poll_checked_targets() {
-  grep -vE '^[[:space:]]*#' "$POLL" \
-    | grep -oE '(^|[^[:alnum:]_])read_(decimal|clock)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' \
-    | awk '{ print $NF }' \
-    | sort -u
-}
-
-# unchecked_number_operands: each `<line>:<operand>` from poll_number_operands whose operand is
-# neither a checked target nor on NUMBER_INTERNAL_NAMES.
-unchecked_number_operands() {
-  local allowed_names
-  allowed_names="$(poll_checked_targets; printf '%s\n' "${NUMBER_INTERNAL_NAMES[@]}")"
-  poll_number_operands | awk -F: 'NR == FNR { allowed[$0] = 1; next } !($2 in allowed)' \
-    <(printf '%s\n' "$allowed_names") -
-}
-
-# unprovenanced_internal_writes: `<line>:<word>` for each word on an executable, non-comment line
-# of the poll that names a NUMBER_INTERNAL_NAMES entry bare (not as a `$` or `${` reference) and is
-# not one of the allowed forms: the bare name in a `local` declaration, or `<name>=` followed by a
-# decimal literal, an arithmetic expansion, or a `$` reference, quoted or not, to one checked or
-# listed name. INVARIANT: the scan is line-local and splits words on whitespace after replacing
-# each `$(( ))` with a placeholder, so a `read`, `printf -v`, `for ... in` or any other write to a
-# listed name goes red.
-unprovenanced_internal_writes() {
-  local allowed_names
-  allowed_names="$(poll_checked_targets; printf '%s\n' "${NUMBER_INTERNAL_NAMES[@]}")"
-  awk -v internal="${NUMBER_INTERNAL_NAMES[*]}" -v allowed="$(printf '%s ' $allowed_names)" '
-    BEGIN {
-      count = split(internal, words, " ")
-      for (k = 1; k <= count; k++) is_internal[words[k]] = 1
-      count = split(allowed, words, " ")
-      for (k = 1; k <= count; k++) is_allowed[words[k]] = 1
-    }
-    function allowed_value(value, ref) {
-      if (value ~ /^[0-9]+$/ || value == "@ARITH@") return 1
-      ref = value
-      gsub(/"/, "", ref)
-      if (ref !~ /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/) return 0
-      if ((ref ~ /^\$\{/) != (ref ~ /\}$/)) return 0
-      gsub(/[${}]/, "", ref)
-      return (ref in is_allowed)
-    }
-    function names_internal_bare(word, rest, token, before) {
-      rest = word
-      while (match(rest, /[A-Za-z_][A-Za-z0-9_]*/)) {
-        token = substr(rest, RSTART, RLENGTH)
-        before = RSTART > 1 ? substr(rest, RSTART - 1, 1) : ""
-        if ((token in is_internal) && before != "$" && before != "{") return 1
-        rest = substr(rest, RSTART + RLENGTH)
-      }
-      return 0
-    }
-    /^[[:space:]]*#/ { next }
-    {
-      line = ""
-      rest = $0
-      while ((start = index(rest, "$((")) > 0) {
-        line = line substr(rest, 1, start - 1) "@ARITH@"
-        rest = substr(rest, start + 3)
-        depth = 2
-        for (pos = 1; pos <= length(rest) && depth > 0; pos++) {
-          ch = substr(rest, pos, 1)
-          if (ch == "(") depth++
-          if (ch == ")") depth--
-        }
-        rest = substr(rest, pos)
-      }
-      line = line rest
-      count = split(line, words, /[[:space:]]+/)
-      is_local = (words[1] == "local" || words[2] == "local")
-      for (k = 1; k <= count; k++) {
-        word = words[k]
-        if (!names_internal_bare(word)) continue
-        if (is_local && (word in is_internal)) continue
-        eq = index(word, "=")
-        if (eq > 1 && (substr(word, 1, eq - 1) in is_internal) \
-          && allowed_value(substr(word, eq + 1))) continue
-        print NR ":" word
-      }
-    }
   ' "$POLL"
 }
 
@@ -2433,17 +2287,115 @@ else
   failed "numbers:one-clock-read" "expected exactly one date command, inside read_clock, got line:in_helper=[$(printf '%s' "$date_commands" | tr '\n' ' ')]"
 fi
 
-number_checks="$(poll_number_checks)"
-number_checks_outside="$(printf '%s\n' "$number_checks" | grep -v ':1$' | grep .)"
-unchecked_operands="$(unchecked_number_operands)"
-unprovenanced_writes="$(unprovenanced_internal_writes)"
-if printf '%s\n' "$number_checks" | grep -q '^pattern:[0-9]*:1$' \
-  && printf '%s\n' "$number_checks" | grep -q '^coerce:[0-9]*:1$' \
-  && [ -z "$number_checks_outside" ] && [ -z "$unchecked_operands" ] \
-  && [ -z "$unprovenanced_writes" ]; then
-  pass "numbers:one-checked-source" "the digit check and 10# live only in read_decimal, every numeric operand is checked or a named internal integer, and each named internal integer is written only from literals or checked numbers"
+# number_source_outcome <state_name> <pr_number> <max_watch> <interval> <seed> <padded>: a poll
+# armed with <seed> over the steady pre-cycle-0 state, every clock reading zero-padded when
+# <padded> is 1, as `<status>:<gh_calls>:<sleeps>:<out>`.
+number_source_outcome() {
+  local st out status
+  st="$(new_state "$1")"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  [ "$6" -eq 0 ] || : > "$st/date.padded"
+  out="$(run_poll "$st" "$OWNER" "$REPO_NAME" "$2" "$3" "$4" "$REVIEWER_FILTER" "$SELF_LOGIN" "$5")"
+  status=$?
+  printf '%s:%s:%s:%s' "$status" "$(gh_call_counts "$st")" "$(recorded_sleeps "$st")" \
+    "$(printf '%s' "$out" | tr '\n' ';')"
+}
+
+# hostile_seed_outcome <state_name> <mode> <seed>: <mode> `poll` or `check` armed with <seed> over
+# the steady pre-cycle-0 state, as `<status>:<gh_calls>:<out>`.
+hostile_seed_outcome() {
+  local st out status
+  st="$(new_state "$1")"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  if [ "$2" = "poll" ]; then
+    out="$(arm_poll "$st" "$3")"
+  else
+    out="$(run_check "$st" "$3")"
+  fi
+  status=$?
+  printf '%s:%s:%s' "$status" "$(gh_call_counts "$st")" "$(printf '%s' "$out" | tr '\n' ';')"
+}
+
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  hostile_ok=1
+  hostile_detail=""
+  hostile_index=0
+  for hostile_value in "$ARITH_PAYLOAD" abc -1 ""; do
+    hostile_index=$((hostile_index + 1))
+    for hostile_slot in pr window interval; do
+      hostile_pr="$PR_NUMBER"
+      hostile_window="$MAX_WATCH"
+      hostile_interval="$POLL_INTERVAL"
+      case "$hostile_slot" in
+        pr) hostile_pr="$hostile_value" ;;
+        window) hostile_window="$hostile_value" ;;
+        interval) hostile_interval="$hostile_value" ;;
+      esac
+      hostile_outcome="$(number_source_outcome "hostile-$hostile_index-$hostile_slot" \
+        "$hostile_pr" "$hostile_window" "$hostile_interval" "$SEED" 0)"
+      if [ "$hostile_outcome" != "1:0 0 0::POLL_ERROR" ]; then
+        hostile_ok=0
+        hostile_detail="$hostile_detail $hostile_slot=[$hostile_value]: status:gh_calls:sleeps:out=$hostile_outcome"
+      fi
+    done
+  done
+  export hostile_failed_checks="$ARITH_PAYLOAD"
+  hostile_seed="$(seed_with_failed_checks hostile_failed_checks)"
+  for hostile_mode in poll check; do
+    hostile_expected="1:0 0 0:POLL_ERROR"
+    [ "$hostile_mode" = "poll" ] || hostile_expected="1:0 0 0:CHECK_ERROR"
+    hostile_outcome="$(hostile_seed_outcome "hostile-seed-$hostile_mode" "$hostile_mode" \
+      "$hostile_seed")"
+    if [ "$hostile_outcome" != "$hostile_expected" ]; then
+      hostile_ok=0
+      hostile_detail="$hostile_detail seed/$hostile_mode: status:gh_calls:out=$hostile_outcome seed=$hostile_seed"
+    fi
+  done
+  unset hostile_failed_checks
+  if [ -e "$ARITH_CANARY" ]; then
+    hostile_ok=0
+    hostile_detail="$hostile_detail canary created: a reading was evaluated before its check"
+  fi
+  if [ "$hostile_ok" -eq 1 ]; then
+    pass "numbers:no-source-evaluated-before-check" "a hostile, non-digit, negative or empty PR number, window, interval, seed failed_checks or clock reading fails closed with zero gh calls, and no reading is evaluated before its check"
+  else
+    failed "numbers:no-source-evaluated-before-check" "$hostile_detail"
+  fi
+
+  padded_expected="0:9,9,9,8,7,6,5,4,3,2,1:WATCH_TIMEOUT"
+  plain_outcome="$(number_source_outcome padded-plain "$PR_NUMBER" 12 9 "$SEED" 0)"
+  padded_outcome="$(number_source_outcome padded-zeros "00$PR_NUMBER" 0012 0009 \
+    "$(seed_with_failed_checks 000)" 1)"
+  if [ "$(cut -d: -f1,3- <<<"$plain_outcome")" = "$padded_expected" ] \
+    && [ "$padded_outcome" = "$plain_outcome" ]; then
+    pass "numbers:leading-zero-readings-behave-as-decimal" "zero-padded PR number, window, interval, seed failed_checks and clock readings give the unpadded poll's WATCH_TIMEOUT, exit 0 and sleeps 9,9,9,8,7,6,5,4,3,2,1"
+  else
+    failed "numbers:leading-zero-readings-behave-as-decimal" "expected status:sleeps:out=$padded_expected for both, got plain status:gh_calls:sleeps:out=$plain_outcome padded=$padded_outcome"
+  fi
+
+  count_ok=1
+  count_detail=""
+  for count_value in -1 1234567890123456789; do
+    count_fixture="$(derive_fixture "bad-count$count_value" "$PRE" \
+      ".data.repository.pullRequest.statusCheckRollup.contexts.checkRunCountsByState =
+         [{\"state\":\"SUCCESS\",\"count\":1},{\"state\":\"FAILURE\",\"count\":$count_value}]")"
+    if ! count_outcome="$(capture_fails_closed "bad-count$count_value" "$count_fixture" "" \
+      "$SEED" "$REVIEWER_FILTER")"; then
+      count_ok=0
+      count_detail="$count_detail count=$count_value $count_outcome"
+    fi
+  done
+  if [ "$count_ok" -eq 1 ]; then
+    pass "numbers:bad-capture-count-fails-closed" "a FAILURE check count of -1 or 19 digits -> SNAPSHOT_ERROR / POLL_ERROR, exit 1"
+  else
+    failed "numbers:bad-capture-count-fails-closed" "$count_detail"
+  fi
 else
-  failed "numbers:one-checked-source" "checks outside read_decimal=[$(printf '%s' "$number_checks_outside" | tr '\n' ' ')] all checks=[$(printf '%s' "$number_checks" | tr '\n' ' ')] unchecked operands line:name=[$(printf '%s' "$unchecked_operands" | tr '\n' ' ')] unprovenanced internal writes line:word=[$(printf '%s' "$unprovenanced_writes" | tr '\n' ' ')]"
+  skipped "numbers:no-source-evaluated-before-check" "$SKIP_REASON"
+  skipped "numbers:leading-zero-readings-behave-as-decimal" "$SKIP_REASON"
+  skipped "numbers:bad-capture-count-fails-closed" "$SKIP_REASON"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
