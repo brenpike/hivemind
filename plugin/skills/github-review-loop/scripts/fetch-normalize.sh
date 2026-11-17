@@ -62,6 +62,14 @@
 #               reactions(content: EYES, last: 20) {         # self EYES createdAt = mark time
 #                 nodes { content createdAt user { login __typename } } } }
 #   }
+#   latestReviews(first: 100) {       # Automated Reviewer EVIDENCE (classifier §2)
+#     nodes[] { author { login __typename } } }  # per-author latest review author
+#   reactionGroups {                   # Automated Reviewer EVIDENCE (classifier §2)
+#     content                          # only the THUMBS_UP group is read
+#     reactors(first: 100) { nodes[] { __typename ... on Bot { login } ... on User { login } } } }
+#
+# The evidence fields are optional for the classifier (absent or null reads as no
+# evidence) and are not covered by the live skeleton check.
 #
 # Three connection-level `totalCount` TRIPWIRE reads (reviewThreads / comments /
 # reviews). These are top-level scalars read DIRECTLY off the raw payload here —
@@ -164,8 +172,17 @@
 #   $1  OWNER             base-repo owner            (required for LIVE fetch)
 #   $2  REPO              base-repo name             (required for LIVE fetch)
 #   $3  PR_NUMBER         integer PR number          (required for LIVE fetch)
-#   $4  REVIEWER_FILTER   "automated" | "codex-only" | "all" | "<login>" (default automated)
+#   $4  REVIEWER_FILTER   "automated" | "all" | "<login>" (default automated).
+#                         The retired value (reviewer-identity.jq is_retired_filter)
+#                         fails closed with FETCHNORM_ERROR=retired-filter BEFORE any
+#                         fetch, on the live and --payload-file paths alike; select
+#                         one reviewer with "<login>" mode instead.
 #   $5  SELF_LOGIN        viewer login               (required — self strip)
+#
+#   HIVEMIND_PR_REVIEWERS (env, optional)  extra Automated Reviewer logins, comma- or
+#                         whitespace-separated, `[bot]` optional. Passed verbatim to
+#                         the classifier as --arg reviewers (unset -> ""); it only
+#                         ADDS to the set derived from the PR evidence (ADR-0043).
 #
 #   --payload-file <path>     read the raw GraphQL JSON from <path> instead of
 #                             running the live `gh api graphql` fetch. Use `-`
@@ -186,7 +203,8 @@
 #   - stdout: the single normalized JSON array (always, on success).
 #   - exit 0 on success (including the fail-open empty-set case).
 #   - FETCHNORM_ERROR=<reason> on stdout + exit 1 ONLY on a bootstrap or LIVE-fetch failure
-#     (gh error, cannot-self-locate, missing/unparseable core/filter/identity module, a
+#     (gh error, cannot-self-locate, missing/unparseable core/filter/identity module, the
+#     retired REVIEWER_FILTER value — retired-filter — a
 #     missing/unparseable shared GraphQL response check — missing-graphql-check /
 #     unparseable-graphql-check — a missing/unparseable shared review-surface check —
 #     missing-review-surface-check / unparseable-review-surface-check — bad input, or a
@@ -348,9 +366,10 @@ PR_NUMBER="${positionals[2]:-}"
 REVIEWER_FILTER="${positionals[3]:-}"
 SELF_LOGIN="${positionals[4]:-}"
 
-# REVIEWER_FILTER defaults to automated when empty; any non-empty string is
-# accepted as a filter mode (automated | codex-only | all | <login>; semantics
-# owned by reviewer-identity.jq §5). Mirrors prefilter.sh.
+# REVIEWER_FILTER defaults to automated when empty; any non-empty string other
+# than the retired value is accepted as a filter mode (automated | all | <login>;
+# semantics owned by reviewer-identity.jq §5). The retired value is rejected
+# below, once the identity module is known to compile. Mirrors prefilter.sh.
 [ -n "$REVIEWER_FILTER" ] || REVIEWER_FILTER="automated"
 # SELF_LOGIN is required on every path: without it the shared filter cannot strip
 # self-authored comments and the self-echo storm re-emerges. Mirrors prefilter.
@@ -371,8 +390,18 @@ IDENTITY_MODULE="$SCRIPT_DIR/reviewer-identity.jq"
 # missing or broken include). The normalize core swallows classifier stderr for
 # fail-OPEN-on-CONTENT, so without this probe a compile failure would normalize
 # silently to `[]` — indistinguishable from a clean PR.
-jq -n -L "$SCRIPT_DIR" -f "$CLASSIFY_FILTER" --arg login x --arg filter automated \
+jq -n -L "$SCRIPT_DIR" -f "$CLASSIFY_FILTER" --arg login x --arg filter automated --arg reviewers "" \
   </dev/null >/dev/null 2>&1 || fetchnorm_fail "unparseable-filter"
+# Reject the retired REVIEWER_FILTER value BEFORE any fetch (live and --payload-file
+# alike). The module's is_retired_filter holds the only literal; `jq -e` exits 0 for
+# true and 1 for false, and any other status is a module failure, not a verdict.
+jq -n -e -L "$SCRIPT_DIR" --arg filter "$REVIEWER_FILTER" \
+  'include "reviewer-identity"; is_retired_filter($filter)' </dev/null >/dev/null 2>&1
+case "$?" in
+  0) fetchnorm_fail "retired-filter" ;;
+  1) ;;
+  *) fetchnorm_fail "unparseable-filter" ;;
+esac
 
 # Source the shared PURE normalize core (emit_overflow_tripwire +
 # build_normalized_candidate_set). It lives at plugin/skills/_shared/, which from
@@ -441,6 +470,8 @@ query($owner: String!, $repo: String!, $pr: Int!) {
           }
         }
       }
+      latestReviews(first: 100) { nodes { author { login __typename } } }
+      reactionGroups { content reactors(first: 100) { nodes { __typename ... on Bot { login } ... on User { login } } } }
     }
   }
 }'
@@ -667,6 +698,6 @@ emit_overflow_tripwire "$graphql_payload"
 # Build + emit the SINGLE normalized candidate array on stdout (review-surface
 # records unioned with CI-check-failure records; `[]` when both empty — the
 # fail-open shape).
-build_normalized_candidate_set "$graphql_payload" "$ci_payload" "$SELF_LOGIN" "$REVIEWER_FILTER" "$CLASSIFY_FILTER"
+build_normalized_candidate_set "$graphql_payload" "$ci_payload" "$SELF_LOGIN" "$REVIEWER_FILTER" "$CLASSIFY_FILTER" "${HIVEMIND_PR_REVIEWERS-}"
 
 exit 0

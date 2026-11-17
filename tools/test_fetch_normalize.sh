@@ -25,6 +25,11 @@
 
 set -u
 
+# The configured-reviewer setting reaches the classifier through the entrypoint's environment; an
+# operator value inherited here would widen the automated set and flake the filter cases. Only the
+# configured case below sets it, for that one invocation.
+unset HIVEMIND_PR_REVIEWERS
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 SKILLS_DIR="$REPO_ROOT/plugin/skills"
@@ -617,28 +622,46 @@ else
 fi
 
 # ── reviewer_filter scoping ───────────────────────────────────────────────────────
-# case09: codex-only matches ONLY the Bot-typed chatgpt-codex-connector (900). all matches any
-# non-self author (900 + the User-typed human reviewer 901). An empty filter slot defaults to
-# automated, which on case09 admits only the Bot-typed codex record (900).
-run_case "filter:codex-only" \
-  "$FIX_HISTORY_DIR/case09-reviewer-filter.json" - codex-only \
-  "$EXPECTED_DIR/review-filter-codex-only.json"
+# case09: all matches any non-self author (900 + the User-typed human reviewer 901). An empty
+# filter slot defaults to automated, which on case09 admits only the Bot-typed thread-comment
+# author's record (900): the Automated Reviewer set is derived from the payload's review evidence.
 run_case "filter:all" \
   "$FIX_HISTORY_DIR/case09-reviewer-filter.json" - all \
   "$EXPECTED_DIR/review-filter-all.json"
 run_case "filter:default-is-automated" \
   "$FIX_HISTORY_DIR/case09-reviewer-filter.json" - "" \
   "$EXPECTED_DIR/review-filter-default.json"
-# case19 carries one author per identity class (registry Bots incl. both Copilot spellings, a human
-# User named claude, non-registry Bots dependabot/github-actions, a human, and self). automated
-# admits ONLY the four registry Bot records (1900..1903). The empty-slot run on the same payload
-# DISCRIMINATES the default: under a codex-only default it would emit 1900 alone.
+# case19 carries one author per identity class (Bot thread-comment authors, a human User named
+# claude, the github-actions Bot, a toplevel-only dependabot Bot, a human, and self). automated
+# admits ONLY the four Bot thread-comment authors' records (1900..1903): github-actions is dropped
+# from the evidence unless configured, and dependabot never reviews, so it is no evidence. The
+# empty-slot run on the same payload DISCRIMINATES the default: it must equal automated, not all.
 run_case "filter:automated" \
   "$FIX_HISTORY_DIR/case19-automated-reviewers.json" - automated \
   "$EXPECTED_DIR/review-filter-automated.json"
 run_case "filter:default-is-automated-discriminating" \
   "$FIX_HISTORY_DIR/case19-automated-reviewers.json" - "" \
   "$EXPECTED_DIR/review-filter-automated.json"
+# HIVEMIND_PR_REVIEWERS only ADDS to the evidence set: naming github-actions (with the `[bot]`
+# suffix) and dependabot (bare), comma-and-space separated, admits their records (1906 thread,
+# 1905 toplevel) on top of 1900..1903. The human User named claude (1904) stays out: the
+# configured set is still Bot-gated. The prefix assignment scopes the value to this one call.
+HIVEMIND_PR_REVIEWERS="github-actions[bot], dependabot" run_case "filter:configured-reviewers-add" \
+  "$FIX_HISTORY_DIR/case19-automated-reviewers.json" - automated \
+  "$EXPECTED_DIR/review-filter-configured.json"
+if [ -n "${HIVEMIND_PR_REVIEWERS+set}" ]; then
+  failed "filter:configured-reviewers-scoped" "HIVEMIND_PR_REVIEWERS leaked past its one invocation"
+else
+  pass "filter:configured-reviewers-scoped" "HIVEMIND_PR_REVIEWERS unset after the configured case"
+fi
+
+# The retired filter value fails CLOSED before any fetch, on both paths. --payload-file: the
+# payload is never classified. Live: no OWNER/REPO/PR are given, so a fetch would fail with
+# missing-owner; retired-filter proves the rejection ran first.
+run_fail_case "fail-closed:retired-filter-payload-file" "retired-filter" \
+  --payload-file "$FIX_HISTORY_DIR/case09-reviewer-filter.json" -- "" "" "" codex-only selfuser
+run_fail_case "fail-closed:retired-filter-live" "retired-filter" \
+  -- "" "" "" codex-only selfuser
 
 # ── Identity-module bootstrap fail-closed (missing / unparseable) ─────────────────
 # The classifier `include`s reviewer-identity.jq. fetch-normalize.sh checks the module is present
@@ -662,7 +685,7 @@ copy_skills_tree() {
 remove_identity_module() { rm -f "$1/reviewer-identity.jq"; }
 
 # corrupt_identity_module <scripts-dir> — overwrite the copied module with a syntax error.
-corrupt_identity_module() { printf '%s\n' 'def automated_reviewers: [' > "$1/reviewer-identity.jq"; }
+corrupt_identity_module() { printf '%s\n' 'def corrupted_module: [' > "$1/reviewer-identity.jq"; }
 
 # keep_identity_module <scripts-dir> — leave the copy untouched (control).
 keep_identity_module() { :; }

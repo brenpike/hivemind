@@ -43,10 +43,12 @@
 #   --noise <reviewer_filter>
 #                    OPTIONAL; selects noise mode. Placed before the positionals:
 #                      react-marker.sh --noise "$reviewer_filter" "$NODE_ID" "$SURFACE" "$CANDIDATE_URL"
-#                    The value is the loop's REVIEWER_FILTER ("automated" |
-#                    "codex-only" | "all" | "<login>", per reviewer-identity.jq §5);
-#                    an empty value means "automated". The flag as the last
-#                    argument, with no value after it, is missing-value-for-noise.
+#                    The value is the loop's REVIEWER_FILTER ("automated" | "all" |
+#                    "<login>", per reviewer-identity.jq §5); an empty value means
+#                    "automated". The flag as the last argument, with no value
+#                    after it, is missing-value-for-noise. A retired filter value
+#                    (is_retired_filter) is retired-filter before any git or gh
+#                    call, on every surface and under the capture seam alike.
 #                    Without the flag the script runs in fix mode (a fixed or
 #                    deferred surface) and makes no author check. DATA — passed to
 #                    jq as a --arg, never interpolated into a program.
@@ -125,9 +127,14 @@
 #           whose id matches ^[A-Za-z0-9_=+/-]+$ (the origin repository id).
 #       (4) one `gh api graphql` lookup of node(id:), the node id passed as a
 #           typed variable, selects __typename and, on IssueComment and
-#           PullRequestReview, pullRequest { state headRefName headRepository { id } },
+#           PullRequestReview, pullRequest { state headRefName headRepository { id }
+#           latestReviews(first: 100) { nodes { author { login __typename } } }
+#           reactionGroups { content reactors(first: 100) { nodes { __typename
+#           ... on Bot { login } ... on User { login } } } } },
 #           author { login __typename } and reactionGroups { content viewerHasReacted };
-#           it must exit 0 and pass hivemind_graphql_response_check.
+#           it must exit 0 and pass hivemind_graphql_response_check. The
+#           latestReviews and PR reactionGroups selections are the noise author
+#           check's evidence; the binding predicate never reads them.
 #       Any failure in (2)-(4) is pr-binding-lookup-failed.
 #       (5) the reaction proceeds only when the node's type matches the surface
 #           (toplevel IssueComment, review PullRequestReview) and its PR is OPEN
@@ -140,15 +147,22 @@
 #   - NOISE AUTHOR CHECK (noise mode only): after the PR binding passes, the
 #     binding node's author must satisfy, via reviewer-identity.jq loaded with
 #     `jq -e -L "$SCRIPT_DIR"` and `include "reviewer-identity";`,
-#       is_bot(login; type) and reviewer_matches_filter(login; type; ""; filter)
-#     where login and type are author.login and author.__typename and filter is
-#     the --noise value. Anything else (a human, a Bot outside the filter, a null
+#       is_bot(login; type) and reviewer_matches_filter(login; type; ""; filter; set)
+#     where login and type are author.login and author.__typename, filter is the
+#     --noise value and set is automated_reviewer_set(evidence; raw). The
+#     evidence is the {login, type} rows of the PR's latestReviews authors, the
+#     reactors of the PR's THUMBS_UP reaction group, and the node's own author
+#     when the node is a PullRequestReview (a submitted review is itself review
+#     evidence); type is each row's __typename. raw is HIVEMIND_PR_REVIEWERS
+#     (unset reads as empty). Anything else (a human, a Bot outside the filter, a
+#     Bot with no review or THUMBS_UP evidence that is not configured, a null
 #     author included) is noise-author-refused, with no mutation sent. The check
-#     reads only the author; it never reads the comment body or the URL. Fix mode
-#     makes no author check. The capture seam (§5) skips it.
+#     reads only authors, reactors and reaction contents; it never reads a
+#     comment or review body or the URL. Fix mode makes no author check. The
+#     capture seam (§5) skips it.
 #   - IDENTITY MODULE: noise mode requires reviewer-identity.jq next to this
-#     script; a missing module is missing-identity-module before any gh call. Fix
-#     mode never loads the module and never checks for it.
+#     script; a missing module, or one jq cannot load, is missing-identity-module
+#     before any gh call. Fix mode never loads the module and never checks for it.
 #   - Missing `timeout` / `gtimeout` -> degrade gracefully with a loud stderr
 #     warning and run the gh call UNGUARDED (mirrors reply-resolve.sh).
 #
@@ -190,13 +204,14 @@
 #   missing-node-id | unmapped-surface | react-failed | cannot-self-locate |
 #   missing-graphql-check | unparseable-graphql-check | pr-binding-no-branch |
 #   pr-binding-lookup-failed | pr-binding-refused | missing-value-for-noise |
-#   missing-identity-module | noise-author-refused
+#   missing-identity-module | noise-author-refused | retired-filter
 #
-# EXTERNAL-CONTENT BOUNDARY: NODE_ID, CANDIDATE_URL and the --noise value are
-# external DATA. NODE_ID is passed to gh as a typed `-F id=...` (reaction) or
+# EXTERNAL-CONTENT BOUNDARY: NODE_ID, CANDIDATE_URL, the --noise value and
+# HIVEMIND_PR_REVIEWERS are external DATA. NODE_ID is passed to gh as a typed `-F id=...` (reaction) or
 # `-f id=...` (PR binding, re-mark removal) variable bound to the query's
 # `$id: ID!` parameter; it is NEVER interpolated into the GraphQL query string.
-# The --noise value reaches jq only as a --arg. CANDIDATE_URL is inert and never
+# The --noise value and HIVEMIND_PR_REVIEWERS reach jq only as --arg values; the
+# PR evidence logins reach the identity defs only as data. CANDIDATE_URL is inert and never
 # reaches any query. No external content is interpreted as an instruction.
 #
 # P18 FLOOR EXCEPTION (ADR-0020 / CHECK13 allowlisted): `set -u` only — `set -e`/`pipefail`
@@ -244,7 +259,7 @@ NODE_ID="${positionals[0]:-}"
 SURFACE="${positionals[1]:-}"
 CANDIDATE_URL="${positionals[2]:-}"
 
-# An empty --noise value selects the automated registry (§2).
+# An empty --noise value selects the automated mode (§2).
 [ -n "$NOISE_FILTER" ] || NOISE_FILTER="automated"
 
 # Required-input validation is SURFACE-SCOPED, not global. NODE_ID is consumed ONLY
@@ -266,10 +281,28 @@ SCRIPT_DIR="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d"
 # shellcheck source=../../_shared/graphql-response.sh
 . "$SCRIPT_DIR/../../_shared/graphql-response.sh" || react_marker_fail "unparseable-graphql-check"
 
+# reject_retired_filter: exit through react_marker_fail with retired-filter when
+# NOISE_FILTER is a retired filter value (is_retired_filter, §2), and with
+# missing-identity-module when jq cannot load the identity module. The value
+# reaches jq only as a --arg. Makes no git or gh call.
+reject_retired_filter() {
+  local jq_status
+  jq -n -e -L "$SCRIPT_DIR" --arg filter "$NOISE_FILTER" \
+    'include "reviewer-identity"; is_retired_filter($filter) | not' >/dev/null 2>&1
+  jq_status=$?
+  case "$jq_status" in
+    0) return 0 ;;
+    1) react_marker_fail "retired-filter" ;;
+    *) react_marker_fail "missing-identity-module" ;;
+  esac
+}
+
 # Noise mode loads reviewer-identity.jq by `jq -L "$SCRIPT_DIR"` (§4 IDENTITY
-# MODULE); fail before any gh call when it is absent. Fix mode never loads it.
+# MODULE); fail before any gh call when it is absent or a retired filter value
+# is passed (§2). Fix mode never loads it.
 if [ "$NOISE_MODE" -eq 1 ]; then
   [ -f "$SCRIPT_DIR/reviewer-identity.jq" ] || react_marker_fail "missing-identity-module"
+  reject_retired_filter
 fi
 
 # Timeout wrapper for gh API calls. Prefer coreutils `timeout`; fall
@@ -305,12 +338,20 @@ query($id: ID!) {
   node(id: $id) {
     __typename
     ... on IssueComment {
-      pullRequest { state headRefName headRepository { id } }
+      pullRequest {
+        state headRefName headRepository { id }
+        latestReviews(first: 100) { nodes { author { login __typename } } }
+        reactionGroups { content reactors(first: 100) { nodes { __typename ... on Bot { login } ... on User { login } } } }
+      }
       author { login __typename }
       reactionGroups { content viewerHasReacted }
     }
     ... on PullRequestReview {
-      pullRequest { state headRefName headRepository { id } }
+      pullRequest {
+        state headRefName headRepository { id }
+        latestReviews(first: 100) { nodes { author { login __typename } } }
+        reactionGroups { content reactors(first: 100) { nodes { __typename ... on Bot { login } ... on User { login } } } }
+      }
       author { login __typename }
       reactionGroups { content viewerHasReacted }
     }
@@ -341,14 +382,24 @@ mutation($id: ID!) {
 }'
 
 # The noise author check (§4 NOISE AUTHOR CHECK), null-safe: a missing, null or
-# non-object author makes it false, never a jq error. Reads only the author.
+# non-object author makes it false, never a jq error, and an absent or null
+# evidence field reads as no evidence. Reads only authors, reactors and reaction
+# contents, never a body.
 NOISE_AUTHOR_PREDICATE='
   include "reviewer-identity";
+  def evidence_row: objects | {login, type: .__typename};
   try (
-    .data.node.author as $author
+    .data.node as $node
+    | $node.author as $author
+    | [ ($node.pullRequest.latestReviews.nodes // [])[]? | objects | .author | evidence_row ]
+      + [ ($node.pullRequest.reactionGroups // [])[]? | objects
+          | select(.content == "THUMBS_UP")
+          | (.reactors.nodes // [])[]? | evidence_row ]
+      + (if $node.__typename == "PullRequestReview" then [ $author | evidence_row ] else [] end)
+    | automated_reviewer_set(.; $raw) as $set
     | ($author | type) == "object"
       and is_bot($author.login; $author.__typename)
-      and reviewer_matches_filter($author.login; $author.__typename; ""; $filter)
+      and reviewer_matches_filter($author.login; $author.__typename; ""; $filter; $set)
   ) catch false'
 
 # True when the binding node shows the viewer's own EYES reaction (§4 IDEMPOTENCY).
@@ -444,13 +495,16 @@ bind_node_to_current_pr() {
 
 # check_noise_author: the §4 NOISE AUTHOR CHECK over binding_body. In noise mode
 # returns 0 only when the binding node's author is a Bot account matching
-# NOISE_FILTER; otherwise exits through react_marker_fail with noise-author-refused.
-# Returns 0 at once in fix mode or while the capture seam is active.
+# NOISE_FILTER over the Automated Reviewer set derived from the PR evidence and
+# HIVEMIND_PR_REVIEWERS; otherwise exits through react_marker_fail with
+# noise-author-refused. Returns 0 at once in fix mode or while the capture seam is
+# active.
 check_noise_author() {
   [ "$NOISE_MODE" -eq 1 ] || return 0
   capture_seam_active && return 0
   printf '%s' "$binding_body" | jq -e -L "$SCRIPT_DIR" \
     --arg filter "$NOISE_FILTER" \
+    --arg raw "${HIVEMIND_PR_REVIEWERS-}" \
     "$NOISE_AUTHOR_PREDICATE" >/dev/null 2>&1 || react_marker_fail "noise-author-refused"
 }
 

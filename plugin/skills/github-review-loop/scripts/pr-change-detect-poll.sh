@@ -14,21 +14,27 @@
 #     and self identity); totalCount tripwires for the three connections capped at
 #     50; a CI `FAILED_CHECKS` scalar that counts only checks in a failed/
 #     errored state, so CI regressions wake the reviewer even when no new review
-#     comment was posted) plus ONE automated-reviewer APPROVAL bool (a
-#     `review-approved` reviewer whose LATEST review is APPROVED, read from
-#     GitHub's per-author `latestReviews` and never rebuilt from review history,
-#     OR a 👍 reaction on the PR from a `pr-reaction-thumbs-up` reviewer; both
-#     scoped by the active reviewer filter). Both approval reads are EXHAUSTIVE
-#     paginated walks (`latestReviews` in its own paginated GraphQL query, the
-#     reactions over paginated REST): the `latestReviews` `first: 100` is a
-#     page size, not a bound, and a walk that fails on any page fails the
-#     capture rather than judging approval from a partial fetch. No bodies —
-#     the poll only answers "did anything change?" and "is the PR terminal?".
+#     comment was posted) plus ONE Reviewer Approval bool (an Automated
+#     Reviewer whose LATEST review is APPROVED, or COMMENTED with zero inline
+#     review comments, read from GitHub's per-author `latestReviews` and never
+#     rebuilt from review history, OR a 👍 reaction on the PR from an Automated
+#     Reviewer; both scoped by the active reviewer filter). Both approval reads
+#     are EXHAUSTIVE paginated walks (`latestReviews` in its own paginated
+#     GraphQL query, the reactions over paginated REST): the `latestReviews`
+#     `first: 100` is a page size, not a bound, and a walk that fails on any
+#     page fails the capture rather than judging approval from a partial
+#     fetch. No bodies — the poll only answers "did anything change?" and "is
+#     the PR terminal?".
 #   - Every reviewer IDENTITY decision (self identity, login normalization,
-#     filter scope, approver membership) is delegated to the sibling jq module
-#     `reviewer-identity.jq` (ADR-0033), loaded by `jq -L "$SCRIPT_DIR"`. This
-#     script carries no login literal, login compare, or suffix-strip regex of
-#     its own; a missing module is a terminal error before the first gh call.
+#     the Automated Reviewer set, filter scope, approval state, the retired
+#     filter value) is delegated to the sibling jq module `reviewer-identity.jq`
+#     (ADR-0043), loaded by `jq -L "$SCRIPT_DIR"`. This script carries no login
+#     literal, login compare, or suffix-strip regex of its own; a missing module
+#     is a terminal error before the first gh call. Each capture derives ONE
+#     Automated Reviewer set from the PR evidence it fetched (snapshot review
+#     authors, `latestReviews` authors, 👍 reactors) plus the optional
+#     HIVEMIND_PR_REVIEWERS value, passed to jq as data and never as program
+#     text, and every identity program of that capture uses that one set.
 #   - It DIFFS the scalar snapshot in bash against the previous iteration and
 #     emits a single minimal marker line ONLY on a real delta or a terminal
 #     state. The reviewer re-fetches ALL feedback bodies and does the full
@@ -117,16 +123,18 @@
 #                    but is NOT a loop terminal: the skill confirms via the
 #                    reviewer before any terminal
 #   WATCH_TIMEOUT    max_watch_duration elapsed (terminal)
-#   POLL_ERROR       repeated query failure, or a missing/malformed seed
-#                    (terminal; skill returns blocked)
+#   POLL_ERROR       repeated query failure, a missing/malformed seed, or a
+#                    retired reviewer filter value (terminal; skill returns
+#                    blocked)
 #   BASELINE=<seed>  --snapshot mode only: the seed token poll mode requires as
 #                    its 8th argument (arm kind + every diffed scalar)
-#   SNAPSHOT_ERROR   --snapshot mode only: the seed could not be captured
-#                    (terminal; skill returns blocked)
+#   SNAPSHOT_ERROR   --snapshot mode only: the seed could not be captured, or
+#                    the reviewer filter value is retired (terminal; skill
+#                    returns blocked)
 #   UNCHANGED        --check mode only: the snapshot raised no marker against
 #                    the seed
-#   CHECK_ERROR      --check mode only: a missing/malformed seed or a failed
-#                    capture (terminal)
+#   CHECK_ERROR      --check mode only: a missing/malformed seed, a retired
+#                    reviewer filter value, or a failed capture (terminal)
 #
 # Process lifetime: `CHANGED` is the ONLY marker after which the poll keeps
 # running. Every other marker is the last line the process prints. --check
@@ -141,9 +149,17 @@
 #   $3  PR_NUMBER               integer PR number
 #   $4  MAX_WATCH_SECONDS       integer seconds before WATCH_TIMEOUT
 #   $5  POLL_INTERVAL_SECONDS   integer seconds between polls
-#   $6  REVIEWER_FILTER         "automated" | "codex-only" | "all" | "<login>"
+#   $6  REVIEWER_FILTER         "automated" | "all" | "<login>"
 #                               (default "automated" when empty; modes are
-#                               defined by reviewer-identity.jq)
+#                               defined by reviewer-identity.jq). A value the
+#                               module's `is_retired_filter` names is the
+#                               mode's error marker, exit 1, before any gh
+#                               call; select one reviewer with `<login>`.
+#
+# Environment:
+#   HIVEMIND_PR_REVIEWERS       optional; more Bot logins for the Automated
+#                               Reviewer set (comma- or whitespace-separated).
+#                               It only adds to the evidence-derived set.
 #   $7  SELF_LOGIN              viewer login used to exclude self-authored
 #                               activity from delta tokens (required)
 #   $8  BASELINE_SEED           poll and --check modes: the BARE value of the
@@ -369,10 +385,17 @@ POLL_INTERVAL_SECONDS=$((10#$POLL_INTERVAL_SECONDS))
 [ "$POLL_INTERVAL_SECONDS" -ge 1 ] || poll_fail
 # SELF_LOGIN is required: without it, the jq filter cannot exclude self-authored
 # activity and self-echo CHANGED storms return. REVIEWER_FILTER defaults to
-# automated when empty; any non-empty string is accepted (a non-keyword value is
-# the legacy login form).
+# automated when empty; any other non-empty string is accepted (a non-keyword
+# value is the login form) except the retired value the module names, which is
+# rejected here, before any gh call, in every mode. The verdict must be exactly
+# `false` to proceed, so a failed jq evaluation also fails closed.
 [ -n "$SELF_LOGIN" ] || poll_fail
 [ -n "$REVIEWER_FILTER" ] || REVIEWER_FILTER="automated"
+retired_filter=$(jq -n -r -L "$SCRIPT_DIR" --arg filter "$REVIEWER_FILTER" '
+  include "reviewer-identity";
+  is_retired_filter($filter)
+' 2>/dev/null) || poll_fail
+[ "$retired_filter" = "false" ] || poll_fail
 # Snapshot mode must be told which kind of arm it is seeding; an absent or
 # unknown kind is SNAPSHOT_ERROR rather than a token whose semantics are guessed
 # downstream.
@@ -420,9 +443,11 @@ fail_count=0
 # `FAILED_CHECKS` scalar can be derived) plus two exhaustive paginated approval
 # reads — every per-author latest review (`latestReviews`, its own paginated
 # GraphQL query) and every REST reaction — folded into ONE in-scope approval
-# bool (an approver's LATEST review APPROVED, OR PR 👍, each from its registry
-# approver kind). The `latestReviews` `first: 100` is a page size, not a
-# bound; a walk that fails on any page fails the capture.
+# bool (an Automated Reviewer's LATEST review passing `is_review_approval`, OR
+# its PR 👍). The `latestReviews` `first: 100` is a page size, not a bound; a
+# walk that fails on any page fails the capture. The three gh calls run first;
+# the Automated Reviewer set is then derived once from their evidence, and the
+# snapshot projection and both approval programs all judge identity over it.
 # Returns 0 on success, non-zero on failure of the query, either approval walk,
 # or any identity jq evaluation, on a GraphQL response (the snapshot body or
 # any `latestReviews` page) that the shared graphql-response.sh check rejects —
@@ -445,7 +470,7 @@ fail_count=0
 # reviewer does the full body-level classification on wake (thin poll, no
 # interpretation). Writes diagnostic stderr to /dev/null (never /tmp).
 compute_snapshot() {
-  local snapshot_body raw line review_pages review_rows review_approved reaction_rows thumbs_approved
+  local snapshot_body raw line review_pages review_rows reaction_rows snapshot_review_rows reviewer_set review_approved thumbs_approved
 
   # gh exits 0 on several GraphQL error envelopes, so its exit status alone never
   # proves a usable response: the body is captured first and must pass the shared
@@ -492,8 +517,78 @@ query($owner: String!, $repo: String!, $pr: Int!) {
   hivemind_graphql_response_check "$snapshot_body" >/dev/null || return 1
   hivemind_review_surface_shape_check "$snapshot_body" >/dev/null || return 1
 
+  # Review approval is CURRENT state read from GitHub, never rebuilt from review
+  # history: `latestReviews` holds the latest submitted review of each author, so
+  # a later CHANGES_REQUESTED or DISMISSED review, or a COMMENTED review with
+  # inline comments, from the same reviewer supersedes an earlier approval. The
+  # read is an EXHAUSTIVE paginated walk in its own query (gh follows only one
+  # paginated connection per query): `first: 100` is the page size, not a bound,
+  # so a reviewer past any number of other authors is still read. The walk
+  # carries NO --jq: under --paginate gh runs --jq once per page and cannot load
+  # a module, so no envelope check could run inside it. The raw page stream
+  # (every page's JSON object concatenated) is captured whole and must pass the
+  # shared hivemind_graphql_pages_check, which rejects the stream when ANY page
+  # carries a GraphQL error envelope. Only then does a local jq (no -s, so it
+  # reads each concatenated page in turn) project one compact row
+  # `{state, login, type, comments}` per entry across every page, `comments`
+  # being the entry's inline review comment count; the identity decision then
+  # runs locally over every row at once. A failed later page, a rejected page,
+  # or a null connection (a jq iteration error) fails the capture, so no
+  # approval verdict is ever drawn from a partial or errored walk. A walk whose
+  # pages hold no entries slurps to `[]` (no approval).
+  review_pages=$("${GH_TIMEOUT[@]}" gh api graphql --paginate \
+    -f owner="$OWNER" -f repo="$REPO" -F pr="$PR_NUMBER" \
+    -f query='
+query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $pr) {
+      latestReviews(first: 100, after: $endCursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { state author { login __typename } comments { totalCount } }
+      }
+    }
+  }
+}' \
+    2>/dev/null) || return 1
+  hivemind_graphql_pages_check "$review_pages" >/dev/null || return 1
+  review_rows=$(printf '%s' "$review_pages" \
+    | jq -c '.data.repository.pullRequest.latestReviews.nodes[] | {state, login: .author.login, type: .author.__typename, comments: .comments.totalCount}' \
+    2>/dev/null) || return 1
+
+  # PR 👍 via the paginated REST reactions endpoint. The gh --jq filter is pure
+  # TRANSPORT: it emits one JSON object `{login, type}` per +1 reaction and
+  # makes NO identity decision (gh may apply --jq per page, so rows concatenate
+  # across pages). Each row is `tojson`-encoded because gh prints a string
+  # result raw and uncolored, one per line; the local jq parses the rows back
+  # as JSON values, so no login byte can be read as a field boundary. The
+  # identity decision runs locally over all rows at once, through the module,
+  # so the 100-node GraphQL blind spot and the per-page slurp pitfall are both
+  # avoided. Empty input slurps to `[]` (no approval); a row that is not JSON
+  # is a jq error and fails the capture.
+  reaction_rows=$("${GH_TIMEOUT[@]}" gh api --paginate "repos/$OWNER/$REPO/issues/$PR_NUMBER/reactions" \
+    --jq '.[] | select(.content == "+1") | {login: .user.login, type: .user.type} | tojson' \
+    2>/dev/null) || return 1
+
+  # The Automated Reviewer set of THIS capture, derived once by the module's
+  # `automated_reviewer_set` from the evidence the three reads returned: the
+  # snapshot's review authors, every `latestReviews` author, and every 👍
+  # reactor (only `{login, type}` is read from each row). HIVEMIND_PR_REVIEWERS
+  # reaches jq as `--arg` data, never as program text, and only adds to the set.
+  # The set is a compact JSON array handed to every identity program below, so
+  # the filtered review token and both approval reads judge the same set. A jq
+  # failure here, or a set that is not valid JSON, fails the capture.
+  snapshot_review_rows=$(printf '%s' "$snapshot_body" \
+    | jq -c '.data.repository.pullRequest.reviews.nodes[] | {login: .author.login, type: .author.__typename}' \
+    2>/dev/null) || return 1
+  reviewer_set=$(printf '%s\n%s\n%s\n' "$snapshot_review_rows" "$review_rows" "$reaction_rows" \
+    | jq -s -c -L "$SCRIPT_DIR" --arg reviewers "${HIVEMIND_PR_REVIEWERS-}" '
+      include "reviewer-identity";
+      automated_reviewer_set(.; $reviewers)
+    ' 2>/dev/null) || return 1
+
   raw=$( ( set -o pipefail; printf '%s' "$snapshot_body" \
-    | jq -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" '
+    | jq -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" \
+      --argjson set "$reviewer_set" '
     include "reviewer-identity";
     .data.repository.pullRequest as $pr |
     ($pr.comments.nodes
@@ -502,7 +597,7 @@ query($owner: String!, $repo: String!, $pr: Int!) {
       | (if length == 0 then "NONE" else max | tostring end)) as $nonself_comment |
     ($pr.reviews.nodes
       | map(select(.state as $s | ["CHANGES_REQUESTED","COMMENTED","APPROVED","DISMISSED"] | index($s)))
-      | map(select(reviewer_matches_filter(.author.login; .author.__typename; $login; $filter)))
+      | map(select(reviewer_matches_filter(.author.login; .author.__typename; $login; $filter; $set)))
       | map(.databaseId)
       | (if length == 0 then "NONE" else max | tostring end)) as $filtered_review |
     ($pr.reviewThreads.nodes
@@ -578,69 +673,26 @@ query($owner: String!, $repo: String!, $pr: Int!) {
 $raw
 EOF
 
-  # Review approval is CURRENT state read from GitHub, never rebuilt from review
-  # history: `latestReviews` holds the latest submitted review of each author, so
-  # a later COMMENTED, CHANGES_REQUESTED, or DISMISSED review from the same
-  # approver supersedes an earlier APPROVED. The read is an EXHAUSTIVE paginated
-  # walk in its own query (gh follows only one paginated connection per query):
-  # `first: 100` is the page size, not a bound, so an approver past any number of
-  # other authors is still read. The walk carries NO --jq: under --paginate gh
-  # runs --jq once per page and cannot load a module, so no envelope check could
-  # run inside it. The raw page stream (every page's JSON object concatenated) is
-  # captured whole and must pass the shared hivemind_graphql_pages_check, which
-  # rejects the stream when ANY page carries a GraphQL error envelope. Only then
-  # does a local jq (no -s, so it reads each concatenated page in turn) project
-  # one compact row `{state, login, type}` per entry across every page; the
-  # identity decision then runs locally over every row at once. A failed later
-  # page, a rejected page, or a null connection (a jq iteration error) fails the
-  # capture, so no approval verdict is ever drawn from a partial or errored
-  # walk. A walk whose pages hold no entries slurps to `[]` (no approval).
-  review_pages=$("${GH_TIMEOUT[@]}" gh api graphql --paginate \
-    -f owner="$OWNER" -f repo="$REPO" -F pr="$PR_NUMBER" \
-    -f query='
-query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
-  repository(owner: $owner, name: $repo) {
-    pullRequest(number: $pr) {
-      latestReviews(first: 100, after: $endCursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes { state author { login __typename } }
-      }
-    }
-  }
-}' \
-    2>/dev/null) || return 1
-  hivemind_graphql_pages_check "$review_pages" >/dev/null || return 1
-  review_rows=$(printf '%s' "$review_pages" \
-    | jq -c '.data.repository.pullRequest.latestReviews.nodes[] | {state, login: .author.login, type: .author.__typename}' \
-    2>/dev/null) || return 1
+  # Approval: a `latestReviews` row whose state passes `is_review_approval`, or a
+  # 👍 row, from an author that is an Automated Reviewer of this capture's set
+  # AND matches the active filter. A missing or null inline count is never an
+  # approval.
   review_approved=$(printf '%s' "$review_rows" \
-    | jq -s -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" '
+    | jq -s -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" \
+      --argjson set "$reviewer_set" '
       include "reviewer-identity";
       any(.[];
-          .state == "APPROVED"
-          and reviewer_is_approver(.login; .type; "review-approved")
-          and reviewer_matches_filter(.login; .type; $login; $filter))
+          is_review_approval(.state; .comments)
+          and is_automated_reviewer(.login; .type; $set)
+          and reviewer_matches_filter(.login; .type; $login; $filter; $set))
     ' 2>/dev/null) || return 1
-
-  # PR 👍 via the paginated REST reactions endpoint. The gh --jq filter is pure
-  # TRANSPORT: it emits one JSON object `{login, type}` per +1 reaction and
-  # makes NO identity decision (gh may apply --jq per page, so rows concatenate
-  # across pages). Each row is `tojson`-encoded because gh prints a string
-  # result raw and uncolored, one per line; the local jq parses the rows back
-  # as JSON values, so no login byte can be read as a field boundary. The
-  # identity decision runs locally over all rows at once, through the module,
-  # so the 100-node GraphQL blind spot and the per-page slurp pitfall are both
-  # avoided. Empty input slurps to `[]` (no approval); a row that is not JSON
-  # is a jq error and fails the capture.
-  reaction_rows=$("${GH_TIMEOUT[@]}" gh api --paginate "repos/$OWNER/$REPO/issues/$PR_NUMBER/reactions" \
-    --jq '.[] | select(.content == "+1") | {login: .user.login, type: .user.type} | tojson' \
-    2>/dev/null) || return 1
   thumbs_approved=$(printf '%s' "$reaction_rows" \
-    | jq -s -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" '
+    | jq -s -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" \
+      --argjson set "$reviewer_set" '
       include "reviewer-identity";
       any(.[];
-          reviewer_is_approver(.login; .type; "pr-reaction-thumbs-up")
-          and reviewer_matches_filter(.login; .type; $login; $filter))
+          is_automated_reviewer(.login; .type; $set)
+          and reviewer_matches_filter(.login; .type; $login; $filter; $set))
     ' 2>/dev/null) || return 1
 
   case "$review_approved" in true|false) ;; *) return 1 ;; esac
@@ -650,7 +702,6 @@ query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
   else
     cur_approval="false"
   fi
-
   # A well-formed snapshot always carries a non-empty PR state.
   [ -n "${cur_state:-}" ] || return 1
   return 0

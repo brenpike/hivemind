@@ -34,16 +34,21 @@
 #     payload, each defaulting to 0 when absent, and emits the >50 OVERFLOW diagnostic
 #     on stderr. No stdout. The per-counter command-substitution read (NO here-doc / NO
 #     temp file) is preserved so the read-only-FS invariant holds.
-#   build_normalized_candidate_set <graphql_payload> <ci_payload> <self_login> <reviewer_filter> <classify_filter_path>
+#   build_normalized_candidate_set <graphql_payload> <ci_payload> <self_login> <reviewer_filter> <classify_filter_path> [configured_reviewers]
 #     $1 graphql_payload      — raw GraphQL JSON (live-validated or trusted injected).
 #     $2 ci_payload           — raw `gh pr checks --json ...` JSON (may be empty).
 #     $3 self_login           — viewer login (passed to the classifier as --arg login).
-#     $4 reviewer_filter      — automated | codex-only | all | <login> (--arg filter;
-#                               mode semantics owned by reviewer-identity.jq §5).
+#     $4 reviewer_filter      — automated | all | <login> (--arg filter; mode semantics
+#                               owned by reviewer-identity.jq §5). The caller rejects
+#                               the retired value before calling.
 #     $5 classify_filter_path — absolute path to fix-history-classify.jq. The classifier
 #                               `include`s reviewer-identity.jq, resolved via
 #                               `-L <dir of $5>`, so the module MUST be co-located with
 #                               the classify filter (same directory).
+#     $6 configured_reviewers — OPTIONAL raw HIVEMIND_PR_REVIEWERS value (default "").
+#                               ALWAYS passed as --arg reviewers: the classifier
+#                               requires it, and omitting it is a jq compile error
+#                               that the fail-open swallow below would turn into [].
 #     Emits the SINGLE compact normalized candidate array on stdout; `[]` when both
 #     record families are empty (the fail-open shape). Malformed/empty injected payload
 #     fails OPEN to `[]`, never an error.
@@ -82,13 +87,14 @@ emit_overflow_tripwire() {
   fi
 }
 
-# build_normalized_candidate_set <graphql_payload> <ci_payload> <self_login> <reviewer_filter> <classify_filter_path>:
+# build_normalized_candidate_set <graphql_payload> <ci_payload> <self_login> <reviewer_filter> <classify_filter_path> [configured_reviewers]:
 # build the SINGLE normalized candidate array (the union of review-surface records and
 # CI-check-failure records) and emit it compact on stdout. FAIL-OPEN: a malformed /
 # empty / unparseable injected payload yields `[]` (NOT an error) — the normalize core
 # never errors on a bad injected payload.
 build_normalized_candidate_set() {
   local graphql_payload="$1" ci_payload="$2" self_login="$3" reviewer_filter="$4" classify_filter_path="$5"
+  local configured_reviewers="${6-}"
   local review_records ci_records classify_module_dir
   classify_module_dir="$(dirname -- "$classify_filter_path")"
 
@@ -107,7 +113,7 @@ build_normalized_candidate_set() {
   # compile-probes the classifier before calling this function and fails closed
   # (FETCHNORM_ERROR=unparseable-filter).
   review_records="$(printf '%s' "$graphql_payload" \
-    | jq -c -L "$classify_module_dir" -f "$classify_filter_path" --arg login "$self_login" --arg filter "$reviewer_filter" 2>/dev/null \
+    | jq -c -L "$classify_module_dir" -f "$classify_filter_path" --arg login "$self_login" --arg filter "$reviewer_filter" --arg reviewers "$configured_reviewers" 2>/dev/null \
     | jq -c '. + {item_source: "review"}' 2>/dev/null)"
   # A jq failure (e.g. malformed payload) leaves review_records empty -> the slurp
   # below canonicalizes to an empty array. This is the fail-open empty-set path.

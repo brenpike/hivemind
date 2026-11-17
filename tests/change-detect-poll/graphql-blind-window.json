@@ -19,7 +19,7 @@
         },
         "latestReviews": {
           "nodes": [
-            { "state": "COMMENTED", "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" } }
+            { "state": "COMMENTED", "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" }, "comments": { "totalCount": 1 } }
           ]
         },
         "reviewThreads": {

@@ -17,62 +17,84 @@ The remaining cases pin the behavior the fix must not break: silence on no delta
 each scalar class (`LATEST_NONSELF_ISSUE_COMMENT_ID`, a `*_TOTAL` tripwire alone, `FAILED_CHECKS`),
 `REVIEWER_APPROVED` on a first-poll approval, and the fail-closed `POLL_ERROR` paths.
 
-## Reviewer identity (ADR-0033)
+## Reviewer identity (ADR-0043)
 
-Every login, filter, and approver decision the poll makes is delegated to the shared
-`reviewer-identity.jq` registry module. The poll's `approval` scalar is true on EITHER a 👍
-reaction from a Bot-account `pr-reaction-thumbs-up` registry member (Codex) OR a Bot-account
-`review-approved` member (Copilot) whose latest review is `APPROVED`, both scoped by the active
-reviewer filter, and an approval edge surfaces as the `REVIEWER_APPROVED` marker. A Bot account is
-the module's `is_bot`: typed `Bot`, OR a raw login ending in the reserved `[bot]` suffix. The REST
-reactions endpoint reports a bot reactor's `user.type` as `User`, so the Codex 👍 arrives
-User-typed with a `[bot]`-suffixed login; a GitHub login is alphanumerics and hyphens only, so no
-human account can carry the suffix. The latest
+Every login, filter, and approval decision the poll makes is delegated to the shared
+`reviewer-identity.jq` module, and no reviewer product is named in code. Each capture derives ONE
+Automated Reviewer set from the PR evidence it read (snapshot review authors, `latestReviews`
+authors, 👍 reactors), keeping Bot accounts only and dropping `github-actions` unless listed, plus
+the optional `HIVEMIND_PR_REVIEWERS` value, which reaches jq as `--arg` data and only adds to the
+set. The poll's `approval` scalar is true when an Automated Reviewer in scope of the active filter
+left a 👍 on the PR, or its latest review is `APPROVED` or `COMMENTED` with zero inline review
+comments; an approval edge surfaces as the `REVIEWER_APPROVED` marker. A missing or null inline
+count is never an approval. A Bot account is the module's `is_bot`: typed `Bot`, OR a raw login
+ending in the reserved `[bot]` suffix. The REST reactions endpoint reports a bot reactor's
+`user.type` as `User`, so a bot 👍 arrives User-typed with a `[bot]`-suffixed login; a GitHub
+login is alphanumerics and hyphens only, so no human account can carry the suffix. The latest
 review is the one GitHub reports per author in `latestReviews`, never one rebuilt from the bounded
 `reviews` history window, and it is read by an exhaustive paginated walk in a query of its own:
 `first: 100` is the page size, not a bound, and a walk that fails on any page fails the capture.
-The suite pins:
+The runner unsets `HIVEMIND_PR_REVIEWERS` at the top and sets it only on a case's own calls. The
+bot logins it uses are shapes, not products: a Codex-shaped, a Copilot-shaped, and a generic bot
+login, the CI identity `github-actions`, and a status bot. The suite pins:
 
-- `approval:thumbs-up-on-first-poll` — a Codex 👍 row in the REST shape (User-typed,
+- `filter:retired-value-rejected` — the filter value the module's `is_retired_filter` names prints
+  exactly `SNAPSHOT_ERROR`, `CHECK_ERROR`, or `POLL_ERROR`, exit 1, in snapshot, check, and poll
+  mode, with zero `gh` calls.
+- `approval:every-bot-shape-approves-identically` — for each bot shape, a REST-shaped 👍, an
+  `APPROVED` latest review, and a `COMMENTED` latest review with zero inline comments each fire
+  `REVIEWER_APPROVED` first under `automated` with no configuration.
+- `approval:commented-with-inline-or-unknown-never-approves` — a `COMMENTED` latest review with 2
+  inline comments, an absent `comments` key, a null `comments`, or a null `totalCount` never
+  approves under `automated` or `all`, and fires `CHANGED`.
+- `approval:ci-identity-only-when-listed` — an unlisted `github-actions` 👍 idles to
+  `WATCH_TIMEOUT` and its `APPROVED` review fires only `CHANGED`, under `automated` and `all`;
+  listed in `HIVEMIND_PR_REVIEWERS` (with or without `[bot]`, among comma- and space-separated
+  logins) each fires `REVIEWER_APPROVED` first. A listed value shaped like jq program text stays
+  data: no capture error and no widened set.
+- `approval:status-bot-comment-changes-never-approves` — a Bot that only posts an issue comment
+  fires `CHANGED` and never `REVIEWER_APPROVED`, under `automated` and `all`.
+- `approval:thumbs-up-on-first-poll` — a bot 👍 row in the REST shape (User-typed,
   `[bot]`-suffixed login) fires `REVIEWER_APPROVED` first.
-- `approval:rest-user-typed-bot-thumbs-up-approves` — the same REST-shaped Codex 👍 fires
-  `REVIEWER_APPROVED` first under `automated` AND `codex-only`, and so does a variant re-typing
-  the row `Bot`; a gate on the account type alone idles to `WATCH_TIMEOUT`.
-- `approval:human-thumbs-up-never-approves` — User-typed 👍 rows with bare logins (one carrying the
-  Codex registry login itself) never approve, under `automated`, `codex-only`, OR `all`; `all`
-  admits every login to the filter, so the approver's Bot-account gate is the only thing under
-  test.
-- `approval:reaction-login-cannot-forge-type` — a User-typed 👍 whose login is the Codex bot login
-  followed by a TAB and `Bot` never approves, under `automated`, `codex-only`, OR `all`. Reaction
-  rows travel as JSON objects, so no login byte can be read as a field boundary, and the login does
-  not END in the `[bot]` suffix, so it is no Bot account.
-- `approval:eyes-reaction-never-approves` — a REST-shaped Codex `eyes` reaction never approves;
-  only a +1 is the Codex approval signal.
-- `approval:copilot-review-scoped-by-filter` — a Copilot `APPROVED` latest review fires
-  `REVIEWER_APPROVED` first under `automated`, and only `CHANGED` (never an approval) under
-  `codex-only`.
-- `approval:superseded-review-never-approves` — a Copilot `latestReviews` entry in state
-  `CHANGES_REQUESTED`, `COMMENTED`, or `DISMISSED` after an earlier `APPROVED` never approves and
-  fires `CHANGED`; a latest `APPROVED` after an earlier `COMMENTED` still fires.
-- `approval:review-window-overflow-still-approves` — with `REVIEWS_TOTAL` at 120 and no Copilot
-  review inside the 50-review window, a Copilot `APPROVED` in `latestReviews` still fires
+- `approval:rest-user-typed-bot-thumbs-up-approves` — the same REST-shaped bot 👍 fires
+  `REVIEWER_APPROVED` first under `automated` AND `<login>` mode naming that bot, and so does a
+  variant re-typing the row `Bot`; a gate on the account type alone idles to `WATCH_TIMEOUT`.
+- `approval:human-thumbs-up-never-approves` — User-typed 👍 rows with bare logins (one carrying a
+  bot login itself) never approve under `automated` or `all`, nor with both logins listed in
+  `HIVEMIND_PR_REVIEWERS`; `all` admits every login to the filter, so the Bot-account gate is the
+  only thing under test.
+- `approval:reaction-login-cannot-forge-type` — a User-typed 👍 whose login is a `[bot]` login
+  followed by a TAB and `Bot` never approves, under `automated` OR `all`. Reaction rows travel as
+  JSON objects, so no login byte can be read as a field boundary, and the login does not END in
+  the `[bot]` suffix, so it is no Bot account.
+- `approval:eyes-reaction-never-approves` — a REST-shaped bot `eyes` reaction never approves;
+  only a +1 is a reaction approval signal.
+- `approval:review-scoped-by-filter` — an `APPROVED` latest review fires `REVIEWER_APPROVED` first
+  under `automated` and under `<login>` mode naming its author, and only `CHANGED` (never an
+  approval) under `<login>` mode naming another reviewer.
+- `approval:superseded-review-never-approves` — a `latestReviews` entry in state
+  `CHANGES_REQUESTED`, `COMMENTED` with inline comments, or `DISMISSED` after an earlier
+  `APPROVED` never approves and fires `CHANGED`; a latest `APPROVED` after an earlier `COMMENTED`
+  still fires.
+- `approval:review-window-overflow-still-approves` — with `REVIEWS_TOTAL` at 120 and no review of
+  that bot inside the 50-review window, an `APPROVED` in `latestReviews` still fires
   `REVIEWER_APPROVED` first under `automated`.
-- `approval:latest-review-not-history` — a Copilot `APPROVED` that is the latest Copilot review in
-  the `reviews` window, with no Copilot `latestReviews` entry, never approves and fires `CHANGED`.
-- `approval:user-typed-review-never-approves` — a User-typed `APPROVED` latest review under the
-  Copilot registry login never approves under `all`, and fires `CHANGED`.
-- `approval:latest-reviews-every-page-read` — a Copilot `APPROVED` on the LAST page of a 2-page and
-  a 3-page `latestReviews` walk, behind 100 / 200 distinct User-typed `COMMENTED` authors, fires
+- `approval:latest-review-not-history` — an `APPROVED` that is the bot's latest review in the
+  `reviews` window, with no `latestReviews` entry for it, never approves and fires `CHANGED`.
+- `approval:user-typed-review-never-approves` — a User-typed `APPROVED` latest review under a bot
+  login never approves under `all`, and fires `CHANGED`.
+- `approval:latest-reviews-every-page-read` — an `APPROVED` on the LAST page of a 2-page and a
+  3-page `latestReviews` walk, behind 100 / 200 distinct User-typed `COMMENTED` authors, fires
   `REVIEWER_APPROVED` first under `automated`; the snapshot query's own `latestReviews` holds
   exactly page 1, so a read bounded to one page idles to `WATCH_TIMEOUT`. The same walks ending in
-  a Copilot `COMMENTED` review stay silent to `WATCH_TIMEOUT` (discrimination).
+  a `COMMENTED` review with 3 inline comments stay silent to `WATCH_TIMEOUT` (discrimination).
 - `approval:latest-reviews-partial-walk-fails-closed` — a walk whose page 1 reports
   `hasNextPage` true and whose next page fails is `SNAPSHOT_ERROR`, exit 1, in snapshot mode and
   `POLL_ERROR`, exit 1, in poll mode; no approval verdict is drawn from a partial walk.
 - `approval:latest-reviews-graphql-errors-fail-closed` — see GraphQL error envelopes below.
 - `filter:empty-slot-is-automated` — over one mixed review state, the seed token captured with an
-  empty filter slot equals the `automated` token and differs from both the `codex-only` and `all`
-  tokens; an empty-slot arm fires `REVIEWER_APPROVED` on the Copilot approval.
+  empty filter slot equals the `automated` token and differs from both the `<login>` and `all`
+  tokens; an empty-slot arm fires `REVIEWER_APPROVED` on the `APPROVED` review.
 - `identity:comment-self-keys-on-type` — a higher-id issue comment whose login IS the self login,
   `COMMENTS_TOTAL` unchanged, fires `CHANGED` when Bot-typed or untyped (the module's `is_self` is
   User-gated, and a null type is never self) and stays silent to `WATCH_TIMEOUT` when User-typed
@@ -94,7 +116,7 @@ row per entry itself. The fake `gh` serves every case below exit 0.
   snapshot mode and `POLL_ERROR`, exit 1, in poll mode. The `data` alone would yield a valid
   baseline and a silent poll.
 - `approval:latest-reviews-graphql-errors-fail-closed` — a 2-page walk ending in a Bot-typed
-  `review-approved` `APPROVED` review (which alone fires `REVIEWER_APPROVED` first, as in
+  `APPROVED` review (which alone fires `REVIEWER_APPROVED` first, as in
   `approval:latest-reviews-every-page-read`), with a top-level `errors` value on page 2 or on
   page 1, is `SNAPSHOT_ERROR` / `POLL_ERROR`, exit 1, and never fires `REVIEWER_APPROVED`.
 
@@ -125,7 +147,7 @@ that can trail a stale `CHANGED`. A return that would end clean, or keep watchin
 running, first runs `--check` against the pending seed (see Quiet-exit check below).
 
 - `approval:marker-ends-poll-process` — (i) a lone approval edge (pre-cycle-0 state, reactions
-  none then Codex 👍) prints exactly `REVIEWER_APPROVED`, exit 0, and the fake `gh` sees exactly
+  none then bot 👍) prints exactly `REVIEWER_APPROVED`, exit 0, and the fake `gh` sees exactly
   two snapshot queries under a watch window long enough for several more; (ii) the approval
   co-firing with a new comment delta prints exactly `REVIEWER_APPROVED`, with no trailing marker;
   (iii) discrimination: the same comment delta without an approval prints `CHANGED` and keeps
@@ -142,7 +164,7 @@ failed capture is `CHECK_ERROR`, exit 1, never retried. Each case reads the fake
 to pin the number of captures.
 
 - `check:delta-after-pending-seed-detected` — the bite: a `re-arm` seed captured over the
-  pre-cycle-0 state with the Codex 👍, then a new Codex issue comment, prints exactly `CHANGED`,
+  pre-cycle-0 state with a bot 👍, then a new bot issue comment, prints exactly `CHANGED`,
   exit 0, in one capture. A script with no `--check` mode reads the flag as `OWNER` and prints
   `POLL_ERROR`.
 - `check:no-delta-unchanged` — the same seed over the unchanged state prints exactly `UNCHANGED`,
@@ -159,7 +181,7 @@ to pin the number of captures.
 ## The second bite: the seed's state model (PR #361)
 
 The seed originally serialized 8 of the 9 scalars the poll diffs, omitting the approval bool
-(then the Codex-only 👍 bool, field `codex`; now `approval`). That
+(then a single-reviewer 👍 bool, field `codex`; now `approval`). That
 omission was correct while the seed had ONE consumer — the initial arm, which WANTS a pre-existing
 👍 to surface. The productive-cycle re-arm is a SECOND consumer with the opposite requirement, so
 one token was carrying two contradictory semantics, decided per-scalar by which fields it happened
@@ -217,11 +239,11 @@ a snapshot that cannot be captured, or one given a missing or unknown arm kind, 
 
 | File | Role |
 | --- | --- |
-| `graphql-pre-cycle0.json` | State A — the PR as it stood before cycle 0 (two User-typed self issue comments, one Bot-typed Codex review and its `COMMENTED` `latestReviews` entry, one Bot-typed Codex thread, checks green). |
-| `graphql-blind-window.json` | State B — A plus the Codex review + review-thread comment posted during the blind window. |
+| `graphql-pre-cycle0.json` | State A — the PR as it stood before cycle 0 (two User-typed self issue comments, one Bot-typed review and its `COMMENTED` `latestReviews` entry carrying one inline comment, one Bot-typed thread, checks green). |
+| `graphql-blind-window.json` | State B — A plus the bot's review + review-thread comment posted during the blind window; its `latestReviews` entry still carries one inline comment. |
 | `graphql-malformed.json` | A GraphQL `NOT_FOUND` error response (`errors` array, null `pullRequest`) that the snapshot capture rejects. |
 | `reactions-none.json` | Raw REST reactions page with no reaction (`[]`). |
-| `reactions-codex.json` | Raw REST reactions page with one +1 from `chatgpt-codex-connector[bot]`, in the shape the REST endpoint returns for a bot reactor (`user.type` `User`, plus `id` and `user_view_type`). |
+| `reactions-codex.json` | Raw REST reactions page with one +1 from `chatgpt-codex-connector[bot]`, in the shape the REST endpoint returns for a bot reactor (`user.type` `User`, plus `id` and `user_view_type`). The runner's `bot_thumbs_up` derives every other bot's 👍 from it. |
 | `reactions-human.json` | Raw REST reactions page with two User-typed +1s (`chatgpt-codex-connector`, `claude`) that must never approve. |
 | `reactions-forged.json` | Raw REST reactions page with one User-typed +1 whose login is `chatgpt-codex-connector[bot]`, a TAB, and `Bot`; it must never approve. |
 | `reactions-codex-eyes.json` | Raw REST reactions page with one `eyes` reaction from `chatgpt-codex-connector[bot]`, in the same REST bot-reactor shape (`user.type` `User`); it must never approve. |
@@ -229,12 +251,14 @@ a snapshot that cannot be captured, or one given a missing or unknown arm kind, 
 The `graphql-*.json` files are whole GraphQL responses shaped to the script's own query; every
 author (issue comments, reviews, and review-thread comments) carries `__typename` (`Bot` for
 automated reviewers, `User` for humans and the self login) because every author selection requests
-it and the registry's self, filter, and approver tests are all type-gated. Every
+it and the module's self, filter, and Automated Reviewer tests are all type-gated. Every
 `graphql-*.json` state other than the malformed one carries a `latestReviews` connection, because
-the poll reads review approval from it and a missing connection fails the capture. The Copilot
-`APPROVED`, superseded, window-overflow, and mixed-review states are derived in the runner rather
-than committed; each adds its Copilot review to `reviews` and, where GitHub would report it as
-that author's latest, to `latestReviews`. The multi-page `latestReviews` walks are generated in
+the poll reads review approval from it and a missing connection fails the capture. Each
+committed `latestReviews` entry carries `comments.totalCount`, its inline review comment count.
+The bot `APPROVED`, `COMMENTED`, superseded, window-overflow, and mixed-review states are derived
+in the runner (`derive_fixture`, `bot_review_state`) rather than committed; each adds its bot
+review to `reviews` and, where GitHub would report it as that author's latest, to
+`latestReviews`. The multi-page `latestReviews` walks are generated in
 the runner (`review_page`, `review_pages`, `review_walk`) rather than committed. The
 `reactions-*.json` files are raw REST reactions pages, the bytes the API returns before `gh`
 applies `--jq`. The fake `gh` reads the script's own `--jq` argument and applies it to each
@@ -268,7 +292,7 @@ query it cannot walk — so the GraphQL pagination contract is enforced behaviou
    the last line, so one entry means a steady state. The literal entry `FAIL` makes that call exit
    non-zero.
 3. Drive it with `arm_poll "$st" "$SEED" [filter]` (`$SEED` is empty when the probe found no seed
-   support, which selects the legacy form; `[filter]` defaults to `codex-only` when omitted, and an
+   support, which selects the legacy form; `[filter]` defaults to `automated` when omitted, and an
    explicit `""` passes an empty filter slot) and assert with `pass` / `failed`. Cases that exercise
    behavior which only exists after the fix must branch on `SEED_SUPPORTED` and `skipped` otherwise.
 4. A case needing a seed other than the shared `initial` one uses

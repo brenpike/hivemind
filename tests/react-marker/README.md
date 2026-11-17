@@ -10,8 +10,8 @@ appended to a scratch capture file (one line per reaction, format
 simulated live mutation exit status is supplied via `REACTMARKER_REACT_STATUS` for
 the failure-path case. Reason tokens asserted on the hard-failure paths are
 `missing-node-id`, `unmapped-surface`, and `react-failed`; the noise-mode cases
-below add `noise-author-refused`, `missing-value-for-noise`, and
-`missing-identity-module`.
+below add `noise-author-refused`, `missing-value-for-noise`,
+`missing-identity-module`, and `retired-filter`.
 
 The live-path cases (issue #393) leave `REACTMARKER_TEST_MODE` and
 `REACTMARKER_CAPTURE_FILE` unset and put a stub `gh` first on `PATH`. The stub
@@ -56,23 +56,41 @@ query text. A thread-surface run from a non-git directory, with stub `git` and
 `gh` first on `PATH`, stays a silent no-op that reaches neither.
 
 The binding stub payloads carry the node's `author { login __typename }` and
-`reactionGroups { content viewerHasReacted }`. The stub also tells apart the
+`reactionGroups { content viewerHasReacted }`, and on its pull request the review
+evidence: `latestReviews` author nodes and `reactionGroups` with their `reactors`
+nodes (`__typename` and `login`). The stub also tells apart the
 `removeReaction` mutation (part `unreact`) and logs each call's part name in
 order, so a case can assert the call order.
 
-Noise mode (issue #568) passes `--noise <reviewer_filter>` before the
+Noise mode (issues #568, #576) passes `--noise <reviewer_filter>` before the
 positionals; an empty value means `automated`. After the PR binding passes, the
 binding node's author must be a Bot account matching the filter, checked through
 `reviewer-identity.jq` (`is_bot` and `reviewer_matches_filter` with an empty
-self login). The script never reads the comment body or the URL for this.
+self login). Under `automated` the Bot must be in the Automated Reviewer set,
+which `automated_reviewer_set` builds from the PR's `latestReviews` authors, the
+reactors of its `THUMBS_UP` group, the node's own author when the node is a
+review, and `HIVEMIND_PR_REVIEWERS`. The runner unsets `HIVEMIND_PR_REVIEWERS`
+at the top so the caller's environment never changes the set; cases that need it
+pass it to the script alone. The script never reads a comment or review body or
+the URL for this.
 
-- Accepted, exit 0 with the reaction sent: a Codex Bot `IssueComment` with an
-  empty filter; a Copilot Bot review with `automated`; a Bot outside the registry
-  with `all`.
-- `noise-author-refused`, exit 1 with no mutation sent: a human with `all`; a
-  human with a filter naming that human's own login; a Bot outside the registry
-  with `automated`; a Copilot Bot with `codex-only`; a null author. A Codex Bot
-  node on another PR stays `pr-binding-refused`.
+- Accepted, exit 0 with the reaction sent: a Codex-shaped Bot comment with a
+  `THUMBS_UP` on the PR and an empty filter; a Copilot-shaped Bot review node
+  with no other evidence; a Copilot-shaped Bot comment with a `latestReviews`
+  entry; a generic Bot comment with a `latestReviews` entry; a Bot with no
+  evidence under `all`; a Bot with no evidence named in `HIVEMIND_PR_REVIEWERS`
+  (`[bot]` suffix, comma and space separated); `github-actions` named in
+  `HIVEMIND_PR_REVIEWERS`.
+- `noise-author-refused`, exit 1 with no mutation sent: a status Bot with no
+  review or `THUMBS_UP` of its own while other Bots have both; a Bot whose only PR
+  reaction is not `THUMBS_UP`; `github-actions` with a review and a `THUMBS_UP`,
+  and `github-actions` as a review node's author, when not configured; a human
+  with a review and a `THUMBS_UP`; a human whose login is in
+  `HIVEMIND_PR_REVIEWERS`; a human with `all`; a human with a filter naming that
+  human's own login; a null author. A Codex Bot node on another PR stays
+  `pr-binding-refused`.
+- `retired-filter`: `--noise codex-only` on the live path, with `gh` never
+  reached, and under the capture seam, with nothing captured.
 - `missing-value-for-noise`: `--noise` as the last argument, with a failing stub
   `gh` first on `PATH` that is never reached.
 - `missing-identity-module`: a copy of the script whose directory lacks
@@ -80,6 +98,8 @@ self login). The script never reads the comment body or the URL for this.
   copy in fix mode still marks, since fix mode never loads the module.
 - Under the capture seam, noise mode skips the binding and the author check and
   captures the reaction; the thread surface stays a silent no-op.
+- The binding query text selects the `latestReviews` authors and the PR's
+  reaction reactors.
 
 Fix mode (no flag) makes no author check: a human-authored node bound to the
 fixture PR is still marked.
