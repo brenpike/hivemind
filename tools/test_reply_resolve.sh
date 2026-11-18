@@ -38,12 +38,14 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 REPLY_RESOLVE="$REPO_ROOT/plugin/skills/github-review-loop/scripts/reply-resolve.sh"
 
 [ -f "$REPLY_RESOLVE" ] || { echo "FAIL: script under test missing: $REPLY_RESOLVE" >&2; exit 2; }
 
-TMPDIR_TEST="$(mktemp -d)"
+make_scratch_dir TMPDIR_TEST
 cleanup() { rm -rf "$TMPDIR_TEST"; }
 trap cleanup EXIT
 

@@ -28,6 +28,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 MIN_NODE_MAJOR=18
 BUILDER="tools/build_workflows.mjs"
@@ -65,7 +67,7 @@ if [[ ${#test_files[@]} -eq 0 ]]; then
   exit 2
 fi
 
-TMPDIR_TEST="$(mktemp -d)"
+make_scratch_dir TMPDIR_TEST
 cleanup() { rm -rf "$TMPDIR_TEST"; }
 trap cleanup EXIT
 

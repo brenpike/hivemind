@@ -45,6 +45,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 FIX_DIR="$REPO_ROOT/tests/brood"
 MANIFEST_V1="$FIX_DIR/manifest-v1-old.json"
@@ -92,7 +94,7 @@ WORKDIR=""
 # server only; the caller's default server (and any real `brood-api`) is unreachable.
 # The server and its dir are torn down on EXIT.
 unset TMUX TMUX_PANE
-TMUX_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-tmux.XXXXXX")"
+make_scratch_dir TMUX_TMPDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-tmux.XXXXXX"
 export TMUX_TMPDIR
 # reap_brood_sessions: kill the deterministic tmux session(s) the spawn-invoking escape
 # cases create. A case that proceeds PAST the guards to `tmux new-session` (e.g. the
@@ -152,7 +154,7 @@ STUB_BIN=""
 build_claude_stub() {
     # Idempotent: build once, reuse across cases. Reaped via the EXIT cleanup() below.
     [ -n "$STUB_BIN" ] && return 0
-    STUB_BIN="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-stub.XXXXXX")"
+    make_scratch_dir STUB_BIN "${TMPDIR:-/tmp}/hivemind-brood-compat-stub.XXXXXX"
     cat > "$STUB_BIN/claude" <<'STUB_EOF'
 #!/usr/bin/env bash
 # Test-scoped `claude` stub (hivemind #169). NO real work — records the launch, prints the
@@ -334,7 +336,7 @@ build_claude_stub
 # SEED_ROOT holds one seed repo per git fixture shape (see copy_seed_repo). It is made in
 # the main shell for the same subshell reason as STUB_BIN; each seed is built on first use, so a
 # case that SKIPs on a missing dependency never runs git. Reaped by cleanup() on EXIT.
-SEED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-seed.XXXXXX")"
+make_scratch_dir SEED_ROOT "${TMPDIR:-/tmp}/hivemind-brood-compat-seed.XXXXXX"
 
 # extract_tmux_session: pull the first strain's tmux_session value the SAME way the
 # spawn-brood liveness guard and brood-status read it from the JSON manifest — `jq -r
@@ -659,7 +661,7 @@ assert_spawn_brood_task_md_data_only() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
     local inputs="$gitroot/brood-inputs.json"
@@ -737,7 +739,7 @@ assert_spawn_brood_symlink_escape_blocked() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     copy_seed_repo init-only "$gitroot"
     # External dir OUTSIDE the checkout, the symlink's escape target. Symlink the gitroot's
@@ -839,7 +841,7 @@ assert_spawn_brood_inputs_external_rejected() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     copy_seed_repo init-only "$gitroot"
     # `.hivemind` stays a REAL dir (the write-chain guard is NOT the subject here). The hostile
@@ -924,7 +926,7 @@ assert_spawn_brood_child_worktree_symlink_escape_blocked() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     # The COORDINATOR checkout is SAFE: its OWN `.hivemind`/`.claude` are REAL dirs, so the
     # coordinator-side write-chain guard passes (this case is NOT testing that guard).
@@ -1048,7 +1050,7 @@ assert_spawn_brood_child_leaf_task_escape_blocked() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     # COORDINATOR checkout is SAFE: real .hivemind/.claude dirs, so the coordinator-side
     # write-chain guard (assertion 4) and child-worktree dir-guard (assertion 6) both pass.
@@ -1171,7 +1173,7 @@ assert_spawn_brood_child_leaf_settings_escape_blocked() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
     # COORDINATOR has a REAL settings.local.json so the `if [ -f "$settings_local" ]`
@@ -1295,7 +1297,7 @@ assert_spawn_brood_child_leaf_regular_ok() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
 
@@ -1544,7 +1546,7 @@ assert_spawn_brood_strain_settings_canonical() {
     canon_rule="$(canonical_plugin_read_rule)"
     [ -n "$canon_rule" ] || { skip "$name" "canonical plugin dir fails the charset gate on this host; skipping"; return; }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     run_strain_settings_spawn "$SPAWN_SCRIPT"
     local verdict
     verdict="$(check_strain_settings_launch "$canon_rule")"
@@ -1565,7 +1567,7 @@ assert_spawn_brood_strain_settings_symlinked_plugin() {
     canon_rule="$(canonical_plugin_read_rule)"
     [ -n "$canon_rule" ] || { skip "$name" "canonical plugin dir fails the charset gate on this host; skipping"; return; }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local linked_plugin="$WORKDIR/linked-plugin"
     ln -s "$REPO_ROOT/plugin" "$linked_plugin"
     run_strain_settings_spawn "$linked_plugin/skills/spawn-brood/scripts/spawn-brood.sh"
@@ -1588,7 +1590,7 @@ assert_spawn_brood_strain_settings_logical_gated() {
     canon_rule="$(canonical_plugin_read_rule)"
     [ -n "$canon_rule" ] || { skip "$name" "canonical plugin dir fails the charset gate on this host; skipping"; return; }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local linked_plugin="$WORKDIR/linked[plugin"
     ln -s "$REPO_ROOT/plugin" "$linked_plugin"
     run_strain_settings_spawn "$linked_plugin/skills/spawn-brood/scripts/spawn-brood.sh"
@@ -1611,7 +1613,7 @@ assert_spawn_brood_strain_settings_all_gated() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gated_plugin="$WORKDIR/gated[root/plugin"
     mkdir -p "$gated_plugin/skills"
     cp -R "$REPO_ROOT/plugin/skills/spawn-brood" "$REPO_ROOT/plugin/skills/_shared" \
@@ -1671,7 +1673,7 @@ run_facts_base_refusal_case() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
 
@@ -1776,7 +1778,7 @@ assert_spawn_brood_task_identity_not_cross_wired() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
 
@@ -1883,7 +1885,7 @@ assert_spawn_brood_alive_no_evidence_starting() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
 
@@ -2016,7 +2018,7 @@ assert_spawn_brood_tail_death_reconciled() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
 
@@ -2114,7 +2116,7 @@ assert_spawn_brood_tail_started_promoted() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
 
@@ -2234,7 +2236,7 @@ assert_spawn_brood_started_child_gets_remote_control() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
     local started_stub="$WORKDIR/started-stub"
@@ -2290,7 +2292,7 @@ assert_spawn_brood_rc_failure_keeps_exit_code() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
     local fake_plugin="$WORKDIR/fake-plugin"
@@ -2353,7 +2355,7 @@ assert_spawn_brood_exact_session_not_prefix_sibling() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
     local keyed_hook="$WORKDIR/exact-session-hook"
@@ -2425,7 +2427,7 @@ assert_spawn_brood_manifest_temp_symlink_not_followed() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
     local fixed_uuid="0c6b006b-0000-4000-8000-00000000e13e"
@@ -2497,7 +2499,7 @@ assert_spawn_brood_inputs_snapshot_read_once() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
     local inputs="$gitroot/.hivemind/spawn-inputs.snapshot-test.json"
@@ -2576,7 +2578,7 @@ assert_spawn_brood_settings_symlink_source_refused() {
         return
     }
 
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
     local settings_marker="SETTINGS-OUTSIDE-MARKER-7f3a"
@@ -2652,7 +2654,7 @@ assert_spawn_brood_settings_symlink_source_refused() {
 PROJ_WORKDIR=""
 ensure_proj_workdir() {
     if [ -z "$PROJ_WORKDIR" ]; then
-        PROJ_WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-proj.XXXXXX")"
+        make_scratch_dir PROJ_WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-proj.XXXXXX"
         PROJ_WORKDIR="$(cd "$PROJ_WORKDIR" && pwd -P)"
         # A seed commit is REQUIRED: the #168 ground-truth worktree discovery cases register real
         # git worktrees (`git worktree add -b <branch> <path> HEAD`) so the engine can resolve each
@@ -2854,7 +2856,7 @@ assert_reconcile_settle_clamp_bounds_huge_override() {
     )
 
     local vec input expect out rc stderr_file failures=0
-    stderr_file="$(mktemp)"
+    make_scratch_file stderr_file
     for vec in "${vectors[@]}"; do
         input="${vec%%|*}"
         expect="${vec##*|}"
@@ -3294,7 +3296,7 @@ assert_proj_facts_outside_checkout() {
     local name="PROJ-FACTS-OUTSIDE:worktree-outside-checkout-field11-no"
     ensure_proj_workdir; local wd="$PROJ_WORKDIR/factsoutside"
     mkdir -p "$wd"
-    local outside; outside="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-outside.XXXXXX")"
+    local outside; make_scratch_dir outside "${TMPDIR:-/tmp}/hivemind-brood-outside.XXXXXX"
     local branch="strain/$GT_BROOD_ID/factsoutside" sid="$GT_BROOD_ID--factsoutside"
     local wt="$outside/wt"
     gt_add_worktree "" "$branch" "$wt"
@@ -4040,7 +4042,7 @@ assert_proj_trailing_nul_manifest() {
 # in the output would prove the refused manifest was read. Records pass/failed itself.
 proj_run_refusal() {
     local name="$1" brood_id="$2" checkout_root="$3" leak_sentinel="$4"
-    local err_file; err_file="$(mktemp "${TMPDIR:-/tmp}/hivemind-brood-proj-err.XXXXXX")"
+    local err_file; make_scratch_file err_file "${TMPDIR:-/tmp}/hivemind-brood-proj-err.XXXXXX"
     local out rc=0
     if [ -n "$checkout_root" ]; then
         out="$(bash "$PROJECT_SCRIPT" "$brood_id" "$checkout_root" 2>"$err_file")" || rc=$?
@@ -4113,7 +4115,7 @@ assert_proj_absent_manifest() {
 assert_proj_manifest_symlink_leaf() {
     local name="PROJ-MANIFEST-SYMLINK-LEAF:symlinked-manifest-leaf-refused"
     ensure_proj_workdir
-    local outside; outside="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-outside.XXXXXX")"
+    local outside; make_scratch_dir outside "${TMPDIR:-/tmp}/hivemind-brood-outside.XXXXXX"
     local brood_id; brood_id="$(proj_brood_id "$name")"
     local manifest; manifest="$(proj_manifest_path "$brood_id")"
     proj_outside_manifest "$outside/manifest.json" "$brood_id" "leafleaksentinel"
@@ -4129,7 +4131,7 @@ assert_proj_manifest_symlink_leaf() {
 assert_proj_manifest_symlink_ancestor() {
     local name="PROJ-MANIFEST-SYMLINK-ANCESTOR:symlinked-brood-dir-refused"
     ensure_proj_workdir
-    local outside; outside="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-outside.XXXXXX")"
+    local outside; make_scratch_dir outside "${TMPDIR:-/tmp}/hivemind-brood-outside.XXXXXX"
     local brood_id; brood_id="$(proj_brood_id "$name")"
     proj_outside_manifest "$outside/brood/manifest.json" "$brood_id" "ancestorleaksentinel"
     mkdir -p "$PROJ_WORKDIR/.hivemind/broods"
@@ -4145,7 +4147,7 @@ assert_proj_manifest_symlink_ancestor() {
 # and never reads the outside manifest.
 assert_proj_manifest_outside_root() {
     local name="PROJ-MANIFEST-OUTSIDE-ROOT:brood-state-outside-checkout-refused"
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-proj-outside.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-proj-outside.XXXXXX"
     tmp="$(cd "$tmp" && pwd -P)"
     local root="$tmp/repo"
     copy_seed_repo init-only "$root"
@@ -4267,7 +4269,7 @@ discover_stub_manifest() {
 # ── DISCOVER-EMPTY: no .hivemind/broods → zero lines, exit 0 ─────────────────────
 assert_discover_empty() {
     local name="DISCOVER-EMPTY:no-broods-zero-lines-exit-0"
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-discover.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-discover.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     discover_seed_repo "$root"
     local out rc=0
@@ -4284,7 +4286,7 @@ assert_discover_empty() {
 # ── DISCOVER-SORT: brood-c/brood-a/brood-b created → emitted a,b,c absolute ──────
 assert_discover_sort_order() {
     local name="DISCOVER-SORT:multi-brood-lexicographic-absolute-paths"
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-discover.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-discover.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     discover_seed_repo "$root"
     # Create out of lexicographic order to prove the script (not creation order) sorts. The ids are
@@ -4316,7 +4318,7 @@ assert_discover_sort_order() {
 #    script-pinned: running from inside a child worktree finds that worktree's broods).
 assert_discover_nested_worktree() {
     local name="DISCOVER-NESTED:linked-worktree-default-anchor-discovers-nested-brood"
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-discover.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-discover.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     discover_seed_repo "$root"
     # A REAL linked worktree off the main checkout — stands in for a child orchestrator's own
@@ -4345,7 +4347,7 @@ assert_discover_nested_worktree() {
 #    correct, not an error). Only the valid brood's manifest path is emitted.
 assert_discover_dir_without_manifest_skipped() {
     local name="DISCOVER-NOMANIFEST:brood-dir-without-manifest-skipped"
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-discover.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-discover.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     discover_seed_repo "$root"
     # One valid brood (has manifest.json, hex-uuid-shaped id so the #185 allowlist admits it) and one
@@ -4377,7 +4379,7 @@ assert_discover_dir_without_manifest_skipped() {
 #      (b) the `evilmarker` file was NOT created — proving nothing in any segment ever executed.
 assert_discover_hostile_name_skipped() {
     local name="DISCOVER-HOSTILE-NAME:metachar-brood-id-segment-skipped-no-exec"
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-discover.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-discover.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     discover_seed_repo "$root"
     # One legitimate brood (hex-uuid-shaped id — admitted by the allowlist).
@@ -4415,7 +4417,7 @@ assert_discover_hostile_name_skipped() {
 #    1 with a `blocker:` line on stderr and emits no path, never an empty (success) listing.
 assert_discover_symlinked_broods_blocker() {
     local name="DISCOVER-SYMLINKED-BROODS:symlinked-broods-dir-exit1-blocker"
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-discover.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-discover.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     discover_seed_repo "$root"
     discover_stub_manifest "$tmp/outside/brood-8888aaaa-8888-4aaa-8aaa-888888888888/manifest.json"
@@ -4464,7 +4466,7 @@ assert_collect_empty() {
         skip "$name" "collect needs jq+git; skipping (missing dep)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     local out rc=0
@@ -4497,7 +4499,7 @@ assert_collect_ok_one_strain() {
         skip "$name" "collect needs jq+git; skipping (missing dep)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     local brood_dir="$root/.hivemind/broods/$COLLECT_BROOD_ID"
@@ -4561,7 +4563,7 @@ assert_collect_unreadable_isolated() {
         skip "$name" "collect needs jq+git; skipping (missing dep)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     # Two broods (sorted by id). First: a VALID empty manifest. Second: a TORN manifest.
@@ -4696,7 +4698,7 @@ assert_collect_missing_sentinel_not_probed() {
         skip "$name" "collect needs jq+git; skipping (missing dep)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     local brood_dir="$root/.hivemind/broods/$COLLECT_BROOD_ID"
@@ -4748,7 +4750,7 @@ assert_collect_broodid_mismatch_blocker() {
         skip "$name" "collect needs jq+git; skipping (missing dep)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     local dir_id="brood-3333cccc-3333-4ccc-8ccc-333333333333"
@@ -4797,7 +4799,7 @@ assert_collect_broodid_mismatch_empty_blocker() {
         skip "$name" "collect needs jq+git; skipping (missing dep)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     # Brood A: empty manifest, top-level brood_id DIFFERS from dir id.
@@ -4867,7 +4869,7 @@ assert_collect_never_opens_manifest() {
         skip "$name" "collect needs jq+git; skipping (missing dep)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     tmp="$(cd "$tmp" && pwd -P)"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
@@ -4914,7 +4916,7 @@ assert_collect_brood_malformed_blocker() {
         skip "$name" "collect needs jq+git; skipping (missing dep)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     local fake_collect
@@ -4958,7 +4960,7 @@ assert_collect_symlinked_broods_blocker() {
         skip "$name" "collect needs jq+git; skipping (missing dep)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     local id="brood-bbbb2222-bbbb-4222-8222-bbbbbbbb2222"
@@ -4990,7 +4992,7 @@ assert_collect_symlinked_entry_blocker() {
         skip "$name" "collect needs jq+git; skipping (missing dep)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     local id_ok="brood-cccc3333-cccc-4333-8333-cccccccc3333"
@@ -5041,7 +5043,7 @@ assert_collect_started_running() {
         skip "$name" "collect started-running case needs a real tmux session to observe alive; skipping (no tmux)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     local brood_dir="$root/.hivemind/broods/$COLLECT_BROOD_ID"
@@ -5104,7 +5106,7 @@ assert_collect_alive_unstarted_starting() {
         skip "$name" "collect alive-unstarted case needs a real tmux session to observe alive; skipping (no tmux)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     local brood_dir="$root/.hivemind/broods/$COLLECT_BROOD_ID"
@@ -5167,7 +5169,7 @@ assert_collect_legacy_no_pointer_running() {
         skip "$name" "collect legacy no-pointer case needs a real tmux session to observe alive; skipping (no tmux)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     local brood_dir="$root/.hivemind/broods/$COLLECT_BROOD_ID"
@@ -5230,7 +5232,7 @@ assert_collect_pr_probe_uses_live_branch() {
         skip "$name" "collect needs jq+git; skipping (missing dep)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     local brood_dir="$root/.hivemind/broods/$COLLECT_BROOD_ID"
@@ -5254,7 +5256,7 @@ assert_collect_pr_probe_uses_live_branch() {
 
     # Test-scoped `gh` stub: records the value following `--head` to $marker and returns a synthetic
     # MERGED PR (the contract probe_pr parses: `gh pr list --head <b> --state all --json ... --jq ...`).
-    local gh_stub; gh_stub="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-gh-stub.XXXXXX")"
+    local gh_stub; make_scratch_dir gh_stub "${TMPDIR:-/tmp}/hivemind-gh-stub.XXXXXX"
     if [ ! -d "$gh_stub" ]; then
         skip "$name" "could not create gh stub dir; skipping"
         rm -rf "$tmp"
@@ -5315,7 +5317,7 @@ assert_collect_detached_no_false_failed() {
         skip "$name" "collect needs jq+git; skipping (missing dep)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     local brood_dir="$root/.hivemind/broods/$COLLECT_BROOD_ID"
@@ -5347,7 +5349,7 @@ assert_collect_detached_no_false_failed() {
     fi
 
     # gh stub that would FABRICATE a merged PR IF ever called — its invocation marker proves a probe.
-    local gh_stub; gh_stub="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-gh-stub.XXXXXX")"
+    local gh_stub; make_scratch_dir gh_stub "${TMPDIR:-/tmp}/hivemind-gh-stub.XXXXXX"
     local marker="$gh_stub/called_marker"
     cat > "$gh_stub/gh" <<'GH_EOF'
 #!/usr/bin/env bash
@@ -5386,7 +5388,7 @@ GH_EOF
 # three lines: made_session (yes|no), the collector exit code, and the compact collector JSON.
 collect_facts_case() {
     local with_facts="$1"
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     local brood_dir="$root/.hivemind/broods/$COLLECT_BROOD_ID"
@@ -5488,7 +5490,7 @@ assert_collect_exact_session_not_prefix_sibling() {
         skip "$name" "collect exact-session case needs a real tmux sibling session; skipping (no tmux)"
         return
     fi
-    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local tmp; make_scratch_dir tmp "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
     local brood_dir="$root/.hivemind/broods/$COLLECT_BROOD_ID"

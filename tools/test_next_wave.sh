@@ -83,6 +83,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 ENGINE="$REPO_ROOT/plugin/skills/next-wave/scripts/next-wave.sh"
 FIXTURES_DIR="$REPO_ROOT/tests/next-wave"
 
@@ -113,7 +115,7 @@ done
 
 # ── Disposable workdir ──────────────────────────────────────────────────────
 
-WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-next-wave-test.XXXXXX")"
+make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-next-wave-test.XXXXXX"
 cleanup() { rm -rf "$WORKDIR"; }
 trap cleanup EXIT
 

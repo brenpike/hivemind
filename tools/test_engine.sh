@@ -192,6 +192,8 @@ set -euo pipefail
 # ── Path setup ──────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 ENGINE="$REPO_ROOT/plugin/skills/record-state-result/scripts/record-state-result.sh"
 INIT_ENGINE="$REPO_ROOT/plugin/skills/init-run-ledger/scripts/init-run-ledger.sh"
@@ -222,7 +224,7 @@ done
 
 # ── Disposable workdir ──────────────────────────────────────────────────────
 
-WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-engine-test.XXXXXX")"
+make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-engine-test.XXXXXX"
 cleanup() { rm -rf "$WORKDIR"; }
 trap cleanup EXIT
 

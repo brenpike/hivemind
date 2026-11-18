@@ -36,6 +36,8 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 ENTRYPOINT="$REPO_ROOT/plugin/skills/seed-hive/scripts/seed-hive.sh"
 
@@ -68,7 +70,7 @@ assert_contains() {
   fi
 }
 
-WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-seed-hive.XXXXXX")"
+make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-seed-hive.XXXXXX"
 cleanup() { rm -rf "$WORKDIR"; return 0; }
 trap cleanup EXIT
 

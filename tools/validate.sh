@@ -21,6 +21,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 
 # Scratch dir for the parallel suite runner. Declared at SCRIPT scope (not `local` inside
@@ -72,6 +74,7 @@ SUITE_TEST_PREFILTER='test_prefilter.sh'
 SUITE_TEST_SYNAPSE_GATE='test_synapse_gate.sh'
 SUITE_TEST_RUN_REVIEW='test_run_review.sh'
 SUITE_TEST_WORKFLOW_SCRIPTS='test_workflow_scripts.sh'
+SUITE_TEST_SCRATCH='test_scratch.sh'
 
 # Full suite, in CI order. Used by --all and by every FAIL-CLOSED escalation.
 ALL_SUITES=(
@@ -108,6 +111,7 @@ ALL_SUITES=(
   "$SUITE_TEST_SYNAPSE_GATE"
   "$SUITE_TEST_RUN_REVIEW"
   "$SUITE_TEST_WORKFLOW_SCRIPTS"
+  "$SUITE_TEST_SCRATCH"
 )
 
 # KNOWN_SUITES: the tools/*.sh validation suites this dispatcher knows about. --self-test
@@ -145,6 +149,7 @@ KNOWN_SUITES=(
   test_synapse_gate.sh
   test_run_review.sh
   test_workflow_scripts.sh
+  test_scratch.sh
 )
 
 # NON_SUITE_TOOLS: tools/*.sh files that are NOT validation suites (so --self-test does not
@@ -227,7 +232,7 @@ run_suites() {
   # after this function returns — the EXIT trap fires post-return, where a `local` would be
   # unbound under `set -u`. `local scratch` below is just a convenience alias used within
   # this function; the trap reads SUITES_SCRATCH.
-  SUITES_SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/validate-suites.XXXXXX")"
+  make_scratch_dir SUITES_SCRATCH "${TMPDIR:-/tmp}/validate-suites.XXXXXX"
   trap cleanup_suites_scratch EXIT
   local scratch="$SUITES_SCRATCH"
 
@@ -473,6 +478,15 @@ map_path() {
   # is preserved.
   if [[ "$p" == tools/test_rc_brood.sh ]]; then
     add_selected "$SUITE_TEST_RC_BROOD" "$p (rc-brood harness)"
+    matched=1
+  fi
+
+  # test_scratch: the checked scratch-path helper tools/lib/scratch.sh and its behavior suite. The
+  # helper has no plugin/* subject, so this leg self-routes both paths to the suite so --self-test
+  # check #1 finds it reachable. It runs BEFORE (and does NOT return early from) the tools/**
+  # escalation below: a real edit to either file still fail-closes to the full suite via that leg.
+  if [[ "$p" == tools/test_scratch.sh || "$p" == tools/lib/scratch.sh ]]; then
+    add_selected "$SUITE_TEST_SCRATCH" "$p (scratch helper)"
     matched=1
   fi
 
@@ -1310,6 +1324,7 @@ self_test() {
     ["test_synapse_gate.sh"]="plugin/hooks/synapse-gate.sh"
     ["test_run_review.sh"]="tests/run-review/README.md"
     ["test_workflow_scripts.sh"]="plugin/workflow-src/lib/decide.js"
+    ["test_scratch.sh"]="tools/lib/scratch.sh"
   )
   local script_name expected_suite suite_path probe_path hit
   for script_name in "${KNOWN_SUITES[@]}"; do

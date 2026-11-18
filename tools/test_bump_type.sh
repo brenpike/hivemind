@@ -32,6 +32,8 @@ set -euo pipefail
 # ── Path setup ──────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 ENGINE="$REPO_ROOT/plugin/skills/bump-type/scripts/bump-type.sh"
 
@@ -46,7 +48,7 @@ command -v jq >/dev/null 2>&1 \
 
 # ── Disposable workdir + host-config isolation ──────────────────────────────
 
-WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-bump-type-test.XXXXXX")"
+make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-bump-type-test.XXXXXX"
 cleanup() { rm -rf "$WORKDIR"; }
 trap cleanup EXIT
 

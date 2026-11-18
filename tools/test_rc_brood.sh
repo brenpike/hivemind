@@ -60,6 +60,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 ENGINE="$REPO_ROOT/plugin/skills/enable-brood-remote/scripts/rc-brood.sh"
 FIXTURES="$REPO_ROOT/tests/brood"
@@ -104,7 +106,7 @@ assert_not_contains() {
   fi
 }
 
-WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-rc-brood.XXXXXX")"
+make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-rc-brood.XXXXXX"
 cleanup() { rm -rf "$WORKDIR"; return 0; }
 trap cleanup EXIT
 

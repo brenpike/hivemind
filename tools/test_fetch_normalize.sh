@@ -33,6 +33,8 @@ set -u
 unset HIVEMIND_PR_REVIEWERS
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 SKILLS_DIR="$REPO_ROOT/plugin/skills"
 NORMALIZE="$SKILLS_DIR/github-review-loop/scripts/fetch-normalize.sh"
@@ -51,7 +53,7 @@ FAIL_COUNT=0
 pass() { echo "PASS [$1] $2"; PASS_COUNT=$((PASS_COUNT + 1)); }
 failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 
-WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-fetch-normalize.XXXXXX")"
+make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-fetch-normalize.XXXXXX"
 cleanup() { rm -rf "$WORKDIR"; return 0; }
 trap cleanup EXIT
 
