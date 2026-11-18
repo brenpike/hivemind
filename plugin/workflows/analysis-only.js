@@ -412,7 +412,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = '39b89329b805ca36';
+const BUILD_ID = '908c7a2b4a7349cb';
 
 function supportedSchemaKeywords(){
 return[
@@ -752,7 +752,7 @@ function askReasons(){
 return['hard_stop','table_surface','gate_irreversible','gate_architectural','gate_safety','no_recommendation'];
 }
 function listReasons(){
-return['beyond_request','outside_limits','repeats_surface'];
+return['beyond_request','outside_limits'];
 }
 function resolveLevel(value,table){
 if(value===undefined||value===null||value===''){
@@ -764,11 +764,12 @@ return value;
 return'low';
 }
 function decide({kind,level,brief,listed},table,schema){
+const[hardStop,tableSurface,gateIrreversible,gateArchitectural,gateSafety,noRecommendation]=askReasons();
 const callerListed=checkCallerListed(listed);
 const briefCheck=validateSchema(schema,brief);
 const resolvedLevel=resolveLevel(level,table);
 if(table.hard_stops.some((stop)=>stop.hard_stop===kind)){
-return askFor('hard_stop');
+return askFor(hardStop);
 }
 if(!briefCheck.ok||!hasInRequestOption(brief)||isBeyondRequestUnearned(brief)){
 return askFor('malformed_brief');
@@ -782,22 +783,22 @@ return askFor('unknown_kind');
 }
 const cell=row[resolvedLevel];
 if(cell==='surface'){
-return askFor('table_surface');
+return askFor(tableSurface);
 }
 if(cell!=='auto'){
 return askFor('bad_cell');
 }
-if(brief.gate.irreversible||isRecommendedOptionIrreversible(brief)){
-return askFor('gate_irreversible');
+if(brief.gate.irreversible||hasRecommendedOption(brief,(option)=>option.reversible===false)){
+return askFor(gateIrreversible);
 }
 if(brief.gate.architectural){
-return askFor('gate_architectural');
+return askFor(gateArchitectural);
 }
-if(brief.gate.safety||isRecommendedOptionDestructive(brief)){
-return askFor('gate_safety');
+if(brief.gate.safety||hasRecommendedOption(brief,(option)=>Array.isArray(option.destructive)&&option.destructive.length>0)){
+return askFor(gateSafety);
 }
 if(brief.recommendation.strength==='none'){
-return askFor('no_recommendation');
+return askFor(noRecommendation);
 }
 return{action:'take',reason:'auto',listed:collectListed(brief,callerListed)};
 }
@@ -808,7 +809,7 @@ return[];
 if(!Array.isArray(listed)){
 throw new Error('decide: listed must be an array, got '+JSON.stringify(listed));
 }
-const callerNames=listReasons().filter((name)=>name!=='beyond_request');
+const callerNames=listReasons().slice(1);
 for(const name of listed){
 if(callerNames.indexOf(name)===-1){
 throw new Error('decide: unknown listed name '+JSON.stringify(name));
@@ -817,23 +818,17 @@ throw new Error('decide: unknown listed name '+JSON.stringify(name));
 return listed;
 }
 function collectListed(brief,callerListed){
-return listReasons().filter((name)=>(name==='beyond_request'?isRecommendedOptionBeyondRequest(brief):callerListed.indexOf(name)!==-1));
+return listReasons().filter((name,index)=>(index===0?hasRecommendedOption(brief,(option)=>option.beyond_request===true):callerListed.includes(name)));
 }
 function askFor(reason){
 return{action:'ask',reason:reason};
 }
-function isRecommendedOptionIrreversible(brief){
-return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.reversible===false);
-}
-function isRecommendedOptionDestructive(brief){
-return brief.options.some((option)=>option.id===brief.recommendation.option_id&&Array.isArray(option.destructive)&&option.destructive.length>0);
-}
-function isRecommendedOptionBeyondRequest(brief){
-return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.beyond_request===true);
+function hasRecommendedOption(brief,predicate){
+return brief.options.some((option)=>option.id===brief.recommendation.option_id&&predicate(option));
 }
 function isBeyondRequestUnearned(brief){
 const isStrong=brief.recommendation.strength==='strong';
-return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.beyond_request===true&&!(isStrong&&(option.effort==='trivial'||option.effort==='small')));
+return hasRecommendedOption(brief,(option)=>option.beyond_request===true&&!(isStrong&&(option.effort==='trivial'||option.effort==='small')));
 }
 function hasInRequestOption(brief){
 return brief.options.some((option)=>option.beyond_request===false);

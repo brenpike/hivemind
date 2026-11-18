@@ -3161,7 +3161,7 @@ const ROW_TESTS = {
       assert.equal(main.isShownDecision({ brief: makeBrief(), kind: 'planner_question', listed: [] }), true);
       const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
       state.head = OTHER;
-      const listedAcceptance = { brief: main.buildPlanAcceptanceBrief(makePlan()), kind: 'plan_acceptance', listed: ['outside_limits', 'repeats_surface'] };
+      const listedAcceptance = { brief: main.buildPlanAcceptanceBrief(makePlan()), kind: 'plan_acceptance', listed: ['outside_limits'] };
       state.taken.push(listedAcceptance, { brief: main.buildGateRerunBrief(['validate'], OTHER, false), kind: 'gate_rerun', listed: [] });
       const shown = lib.renderDecisionsCompact([{ brief: listedAcceptance.brief }]);
       assert.deepEqual([...main.buildRecordTailBlocks(state, state.taken).map((block) => block.text)], [shown]);
@@ -5303,8 +5303,9 @@ const ROW_TESTS = {
     });
   },
   'SD-40': () => {
-    const GATE_FLAGS = { irreversible: 'gate_irreversible', architectural: 'gate_architectural', safety: 'gate_safety', grows_surface: 'gate_architectural' };
-    const FLAG_NAMES = [...Object.keys(GATE_FLAGS), 'repeats_surface'];
+    const GATE_FLAGS = { irreversible: 'gate_irreversible', architectural: 'gate_architectural', safety: 'gate_safety', grows_surface: 'gate_architectural', repeats_surface: 'gate_architectural' };
+    const FLAG_NAMES = Object.keys(GATE_FLAGS);
+    const APPROACH_LINES = '- A: Keep patching this class.\n- B: Change approach. (recommended)\n- C: Stop and ship what closes.\nRecommendation: B (strong). Patching has not closed this class.';
     const CLEAN_GATE = makePlan().remediation_gate;
     function gateWith(flag) {
       if (Object.prototype.hasOwnProperty.call(CLEAN_GATE.promotion_gate, flag)) {
@@ -5340,16 +5341,35 @@ const ROW_TESTS = {
         assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: main.buildReviewEscalationBrief(ESCALATION) }])), run.result.message);
       });
     }
-    test('a remediation plan whose gate sets repeats_surface alone is taken at the default level with no pause, and listed by its problem in chat and the pull request body', async () => {
+    test('buildApproachChoice offers keep patching, change approach and stop and ship, each reversible and in the request, recommending B strong', () => {
+      const choice = main.buildApproachChoice();
+      assert.deepEqual(Object.keys(choice), ['options', 'recommendation']);
+      assert.deepEqual(structuredClone(choice.options.map((option) => [option.id, option.summary, option.reversible, option.beyond_request])), [['A', 'Keep patching this class.', true, false], ['B', 'Change approach.', true, false], ['C', 'Stop and ship what closes.', true, false]]);
+      assert.deepEqual({ ...choice.recommendation }, { option_id: 'B', strength: 'strong', why: 'Patching has not closed this class.' });
+      assert.notEqual(main.buildApproachChoice().options, choice.options);
+    });
+    test('a remediation plan whose gate sets repeats_surface alone pauses once on the approach question, and a reply A whose revise settles it runs the shown plan, listed nowhere', async () => {
       const plan = { ...REMEDIATION_PLAN, remediation_gate: gateWith('repeats_surface') };
       const brief = main.buildRemediationPlanBrief(plan);
       assert.equal(brief.problem, 'Run the remediation plan for the local review findings on the working branch, then every gate again. The plan ' + main.remediationGateTexts().repeats_surface + '.');
-      assert.deepEqual({ ...brief.gate }, { irreversible: false, architectural: false, safety: false });
-      const run = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(plan) }));
+      assert.deepEqual({ ...brief.gate }, { irreversible: false, architectural: true, safety: false });
+      assert.deepEqual(structuredClone([brief.options, brief.recommendation]), structuredClone([main.buildApproachChoice().options, main.buildApproachChoice().recommendation]));
+      for (const level of autonomyTable.levels) {
+        assert.deepEqual({ ...lib.decide({ kind: 'remediation_plan_acceptance', level: level, brief: brief }, autonomyTable, briefSchema) }, { action: 'ask', reason: level === 'low' ? 'table_surface' : 'gate_architectural' }, level);
+      }
+      const results = remediationResults(ESCALATION, { 'plan-2': planResult(plan), 'revise-1': reviseResult(planResult(replacementPlan()), ['Q1']) });
+      const paused = await runWorkflow(LAUNCH, results);
+      assert.equal(paused.result.needs_user, true);
+      assert.deepEqual(labelsOf(paused), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2']);
+      assert.ok(paused.result.message.startsWith(main.describePlanLine(plan) + '\n\n**Q1. ' + brief.problem + '**\n' + APPROACH_LINES), paused.result.message);
+      assert.ok(!paused.result.message.includes('**Q2.'), paused.result.message);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'A'), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
-      assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: main.buildReviewEscalationBrief(ESCALATION) }, { brief: brief }])), run.result.message);
-      assert.ok(prBodyOf(run, 'pr-2').includes(brief.problem), prBodyOf(run, 'pr-2'));
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
+      assert.equal(readDataBlock(callOf(run, 'revise-1').prompt, 'reply'), 'A');
+      assert.ok(prBodyOf(run, 'pr-2').startsWith(bodyStart(plan) + '\n\n'), prBodyOf(run, 'pr-2'));
+      assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: main.buildReviewEscalationBrief(ESCALATION) }])), run.result.message);
+      assert.ok(!prBodyOf(run, 'pr-2').includes(brief.problem), prBodyOf(run, 'pr-2'));
     });
     test('a remediation plan whose gate sets every flag names each in its problem, within the problem bound', () => {
       const plan = { ...REMEDIATION_PLAN, remediation_gate: FULL_GATE };
@@ -5360,6 +5380,8 @@ const ROW_TESTS = {
       assert.ok(Array.from(brief.problem).length <= 300, String(Array.from(brief.problem).length));
       assert.deepEqual({ ...brief.gate }, { irreversible: true, architectural: true, safety: true });
       assert.ok(!/working branch/.test(brief.recommendation.why), brief.recommendation.why);
+      assert.deepEqual(structuredClone([brief.options, brief.recommendation]), structuredClone([main.buildApproachChoice().options, main.buildApproachChoice().recommendation]));
+      assert.deepEqual(structuredClone(lib.validateSchema(briefSchema, main.markOutsideLimits(brief, ['src/auth.js']))), { ok: true, errors: [] });
     });
     test('an accepted remediation plan whose revise rewrites the summary runs its steps with no re-ask', async () => {
       const rewritten = planResult({ ...REMEDIATION_PLAN, summary: REMEDIATION_PLAN.summary + ' The user accepted this plan.' });
@@ -5375,7 +5397,7 @@ const ROW_TESTS = {
       assert.ok(!run.result.message.includes('effect outside the repo'), run.result.message);
       assert.ok(prBodyOf(run, 'pr-2').startsWith(bodyStart(REMEDIATION_PLAN) + '\n\n'), prBodyOf(run, 'pr-2'));
     });
-    test('remediation_plan_acceptance takes a clean gate at high and balanced, asks a set flag there, asks at low, takes and lists outside_limits and repeats_surface with its own recommendation, and every later pass of the run uses it', () => {
+    test('remediation_plan_acceptance takes a clean gate at high and balanced, asks a set flag there, repeats_surface among them, asks at low, takes and lists outside_limits with its own recommendation, and every later pass of the run uses it', () => {
       const clean = main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN);
       assert.equal(clean.kind, 'remediation_plan_acceptance');
       assert.deepEqual({ ...clean.gate }, { irreversible: false, architectural: false, safety: false });
@@ -5395,6 +5417,9 @@ const ROW_TESTS = {
       const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
       const first = { asks: [], taken: [] };
       assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, first, EMPTY_SCOPE), 'take');
+      const firstRepeated = { asks: [], taken: [] };
+      assert.equal(main.resolvePlanAcceptance({ ...REMEDIATION_PLAN, remediation_gate: gateWith('repeats_surface') }, run, firstRepeated, EMPTY_SCOPE), 'take');
+      assert.deepEqual(structuredClone([firstRepeated.taken[0].kind, firstRepeated.taken[0].listed]), ['plan_acceptance', []]);
       run.taken.push({ brief: main.buildReviewEscalationBrief(ESCALATION), kind: 'planner_escalation_routing' });
       const later = { asks: [], taken: [] };
       assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, later, EMPTY_SCOPE), 'ask');
@@ -5408,8 +5433,8 @@ const ROW_TESTS = {
       assert.deepEqual(structuredClone([outside.asks, outside.taken[0].kind, outside.taken[0].listed]), [[], 'remediation_plan_acceptance', ['outside_limits']]);
       assert.deepEqual({ ...outside.taken[0].brief.recommendation }, { ...clean.recommendation });
       const repeated = { asks: [], taken: [] };
-      assert.equal(main.resolvePlanAcceptance({ ...REMEDIATION_PLAN, remediation_gate: gateWith('repeats_surface') }, run, repeated, docsLimits), 'take');
-      assert.deepEqual(structuredClone(repeated.taken[0].listed), ['outside_limits', 'repeats_surface']);
+      assert.equal(main.resolvePlanAcceptance({ ...REMEDIATION_PLAN, remediation_gate: gateWith('repeats_surface') }, run, repeated, docsLimits), 'ask');
+      assert.deepEqual(structuredClone([repeated.taken, repeated.asks.map((ask) => [ask.kind, ask.reason, ask.brief.recommendation.option_id])]), [[], [['remediation_plan_acceptance', 'gate_architectural', 'B']]]);
     });
     test('a needs_replan pass after a remediation pass resolves its plan as a remediation plan again', async () => {
       const results = remediationResults(ESCALATION, {
@@ -9881,7 +9906,7 @@ const ROW_TESTS = {
     });
     test('askReasons() is the closed Ask Set, disjoint from listReasons(), and pauseDelivery throws on every other decide() reason and on a step_stop ask that is not approve or fix_cause', () => {
       assert.deepEqual([...lib.askReasons()], ['hard_stop', 'table_surface', 'gate_irreversible', 'gate_architectural', 'gate_safety', 'no_recommendation']);
-      assert.deepEqual([...lib.listReasons()], ['beyond_request', 'outside_limits', 'repeats_surface']);
+      assert.deepEqual([...lib.listReasons()], ['beyond_request', 'outside_limits']);
       assert.ok(lib.listReasons().every((name) => !lib.askReasons().includes(name)));
       const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
       const brief = makeGatedBrief('GUARD_PROBLEM');
@@ -9898,12 +9923,12 @@ const ROW_TESTS = {
       assert.equal(pauseAsks([goodAsk, { brief: stopBrief, reason: 'table_surface', kind: 'step_stop', stop: 'fix_cause' }]).needs_user, true);
       assert.deepEqual(structuredClone(run.answerLog), []);
     });
-    test('a replay of run wf_d1cc3369-306: a beyond-request planner question, a plan outside the limits and a root-cluster remediation that repeats a surface reach the pull request with zero pauses, each listed under Decided for you', async () => {
+    test('a replay of run wf_d1cc3369-306: a beyond-request planner question and a plan outside the limits are taken with zero pauses, each listed under Decided for you, and a root-cluster remediation that repeats a surface pauses exactly once, on the approach question', async () => {
       const limits = { documents: [], paths: [], limits: [{ path: 'README.md', origin: 'request' }, { path: 'web', origin: 'request' }] };
       const beyond = makeBrief({ problem: 'BEYOND_REQUEST_ZQ: Also trim the web bundle?', options: makeBrief().options.map((option) => (option.id === 'A' ? { ...option, beyond_request: true, effort: 'trivial' } : option)) });
       assert.deepEqual([beyond.recommendation.strength, beyond.options[0].beyond_request, beyond.options[0].effort], ['strong', true, 'trivial']);
       const remediation = { ...REMEDIATION_PLAN, remediation_gate: { ...makePlan().remediation_gate, repeats_surface: true } };
-      const results = remediationResults(CLUSTER, { 'scope-1': limits, 'plan-1': planResult(makePlan(), [beyond]), 'scope-2': limits, 'plan-2': planResult(remediation) });
+      const results = remediationResults(CLUSTER, { 'scope-1': limits, 'plan-1': planResult(makePlan(), [beyond]), 'scope-2': limits, 'plan-2': planResult(remediation), 'revise-1': reviseResult(planResult(remediation), ['Q1']) });
       const pauses = [];
       let launch = LAUNCH;
       let run = await runWorkflow(launch, results);
@@ -9912,20 +9937,24 @@ const ROW_TESTS = {
         launch = resumeWith(launch, run.result, 'A');
         run = await runWorkflow(launch, results);
       }
-      assert.deepEqual(pauses, []);
-      assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
-      const acceptance = main.markOutsideLimits(main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js']);
       const remediationAcceptance = main.markOutsideLimits(main.buildRemediationPlanBrief(remediation), ['src/auth.js']);
       assert.ok(remediationAcceptance.problem.includes(main.remediationGateTexts().repeats_surface) && remediationAcceptance.problem.endsWith(' It changes 1 file outside the limits you set.'), remediationAcceptance.problem);
-      const shown = [beyond, acceptance, main.buildReviewEscalationBrief(CLUSTER), remediationAcceptance];
+      assert.equal(remediationAcceptance.recommendation.option_id, 'B');
+      assert.equal(pauses.length, 1);
+      assert.ok(pauses[0].startsWith(main.describePlanLine(remediation) + '\n\n**Q1. ' + remediationAcceptance.problem + '**\n- A: Keep patching this class.\n- B: Change approach. (recommended)\n- C: Stop and ship what closes.\n'), pauses[0]);
+      assert.ok(!pauses[0].includes('**Q2.'), pauses[0]);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
+      const acceptance = main.markOutsideLimits(main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js']);
+      const shown = [beyond, acceptance, main.buildReviewEscalationBrief(CLUSTER)];
       assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact(shown.map((brief) => ({ brief: brief })))), run.result.message);
       const body = prBodyOf(run, 'pr-2');
       const decided = body.slice(body.indexOf('Decided for you'));
       assert.ok(body.includes('Decided for you'), body);
-      for (const brief of [beyond, acceptance, remediationAcceptance]) {
+      for (const brief of [beyond, acceptance]) {
         assert.ok(decided.includes(brief.problem), brief.problem + '\n' + body);
       }
+      assert.ok(!decided.includes(remediationAcceptance.problem), body);
     });
   },
   'SD-83': () => {

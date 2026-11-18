@@ -692,7 +692,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'af5504597fdee428';
+const BUILD_ID = '13b789dca733104d';
 
 function supportedSchemaKeywords(){
 return[
@@ -1032,7 +1032,7 @@ function askReasons(){
 return['hard_stop','table_surface','gate_irreversible','gate_architectural','gate_safety','no_recommendation'];
 }
 function listReasons(){
-return['beyond_request','outside_limits','repeats_surface'];
+return['beyond_request','outside_limits'];
 }
 function resolveLevel(value,table){
 if(value===undefined||value===null||value===''){
@@ -1044,11 +1044,12 @@ return value;
 return'low';
 }
 function decide({kind,level,brief,listed},table,schema){
+const[hardStop,tableSurface,gateIrreversible,gateArchitectural,gateSafety,noRecommendation]=askReasons();
 const callerListed=checkCallerListed(listed);
 const briefCheck=validateSchema(schema,brief);
 const resolvedLevel=resolveLevel(level,table);
 if(table.hard_stops.some((stop)=>stop.hard_stop===kind)){
-return askFor('hard_stop');
+return askFor(hardStop);
 }
 if(!briefCheck.ok||!hasInRequestOption(brief)||isBeyondRequestUnearned(brief)){
 return askFor('malformed_brief');
@@ -1062,22 +1063,22 @@ return askFor('unknown_kind');
 }
 const cell=row[resolvedLevel];
 if(cell==='surface'){
-return askFor('table_surface');
+return askFor(tableSurface);
 }
 if(cell!=='auto'){
 return askFor('bad_cell');
 }
-if(brief.gate.irreversible||isRecommendedOptionIrreversible(brief)){
-return askFor('gate_irreversible');
+if(brief.gate.irreversible||hasRecommendedOption(brief,(option)=>option.reversible===false)){
+return askFor(gateIrreversible);
 }
 if(brief.gate.architectural){
-return askFor('gate_architectural');
+return askFor(gateArchitectural);
 }
-if(brief.gate.safety||isRecommendedOptionDestructive(brief)){
-return askFor('gate_safety');
+if(brief.gate.safety||hasRecommendedOption(brief,(option)=>Array.isArray(option.destructive)&&option.destructive.length>0)){
+return askFor(gateSafety);
 }
 if(brief.recommendation.strength==='none'){
-return askFor('no_recommendation');
+return askFor(noRecommendation);
 }
 return{action:'take',reason:'auto',listed:collectListed(brief,callerListed)};
 }
@@ -1088,7 +1089,7 @@ return[];
 if(!Array.isArray(listed)){
 throw new Error('decide: listed must be an array, got '+JSON.stringify(listed));
 }
-const callerNames=listReasons().filter((name)=>name!=='beyond_request');
+const callerNames=listReasons().slice(1);
 for(const name of listed){
 if(callerNames.indexOf(name)===-1){
 throw new Error('decide: unknown listed name '+JSON.stringify(name));
@@ -1097,23 +1098,17 @@ throw new Error('decide: unknown listed name '+JSON.stringify(name));
 return listed;
 }
 function collectListed(brief,callerListed){
-return listReasons().filter((name)=>(name==='beyond_request'?isRecommendedOptionBeyondRequest(brief):callerListed.indexOf(name)!==-1));
+return listReasons().filter((name,index)=>(index===0?hasRecommendedOption(brief,(option)=>option.beyond_request===true):callerListed.includes(name)));
 }
 function askFor(reason){
 return{action:'ask',reason:reason};
 }
-function isRecommendedOptionIrreversible(brief){
-return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.reversible===false);
-}
-function isRecommendedOptionDestructive(brief){
-return brief.options.some((option)=>option.id===brief.recommendation.option_id&&Array.isArray(option.destructive)&&option.destructive.length>0);
-}
-function isRecommendedOptionBeyondRequest(brief){
-return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.beyond_request===true);
+function hasRecommendedOption(brief,predicate){
+return brief.options.some((option)=>option.id===brief.recommendation.option_id&&predicate(option));
 }
 function isBeyondRequestUnearned(brief){
 const isStrong=brief.recommendation.strength==='strong';
-return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.beyond_request===true&&!(isStrong&&(option.effort==='trivial'||option.effort==='small')));
+return hasRecommendedOption(brief,(option)=>option.beyond_request===true&&!(isStrong&&(option.effort==='trivial'||option.effort==='small')));
 }
 function hasInRequestOption(brief){
 return brief.options.some((option)=>option.beyond_request===false);
@@ -2803,7 +2798,7 @@ const hasAnswers=answers.length>0;
 const lines=[
 'Revise your plan for the delivery of the user request below with the user reply below.',
 boundarySentence(),
-hasAnswers?settledAnswersSentence('The reply block'):dataBlocksSentence('The reply block'),
+(hasAnswers?settledAnswersSentence:dataBlocksSentence)('The reply block'),
 '',
 buildFactsBlock(facts),
 formatDataBlock('request',request),
@@ -2937,8 +2932,7 @@ resolveDecision(EXTERNAL_EFFECT_KIND,buildExternalEffectBrief(effect.summary),['
 function resolvePlanAcceptance(plan,run,resolution,scope){
 const isRemediation=run.taken.some((entry)=>entry.kind===PLANNER_ESCALATION_ROUTING_KIND||entry.kind===ROOT_CLUSTER_ROUTING_KIND);
 const outsidePaths=listOutsidePaths(plan,scope);
-const holds={outside_limits:outsidePaths.length>0,repeats_surface:plan.remediation_gate.repeats_surface};
-const listed=Object.keys(holds).filter((name)=>holds[name]);
+const listed=outsidePaths.length>0?['outside_limits']:[];
 const brief=isRemediation?buildRemediationPlanBrief(plan):buildPlanAcceptanceBrief(plan);
 return resolveDecision(isRemediation?REMEDIATION_PLAN_ACCEPTANCE_KIND:PLAN_ACCEPTANCE_KIND,markOutsideLimits(brief,outsidePaths),[run.pass,plan],run,resolution,listed);
 }
@@ -3198,6 +3192,13 @@ gate:buildBriefGate(),
 verbatim:plan.summary
 };
 }
+function buildApproachChoice(){
+const summaries=['Keep patching this class.','Change approach.','Stop and ship what closes.'];
+return{
+options:summaries.map((summary,index)=>buildBriefOption(optionLabel(index),summary)),
+recommendation:{option_id:optionLabel(1),strength:'strong',why:'Patching has not closed this class.'}
+};
+}
 function buildRemediationPlanBrief(plan){
 const remediationGate=plan.remediation_gate;
 const flags={...remediationGate.promotion_gate,grows_surface:remediationGate.grows_surface,repeats_surface:remediationGate.repeats_surface};
@@ -3205,11 +3206,11 @@ const texts=remediationGateTexts();
 const flagTexts=Object.keys(texts).filter((flag)=>flags[flag]).map((flag)=>texts[flag]);
 const lead='Run the remediation plan for the local review findings on the working branch, then every gate again.';
 const brief=buildPlanAcceptanceBrief(plan);
-return Object.assign(brief,{
+const choice=flags.repeats_surface?buildApproachChoice():{recommendation:{...brief.recommendation,why:'The plan answers the local review findings, and every gate runs again on its commit before the pull request.'}};
+return Object.assign(brief,choice,{
 kind:REMEDIATION_PLAN_ACCEPTANCE_KIND,
 problem:flagTexts.length===0?lead:lead+' The plan '+joinNames(flagTexts,'and')+'.',
-recommendation:{...brief.recommendation,why:'The plan answers the local review findings, and every gate runs again on its commit before the pull request.'},
-gate:{...remediationGate.promotion_gate,architectural:flags.architectural||flags.grows_surface}
+gate:{...remediationGate.promotion_gate,architectural:flags.architectural||flags.grows_surface||flags.repeats_surface}
 });
 }
 function buildTrunkStaleBrief(facts){

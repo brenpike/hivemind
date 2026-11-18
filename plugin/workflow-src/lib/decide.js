@@ -10,8 +10,8 @@
  *     level  the autonomy level. Resolved through resolveLevel.
  *     brief  a decision brief, checked against schema.
  *     listed optional array of the listReasons() names the caller sees
- *            hold, outside_limits and repeats_surface. Any other value, a
- *            non-array or beyond_request included, throws.
+ *            hold: outside_limits only. Any other value, a non-array,
+ *            beyond_request or repeats_surface included, throws.
  *     table  as above.
  *     schema the parsed decision brief schema (BRIEF_SCHEMA once built).
  *
@@ -26,7 +26,8 @@
  *                 passed them.
  *   askReasons    the closed Ask Set: every reason a well formed brief from
  *                 a known kind can ask, in check order.
- *   listReasons   the names a take may be listed under for veto before merge.
+ *   listReasons   the names a take may be listed under for veto before merge,
+ *                 beyond_request first; a caller may pass every other one.
  *
  * Invariants
  *   Pure: no clock, no randomness, no I/O. The table and the schema are
@@ -65,6 +66,8 @@
  *
  * Why
  *   ADR-0037, amendment 2026-11-07 (issue 549): the closed Ask Set.
+ *   Issue 587: a remediation plan that repeats a surface is no longer a
+ *   list reason; its brief sets gate.architectural, so it asks.
  */
 
 function askReasons() {
@@ -72,7 +75,7 @@ function askReasons() {
 }
 
 function listReasons() {
-  return ['beyond_request', 'outside_limits', 'repeats_surface'];
+  return ['beyond_request', 'outside_limits'];
 }
 
 function resolveLevel(value, table) {
@@ -86,11 +89,12 @@ function resolveLevel(value, table) {
 }
 
 function decide({ kind, level, brief, listed }, table, schema) {
+  const [hardStop, tableSurface, gateIrreversible, gateArchitectural, gateSafety, noRecommendation] = askReasons();
   const callerListed = checkCallerListed(listed);
   const briefCheck = validateSchema(schema, brief);
   const resolvedLevel = resolveLevel(level, table);
   if (table.hard_stops.some((stop) => stop.hard_stop === kind)) {
-    return askFor('hard_stop');
+    return askFor(hardStop);
   }
   if (!briefCheck.ok || !hasInRequestOption(brief) || isBeyondRequestUnearned(brief)) {
     return askFor('malformed_brief');
@@ -104,22 +108,22 @@ function decide({ kind, level, brief, listed }, table, schema) {
   }
   const cell = row[resolvedLevel];
   if (cell === 'surface') {
-    return askFor('table_surface');
+    return askFor(tableSurface);
   }
   if (cell !== 'auto') {
     return askFor('bad_cell');
   }
-  if (brief.gate.irreversible || isRecommendedOptionIrreversible(brief)) {
-    return askFor('gate_irreversible');
+  if (brief.gate.irreversible || hasRecommendedOption(brief, (option) => option.reversible === false)) {
+    return askFor(gateIrreversible);
   }
   if (brief.gate.architectural) {
-    return askFor('gate_architectural');
+    return askFor(gateArchitectural);
   }
-  if (brief.gate.safety || isRecommendedOptionDestructive(brief)) {
-    return askFor('gate_safety');
+  if (brief.gate.safety || hasRecommendedOption(brief, (option) => Array.isArray(option.destructive) && option.destructive.length > 0)) {
+    return askFor(gateSafety);
   }
   if (brief.recommendation.strength === 'none') {
-    return askFor('no_recommendation');
+    return askFor(noRecommendation);
   }
   return { action: 'take', reason: 'auto', listed: collectListed(brief, callerListed) };
 }
@@ -131,7 +135,7 @@ function checkCallerListed(listed) {
   if (!Array.isArray(listed)) {
     throw new Error('decide: listed must be an array, got ' + JSON.stringify(listed));
   }
-  const callerNames = listReasons().filter((name) => name !== 'beyond_request');
+  const callerNames = listReasons().slice(1);
   for (const name of listed) {
     if (callerNames.indexOf(name) === -1) {
       throw new Error('decide: unknown listed name ' + JSON.stringify(name));
@@ -141,28 +145,24 @@ function checkCallerListed(listed) {
 }
 
 function collectListed(brief, callerListed) {
-  return listReasons().filter((name) => (name === 'beyond_request' ? isRecommendedOptionBeyondRequest(brief) : callerListed.indexOf(name) !== -1));
+  return listReasons().filter((name, index) => (index === 0 ? hasRecommendedOption(brief, (option) => option.beyond_request === true) : callerListed.includes(name)));
 }
 
 function askFor(reason) {
   return { action: 'ask', reason: reason };
 }
 
-function isRecommendedOptionIrreversible(brief) {
-  return brief.options.some((option) => option.id === brief.recommendation.option_id && option.reversible === false);
-}
-
-function isRecommendedOptionDestructive(brief) {
-  return brief.options.some((option) => option.id === brief.recommendation.option_id && Array.isArray(option.destructive) && option.destructive.length > 0);
-}
-
-function isRecommendedOptionBeyondRequest(brief) {
-  return brief.options.some((option) => option.id === brief.recommendation.option_id && option.beyond_request === true);
+/**
+ * Returns whether an option whose id is the recommended option_id
+ * satisfies predicate.
+ */
+function hasRecommendedOption(brief, predicate) {
+  return brief.options.some((option) => option.id === brief.recommendation.option_id && predicate(option));
 }
 
 function isBeyondRequestUnearned(brief) {
   const isStrong = brief.recommendation.strength === 'strong';
-  return brief.options.some((option) => option.id === brief.recommendation.option_id && option.beyond_request === true && !(isStrong && (option.effort === 'trivial' || option.effort === 'small')));
+  return hasRecommendedOption(brief, (option) => option.beyond_request === true && !(isStrong && (option.effort === 'trivial' || option.effort === 'small')));
 }
 
 function hasInRequestOption(brief) {

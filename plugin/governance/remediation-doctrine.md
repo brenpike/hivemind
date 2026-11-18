@@ -169,11 +169,11 @@ Each reviewer that runs a fix loop holds three rules.
 
 The overlord reconstructs the per-surface counter behind **Cross-Iteration Same-Surface Recurrence** each loop from GitHub ground truth; no local recurrence file persists it. The counting unit is the distinct structural-remediation event (one accepted structural fix: a remediation commit or a resolved thread citing a structural fix on that surface), not the (fix, finding) pair. Each event followed by one or more fresh findings on the same surface is one non-closing structural fix, however many findings follow; a surface's count is the number of such events.
 
-**Forced zoom-out after the first non-closing structural fix.** When a surface has absorbed one non-closing structural fix, the overlord forces an approach-level zoom-out: it reruns **First-Finding Triage** at the approach level and questions the key or primitive per the **Closed-by-Construction Acceptance Test**, never dispatching another conjunct-completion patch. The script engine has no code trigger for it: when the cerebrate plans a replan that carries a review block, it sees the branch's earlier remediation fixes in the commits its fresh facts list and makes this call by judgment.
+**Forced zoom-out after the first non-closing structural fix.** When a surface has absorbed one non-closing structural fix, the overlord forces an approach-level zoom-out: it reruns **First-Finding Triage** at the approach level and questions the key or primitive per the **Closed-by-Construction Acceptance Test**, never dispatching another conjunct-completion patch. On the script engine the user makes the call when a remediation plan sets `remediation_gate.repeats_surface` or a root cluster lands on a file the run's last remediation plan changed: keep patching this class, change approach, or stop and ship what closes. Stop is the user's rejection of the cluster, recorded per **Recorded Decisions and Repeat Findings**.
 
-Because the counter persists across structural fixes, a surface that already yielded one root keeps the same trip point: the first non-closing fix after any accepted structural fix.
+The counter persists across structural fixes, so the trip point stays the first non-closing fix after any accepted structural fix.
 
-The user-only architecture zoom-out skill carries `disable-model-invocation: true`, so the overlord cannot invoke it. The overlord routes an architectural zoom-out through the cerebrate via the `review_remediation_plan` / `review_remediation_plan_postpr` remediation state, the path a `root-cluster-suspected` exit_reason already takes.
+The user-only architecture zoom-out skill carries `disable-model-invocation: true`, so the overlord routes an architectural zoom-out through the cerebrate via the `review_remediation_plan` / `review_remediation_plan_postpr` remediation state, the path a `root-cluster-suspected` exit_reason takes.
 
 ### Proactive Zoom-Out Ledger Marker
 
@@ -184,9 +184,9 @@ The marker is one key in the transition's `event.outputs` object:
 - Key: `recurrence_origin`.
 - Value `"proactive"`: the overlord's reconstructed counter tripped.
 - A reviewer-returned cluster omits the key or carries `"reviewer"`.
-- An absent key means non-proactive. Consumers infer proactive origin only from an explicit `"proactive"` value.
+- Consumers infer proactive origin only from an explicit `"proactive"` value.
 
-The marker records judgment; the trip call stays judgment per ADR-0025. It is written through the normal `hivemind:record-state-result` `outputs` path on the existing `root-cluster-suspected` transition, never via `hivemind:mark-intent-fallback` or any fallback path. It rides whichever producer state carries that exit_reason (`github_review_loop`, `github_reviewer_fix`, or the post-PR mirror that targets `review_remediation_plan_postpr`), lives only in `event.outputs`, and never collides with `plan_steps` or any `plan.*` field.
+The marker records judgment; the trip call stays judgment per ADR-0025. It is written through the `hivemind:record-state-result` `outputs` path on the `root-cluster-suspected` transition, never via `hivemind:mark-intent-fallback` or any fallback path. It rides whichever producer state carries that exit_reason (`github_review_loop`, `github_reviewer_fix`, or the post-PR mirror that targets `review_remediation_plan_postpr`), lives only in `event.outputs`, and never collides with `plan_steps` or any `plan.*` field.
 
 ## Skeleton-Enrichment Judgment Criteria
 
