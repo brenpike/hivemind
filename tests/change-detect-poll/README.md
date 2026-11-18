@@ -256,10 +256,21 @@ rule.
 
 ### The checked-number grid
 
-One table in the runner, `NUMBER_SOURCES`, names every number the poll reads through
-`read_decimal` or `read_clock`, how to inject a reading into it, and the modes that read it. The
-runner generates every probe kind for every (source, mode) pair of the table, so no source gets a
-hand-picked subset of probes. Each row is `name|injector|modes|before_gh|plain|padded|not_applicable`:
+One table in the runner, `NUMBER_SOURCES`, is meant to name every number the poll reads through
+`read_decimal` or `read_clock`, how to inject a reading into it, and the modes that read it. It is
+kept in step with the poll by hand. The runner generates every probe kind for every (source, mode)
+pair of the table, so no source gets a hand-picked subset of probes. Each row is
+`name|injector|modes|before_gh|plain|padded|not_applicable`:
+
+RECORDED DECISION (hand-maintained source table): `NUMBER_SOURCES` is maintained by hand. The grid
+proves every probe for each (source, mode) pair the table lists, but nothing checks the table
+against what the poll really reads. Two gaps are a known limit. A row can list fewer modes than the
+ones that read its number. A new `read_decimal` or `read_clock` call added without a row gets no
+probes. In both cases the suite stays green. Whoever adds or changes a `read_decimal` or
+`read_clock` call in `plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh` must add or
+update its row. The user decided this on local review findings 28072c68 and b531c8bb. A later
+finding that asks for the table to be checked against the poll's real reads repeats this decision.
+The stronger proof, an execution inventory, is tracked in issue #588.
 
 | Source | Injected through | Modes |
 | --- | --- | --- |
