@@ -5381,6 +5381,19 @@ const ROW_TESTS = {
       assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: main.buildReviewEscalationBrief(ESCALATION) }])), run.result.message);
       assert.ok(!prBodyOf(run, 'pr-2').includes(brief.problem), prBodyOf(run, 'pr-2'));
     });
+    test('a reply C to the approach question reaches the revise as the reply, and a revise that rejects the shown plan runs its own plan, never the rejected steps', async () => {
+      const plan = { ...REMEDIATION_PLAN, remediation_gate: gateWith('repeats_surface') };
+      const recorded = { ...CLEAN_REMEDIATION_PLAN, summary: 'Record the rejection of the cluster.', steps: [makeStep('STEP-004', ['src/decisions.js'])] };
+      const results = remediationResults(ESCALATION, { 'plan-2': planResult(plan), 'revise-1': reviseResult(planResult(recorded), []), 'scope-2-1': EMPTY_SCOPE, 'work-2-STEP-004': WORKER_DONE });
+      const paused = await runWorkflow(LAUNCH, results);
+      assert.equal(paused.result.needs_user, true);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'C'), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'revise-1', 'scope-2-1', 'branch-2', 'work-2-STEP-004', 'commit-2-1', ...tailLabels(2)]);
+      assert.equal(readDataBlock(callOf(run, 'revise-1').prompt, 'reply'), 'C');
+      assert.ok(!labelsOf(run).includes('work-2-STEP-002'), labelsOf(run).join(' '));
+      assert.ok(prBodyOf(run, 'pr-2').startsWith(bodyStart(recorded) + '\n\n'), prBodyOf(run, 'pr-2'));
+    });
     test('a remediation plan whose gate sets every flag names each in its problem, within the problem bound', () => {
       const plan = { ...REMEDIATION_PLAN, remediation_gate: FULL_GATE };
       const texts = main.remediationGateTexts();
@@ -10338,6 +10351,19 @@ const ROW_TESTS = {
       state.pendingReply = 'B';
       assert.deepEqual(structuredClone(main.requestReviewReplan(CLUSTER, state, SAME_SURFACE_PLAN)), { replan: { reason: REPLAN_REASON, review: structuredClone(main.projectReplanReview(CLUSTER)) } });
       assert.deepEqual([state.replans, state.reviewReplans, state.taken.length, state.answerLog.length], [2, 2, 0, 1]);
+    });
+    test('reply C to the approach question reaches the pass 3 planner with the review, and pass 3 runs the plan it returns, never the rejected cluster steps', async () => {
+      const recorded = { ...CLEAN_REMEDIATION_PLAN, summary: 'Record the rejection of the cluster.', steps: [makeStep('STEP-005', ['src/decisions.js'])] };
+      const results = sameSurfaceResults({ 'plan-3': planResult(recorded), 'work-3-STEP-005': WORKER_DONE });
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'C'), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), [...SECOND_PASS_LABELS, 'facts-3', 'scope-3', 'plan-3', 'branch-3', 'work-3-STEP-005', 'commit-3-1', ...tailLabels(3)]);
+      const prompt = callOf(run, 'plan-3').prompt;
+      assert.equal(readDataBlock(prompt, 'replan'), REPLAN_REASON);
+      assert.deepEqual(readDataBlock(prompt, 'review'), structuredClone(main.projectReplanReview(CLUSTER)));
+      assert.deepEqual(readDataBlock(prompt, 'answers').at(-1).reply, 'C');
+      assert.ok(!labelsOf(run).includes('work-3-STEP-002'), labelsOf(run).join(' '));
     });
     test('a second root cluster that names no file of the plan just run still opens a draft pull request', async () => {
       const run = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(CLEAN_REMEDIATION_PLAN), 'review-2-1': { ...CLUSTER, open_findings: [OPEN_FINDING] } }));

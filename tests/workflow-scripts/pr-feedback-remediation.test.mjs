@@ -861,6 +861,20 @@ const ROW_TESTS = {
       assert.ok(!callOf(resumed, 'work-2-STEP-001').prompt.includes('src/other.js'));
       assert.deepEqual(resumed.result, completeResult(ESCALATION_ASK));
     });
+    test('a reply C to the approach question reaches the revise as the reply, and a revise that rejects the shown plan runs its own plan, never the rejected steps', async () => {
+      const repeated = planResult(makePlan({ remediation_gate: { ...makePlan().remediation_gate, repeats_surface: true } }));
+      const recorded = planResult(makePlan({ summary: 'Record the rejection of the cluster.', steps: [{ ...makePlan().steps[0], files: ['src/other.js'] }] }));
+      const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': repeated }));
+      assert.equal(first.result.needs_user, true);
+      const results = escalationResults('planner-escalation', { 'plan-2': repeated, 'revise-1': { ...recorded, settled: [] }, 'scope-2-1': SCOPE });
+      const resumed = await runWorkflow(resumeArgs(first, 'C'), results);
+      assertReplayed(first, resumed);
+      assert.deepEqual(labelsOf(resumed), [...labelsOf(first), 'revise-1', 'scope-2-1', ...tailLabels(2)]);
+      assert.equal(readDataBlock(callOf(resumed, 'revise-1').prompt, 'reply'), 'C');
+      assert.ok(callOf(resumed, 'work-2-STEP-001').prompt.includes('src/other.js'));
+      assert.ok(!callOf(resumed, 'work-2-STEP-001').prompt.includes('src/a.js'));
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+    });
   },
   'PFR-17': () => {
     test('a resume with answers, build and reply replays every earlier agent and revises', async () => {
