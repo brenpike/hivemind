@@ -4728,7 +4728,8 @@ mark_time 'CHECK18'
 # runner list. The threat model above is unchanged.
 #
 # Recorded residual, outside the threat model: a wrapper on a continuation
-# line of a split $( ), a wrapper at a bare command start with no capture,
+# line of a split $( ), a wrapper or VAR=value assignment prefix before mktemp
+# at a bare command start with no capture (env, timeout 5, TMPDIR=/x),
 # quoted names, variable-held commands, and mktemp text in a string or quoted
 # heredoc after an opener. Its impact is bounded: it needs mktemp to fail and
 # a run as root, and the tests only run in development and CI. Reword a
@@ -4957,6 +4958,9 @@ check19_expect_admitted 'mktemp_path="$(command -v {mktemp})"'
 check19_expect_admitted 'mktemp_path=`which {mktemp}`'
 check19_expect_admitted 'echo "$(date) ran {mktemp} -d"'
 check19_expect_admitted 'parent_dir="$(dirname "$(pwd)")"; {scratch}_dir tmp_dir'
+check19_expect_admitted 'env {mktemp} -d'
+check19_expect_admitted 'timeout 5 {mktemp} -d'
+check19_expect_admitted 'TMPDIR=/x {mktemp} -d'
 
 if [[ "$check19_found" == false ]]; then
     echo "[PASS] Check 19: None of the $check19_script_count tools/ shell scripts outside ${CHECK19_HELPER_REL} runs mktemp at a statement start, names mktemp inside a substitution other than after a lookup, or calls a scratch helper inside a substitution"
