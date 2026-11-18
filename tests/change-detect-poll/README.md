@@ -307,18 +307,19 @@ How a reading reaches each source:
   reads serving `CLOCK`.
 
 A probe a source cannot take is excluded in its row as `<kind>@<mode>=<reason>`, and the runner
-prints an `N/A` line with that reason instead of a case. The only exclusions are the `padded`
-probe of the window and interval in `--snapshot` and `--check`: those modes read both arguments
+prints an `N/A` line with that reason instead of a case. Only a `padded` probe can be excluded:
+a fail-closed probe (`hostile`, `non-digit`, `negative`, `empty`, `19-digits`) always runs, and a row
+that excludes one fails the row check. The only exclusions in use are the `padded` probe of the window and interval in `--snapshot` and `--check`: those modes read both arguments
 through `read_decimal` but never use them, so a padded reading has nothing to change. Their
 `hostile` and rejection probes still run in every mode.
 
 `numbers:source-table` is the self-check. `check_source_row` validates every row before the grid
 runs: seven fields, an injector naming a declared function, a mode list drawn from poll, snapshot
-and check, a `yes` or `no` `before_gh`, well-formed exclusions naming a probe kind and one of the
+and check, a `yes` or `no` `before_gh`, well-formed exclusions that name the `padded` probe and one of the
 row's modes, and distinct plain and padded readings unless every mode excludes `padded`. A row that
 fails it fails the case and is left out of the grid, so a missing combination cannot pass
-silently. The case also confirms the check rejects a row missing its injector and a row missing
-its mode list. A new number source is one row.
+silently. The case also confirms the check rejects a row missing its injector, a row missing
+its mode list, and, for each fail-closed kind, a row that excludes it. A new number source is one row.
 
 The grid proves only the sources in its table. The other snapshot scalars (`*_TOTAL` and the id
 tokens) are not read through `read_decimal`, are not in the table, and the grid claims nothing

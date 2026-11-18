@@ -2316,8 +2316,10 @@ fi
 #   modes           comma list of the modes that read the source, from poll, snapshot and check.
 #   before_gh       yes when the source is read before any gh call.
 #   plain, padded   the reading the padded probe runs plain, and the same value zero-padded.
-#   not_applicable  `;`-joined `<kind>@<mode>=<reason>` items, one per probe the source cannot
-#                   take; the runner prints each as an N/A line with its reason.
+#   not_applicable  `;`-joined `padded@<mode>=<reason>` items, one per padded probe the source
+#                   cannot take; the runner prints each as an N/A line with its reason. Only the
+#                   padded probe is excludable: a fail-closed probe (hostile, non-digit, negative,
+#                   empty, 19-digits) always runs, and a row excluding one fails the row check.
 # A new source is one row. check_source_row validates every row before the grid runs; a row
 # missing its injector or mode list, or any other defect, fails numbers:source-table, and the
 # grid skips only that row.
@@ -2443,11 +2445,11 @@ probe_exclusion() {
 
 # check_source_row <row>: 0 when <row> has its seven fields, an injector naming a declared
 # function, a mode list drawn from poll, snapshot and check, a yes or no before_gh, well-formed
-# not_applicable items that name a probe kind and one of the row's modes with a reason, and
-# distinct non-empty plain and padded readings unless every mode excludes the padded probe.
+# not_applicable items that exclude only the padded probe in one of the row's modes with a reason
+# (a fail-closed probe is never excludable), and distinct non-empty plain and padded readings unless every mode excludes the padded probe.
 # Otherwise prints the defect and returns 1.
 check_source_row() {
-  local row="$1" name injector modes before_gh plain padded not_applicable mode item kind padded_mode_count=0
+  local row="$1" name injector modes before_gh plain padded not_applicable mode item padded_mode_count=0
   local -a injector_words=() mode_list=() items=()
   if [ "$(printf '%s\n' "$row" | awk -F'|' '{print NF}')" != "7" ]; then
     printf 'row [%s] does not have 7 fields' "$row"
@@ -2472,12 +2474,10 @@ check_source_row() {
   esac
   IFS=';' read -r -a items <<<"$not_applicable"
   for item in ${items[@]+"${items[@]}"}; do
-    kind="${item%%@*}"
     mode="${item#*@}"
     mode="${mode%%=*}"
-    if ! [[ "$item" =~ ^[a-z0-9-]+@[a-z]+=.+$ ]] || ! [[ " ${GRID_PROBE_KINDS[*]} " == *" $kind "* ]] \
-      || ! [[ ",$modes," == *",$mode,"* ]]; then
-      printf 'source %s has a malformed not_applicable item [%s]' "$name" "$item"
+    if ! [[ "$item" =~ ^padded@[a-z]+=.+$ ]] || ! [[ ",$modes," == *",$mode,"* ]]; then
+      printf 'source %s has a malformed not_applicable item [%s]: only a padded probe can be excluded' "$name" "$item"
       return 1
     fi
   done
@@ -2602,14 +2602,18 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
       table_detail="$table_detail $row_defect;"
     fi
   done
-  for broken_row in "no-injector||poll|yes|1|01|" "no-modes|inject_pr_number||yes|1|01|"; do
+  declare -a broken_rows=("no-injector||poll|yes|1|01|" "no-modes|inject_pr_number||yes|1|01|")
+  for kind in "${GRID_FAIL_CLOSED_KINDS[@]}"; do
+    broken_rows+=("excludes-$kind|inject_pr_number|poll|yes|1|01|$kind@poll=a fail-closed probe must not be excludable")
+  done
+  for broken_row in "${broken_rows[@]}"; do
     if check_source_row "$broken_row" >/dev/null; then
       table_ok=0
       table_detail="$table_detail self-check accepted the broken row [$broken_row];"
     fi
   done
   if [ "$table_ok" -eq 1 ]; then
-    pass "numbers:source-table" "${#NUMBER_SOURCES[@]} sources pass the row self-check, which rejects a row missing its injector or mode list"
+    pass "numbers:source-table" "${#NUMBER_SOURCES[@]} sources pass the row self-check, which rejects a row missing its injector or mode list and a row excluding any fail-closed probe"
   else
     failed "numbers:source-table" "$table_detail"
   fi
