@@ -51,6 +51,8 @@ set -euo pipefail
 # ── Path setup ──────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 ENGINE="$REPO_ROOT/plugin/skills/create-working-branch/scripts/create-working-branch.sh"
 
@@ -63,10 +65,9 @@ command -v git >/dev/null 2>&1 \
 
 # ── Disposable workdir + host-config isolation ──────────────────────────────
 
-WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-create-working-branch-test.XXXXXX")"
+make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-create-working-branch-test.XXXXXX"
 cleanup() { rm -rf "$WORKDIR"; }
 trap cleanup EXIT
-WORKDIR="$(cd "$WORKDIR" && pwd -P)"
 
 mkdir -p "$WORKDIR/home"
 export HOME="$WORKDIR/home"

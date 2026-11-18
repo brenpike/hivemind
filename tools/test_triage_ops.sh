@@ -27,6 +27,8 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 OPS="$REPO_ROOT/plugin/skills/triage-backlog/scripts/triage-ops.sh"
 TB_DIR="$REPO_ROOT/tests/triage-backlog"
@@ -37,7 +39,7 @@ EXPECTED_DIR="$TB_DIR/expected"
 [ -d "$EXPECTED_DIR" ] || { echo "FAIL: expected-output dir missing: $EXPECTED_DIR" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite" >&2; exit 2; }
 
-TMPDIR_TEST="$(mktemp -d)"
+make_scratch_dir TMPDIR_TEST
 trap 'rm -rf "$TMPDIR_TEST"' EXIT
 
 PASS_COUNT=0

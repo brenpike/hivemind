@@ -50,12 +50,14 @@ set -u
 unset HIVEMIND_PR_REVIEWERS
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 REACT_MARKER="$REPO_ROOT/plugin/skills/github-review-loop/scripts/react-marker.sh"
 
 [ -f "$REACT_MARKER" ] || { echo "FAIL: script under test missing: $REACT_MARKER" >&2; exit 2; }
 
-TMPDIR_TEST="$(mktemp -d)"
+make_scratch_dir TMPDIR_TEST
 cleanup() { rm -rf "$TMPDIR_TEST"; }
 trap cleanup EXIT
 

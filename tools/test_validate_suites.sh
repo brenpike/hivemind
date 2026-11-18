@@ -35,8 +35,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 VALIDATE_SH="$SCRIPT_DIR/validate.sh"
+SCRATCH_LIB="$SCRIPT_DIR/lib/scratch.sh"
 
 [ -f "$VALIDATE_SH" ] || { printf 'FAIL: script under test missing: %s\n' "$VALIDATE_SH" >&2; exit 2; }
 
@@ -57,8 +60,9 @@ FAIL_COUNT=0
 pass()   { printf 'PASS [%s] %s\n' "$1" "$2"; PASS_COUNT=$((PASS_COUNT + 1)); }
 failed() { printf 'FAIL [%s] %s\n' "$1" "$2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 
-# All scratch lives under one mktemp -d; EXIT-trap cleanup leaves the repo tree untouched.
-HARNESS_SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/test-validate-suites.XXXXXX")"
+# All scratch lives under one checked scratch folder; EXIT-trap cleanup leaves the repo tree
+# untouched.
+make_scratch_dir HARNESS_SCRATCH "${TMPDIR:-/tmp}/test-validate-suites.XXXXXX"
 cleanup_harness() { [ -n "${HARNESS_SCRATCH:-}" ] && rm -rf -- "$HARNESS_SCRATCH"; }
 trap cleanup_harness EXIT
 
@@ -73,6 +77,9 @@ if [ "$main_lines" != "1" ]; then
   exit 2
 fi
 grep -v '^main "\$@"$' "$VALIDATE_SH" >"$VALIDATE_NOMAIN"
+# INVARIANT: the copy sources lib/scratch.sh from its own folder, so the helper must sit beside it.
+mkdir -p "$HARNESS_SCRATCH/lib"
+cp "$SCRATCH_LIB" "$HARNESS_SCRATCH/lib/scratch.sh"
 
 # ---------------------------------------------------------------------------
 # run_suites is invoked in a SUBSHELL per scenario so each scenario gets a fresh

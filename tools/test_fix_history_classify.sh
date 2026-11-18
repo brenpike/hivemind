@@ -30,6 +30,8 @@ set -u
 unset HIVEMIND_PR_REVIEWERS
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 MODULE_DIR="$REPO_ROOT/plugin/skills/github-review-loop/scripts"
 FILTER="$MODULE_DIR/fix-history-classify.jq"
@@ -46,7 +48,7 @@ FAIL_COUNT=0
 pass() { echo "PASS [$1] $2"; PASS_COUNT=$((PASS_COUNT + 1)); }
 failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 
-WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-fix-history.XXXXXX")"
+make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-fix-history.XXXXXX"
 cleanup() { rm -rf "$WORKDIR"; return 0; }
 trap cleanup EXIT
 

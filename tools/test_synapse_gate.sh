@@ -17,6 +17,8 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 PLUGIN_ROOT="$REPO_ROOT/plugin"
 HOOK="$PLUGIN_ROOT/hooks/synapse-gate.sh"
@@ -25,7 +27,7 @@ HOOKS_JSON="$PLUGIN_ROOT/hooks/hooks.json"
 [ -f "$HOOK" ] || { echo "FAIL: hook under test missing: $HOOK" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "FAIL: required dependency 'jq' is not installed" >&2; exit 2; }
 
-WORK_ROOT="$(mktemp -d)"
+make_scratch_dir WORK_ROOT
 remove_work_root() { rm -rf "$WORK_ROOT"; }
 trap remove_work_root EXIT
 

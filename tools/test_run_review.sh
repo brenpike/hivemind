@@ -45,6 +45,8 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 RUN_REVIEW="$REPO_ROOT/plugin/skills/adaptation-cycle/scripts/run-review.sh"
 
 [ -f "$RUN_REVIEW" ] || { echo "FAIL: script under test missing: $RUN_REVIEW" >&2; exit 2; }
@@ -59,13 +61,10 @@ else
   exit 2
 fi
 
-# INVARIANT: the cleanup trap's target is set once, before the trap, and only from a directory
-# this run's mktemp created and canonicalized; a failed step exits first, so cleanup never removes
-# an empty, fallback or working-directory path.
-raw_tmpdir="$(mktemp -d)" || { echo "FAIL: mktemp -d failed" >&2; exit 2; }
-[ -n "$raw_tmpdir" ] && [ -d "$raw_tmpdir" ] || { echo "FAIL: mktemp -d gave no directory" >&2; exit 2; }
-TMPDIR_TEST="$(cd -- "$raw_tmpdir" && pwd -P)" && [ -n "$TMPDIR_TEST" ] && [ -d "$TMPDIR_TEST" ] \
-  || { echo "FAIL: cannot resolve scratch dir: $raw_tmpdir" >&2; exit 2; }
+# INVARIANT: the cleanup trap's target is set once, before the trap, and only by make_scratch_dir
+# from a fresh, empty directory this run's mktemp created and resolved; a failed call exits 2
+# first, so cleanup never removes an empty, fallback or working-directory path.
+make_scratch_dir TMPDIR_TEST
 cleanup() { rm -rf "$TMPDIR_TEST"; }
 trap cleanup EXIT
 

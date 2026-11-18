@@ -21,6 +21,8 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 SHARED_DIR="$REPO_ROOT/plugin/skills/_shared"
 FIX_DIR="$REPO_ROOT/tests/brood"
@@ -107,7 +109,7 @@ pass() { echo "PASS [$1] $2"; PASS_COUNT=$((PASS_COUNT + 1)); }
 failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 
 # Disposable tmpdir for inline JSON ledger fixtures and side-effect probes.
-WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-shared-libs.XXXXXX")"
+make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-shared-libs.XXXXXX"
 cleanup() { rm -rf "$WORKDIR"; return 0; }
 trap cleanup EXIT
 
@@ -4473,28 +4475,26 @@ echo '=== test-detect.sh: ecosystem detection + JS sub-signal ordering + ## Vali
 # scripts.test fall-through, monorepo multi-match (root signals only), and the file-guard
 # delegation for the `## Validation` append.
 
-# Helper: build a fresh empty project dir and echo its path.
+# td_new_project <var>: assigns <var> a fresh empty project dir under $WORKDIR.
 td_new_project() {
-  local p
-  p="$(mktemp -d "$WORKDIR/td-proj.XXXXXX")"
-  printf '%s' "$p"
+  make_scratch_dir "$1" "$WORKDIR/td-proj.XXXXXX"
 }
 
 # 15a. Each ecosystem emits its correct command (one focused project per ecosystem).
 # JS curated scripts.test → npm test.
-td_js="$(td_new_project)"
+td_new_project td_js
 printf '{"scripts":{"test":"jest --runInBand"}}\n' > "$td_js/package.json"
 assert_eq "test-detect:js-curated" "npm test" "$(hivemind_detect_test_commands "$td_js")" "curated scripts.test → npm test"
 
 # Python pytest (pyproject.toml with a pytest dependency signal) → pytest.
-td_py="$(td_new_project)"
+td_new_project td_py
 printf '[project]\ndependencies = ["pytest"]\n' > "$td_py/pyproject.toml"
 assert_eq "test-detect:python" "pytest" "$(hivemind_detect_test_commands "$td_py")" "pyproject pytest signal → pytest"
 
 # Python pytest NESTED test file (tests/unit/test_api.py, no direct-child test file) → pytest.
 # NON-VACUITY: the old shallow ls-glob misses tests/unit/test_api.py so this case FAILS against
 # the unfixed code (emitting nothing) and PASSES only with the recursive find fix.
-td_py_nested="$(td_new_project)"
+td_new_project td_py_nested
 printf '[tool.pytest.ini_options]\n' > "$td_py_nested/pyproject.toml"
 mkdir -p "$td_py_nested/tests/unit"
 printf '# unit test\n' > "$td_py_nested/tests/unit/test_api.py"
@@ -4503,7 +4503,7 @@ assert_eq "test-detect:python-nested-test-file" "pytest" \
   "pyproject.toml [tool.pytest] + nested tests/unit/test_api.py → pytest"
 
 # Python pytest DIRECT-CHILD regression: tests/test_foo.py still detected after the recursive fix.
-td_py_direct="$(td_new_project)"
+td_new_project td_py_direct
 printf '[tool.pytest.ini_options]\n' > "$td_py_direct/pyproject.toml"
 mkdir -p "$td_py_direct/tests"
 printf '# test\n' > "$td_py_direct/tests/test_foo.py"
@@ -4512,7 +4512,7 @@ assert_eq "test-detect:python-direct-test-file" "pytest" \
   "direct-child tests/test_foo.py still detected (recursive find includes depth-1)"
 
 # Python pytest NO-SIGNAL regression: pyproject.toml without a pytest signal AND no test files → no pytest.
-td_py_nosig="$(td_new_project)"
+td_new_project td_py_nosig
 printf '[project]\nname = "myapp"\n' > "$td_py_nosig/pyproject.toml"
 mkdir -p "$td_py_nosig/tests"
 printf '# helper\n' > "$td_py_nosig/tests/helpers.py"
@@ -4521,38 +4521,38 @@ assert_eq "test-detect:python-no-signal" "" \
   "pyproject without pytest signal and no test_*.py/*_test.py → no pytest command"
 
 # Go → go test ./...
-td_go="$(td_new_project)"
+td_new_project td_go
 printf 'module example.com/x\n\ngo 1.22\n' > "$td_go/go.mod"
 assert_eq "test-detect:go" "go test ./..." "$(hivemind_detect_test_commands "$td_go")" "go.mod → go test ./..."
 
 # Rust → cargo test.
-td_rs="$(td_new_project)"
+td_new_project td_rs
 printf '[package]\nname = "x"\n' > "$td_rs/Cargo.toml"
 assert_eq "test-detect:rust" "cargo test" "$(hivemind_detect_test_commands "$td_rs")" "Cargo.toml → cargo test"
 
 # .NET csproj referencing Microsoft.NET.Test.Sdk → dotnet test.
-td_net="$(td_new_project)"
+td_new_project td_net
 printf '<Project><ItemGroup><PackageReference Include="Microsoft.NET.Test.Sdk" /></ItemGroup></Project>\n' > "$td_net/app.csproj"
 assert_eq "test-detect:dotnet" "dotnet test" "$(hivemind_detect_test_commands "$td_net")" "csproj with Test.Sdk → dotnet test"
 # .NET csproj WITHOUT the Test.Sdk reference → no signal (file existence alone insufficient).
-td_net_bare="$(td_new_project)"
+td_new_project td_net_bare
 printf '<Project></Project>\n' > "$td_net_bare/app.csproj"
 assert_eq "test-detect:dotnet-no-sdk" "" "$(hivemind_detect_test_commands "$td_net_bare")" "csproj without Test.Sdk → no command"
 
 # Elixir → mix test.
-td_ex="$(td_new_project)"
+td_new_project td_ex
 printf 'defmodule X.MixProject do\nend\n' > "$td_ex/mix.exs"
 assert_eq "test-detect:elixir" "mix test" "$(hivemind_detect_test_commands "$td_ex")" "mix.exs → mix test"
 
 # Ruby Gemfile with rspec → bundle exec rspec.
-td_rb="$(td_new_project)"
+td_new_project td_rb
 printf 'gem "rspec"\n' > "$td_rb/Gemfile"
 assert_eq "test-detect:ruby" "bundle exec rspec" "$(hivemind_detect_test_commands "$td_rb")" "Gemfile rspec signal → bundle exec rspec"
 
 # Ruby rspec NESTED spec file (spec/unit/foo_spec.rb, no direct-child spec file) → bundle exec rspec.
 # NON-VACUITY: the old shallow ls-glob misses spec/unit/foo_spec.rb so this case FAILS against
 # the unfixed code and PASSES only with the recursive find fix.
-td_rb_nested="$(td_new_project)"
+td_new_project td_rb_nested
 mkdir -p "$td_rb_nested/spec/unit"
 printf '# unit spec\n' > "$td_rb_nested/spec/unit/foo_spec.rb"
 assert_eq "test-detect:ruby-nested-spec-file" "bundle exec rspec" \
@@ -4560,7 +4560,7 @@ assert_eq "test-detect:ruby-nested-spec-file" "bundle exec rspec" \
   "nested spec/unit/foo_spec.rb with no Gemfile rspec → bundle exec rspec"
 
 # Ruby rspec DIRECT-CHILD regression: spec/bar_spec.rb still detected after the recursive fix.
-td_rb_direct="$(td_new_project)"
+td_new_project td_rb_direct
 mkdir -p "$td_rb_direct/spec"
 printf '# spec\n' > "$td_rb_direct/spec/bar_spec.rb"
 assert_eq "test-detect:ruby-direct-spec-file" "bundle exec rspec" \
@@ -4572,86 +4572,86 @@ assert_eq "test-detect:ruby-direct-spec-file" "bundle exec rspec" \
 # `^[ ]*test[[:space:]]*:` (which matched `test` + optional space + ANY colon, so it false-positived
 # on `:=`/`::=` assignment lines) or to a behavior that must be PRESERVED.
 # (1) column-0 real target → make test [preserved].
-td_mk="$(td_new_project)"
+td_new_project td_mk
 printf 'test:\n\tgo test ./...\n' > "$td_mk/Makefile"
 assert_eq "test-detect:make" "make test" "$(hivemind_detect_test_commands "$td_mk")" "column-0 test: target → make test [preserved]"
 # (2) space-leading target → make test [Fix-1 guard: column-0-anchored regex would miss this].
-td_mk_sp="$(td_new_project)"
+td_new_project td_mk_sp
 printf ' test:\n\t@echo run\n' > "$td_mk_sp/Makefile"
 assert_eq "test-detect:make-space-target" "make test" "$(hivemind_detect_test_commands "$td_mk_sp")" "space-indented test: target → make test [Fix-1 guard]"
 # (3) double-colon rule target → make test [non-vacuity: a naive reject-any-second-char-after-colon
 # would wrongly drop this VALID target].
-td_mk_dc="$(td_new_project)"
+td_new_project td_mk_dc
 printf 'test::\n\t@echo dc\n' > "$td_mk_dc/Makefile"
 assert_eq "test-detect:make-double-colon" "make test" "$(hivemind_detect_test_commands "$td_mk_dc")" "double-colon test:: rule → make test [non-vacuity: valid target, second char is a colon]"
 # (4) THE Codex P2: `test :=` recursive assignment, no real target → empty [pre-fix the regex
 # matched the `:` of `:=` → false positive; rejected post-fix by the assignment-operator grammar].
-td_mk_assign="$(td_new_project)"
+td_new_project td_mk_assign
 printf 'test := foo\nbuild:\n\tgo build ./...\n' > "$td_mk_assign/Makefile"
 assert_eq "test-detect:make-assign-colon-eq" "" "$(hivemind_detect_test_commands "$td_mk_assign")" "test := assignment, no target → empty [Codex P2: pre-fix matched the : of :=]"
 # (5) `test ::=` POSIX simple assignment → empty [pre-fix regex matched the first `:` of `::=` →
 # false positive; rejected post-fix].
-td_mk_assign2="$(td_new_project)"
+td_new_project td_mk_assign2
 printf 'test ::= foo\nbuild:\n\tgo build ./...\n' > "$td_mk_assign2/Makefile"
 assert_eq "test-detect:make-assign-dcolon-eq" "" "$(hivemind_detect_test_commands "$td_mk_assign2")" "test ::= assignment → empty [pre-fix matched first : of ::=]"
 # (6) `test ?=` conditional assignment → empty [grammar class lock: rejected by the assignment-operator
 # branch, never reached the pre-fix regex's colon at all but locks the class].
-td_mk_q="$(td_new_project)"
+td_new_project td_mk_q
 printf 'test ?= foo\nbuild:\n\tgo build ./...\n' > "$td_mk_q/Makefile"
 assert_eq "test-detect:make-assign-qeq" "" "$(hivemind_detect_test_commands "$td_mk_q")" "test ?= assignment → empty [grammar class lock]"
 # (7) `test +=` append assignment → empty [grammar class lock].
-td_mk_plus="$(td_new_project)"
+td_new_project td_mk_plus
 printf 'test += foo\nbuild:\n\tgo build ./...\n' > "$td_mk_plus/Makefile"
 assert_eq "test-detect:make-assign-pluseq" "" "$(hivemind_detect_test_commands "$td_mk_plus")" "test += assignment → empty [grammar class lock]"
 # (8) `test !=` shell assignment → empty [grammar class lock].
-td_mk_bang="$(td_new_project)"
+td_new_project td_mk_bang
 printf 'test != echo foo\nbuild:\n\tgo build ./...\n' > "$td_mk_bang/Makefile"
 assert_eq "test-detect:make-assign-bangeq" "" "$(hivemind_detect_test_commands "$td_mk_bang")" "test != shell-assignment → empty [grammar class lock]"
 # (9) `.PHONY: test` with NO `test:` recipe → empty [non-vacuity: locks the decision that a phony
 # DECLARATION with no recipe is not a runnable `make test`; first token is `.PHONY`, not `test`].
-td_mk_phony="$(td_new_project)"
+td_new_project td_mk_phony
 printf '.PHONY: test\nbuild:\n\tgo build ./...\n' > "$td_mk_phony/Makefile"
 assert_eq "test-detect:make-phony-only" "" "$(hivemind_detect_test_commands "$td_mk_phony")" ".PHONY: test with no test: recipe → empty [first token is .PHONY, not test]"
 # (10) `.PHONY: test` PLUS a real `test:` recipe elsewhere → make test [the real target line matches
 # independently of the phony declaration].
-td_mk_phony2="$(td_new_project)"
+td_new_project td_mk_phony2
 printf '.PHONY: test\ntest:\n\tgo test ./...\n' > "$td_mk_phony2/Makefile"
 assert_eq "test-detect:make-phony-plus-target" "make test" "$(hivemind_detect_test_commands "$td_mk_phony2")" ".PHONY: test plus real test: recipe → make test [real target matches independently]"
 # (11) TAB-indented `test:` recipe line under another target → empty [regresses if the leading class
 # is loosened to `[[:space:]]*`; locks the literal-space invariant — a TAB-led line is a recipe].
-td_mk_tab="$(td_new_project)"
+td_new_project td_mk_tab
 printf 'build:\n\ttest: not-a-target\n' > "$td_mk_tab/Makefile"
 assert_eq "test-detect:make-tab-recipe" "" "$(hivemind_detect_test_commands "$td_mk_tab")" "TAB-indented test: recipe line → empty [locks literal-space leading invariant]"
 # (12) `testing:` near-miss → empty [token-boundary guard: first token is `testing`, not `test`].
-td_mk_near="$(td_new_project)"
+td_new_project td_mk_near
 printf 'testing:\n\t@echo x\n' > "$td_mk_near/Makefile"
 assert_eq "test-detect:make-near-miss" "" "$(hivemind_detect_test_commands "$td_mk_near")" "testing: near-miss → empty [token-boundary guard]"
 # (13) `test: VAR=x` target-specific variable line → make test [non-vacuity: a matcher rejecting ANY
 # `=` after the colon would wrongly drop this REAL target — distinguishes the assignment OPERATOR
 # (`:=`/`::=`/`?=`/`+=`/`!=`) from any plain `=` appearing in the recipe/prereqs].
-td_mk_tsv="$(td_new_project)"
+td_new_project td_mk_tsv
 printf 'test: VAR=x\n\tgo test ./...\n' > "$td_mk_tsv/Makefile"
 assert_eq "test-detect:make-target-specific-var" "make test" "$(hivemind_detect_test_commands "$td_mk_tsv")" "test: VAR=x target-specific variable → make test [non-vacuity: any-= reject would drop a real target]"
 # Makefile WITHOUT any test: target → no signal [preserved].
-td_mk_bare="$(td_new_project)"
+td_new_project td_mk_bare
 printf 'build:\n\tgo build ./...\n' > "$td_mk_bare/Makefile"
 assert_eq "test-detect:make-no-target" "" "$(hivemind_detect_test_commands "$td_mk_bare")" "Makefile lacking test: target → no command [preserved]"
 
 # 15b. JS sub-signal ordering: a curated scripts.test WINS over a parallel vitest/jest dependency
 # (the fallback is NOT taken when sub-signal 1 matches).
-td_js_order="$(td_new_project)"
+td_new_project td_js_order
 printf '{"scripts":{"test":"vitest run --coverage"},"devDependencies":{"vitest":"^1.0.0","jest":"^29.0.0"}}\n' > "$td_js_order/package.json"
 assert_eq "test-detect:js-curated-wins" "npm test" "$(hivemind_detect_test_commands "$td_js_order")" "curated scripts.test wins over vitest/jest deps"
 # vitest fallback fires only when scripts.test is unmatched.
-td_js_vitest="$(td_new_project)"
+td_new_project td_js_vitest
 printf '{"devDependencies":{"vitest":"^1.0.0"}}\n' > "$td_js_vitest/package.json"
 assert_eq "test-detect:js-vitest-fallback" "npx vitest run" "$(hivemind_detect_test_commands "$td_js_vitest")" "no scripts.test, vitest dep → npx vitest run"
 # jest fallback fires only when scripts.test AND vitest are both unmatched.
-td_js_jest="$(td_new_project)"
+td_new_project td_js_jest
 printf '{"devDependencies":{"jest":"^29.0.0"}}\n' > "$td_js_jest/package.json"
 assert_eq "test-detect:js-jest-fallback" "npx jest" "$(hivemind_detect_test_commands "$td_js_jest")" "no scripts.test/vitest, jest dep → npx jest"
 # vitest precedes jest when BOTH deps present and scripts.test is unmatched.
-td_js_both="$(td_new_project)"
+td_new_project td_js_both
 printf '{"devDependencies":{"vitest":"^1.0.0","jest":"^29.0.0"}}\n' > "$td_js_both/package.json"
 assert_eq "test-detect:js-vitest-over-jest" "npx vitest run" "$(hivemind_detect_test_commands "$td_js_both")" "vitest precedes jest fallback"
 
@@ -4660,40 +4660,40 @@ assert_eq "test-detect:js-vitest-over-jest" "npx vitest run" "$(hivemind_detect_
 # default prefixes; none of them is ever emitted as `npm test`.
 for td_init_prefix in 'echo "Error: no test specified" && exit 1' \
                       'echo \"Error: no test specified\" && exit 1'; do
-  td_init="$(td_new_project)"
+  td_new_project td_init
   jq -n --arg t "$td_init_prefix" '{scripts:{test:$t},devDependencies:{vitest:"^1.0.0"}}' > "$td_init/package.json"
   assert_eq "test-detect:placeholder-fallthrough" "npx vitest run" "$(hivemind_detect_test_commands "$td_init")" \
     "init placeholder scripts.test rejected → falls through to vitest (not npm test)"
 done
 # Placeholder with NO fallback present → JS contributes nothing (no-signal path).
-td_init_only="$(td_new_project)"
+td_new_project td_init_only
 jq -n '{scripts:{test:"echo \"Error: no test specified\" && exit 1"}}' > "$td_init_only/package.json"
 assert_eq "test-detect:placeholder-only" "" "$(hivemind_detect_test_commands "$td_init_only")" \
   "init placeholder with no vitest/jest fallback → no command emitted"
 # Case-insensitivity of the substring guard.
-td_init_case="$(td_new_project)"
+td_new_project td_init_case
 jq -n '{scripts:{test:"echo \"ERROR: NO TEST SPECIFIED\" && exit 1"},devDependencies:{jest:"^29.0.0"}}' > "$td_init_case/package.json"
 assert_eq "test-detect:placeholder-case-insensitive" "npx jest" "$(hivemind_detect_test_commands "$td_init_case")" \
   "uppercase placeholder still rejected (case-insensitive) → jest fallback"
 
 # 15d. Non-string scripts.test (object / number) → UNMATCHED, falls through to fallbacks.
-td_nonstr_obj="$(td_new_project)"
+td_new_project td_nonstr_obj
 printf '{"scripts":{"test":{"cmd":"x"}},"devDependencies":{"vitest":"^1.0.0"}}\n' > "$td_nonstr_obj/package.json"
 assert_eq "test-detect:nonstring-object" "npx vitest run" "$(hivemind_detect_test_commands "$td_nonstr_obj")" \
   "object scripts.test unmatched → vitest fallback"
-td_nonstr_num="$(td_new_project)"
+td_new_project td_nonstr_num
 printf '{"scripts":{"test":42},"devDependencies":{"jest":"^29.0.0"}}\n' > "$td_nonstr_num/package.json"
 assert_eq "test-detect:nonstring-number" "npx jest" "$(hivemind_detect_test_commands "$td_nonstr_num")" \
   "numeric scripts.test unmatched → jest fallback"
 # Non-string scripts.test with NO fallback → JS contributes nothing.
-td_nonstr_only="$(td_new_project)"
+td_new_project td_nonstr_only
 printf '{"scripts":{"test":["a","b"]}}\n' > "$td_nonstr_only/package.json"
 assert_eq "test-detect:nonstring-only" "" "$(hivemind_detect_test_commands "$td_nonstr_only")" \
   "array scripts.test, no fallback → no command"
 
 # 15e. Monorepo multi-match: root package.json (curated) + go.mod → BOTH commands, in canonical
 # order, NEVER combined. A NESTED package.json is ignored (root signals only).
-td_mono="$(td_new_project)"
+td_new_project td_mono
 printf '{"scripts":{"test":"npm run jest"}}\n' > "$td_mono/package.json"
 printf 'module example.com/x\n\ngo 1.22\n' > "$td_mono/go.mod"
 mkdir -p "$td_mono/packages/nested"
@@ -4704,7 +4704,7 @@ go test ./..." "$(hivemind_detect_test_commands "$td_mono")" \
 
 # 15f. No-signal project → detector emits nothing; recorder reports recommend-manual and writes
 # NOTHING (nothing fabricated).
-td_empty="$(td_new_project)"
+td_new_project td_empty
 printf '# Just docs\n' > "$td_empty/README.md"
 assert_eq "test-detect:no-signal-detect" "" "$(hivemind_detect_test_commands "$td_empty")" "no signal → empty detector output"
 td_empty_claude="$td_empty/CLAUDE.md"
@@ -4720,7 +4720,7 @@ fi
 # 15g. Recorder DELEGATES the `## Validation` append to file-guard.sh: absent CLAUDE.md → `added`
 # with a fenced block per command; existing `## Validation` → `already documented`, prose
 # byte-untouched.
-td_rec="$(td_new_project)"
+td_new_project td_rec
 printf 'module example.com/x\n\ngo 1.22\n' > "$td_rec/go.mod"
 td_rec_claude="$td_rec/CLAUDE.md"
 rm -f "$td_rec_claude"
@@ -4729,7 +4729,7 @@ assert_eq "test-detect:recorder-added" "added" "$td_rec_added" "absent CLAUDE.md
 assert_eq "test-detect:recorder-section" "1" "$(grep -c '^## Validation$' "$td_rec_claude")" "## Validation heading written once"
 assert_eq "test-detect:recorder-command" "1" "$(grep -cF 'go test ./...' "$td_rec_claude")" "detected command in the fenced block"
 # Already-documented project → already documented, existing prose untouched (file-guard delegation).
-td_doc="$(td_new_project)"
+td_new_project td_doc
 printf 'module example.com/x\n\ngo 1.22\n' > "$td_doc/go.mod"
 td_doc_claude="$td_doc/CLAUDE.md"
 printf '# Project\n\n## Validation\n\n```bash\nmake test\n```\n' > "$td_doc_claude"
@@ -4739,7 +4739,7 @@ assert_eq "test-detect:recorder-already-documented" "already documented" "$td_do
 assert_eq "test-detect:recorder-prose-untouched" "$td_doc_before" "$(cat "$td_doc_claude")" "existing ## Validation prose left byte-unchanged"
 
 # 15h. Monorepo recorder: multiple commands → one fenced block PER command, both present.
-td_mono_rec="$(td_new_project)"
+td_new_project td_mono_rec
 printf '{"scripts":{"test":"npm run x"}}\n' > "$td_mono_rec/package.json"
 printf 'module example.com/x\n\ngo 1.22\n' > "$td_mono_rec/go.mod"
 td_mono_claude="$td_mono_rec/CLAUDE.md"

@@ -50,6 +50,8 @@ set -euo pipefail
 # ── Path setup ──────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 ENGINE="$REPO_ROOT/plugin/skills/gather-facts/scripts/gather-facts.sh"
 ASSEMBLY="$REPO_ROOT/plugin/skills/gather-facts/scripts/gather-facts.jq"
@@ -76,10 +78,9 @@ done
 
 # ── Disposable workdir + host-config isolation ──────────────────────────────
 
-WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-gather-facts-test.XXXXXX")"
+make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-gather-facts-test.XXXXXX"
 cleanup() { rm -rf "$WORKDIR"; }
 trap cleanup EXIT
-WORKDIR="$(cd "$WORKDIR" && pwd -P)"
 
 mkdir -p "$WORKDIR/home" "$WORKDIR/base-bin" "$WORKDIR/stub-bin"
 export HOME="$WORKDIR/home"

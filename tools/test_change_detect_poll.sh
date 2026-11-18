@@ -134,6 +134,8 @@ set -u
 unset HIVEMIND_PR_REVIEWERS
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=lib/scratch.sh
+. "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 POLL="$REPO_ROOT/plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh"
 FIXTURES="$REPO_ROOT/tests/change-detect-poll"
@@ -142,7 +144,7 @@ FIXTURES="$REPO_ROOT/tests/change-detect-poll"
 [ -d "$FIXTURES" ] || { echo "FAIL: fixture dir missing: $FIXTURES" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required by the script under test" >&2; exit 2; }
 
-TMPDIR_TEST="$(mktemp -d)"
+make_scratch_dir TMPDIR_TEST
 cleanup() { rm -rf "$TMPDIR_TEST"; }
 trap cleanup EXIT
 
