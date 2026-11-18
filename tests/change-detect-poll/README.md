@@ -223,58 +223,106 @@ clock reading is `POLL_ERROR`, exit 1. `--snapshot` and `--check` never read the
 
 The fake `date` counts its calls in the state dir's `date.n`, which `new_state` zeroes. When the
 state dir carries `date.seq` (`set_seq "$st" date <entry>...`), call N serves line N: `FAIL` exits
-non-zero with no output, `CLOCK` reads the virtual clock, and any other line, an empty one
-included, is printed as the reading. Calls past the list, and states with no `date.seq`, read the
-virtual clock unchanged.
-
-When the state dir carries the flag file `date.padded` (`new_state` leaves it absent), every
-virtual-clock reading, a `CLOCK` entry or a call past the list, is printed left-padded with zeros
-to 18 digits.
+non-zero with no output, `CLOCK` reads the virtual clock, `PADDED` reads the virtual clock
+left-padded with zeros to 18 digits, and any other line, an empty one included, is printed as the
+reading. Calls past the list, and states with no `date.seq`, read the virtual clock unchanged. The
+virtual epoch holds the digit 8, so a padded reading that skips the base-10 coercion is not valid
+octal: Bash arithmetic on it errors instead of silently reading another number. The fake `gh`
+appends `<kind>:<pr>` to the state dir's `gh.prs` on every call, `<pr>` being the PR number the
+call carried, so a case reads the PR number the poll handed to `gh`.
 
 No case scans the poll's text for numbers. Bash evaluates a number in many syntax forms
 (arithmetic expansion, `(( ))`, `let`, `declare -i`, `[[ -eq ]]`, subscripts, substring offsets),
 so a list of allowed forms cannot be complete. Running the poll at each source is
 form-independent: a hostile reading evaluated before its check, in any form, leaves the canary
-file behind, and a zero-padded reading used without the base-10 coercion changes the output. The
-sources are the PR number, the window and interval arguments, the seed's `failed_checks` field, a
-capture's check count and the clock. A new source of numbers is a new row of that grid.
+file behind, and a zero-padded reading used without the base-10 coercion changes the output.
 `numbers:one-clock-read` and `watch:one-sleep-primitive` are placement pins for one command word
-each, `date` and `sleep`; they are not a safety proof, and the rows below prove the rule.
-
-The canary payload is `ARITH_PAYLOAD`, `BASH_VERSINFO[$(touch <canary>)]`: arithmetic evaluation
-runs its subscript, which creates `ARITH_CANARY`. Its base name is `BASH_VERSINFO`, an array every
-Bash sets, because the poll runs under `set -u` and an unset base name would abort the evaluation
-before the subscript runs.
+each, `date` and `sleep`; they are not a safety proof, and the checked-number grid below proves the
+rule.
 
 - `clock:bad-reading-fails-closed` — each bad reading (`FAIL`, empty, `abc`, `-1`,
-  `9999999999999999999`, the arithmetic payload `ARITH_PAYLOAD`) served on clock read N, for N = 1
-  to 4, makes a poll over the steady pre-cycle-0 state armed with the shared seed print exactly
-  `POLL_ERROR`, exit 1, after exactly N clock reads. Reads 1 to 4 are arm time, the first loop top,
-  the first `sleep_to_next_poll` and the second loop top. On N = 1 the fake `gh` sees zero calls.
-  The unfixed script idles to `WATCH_TIMEOUT`.
+  `9999999999999999999`) served on clock read N, for N = 1 to 4, makes a poll over the steady
+  pre-cycle-0 state armed with the shared seed print exactly `POLL_ERROR`, exit 1, after exactly N
+  clock reads. Reads 1 to 4 are arm time, the first loop top, the first `sleep_to_next_poll` and
+  the second loop top. On N = 1 the fake `gh` sees zero calls. The unfixed script idles to
+  `WATCH_TIMEOUT`.
 - `clock:snapshot-and-check-never-read-clock` — with a `FAIL` `date.seq`, `--snapshot` prints its
   `BASELINE=` line, exit 0, and `--check` with the shared seed prints `UNCHANGED`, exit 0. Each
   leaves `date.n` at 0.
 - `numbers:one-clock-read` — structural placement pin, like `watch:one-sleep-primitive`: the
   executable, non-comment lines of the poll hold exactly one `date` command, inside `read_clock`.
-- `numbers:no-source-evaluated-before-check` — `ARITH_PAYLOAD`, `abc`, `-1` and empty, each served
-  as the PR number, the window and the interval of a poll over the steady pre-cycle-0 state armed
-  with the shared seed, print exactly `POLL_ERROR`, exit 1, with zero `gh` calls and no sleep.
-  `ARITH_PAYLOAD` served as the seed's `failed_checks` field, through an exported variable whose
-  name is the field value (the seed shape allows only `[A-Za-z0-9_-]`, and arithmetic on a name
-  runs its value), is `POLL_ERROR` in poll mode and `CHECK_ERROR` in `--check` mode, exit 1, with
-  zero `gh` calls. `ARITH_CANARY` does not exist after every row ran, the clock rows of
-  `clock:bad-reading-fails-closed` included.
-- `numbers:leading-zero-readings-behave-as-decimal` — a poll over the steady pre-cycle-0 state
-  armed with the shared seed, window 12 and interval 9, prints exactly `WATCH_TIMEOUT`, exit 0, and
-  sleeps 9, 9, 9, 8, 7, 6, 5, 4, 3, 2, 1. The padded run, with the PR number, window and interval
-  zero-padded (`004242`, `0012`, `0009`), the seed's `failed_checks` field padded (`000`) and
-  `date.padded` set, gives identical output, status, `gh` calls and sleeps.
-- `numbers:bad-capture-count-fails-closed` — a capture whose `checkRunCountsByState` holds a
-  `FAILURE` count of `-1`, or of the 19 digits `1234567890123456789`, is `SNAPSHOT_ERROR` in
-  snapshot mode and `POLL_ERROR` in poll mode, exit 1.
 - `validation:oversized-pr-number` — a 19-digit PR number is `POLL_ERROR`, exit 1, with zero `gh`
   calls.
+
+### The checked-number grid
+
+One table in the runner, `NUMBER_SOURCES`, names every number the poll reads through
+`read_decimal` or `read_clock`, how to inject a reading into it, and the modes that read it. The
+runner generates every probe kind for every (source, mode) pair of the table, so no source gets a
+hand-picked subset of probes. Each row is `name|injector|modes|before_gh|plain|padded|not_applicable`:
+
+| Source | Injected through | Modes |
+| --- | --- | --- |
+| `pr-number` | the PR number argument | poll, `--snapshot`, `--check` |
+| `watch-window` | the watch window argument | poll, `--snapshot`, `--check` |
+| `poll-interval` | the poll interval argument | poll, `--snapshot`, `--check` |
+| `seed-failed-checks` | the shared seed's `failed_checks` field | poll, `--check` |
+| `clock-arm-read` | clock read 1 (arm time), through `date.seq` | poll |
+| `clock-loop-top-read` | clock read 2 (the loop-top deadline check) | poll |
+| `clock-sleep-read` | clock read 3 (`sleep_to_next_poll`) | poll |
+| `capture-check-run-failures` | the `checkRunCountsByState` `FAILURE` count of the snapshot query | poll, `--snapshot`, `--check` |
+| `capture-status-context-failures` | the `statusContextCountsByState` `FAILURE` count of the snapshot query | poll, `--snapshot`, `--check` |
+
+Each probe is one case named `numbers:<source>:<kind>:<mode>`. The probe kinds:
+
+- `hostile` — `ARITH_PAYLOAD`, `BASH_VERSINFO[$(touch <canary>)]`: arithmetic evaluation runs its
+  subscript, which creates `ARITH_CANARY`. Its base name is `BASH_VERSINFO`, an array every Bash
+  sets, because the poll runs under `set -u` and an unset base name would abort the evaluation
+  before the subscript runs.
+- `non-digit` (`abc`), `negative` (`-1`), `empty` (the empty string) and `19-digits`
+  (`1234567890123456789`, past the 18-digit bound).
+- `padded` — the row's padded reading (`004242`, `0009`, `0008`, `000`, or the fake `date`'s
+  `PADDED`) against its plain one (`4242`, `9`, `8`, `0`, or `CLOCK`).
+
+A `hostile`, `non-digit`, `negative`, `empty` or `19-digits` probe passes when the run prints
+exactly the mode's error marker (`POLL_ERROR`, `SNAPSHOT_ERROR`, `CHECK_ERROR`), exit 1, and leaves
+no `ARITH_CANARY`; a source the row marks `before_gh` (the arguments, the seed, the first two clock
+reads) also leaves the fake `gh` at zero calls. A `padded` probe runs the same mode twice, once with
+the plain reading and once with the padded one: the plain run exits 0, and the padded run gives
+identical status, `gh` calls, sleeps, PR numbers handed to `gh` and output. The probe runs under
+window 3 and interval 1; the interval row widens the window to 9, so an interval of 8 reaches
+`sleep`. The window, interval and clock readings hold a digit octal lacks, so Bash arithmetic on a
+padded reading that skipped the base-10 coercion errors, and the fake `gh` records the PR number
+it was handed.
+
+How a reading reaches each source:
+
+- The capture rows drive the count as a JSON string. The poll sums the `FAILURE` counts of both
+  buckets with jq's `add`; the injector sets the other bucket's `FAILURE` count to the empty
+  string, so `add` concatenates and the reading reaches the poll's `FAILED_CHECKS` line unchanged,
+  the payload and the padding included.
+- The seed row carries a reading the seed shape (`[A-Za-z0-9_-]`) cannot hold, the payload, through
+  an exported variable whose name is the field value, because arithmetic on a name runs its value.
+- The clock rows serve the reading on one `read_clock` call site through `date.seq`, the earlier
+  reads serving `CLOCK`.
+
+A probe a source cannot take is excluded in its row as `<kind>@<mode>=<reason>`, and the runner
+prints an `N/A` line with that reason instead of a case. The only exclusions are the `padded`
+probe of the window and interval in `--snapshot` and `--check`: those modes read both arguments
+through `read_decimal` but never use them, so a padded reading has nothing to change. Their
+`hostile` and rejection probes still run in every mode.
+
+`numbers:source-table` is the self-check. `check_source_row` validates every row before the grid
+runs: seven fields, an injector naming a declared function, a mode list drawn from poll, snapshot
+and check, a `yes` or `no` `before_gh`, well-formed exclusions naming a probe kind and one of the
+row's modes, and distinct plain and padded readings unless every mode excludes `padded`. A row that
+fails it fails the case and is left out of the grid, so a missing combination cannot pass
+silently. The case also confirms the check rejects a row missing its injector and a row missing
+its mode list. A new number source is one row.
+
+The grid proves only the sources in its table. The other snapshot scalars (`*_TOTAL` and the id
+tokens) are not read through `read_decimal`, are not in the table, and the grid claims nothing
+about them.
 
 ## Quiet-exit check
 
@@ -336,7 +384,7 @@ to carry. Two halves close the class rather than the instance, and the suite hol
 bash tools/test_change_detect_poll.sh
 ```
 
-Offline — bash + `jq` only, no `gh`, no network, ~160s. A PATH-shim fake `gh` serves canned
+Offline — bash + `jq` only, no `gh`, no network, ~4 min. A PATH-shim fake `gh` serves canned
 fixture bytes while the REAL `jq` runs the script's REAL filters, so the snapshot derivation
 under test is the production one and only the transport is faked.
 
