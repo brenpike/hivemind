@@ -15,7 +15,8 @@
  *            of a gate decision (standard-delivery gates.js).
  *   values   the routing values of a version check whose version_check is
  *            undetermined or unreadable (standard-delivery gates.js).
- *   unshownBriefText and describeCount (lib/plan.js), isRepositoryPath and
+ *   unshownBriefText and describeCount (lib/plan.js), optionLabel
+ *   (lib/brief.js), isRepositoryPath and
  *   listPlanPaths (lib/paths.js), and the workflow functions gateNames
  *   (standard-delivery gates.js), maxFixRounds (standard-delivery main.js)
  *   and buildUndecidedAsk (standard-delivery tails.js).
@@ -27,6 +28,10 @@
  *   declares those it reads.
  *
  * Outputs
+ *   buildApproachChoice()  the options and recommendation of an approach
+ *            question: A keeps patching the class, B changes approach, C
+ *            stops and ships what closes, all reversible and in the request;
+ *            strength strong for B. Read by buildRemediationPlanBrief.
  *   buildPlanAcceptanceBrief(plan), buildRemediationPlanBrief(plan),
  *   buildTrunkStaleBrief(facts) and buildExternalEffectBrief(summary)
  *            the briefs lib/plan.js resolves through decide(). The effect brief
@@ -84,10 +89,11 @@
  *   function of this library.
  *   The brief gate of a remediation plan acceptance is
  *   plan.remediation_gate.promotion_gate copied whole, with architectural
- *   also true when grows_surface is, and its problem names each flag that
- *   holds, so it asks then and is taken otherwise at the default level
- *   (decision-autonomy.md, Promotion Gate). repeats_surface only lists a
- *   taken acceptance: lib/plan.js passes it to decide() in listed.
+ *   also true when grows_surface or repeats_surface is, and its problem
+ *   names each flag that holds, so it asks then and is taken otherwise at
+ *   the default level (decision-autonomy.md, Promotion Gate). When
+ *   repeats_surface holds, its options and recommendation are
+ *   buildApproachChoice() (issue 587).
  *   Every brief here puts unshownBriefText() in each field no message
  *   shows and fits BRIEF_SCHEMA with worst-case inputs (the workflow's
  *   main.js, bounded fields).
@@ -125,6 +131,14 @@ function buildPlanAcceptanceBrief(plan) {
   };
 }
 
+function buildApproachChoice() {
+  const summaries = ['Keep patching this class.', 'Change approach.', 'Stop and ship what closes.'];
+  return {
+    options: summaries.map((summary, index) => buildBriefOption(optionLabel(index), summary)),
+    recommendation: { option_id: optionLabel(1), strength: 'strong', why: 'Patching has not closed this class.' }
+  };
+}
+
 function buildRemediationPlanBrief(plan) {
   const remediationGate = plan.remediation_gate;
   const flags = { ...remediationGate.promotion_gate, grows_surface: remediationGate.grows_surface, repeats_surface: remediationGate.repeats_surface };
@@ -132,11 +146,11 @@ function buildRemediationPlanBrief(plan) {
   const flagTexts = Object.keys(texts).filter((flag) => flags[flag]).map((flag) => texts[flag]);
   const lead = 'Run the remediation plan for the local review findings on the working branch, then every gate again.';
   const brief = buildPlanAcceptanceBrief(plan);
-  return Object.assign(brief, {
+  const choice = flags.repeats_surface ? buildApproachChoice() : { recommendation: { ...brief.recommendation, why: 'The plan answers the local review findings, and every gate runs again on its commit before the pull request.' } };
+  return Object.assign(brief, choice, {
     kind: REMEDIATION_PLAN_ACCEPTANCE_KIND,
     problem: flagTexts.length === 0 ? lead : lead + ' The plan ' + joinNames(flagTexts, 'and') + '.',
-    recommendation: { ...brief.recommendation, why: 'The plan answers the local review findings, and every gate runs again on its commit before the pull request.' },
-    gate: { ...remediationGate.promotion_gate, architectural: flags.architectural || flags.grows_surface }
+    gate: { ...remediationGate.promotion_gate, architectural: flags.architectural || flags.grows_surface || flags.repeats_surface }
   });
 }
 

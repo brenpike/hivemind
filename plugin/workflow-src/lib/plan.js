@@ -172,11 +172,11 @@
  *   step files the wave commits take. When scope.limits is not empty, a
  *   plan path in neither versioning.artifact_files nor
  *   versioning.changelog_files that neither equals a limit path nor sits
- *   under it plus '/' makes resolvePlanAcceptance pass outside_limits in
- *   listed to decide(), as plan.remediation_gate.repeats_surface passes
- *   repeats_surface, so an acceptance decide() takes is taken and listed
- *   for veto before merge: markOutsideLimits never changes the strength or
- *   why. A surface cell or a gate flag still asks, with its own reason.
+ *   under it plus '/' makes resolvePlanAcceptance pass outside_limits, its
+ *   only listed name, to decide(), so an acceptance decide() takes is
+ *   listed for veto before merge: markOutsideLimits never changes the
+ *   strength or why. A surface cell or a gate flag still asks, with its
+ *   own reason; repeats_surface sets the remediation brief gate (issue 587).
  *   The acceptance problem names their count when it fits. Empty limits
  *   leave the brief as it was. The limits come only
  *   from the scope step, so a later pass lists a file outside them again.
@@ -263,7 +263,7 @@ function buildPlanRevisePrompt({ request, facts, scope, answers, plan, questions
   const lines = [
     'Revise your plan for the delivery of the user request below with the user reply below.',
     boundarySentence(),
-    hasAnswers ? settledAnswersSentence('The reply block') : dataBlocksSentence('The reply block'),
+    (hasAnswers ? settledAnswersSentence : dataBlocksSentence)('The reply block'),
     '',
     buildFactsBlock(facts),
     formatDataBlock('request', request),
@@ -442,8 +442,7 @@ function resolveExternalEffects(plan, run, resolution) {
 function resolvePlanAcceptance(plan, run, resolution, scope) {
   const isRemediation = run.taken.some((entry) => entry.kind === PLANNER_ESCALATION_ROUTING_KIND || entry.kind === ROOT_CLUSTER_ROUTING_KIND);
   const outsidePaths = listOutsidePaths(plan, scope);
-  const holds = { outside_limits: outsidePaths.length > 0, repeats_surface: plan.remediation_gate.repeats_surface };
-  const listed = Object.keys(holds).filter((name) => holds[name]);
+  const listed = outsidePaths.length > 0 ? ['outside_limits'] : [];
   const brief = isRemediation ? buildRemediationPlanBrief(plan) : buildPlanAcceptanceBrief(plan);
   return resolveDecision(isRemediation ? REMEDIATION_PLAN_ACCEPTANCE_KIND : PLAN_ACCEPTANCE_KIND, markOutsideLimits(brief, outsidePaths), [run.pass, plan], run, resolution, listed);
 }

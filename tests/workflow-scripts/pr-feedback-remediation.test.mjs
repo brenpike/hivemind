@@ -843,6 +843,38 @@ const ROW_TESTS = {
       assert.ok(run.result.message.startsWith(PLAN_LINE + '\n\n**Q1. Run the remediation plan for the '), run.result.message);
       assert.ok(run.result.message.includes(' The plan changes how the system is built.**'), run.result.message);
     });
+    test('a plan that repeats a surface pauses once on the approach question, and a reply A whose revise settles it runs the shown plan', async () => {
+      const repeated = planResult(makePlan({ remediation_gate: { ...makePlan().remediation_gate, repeats_surface: true } }));
+      const replacement = planResult(makePlan({ summary: 'Rewrite the whole cache.', steps: [{ ...makePlan().steps[0], files: ['src/other.js'] }] }));
+      const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': repeated }));
+      assert.deepEqual(labelsOf(first), ['facts-1', 'fix-1', 'facts-2', 'scope-2', 'plan-2']);
+      assert.equal(first.result.needs_user, true);
+      const approach = '**\n- A: Keep patching this class.\n- B: Change approach. (recommended)\n- C: Stop and ship what closes.\nRecommendation: B (strong). Patching has not closed this class.';
+      assert.ok(first.result.message.startsWith(PLAN_LINE + '\n\n**Q1. Run the remediation plan for the local review findings on the working branch, then every gate again. The plan repeats a fix that did not close its class.' + approach), first.result.message);
+      assert.ok(!first.result.message.includes('**Q2.'), first.result.message);
+      const results = escalationResults('planner-escalation', { 'plan-2': repeated, 'revise-1': { ...replacement, settled: ['Q1'] } });
+      const resumed = await runWorkflow(resumeArgs(first, 'A'), results);
+      assert.deepEqual(labelsOf(resumed), [...labelsOf(first), 'revise-1', ...tailLabels(2)]);
+      assertReplayed(first, resumed);
+      assert.equal(readDataBlock(callOf(resumed, 'revise-1').prompt, 'reply'), 'A');
+      assert.ok(callOf(resumed, 'work-2-STEP-001').prompt.includes('src/a.js'));
+      assert.ok(!callOf(resumed, 'work-2-STEP-001').prompt.includes('src/other.js'));
+      assert.deepEqual(resumed.result, completeResult(ESCALATION_ASK));
+    });
+    test('a reply C to the approach question reaches the revise as the reply, and a revise that rejects the shown plan runs its own plan, never the rejected steps', async () => {
+      const repeated = planResult(makePlan({ remediation_gate: { ...makePlan().remediation_gate, repeats_surface: true } }));
+      const recorded = planResult(makePlan({ summary: 'Record the rejection of the cluster.', steps: [{ ...makePlan().steps[0], files: ['src/other.js'] }] }));
+      const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': repeated }));
+      assert.equal(first.result.needs_user, true);
+      const results = escalationResults('planner-escalation', { 'plan-2': repeated, 'revise-1': { ...recorded, settled: [] }, 'scope-2-1': SCOPE });
+      const resumed = await runWorkflow(resumeArgs(first, 'C'), results);
+      assertReplayed(first, resumed);
+      assert.deepEqual(labelsOf(resumed), [...labelsOf(first), 'revise-1', 'scope-2-1', ...tailLabels(2)]);
+      assert.equal(readDataBlock(callOf(resumed, 'revise-1').prompt, 'reply'), 'C');
+      assert.ok(callOf(resumed, 'work-2-STEP-001').prompt.includes('src/other.js'));
+      assert.ok(!callOf(resumed, 'work-2-STEP-001').prompt.includes('src/a.js'));
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+    });
   },
   'PFR-17': () => {
     test('a resume with answers, build and reply replays every earlier agent and revises', async () => {

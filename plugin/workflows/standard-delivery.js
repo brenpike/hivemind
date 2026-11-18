@@ -696,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '9a05871a703603e4';
+const BUILD_ID = '6614e99836dd84b8';
 
 function supportedSchemaKeywords(){
 return[
@@ -1036,7 +1036,7 @@ function askReasons(){
 return['hard_stop','table_surface','gate_irreversible','gate_architectural','gate_safety','no_recommendation'];
 }
 function listReasons(){
-return['beyond_request','outside_limits','repeats_surface'];
+return['beyond_request','outside_limits'];
 }
 function resolveLevel(value,table){
 if(value===undefined||value===null||value===''){
@@ -1048,11 +1048,12 @@ return value;
 return'low';
 }
 function decide({kind,level,brief,listed},table,schema){
+const[hardStop,tableSurface,gateIrreversible,gateArchitectural,gateSafety,noRecommendation]=askReasons();
 const callerListed=checkCallerListed(listed);
 const briefCheck=validateSchema(schema,brief);
 const resolvedLevel=resolveLevel(level,table);
 if(table.hard_stops.some((stop)=>stop.hard_stop===kind)){
-return askFor('hard_stop');
+return askFor(hardStop);
 }
 if(!briefCheck.ok||!hasInRequestOption(brief)||isBeyondRequestUnearned(brief)){
 return askFor('malformed_brief');
@@ -1066,22 +1067,22 @@ return askFor('unknown_kind');
 }
 const cell=row[resolvedLevel];
 if(cell==='surface'){
-return askFor('table_surface');
+return askFor(tableSurface);
 }
 if(cell!=='auto'){
 return askFor('bad_cell');
 }
-if(brief.gate.irreversible||isRecommendedOptionIrreversible(brief)){
-return askFor('gate_irreversible');
+if(brief.gate.irreversible||hasRecommendedOption(brief,(option)=>option.reversible===false)){
+return askFor(gateIrreversible);
 }
 if(brief.gate.architectural){
-return askFor('gate_architectural');
+return askFor(gateArchitectural);
 }
-if(brief.gate.safety||isRecommendedOptionDestructive(brief)){
-return askFor('gate_safety');
+if(brief.gate.safety||hasRecommendedOption(brief,(option)=>Array.isArray(option.destructive)&&option.destructive.length>0)){
+return askFor(gateSafety);
 }
 if(brief.recommendation.strength==='none'){
-return askFor('no_recommendation');
+return askFor(noRecommendation);
 }
 return{action:'take',reason:'auto',listed:collectListed(brief,callerListed)};
 }
@@ -1092,7 +1093,7 @@ return[];
 if(!Array.isArray(listed)){
 throw new Error('decide: listed must be an array, got '+JSON.stringify(listed));
 }
-const callerNames=listReasons().filter((name)=>name!=='beyond_request');
+const callerNames=listReasons().slice(1);
 for(const name of listed){
 if(callerNames.indexOf(name)===-1){
 throw new Error('decide: unknown listed name '+JSON.stringify(name));
@@ -1101,23 +1102,17 @@ throw new Error('decide: unknown listed name '+JSON.stringify(name));
 return listed;
 }
 function collectListed(brief,callerListed){
-return listReasons().filter((name)=>(name==='beyond_request'?isRecommendedOptionBeyondRequest(brief):callerListed.indexOf(name)!==-1));
+return listReasons().filter((name,index)=>(index===0?hasRecommendedOption(brief,(option)=>option.beyond_request===true):callerListed.includes(name)));
 }
 function askFor(reason){
 return{action:'ask',reason:reason};
 }
-function isRecommendedOptionIrreversible(brief){
-return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.reversible===false);
-}
-function isRecommendedOptionDestructive(brief){
-return brief.options.some((option)=>option.id===brief.recommendation.option_id&&Array.isArray(option.destructive)&&option.destructive.length>0);
-}
-function isRecommendedOptionBeyondRequest(brief){
-return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.beyond_request===true);
+function hasRecommendedOption(brief,predicate){
+return brief.options.some((option)=>option.id===brief.recommendation.option_id&&predicate(option));
 }
 function isBeyondRequestUnearned(brief){
 const isStrong=brief.recommendation.strength==='strong';
-return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.beyond_request===true&&!(isStrong&&(option.effort==='trivial'||option.effort==='small')));
+return hasRecommendedOption(brief,(option)=>option.beyond_request===true&&!(isStrong&&(option.effort==='trivial'||option.effort==='small')));
 }
 function hasInRequestOption(brief){
 return brief.options.some((option)=>option.beyond_request===false);
@@ -2823,7 +2818,7 @@ const hasAnswers=answers.length>0;
 const lines=[
 'Revise your plan for the delivery of the user request below with the user reply below.',
 boundarySentence(),
-hasAnswers?settledAnswersSentence('The reply block'):dataBlocksSentence('The reply block'),
+(hasAnswers?settledAnswersSentence:dataBlocksSentence)('The reply block'),
 '',
 buildFactsBlock(facts),
 formatDataBlock('request',request),
@@ -2957,8 +2952,7 @@ resolveDecision(EXTERNAL_EFFECT_KIND,buildExternalEffectBrief(effect.summary),['
 function resolvePlanAcceptance(plan,run,resolution,scope){
 const isRemediation=run.taken.some((entry)=>entry.kind===PLANNER_ESCALATION_ROUTING_KIND||entry.kind===ROOT_CLUSTER_ROUTING_KIND);
 const outsidePaths=listOutsidePaths(plan,scope);
-const holds={outside_limits:outsidePaths.length>0,repeats_surface:plan.remediation_gate.repeats_surface};
-const listed=Object.keys(holds).filter((name)=>holds[name]);
+const listed=outsidePaths.length>0?['outside_limits']:[];
 const brief=isRemediation?buildRemediationPlanBrief(plan):buildPlanAcceptanceBrief(plan);
 return resolveDecision(isRemediation?REMEDIATION_PLAN_ACCEPTANCE_KIND:PLAN_ACCEPTANCE_KIND,markOutsideLimits(brief,outsidePaths),[run.pass,plan],run,resolution,listed);
 }
@@ -3218,6 +3212,13 @@ gate:buildBriefGate(),
 verbatim:plan.summary
 };
 }
+function buildApproachChoice(){
+const summaries=['Keep patching this class.','Change approach.','Stop and ship what closes.'];
+return{
+options:summaries.map((summary,index)=>buildBriefOption(optionLabel(index),summary)),
+recommendation:{option_id:optionLabel(1),strength:'strong',why:'Patching has not closed this class.'}
+};
+}
 function buildRemediationPlanBrief(plan){
 const remediationGate=plan.remediation_gate;
 const flags={...remediationGate.promotion_gate,grows_surface:remediationGate.grows_surface,repeats_surface:remediationGate.repeats_surface};
@@ -3225,11 +3226,11 @@ const texts=remediationGateTexts();
 const flagTexts=Object.keys(texts).filter((flag)=>flags[flag]).map((flag)=>texts[flag]);
 const lead='Run the remediation plan for the local review findings on the working branch, then every gate again.';
 const brief=buildPlanAcceptanceBrief(plan);
-return Object.assign(brief,{
+const choice=flags.repeats_surface?buildApproachChoice():{recommendation:{...brief.recommendation,why:'The plan answers the local review findings, and every gate runs again on its commit before the pull request.'}};
+return Object.assign(brief,choice,{
 kind:REMEDIATION_PLAN_ACCEPTANCE_KIND,
 problem:flagTexts.length===0?lead:lead+' The plan '+joinNames(flagTexts,'and')+'.',
-recommendation:{...brief.recommendation,why:'The plan answers the local review findings, and every gate runs again on its commit before the pull request.'},
-gate:{...remediationGate.promotion_gate,architectural:flags.architectural||flags.grows_surface}
+gate:{...remediationGate.promotion_gate,architectural:flags.architectural||flags.grows_surface||flags.repeats_surface}
 });
 }
 function buildTrunkStaleBrief(facts){
@@ -4808,17 +4809,11 @@ return'.hivemind/review-loop/fix-ledger.yaml';
 function reviewQuestionKinds(){
 return{'user-input-required':REVIEW_QUESTION_KIND,'high-severity-rejection':HIGH_SEVERITY_REJECTION_KIND};
 }
-function reviewerOptions(label){
-return{agentType:REVIEWER_AGENT,schema:toAgentSchema(REVIEW_SCHEMA),label:label,phase:'Review'};
-}
 function describeReviewAnswerData(answer){
-if(answer===undefined){
-return dataBlocksSentence();
-}
-if(answer.decided_by==='run'){
+if(answer?.decided_by==='run'){
 return dataBlocksSentence()+' The reply in user_answer is the run\'s decision, not the user\'s.';
 }
-return dataBlocksSentence('The reply in user_answer');
+return dataBlocksSentence(answer===undefined?undefined:'The reply in user_answer');
 }
 function buildReviewPrompt(plan,run,answer){
 const inputs={base:plan.base,working_branch:plan.branch,trunk:run.trunk,max_iterations:maxReviewIterations(),caller_validates:true};
@@ -4855,8 +4850,7 @@ if(question===undefined){
 return false;
 }
 const optionIds=question.options.map((option)=>option.id);
-const isInOrder=optionIds.every((optionId,index)=>optionId===reviewOptionIds()[index]);
-return!isInOrder||!optionIds.includes(question.recommendation.option_id);
+return!optionIds.every((optionId,index)=>optionId===reviewOptionIds()[index])||!optionIds.includes(question.recommendation.option_id);
 }
 function reviewStopTexts(review){
 switch(review.exit_reason){
@@ -4912,8 +4906,11 @@ options:brief.options.map((option)=>({...option,summary:unshownBriefText(),destr
 recommendation:{...brief.recommendation,why:unshownBriefText()}
 };
 }
+function describeReviewCommit(head){
+return'Local review on commit '+head;
+}
 function describeReviewQuestionLead(review,head){
-return'Local review on commit '+head+', finding '+quoteShortFindingId(review.finding_id)+': '+encodeUntrustedText(review.user_question.found);
+return describeReviewCommit(head)+', finding '+quoteShortFindingId(review.finding_id)+': '+encodeUntrustedText(review.user_question.found);
 }
 function takeReviewCall(review,run,shown,lead){
 acceptResolution({taken:[{brief:listReviewCall(review,shown),kind:shown.kind}],reversibleEffects:[]},run);
@@ -4945,7 +4942,7 @@ return askShownReviewQuestion(ask,review,run,'Local review held back the call th
 function buildDiminishingReturnsBrief(review,head){
 return buildTailBrief({
 kind:DIMINISHING_RETURNS_EXIT_KIND,
-problem:'Local review on commit '+head+' sees diminishing returns, with '+describeCount(review.findings_open,'finding')+' still open. Stop fixing and hold the local review gate on this commit with those findings open?',
+problem:describeReviewCommit(head)+' sees diminishing returns, with '+describeCount(review.findings_open,'finding')+' still open. Stop fixing and hold the local review gate on this commit with those findings open?',
 goOn:'Stop fixing and go on with the open findings.',
 strength:'strong',
 why:'More review rounds fix little now, and the open findings stay on the record for you before the merge.'
@@ -4973,17 +4970,17 @@ function resolveDiminishingReturns(review,run){
 const decided=resolveTailDecision(DIMINISHING_RETURNS_EXIT_KIND,buildDiminishingReturnsBrief(review,run.head),run);
 return isRunEnd(decided)?decided:{held:true,note:'diminishing returns, '+review.findings_open+' findings still open'+describeHeldCounts(run)};
 }
-function buildReviewEscalationBrief(review){
+function buildReviewEscalationBrief(review,isRepeat){
 const isCluster=review.exit_reason==='root-cluster-suspected';
-return buildTailBrief({
+const found=isCluster?'Local review found '+describeCount(review.cluster_ids.length,'finding')+' in '+describeCount(review.cluster_files.length,'file')+' that share one suspected root.':'Local review escalated finding '+quoteShortFindingId(review.finding_id)+' to the planner.';
+const brief=buildTailBrief({
 kind:isCluster?ROOT_CLUSTER_ROUTING_KIND:PLANNER_ESCALATION_ROUTING_KIND,
-problem:(isCluster
-?'Local review found '+describeCount(review.cluster_ids.length,'finding')+' in '+describeCount(review.cluster_files.length,'file')+' that share one suspected root.'
-:'Local review escalated finding '+quoteShortFindingId(review.finding_id)+' to the planner.')+' Go back to planning, from fresh facts, for '+(isCluster?'a remediation that closes the class?':'its remediation?'),
+problem:found+' Go back to planning, from fresh facts, for '+(isCluster?'a remediation that closes the class?':'its remediation?'),
 goOn:'Plan the remediation from fresh facts.',
 strength:'strong',
 why:'The finding needs more than a simple fix, and a remediation plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.'
 });
+return isRepeat?{...brief,problem:found+' The last remediation changed those files.',...buildApproachChoice(),gate:{...brief.gate,architectural:true}}:brief;
 }
 function projectReplanReview(review){
 const projected={exit_reason:review.exit_reason};
@@ -4994,23 +4991,23 @@ projected[field]=review[field];
 }
 return projected;
 }
-function requestReviewReplan(review,run){
+function requestReviewReplan(review,run,plan){
 const returned='Local review returned '+review.exit_reason;
 if(run.replans>=maxReplans()){
 return{draft:returned+' after '+maxReplans()+' replans.'};
 }
-if(run.reviewReplans>=maxReviewReplans()){
+const isRepeat=run.reviewReplans>=1&&review.cluster_files?.some((file)=>plan.steps.some((step)=>step.files.includes(file)));
+if(!isRepeat&&run.reviewReplans>=maxReviewReplans()){
 return{draft:returned+' after '+describeCount(maxReviewReplans(),'review replan')+'.'};
 }
-const brief=buildReviewEscalationBrief(review);
+const brief=buildReviewEscalationBrief(review,isRepeat);
 const decided=resolveTailDecision(brief.kind,brief,run);
-if(isRunEnd(decided)){
+if(decided.result!==undefined){
 return decided;
 }
 run.replans+=1;
 run.reviewReplans+=1;
-const reason=returned+', so plan the remediation of what the review block reports, from the fresh facts.';
-return{replan:{reason:reason,review:projectReplanReview(review)}};
+return{replan:{reason:returned+', so plan the remediation of what the review block reports, from the fresh facts.',review:projectReplanReview(review)}};
 }
 function waitForService(review,run){
 const resumeArgs=buildResumeArgs(run.answerLog.map((entry)=>entry.reply),BUILD_ID);
@@ -5028,7 +5025,7 @@ run.answerLog.push(buildAnswerEntry({question:lead,labels:[],reply:reply,decided
 run.waits+=1;
 return{rerun:true};
 }
-function routeLocalReview(review,run){
+function routeLocalReview(review,run,plan){
 switch(localReviewRoutes()[review.exit_reason]){
 case'hold':
 return{held:true,note:'clean'+describeHeldCounts(run)};
@@ -5036,17 +5033,14 @@ case'diminishing':
 return resolveDiminishingReturns(review,run);
 case'replan':
 run.resumeLedger=true;
-return requestReviewReplan(review,run);
+return requestReviewReplan(review,run,plan);
 case'question':
 return askReviewQuestion(review,run);
 case'draft':
 return{draft:describeReviewOpen(review,run.head,'')+'.'};
 case'stop_rerun':
 run.resumeLedger=true;
-if(review.retry_minutes>=1){
-return waitForService(review,run);
-}
-return stopDelivery([{problem:describeReviewStop(review,run.head)}],run);
+return review.retry_minutes>=1?waitForService(review,run):stopDelivery([{problem:describeReviewStop(review,run.head)}],run);
 case'stop':
 return stopDelivery([{problem:describeReviewStop(review,run.head),terminal:true}],run);
 case'skip':
@@ -5061,13 +5055,13 @@ return{purpose:'the local review that just ran, with an empty file list',noun:'t
 }
 async function runReviewGate(run,plan,gates){
 const count=gates.runs.review;
-const answer=gates.answer;
-const takenReview=gates.takenReview;
+const{answer,takenReview}=gates;
 gates.answer=undefined;
 gates.takenReview=undefined;
 phase('Review');
-const prompt=answer===undefined?addResumeNote(buildReviewPrompt(plan,run),run):buildReviewPrompt(plan,run,answer);
-const review=await agent(prompt,reviewerOptions(gateLabel('review',run,count)));
+const built=buildReviewPrompt(plan,run,answer);
+const prompt=answer===undefined?addResumeNote(built,run):built;
+const review=await agent(prompt,{agentType:REVIEWER_AGENT,schema:toAgentSchema(REVIEW_SCHEMA),label:gateLabel('review',run,count),phase:'Review'});
 const unusable=describeReviewProblem(review);
 if(unusable===undefined){
 keepReviewLists(run,review);
@@ -5077,8 +5071,8 @@ if(committed.values===undefined){
 return committed;
 }
 const isHeldCall=takenReview!==undefined&&readGateHold(review,run.approvals).holds!==undefined;
-const routed=isHeldCall?askHeldReviewCall(takenReview,run):routeLocalReview(review,run);
-if(routed.answer!==undefined&&routed.answer.decided_by==='run'){
+const routed=isHeldCall?askHeldReviewCall(takenReview,run):routeLocalReview(review,run,plan);
+if(routed.answer?.decided_by==='run'){
 gates.takenReview=review;
 }
 return routed;

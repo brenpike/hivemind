@@ -40,8 +40,8 @@ function decideListing(kind, level, brief, listed, decisionTable = table) {
 
 const takeAuto = { action: 'take', reason: 'auto', listed: [] };
 const askSet = ['hard_stop', 'table_surface', 'gate_irreversible', 'gate_architectural', 'gate_safety', 'no_recommendation'];
-const listSet = ['beyond_request', 'outside_limits', 'repeats_surface'];
-const callerListSet = ['outside_limits', 'repeats_surface'];
+const listSet = ['beyond_request', 'outside_limits'];
+const callerListSet = ['outside_limits'];
 
 function resolvedLevelOf(level) {
   return level === undefined ? table.default_level : level;
@@ -447,6 +447,7 @@ describe('askReasons and listReasons', () => {
     for (const reason of ['beyond_request', 'outside_limits', 'repeats_surface']) {
       assert.equal(lib.askReasons().includes(reason), false, reason);
     }
+    assert.equal(lib.listReasons().includes('repeats_surface'), false);
   });
 });
 
@@ -468,7 +469,7 @@ const recommendedVariants = (() => {
 
 const gateVariants = [false, true].flatMap((irreversible) => [false, true].flatMap((architectural) => [false, true].map((safety) => ({ irreversible, architectural, safety }))));
 
-const callerListVariants = [undefined, [], ['outside_limits'], ['repeats_surface'], ['outside_limits', 'repeats_surface'], ['repeats_surface', 'outside_limits']];
+const callerListVariants = [undefined, [], ['outside_limits'], ['outside_limits', 'outside_limits']];
 
 function makeVariantBrief(variant, gate) {
   const base = makeBrief();
@@ -534,9 +535,10 @@ describe('every kind, level, gate, recommended option and caller list', () => {
     testCase.isRefused = defectReasons.includes(plannerVerdict.reason);
   }
   for (const kind of kinds) {
-    test(`${kind}: an ask is in askReasons() unless the planner check refuses its brief, and a take is auto with listed in order`, () => {
+    test(`${kind}: an ask is in askReasons() unless the planner check refuses its brief, a take is auto with listed in order, and a caller repeats_surface throws`, () => {
       for (const { gate, variant, brief, isRefused } of cases) {
         for (const level of levels) {
+          assert.throws(() => lib.decide({ kind, level, brief, listed: ['repeats_surface'] }, table, emptySchema), /^Error: decide: unknown listed name "repeats_surface"$/);
           for (const callerListed of callerListVariants) {
             const verdict = lib.decide({ kind, level, brief, listed: callerListed }, table, emptySchema);
             const expected = expectDecision(kind, level, variant, gate, callerListed);
@@ -558,9 +560,8 @@ describe('caller listed names', () => {
     assert.ok(autoCells.length > 0);
     for (const [kind, level] of autoCells) {
       assert.deepEqual(decideListing(kind, level, makeBrief(), ['outside_limits']), { ...takeAuto, listed: ['outside_limits'] });
-      assert.deepEqual(decideListing(kind, level, makeBrief(), ['repeats_surface']), { ...takeAuto, listed: ['repeats_surface'] });
-      const both = { ...takeAuto, listed: ['beyond_request', 'outside_limits', 'repeats_surface'] };
-      assert.deepEqual(decideListing(kind, level, makeBeyondBrief(0), ['repeats_surface', 'outside_limits']), both);
+      const both = { ...takeAuto, listed: ['beyond_request', 'outside_limits'] };
+      assert.deepEqual(decideListing(kind, level, makeBeyondBrief(0), ['outside_limits']), both);
     }
   });
   test('a caller name never makes it ask and never changes an ask', () => {
@@ -584,7 +585,7 @@ describe('caller listed names', () => {
   test('a repeated caller name is listed once', () => {
     assert.deepEqual(decideListing('plan_acceptance', 'high', makeBrief(), ['outside_limits', 'outside_limits']).listed, ['outside_limits']);
   });
-  for (const invalid of ['outside_limits', null, 0, false, {}, ['beyond_request'], ['auto'], ['hard_stop'], ['OUTSIDE_LIMITS'], [''], [undefined], ['outside_limits', 'gate_safety']]) {
+  for (const invalid of ['outside_limits', null, 0, false, {}, ['beyond_request'], ['repeats_surface'], ['outside_limits', 'repeats_surface'], ['auto'], ['hard_stop'], ['OUTSIDE_LIMITS'], [''], [undefined], ['outside_limits', 'gate_safety']]) {
     test(`listed ${JSON.stringify(invalid)} throws, even for a hard stop`, () => {
       for (const kind of ['plan_acceptance', hardStopKinds[0]]) {
         const call = () => lib.decide({ kind, level: 'high', brief: makeBrief(), listed: invalid }, table, briefSchema);
@@ -595,12 +596,12 @@ describe('caller listed names', () => {
   test('neither the brief nor the caller list is mutated, and each take returns a new list', () => {
     const brief = makeBeyondBrief(0);
     const before = structuredClone(brief);
-    const callerListed = ['repeats_surface'];
+    const callerListed = ['outside_limits'];
     const first = lib.decide({ kind: 'plan_acceptance', level: 'high', brief, listed: callerListed }, table, briefSchema);
     const second = lib.decide({ kind: 'plan_acceptance', level: 'high', brief, listed: callerListed }, table, briefSchema);
     decideListing('plan_acceptance', 'low', brief, callerListed);
     assert.deepEqual(brief, before);
-    assert.deepEqual(callerListed, ['repeats_surface']);
+    assert.deepEqual(callerListed, ['outside_limits']);
     assert.notEqual(first.listed, second.listed);
     assert.notEqual(first.listed, callerListed);
   });

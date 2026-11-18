@@ -30,9 +30,9 @@ Each resolves to exactly one disposition of **Disposition Vocabulary**:
 - the Creep-Stagnation / diminishing-returns advisory early-exit decision
 - a validation failure: remediate autonomously; surface only if unresolved
 - a version-bump type inferable from the compatibility impact; a non-inferable one is Tier A
-- root-cluster zoom-out routing: only routing the reviewer's read-only signal to cerebrate for a remediation plan; accepting or executing that plan falls under the remediation-plan rule in **Promotion Gate**.
+- root-cluster zoom-out routing, per the remediation-plan rule in **Promotion Gate**
 - a remediation-approach choice where the overlord holds a confident recommendation
-- the list set: an option beyond the request recommended strong at trivial or small effort, a plan file outside the request's limits, and a remediation plan with `remediation_gate.repeats_surface` set. Each is taken, journaled and listed for veto before merge; branch work is undone by declining the PR.
+- the list set: an option beyond the request recommended strong at trivial or small effort, and a plan file outside the request's limits. Each is taken, journaled and listed for veto before merge; branch work is undone by declining the PR.
 
 ## The Autonomy 2x2
 
@@ -57,14 +57,15 @@ The gate trips, forcing a surface, when the recommended action is any of:
 
 Otherwise it is clean, and the 2x2 applies. A review call reads clauses 1 and 2 only (**Review Calls**).
 
-**Remediation-plan rule.** Routing a reviewer's or escalation's read-only signal to cerebrate for a remediation plan is clean-gate, auto-taken (**Tier B**). Accepting the returned plan is separate, asked of the user only when its `remediation_gate` (`${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json`) marks either of:
+**Remediation-plan rule.** Routing a reviewer's or escalation's read-only signal to cerebrate for a remediation plan is clean-gate, auto-taken (**Tier B**), except the forced zoom-out per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry). Accepting the returned plan is asked of the user only when its `remediation_gate` (`${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json`) marks any of:
 
 - the gate trips on accepting it, by any clause, as `remediation_gate.promotion_gate` records;
-- it adds more surface than it removes, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Surface-Growth Escalation).
+- it adds more surface than it removes, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Surface-Growth Escalation);
+- it repeats a fix that did not close its class (`remediation_gate.repeats_surface`).
 
 Any other plan is auto-taken: on the workflow state machine the overlord journals it `did-now` and records the transition into implement; on the script engine the `remediation_plan_acceptance` row of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` resolves it. **Tier A** safety rails hold for every step of an auto-taken plan.
 
-With either flag set on the state machine, the overlord by judgment pauses its continuous-execution loop and surfaces the plan before recording that transition.
+With any flag set on the state machine, the overlord by judgment surfaces the plan before recording that transition.
 
 ### Review Calls
 
@@ -87,7 +88,7 @@ Each Tier-B decision resolves to exactly one of:
 
 ## Decision Journal
 
-Each Tier-B decision and Tier-A surface is one entry appended to `event.outputs.decisions[]` on the bounding state-result event, through `hivemind:record-state-result`'s free-form `outputs` path, the write the proactive recurrence-origin marker uses (`${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Proactive Zoom-Out Ledger Marker)). It records judgment only: no new workflow state, graph change or run status, and no routing through `hivemind:mark-intent-fallback`.
+Each Tier-B decision and Tier-A surface is one entry appended to `event.outputs.decisions[]` on the bounding state-result event, through `hivemind:record-state-result`'s free-form `outputs` path, the write the recurrence-origin marker uses (`${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Proactive Zoom-Out Ledger Marker)). It records judgment only: no new workflow state, graph change or run status, and no routing through `hivemind:mark-intent-fallback`.
 
 Entry fields: `ts` (decision time), `state` (workflow state), `situation` (what was decided), `options` (considered), `tradeoffs` (across them), `rec_strength` (`strong` | `weak` | `none`), `gate` (`clean` | `trips`), `disposition` (exactly one of `did-now` | `deferred` | `recorded` | `surfaced`), `decision` (action taken or deferred), `rationale` (why chosen), `reversible` (whether undoable).
 
