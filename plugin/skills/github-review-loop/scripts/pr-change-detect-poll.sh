@@ -146,9 +146,9 @@
 #                    reviewer before any terminal
 #   WATCH_TIMEOUT    max_watch_duration elapsed (terminal); no sleep passes
 #                    the deadline, so it is never late by more than one capture
-#   POLL_ERROR       repeated query failure, a missing/malformed seed, or a
-#                    retired reviewer filter value (terminal; skill returns
-#                    blocked)
+#   POLL_ERROR       repeated query failure, a missing/malformed seed, a
+#                    retired reviewer filter value, or an unreadable clock
+#                    (terminal; skill returns blocked)
 #   BASELINE=<seed>  --snapshot mode only: the seed token poll mode requires as
 #                    its 8th argument (arm kind + every diffed scalar)
 #   SNAPSHOT_ERROR   --snapshot mode only: the seed could not be captured, or
@@ -200,9 +200,9 @@
 #                               an optional seed would let a caller silently
 #                               regress to the self-baselining blind window, so
 #                               a missing, malformed, or incomplete value, or a
-#                               failed_checks field that is not a bounded
-#                               decimal (is_bounded_decimal), is POLL_ERROR (CHECK_ERROR in --check mode) before
-#                               any gh call.
+#                               failed_checks field that read_decimal rejects,
+#                               is POLL_ERROR (CHECK_ERROR in --check mode)
+#                               before any gh call.
 #
 # P18 FLOOR EXCEPTION (ADR-0020 / CHECK13 allowlisted): `set -u` only — `set -e`/`pipefail`
 # are DELIBERATELY omitted. The full floor would change behavior: compute_snapshot returns
@@ -295,13 +295,33 @@ poll_fail() {
   exit 1
 }
 
-# is_bounded_decimal: 0 when the value is 1 to 18 decimal digits.
-# INVARIANT: every caller- or API-sourced value that reaches shell arithmetic or
-# a numeric test passes this first. Bash arithmetic is signed 64-bit and wraps
-# silently; 18 digits stay below 2^63 with room for the epoch the deadline adds,
-# so no accepted value can wrap.
-is_bounded_decimal() {
-  [[ "${1:-}" =~ ^[0-9]{1,18}$ ]]
+# read_decimal <name> <value>: when the value is 1 to 18 decimal digits, assign
+# its base-10 value to the variable <name> and return 0; otherwise return 1 and
+# assign nothing. It declares no locals, so no target name can collide with one.
+# INVARIANT: read_decimal is the script's only bounded-decimal check and its
+# only base-10 coercion. Every number the script reads from outside itself (an
+# argument, the seed, a gh capture, the clock) is read through it or read_clock,
+# never checked at its use site. Every other number is a script-internal
+# integer: a literal, or a value computed only from checked numbers and
+# literals, never read from outside. Bash arithmetic is signed 64-bit and wraps silently; 18 digits stay
+# below 2^63 with room for the epoch the deadline adds, so no accepted value can
+# wrap. The base-10 coercion keeps a leading zero from reading as octal (08/09
+# error under set -u, 060 mis-scales to 48), and a normalized value also
+# compares equal as text to a capture of the same count.
+read_decimal() {
+  [[ "${2:-}" =~ ^[0-9]{1,18}$ ]] || return 1
+  printf -v "$1" '%s' "$((10#$2))"
+}
+
+# read_clock <name>: hold the script's only date command. Assigns the epoch
+# seconds to the variable <name> through read_decimal; a non-zero date exit or a
+# reading read_decimal rejects is poll_fail. Always called in the main shell,
+# never inside $( ), so poll_fail ends the poll rather than a subshell. Its one
+# local is clock_reading, which no caller uses as a target name.
+read_clock() {
+  local clock_reading
+  clock_reading="$(date +%s)" || poll_fail
+  read_decimal "$1" "$clock_reading" || poll_fail
 }
 
 # Resolve the sibling identity module RELATIVE to this script's own location
@@ -390,11 +410,11 @@ snapshot_changed() {
 }
 
 # failed_checks_rose: 0 when the current FAILED_CHECKS count is greater than the
-# previous one, compared as base-10 integers so a leading zero is never read as
-# octal. Both values are bounded decimals: the seed is validated before any gh
-# call and compute_snapshot fails a capture whose count is not one.
+# previous one. Both counts were read through read_decimal, the seed's before any
+# gh call and the capture's inside compute_snapshot, so both are base-10 values
+# and the compare needs no coercion of its own.
 failed_checks_rose() {
-  [ "$((10#$cur_failed_checks))" -gt "$((10#$prev_failed_checks))" ]
+  [ "$cur_failed_checks" -gt "$prev_failed_checks" ]
 }
 
 # marker_continues: 0 when the poll keeps running after printing the given
@@ -441,14 +461,21 @@ iteration_marker() {
 
 [ -n "$OWNER" ] || poll_fail
 [ -n "$REPO" ] || poll_fail
-case "$PR_NUMBER" in ''|*[!0-9]*) poll_fail ;; esac
-is_bounded_decimal "$MAX_WATCH_SECONDS" || poll_fail
-is_bounded_decimal "$POLL_INTERVAL_SECONDS" || poll_fail
-# Base-10-coerce before any arithmetic / numeric comparison. The bounded-decimal
-# guards above guarantee decimal digits that cannot wrap, but bash reads a leading-zero value as
-# octal in $(( )) and [ -ge ] — 08/09 error under set -u, 060 mis-scales to 48s.
-MAX_WATCH_SECONDS=$((10#$MAX_WATCH_SECONDS))
-POLL_INTERVAL_SECONDS=$((10#$POLL_INTERVAL_SECONDS))
+# The numeric args are read through read_decimal, the one source of checked
+# base-10 numbers, before any gh binding, arithmetic or numeric comparison.
+read_decimal PR_NUMBER "$PR_NUMBER" || poll_fail
+read_decimal MAX_WATCH_SECONDS "$MAX_WATCH_SECONDS" || poll_fail
+read_decimal POLL_INTERVAL_SECONDS "$POLL_INTERVAL_SECONDS" || poll_fail
+# RECORDED DECISION (duration bounds): callers are trusted to pass sane watch
+# window and poll interval values. The 18-digit limit only keeps the deadline
+# arithmetic from overflowing; it is not an operational cap, so a huge window or
+# interval makes a poll that runs or sleeps for that long. That is a caller
+# misconfiguration, outside the threat model, and is not hardened against: no
+# upper cap is enforced. The poll still ends on time for the window it is given.
+# Decided by the run, not the user, as a review call per
+# ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Review Calls), on local
+# review finding 858d54db. A later finding asking for a duration cap repeats this
+# decision.
 # Reject a zero (or otherwise non-positive) poll interval: `sleep 0` would make
 # the loop re-poll immediately and hammer gh api until timeout, risking rate
 # limits. Require at least one second between polls before entering the loop.
@@ -477,12 +504,12 @@ fi
 # prev_ scalar empty and fire a spurious CHANGED, and an absent one would re-open
 # the #324 blind window. Two layers, both derived from SNAPSHOT_FIELDS: the shape
 # regex, then load_seed's field-count and non-empty checks. The failed_checks
-# field must then be a bounded decimal, since failed_checks_rose compares it as
-# a base-10 integer.
+# field is then read through read_decimal, since failed_checks_rose compares it
+# as a number.
 if [ "$MODE" = "poll" ] || [ "$MODE" = "check" ]; then
   [[ "$BASELINE_SEED" =~ $SEED_FORMAT_RE ]] || poll_fail
   load_seed "$BASELINE_SEED" || poll_fail
-  is_bounded_decimal "$prev_failed_checks" || poll_fail
+  read_decimal prev_failed_checks "$prev_failed_checks" || poll_fail
 fi
 
 # Timeout wrapper for gh API calls.
@@ -505,7 +532,6 @@ else
   echo "github-review-loop: WARNING neither 'timeout' nor 'gtimeout' found on PATH; gh API calls in the change-detection poll are running UNGUARDED and a hung call can stall this poll until max_watch_duration. Install GNU coreutils (provides 'timeout'; 'gtimeout' on Homebrew) to restore the timeout guard." >&2
 fi
 
-deadline=$(($(date +%s) + MAX_WATCH_SECONDS))
 fail_count=0
 
 # compute_snapshot: fills the global scalar variables from ONE non-paginated
@@ -540,8 +566,8 @@ fail_count=0
 # ACTION_REQUIRED for CheckRun; FAILURE / ERROR for legacy StatusContext); a
 # rise here fires CI_FAILED, dispatched to the reviewer without the prefilter,
 # so the reviewer's ci-check-failure fix candidates are wired to a wake signal
-# independent of review activity, and a drop fires CHANGED. A count that is not
-# a bounded decimal fails the capture, since the rise is a base-10 compare. The
+# independent of review activity, and a drop fires CHANGED. The count is read
+# through read_decimal, and a count it rejects fails the capture. The
 # reviewer does the full body-level classification on wake (thin poll, no
 # interpretation). Writes diagnostic stderr to /dev/null (never /tmp).
 compute_snapshot() {
@@ -778,9 +804,9 @@ EOF
     cur_approval="false"
   fi
   # A well-formed snapshot always carries a non-empty PR state and a
-  # bounded-decimal failed-check count.
+  # failed-check count read_decimal accepts.
   [ -n "${cur_state:-}" ] || return 1
-  is_bounded_decimal "${cur_failed_checks:-}" || return 1
+  read_decimal cur_failed_checks "${cur_failed_checks:-}" || return 1
   return 0
 }
 
@@ -844,24 +870,27 @@ if [ "$MODE" = "check" ]; then
 fi
 
 # sleep_to_next_poll: hold the only sleep in this script. Reads the clock once
-# and sleeps the smaller of POLL_INTERVAL_SECONDS and the seconds left to the
-# deadline; with none left it returns without sleeping, so the loop top emits
-# WATCH_TIMEOUT. A clock reading that is not a bounded decimal is POLL_ERROR.
+# through read_clock and sleeps the smaller of POLL_INTERVAL_SECONDS and the
+# seconds left to the deadline; with none left it returns without sleeping, so
+# the loop top emits WATCH_TIMEOUT. An unreadable clock is POLL_ERROR.
 # INVARIANT: no poll sleep passes the deadline, for every accepted interval and
 # window, including a re-arm whose window is smaller than the interval.
 sleep_to_next_poll() {
   local now_seconds seconds_left nap_seconds
-  now_seconds="$(date +%s)"
-  is_bounded_decimal "$now_seconds" || poll_fail
-  seconds_left=$((deadline - 10#$now_seconds))
+  read_clock now_seconds
+  seconds_left=$((deadline - now_seconds))
   [ "$seconds_left" -gt 0 ] || return 0
   nap_seconds="$POLL_INTERVAL_SECONDS"
   [ "$seconds_left" -lt "$nap_seconds" ] && nap_seconds="$seconds_left"
   sleep "$nap_seconds"
 }
 
+read_clock arm_seconds
+deadline=$((arm_seconds + MAX_WATCH_SECONDS))
+
 while true; do
-  if [ "$(date +%s)" -ge "$deadline" ]; then
+  read_clock clock_seconds
+  if [ "$clock_seconds" -ge "$deadline" ]; then
     echo "WATCH_TIMEOUT"
     exit 0
   fi

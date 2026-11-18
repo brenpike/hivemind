@@ -107,6 +107,25 @@
 # window, including a re-arm whose window is smaller than the interval. The executable lines of the
 # poll hold exactly one `sleep` command, inside that helper, so a second raw sleep goes red.
 #
+# THE CHECKED-NUMBER CONTRACT: every number the poll reads from outside itself (an argument, the
+# seed, a gh capture, the clock) is read through one of two helpers, and every other number it does
+# arithmetic or a numeric test on is a script-internal integer computed only from literals and
+# checked numbers. read_decimal is the only bounded-decimal check (1 to 18 digits) and
+# the only base-10 coercion; read_clock holds the only `date` command and routes its reading
+# through read_decimal. A failed or bad clock reading, at any of the three clock reads (arm time,
+# the loop-top deadline check, sleep_to_next_poll), is POLL_ERROR, exit 1, and a 19-digit PR number
+# is POLL_ERROR before any gh call. `--snapshot` and `--check` never read the clock. No scan of the
+# poll's text decides whether a number is checked: Bash evaluates a number in many syntax forms, so
+# a list of them cannot be complete. The rule is held by the checked-number grid: one table,
+# NUMBER_SOURCES, names each source (the PR number, window and interval arguments, the seed's
+# failed_checks field, each read_clock call site, each failed-check bucket of a capture) and the
+# modes that read it, and the runner generates every probe kind (a hostile reading, four rejected
+# readings, a zero-padded reading) for every one of those modes. A hostile reading that arithmetic
+# would run creates a canary file when any form evaluates it before its check, and a zero-padded
+# reading changes the output when any use skips the base-10 coercion. A new source is one row, and
+# a row missing its injector or mode list fails the runner. One structural case remains: the
+# executable lines hold exactly one `date` command, inside read_clock.
+#
 # Usage:
 #   ./tools/test_change_detect_poll.sh
 
@@ -180,6 +199,9 @@ REACT_CODEX_EYES="$FIXTURES/reactions-codex-eyes.json"
 #
 # Call kinds: `reactions` (the REST reactions path), `latestreviews` (a `graphql` call carrying
 # `--paginate`, the paginated per-author latest-reviews walk), and `graphql` (the snapshot query).
+# Every call appends `<kind>:<pr>` to the state dir's `gh.prs`, <pr> being the PR number the call
+# carried (the `-F pr=` value, or the number in the reactions path), so a case reads the PR number
+# the poll handed to gh.
 # With no `latestreviews.seq`, a `latestreviews` call MIRRORS the `graphql.seq` entry at its OWN
 # counter, so every committed state fixture (each carries a `latestReviews` connection) serves both
 # calls. Caveat: the two counters advance independently, so a sequence whose `graphql` call fails
@@ -201,6 +223,7 @@ set -o pipefail
 kind=""
 jq_expr=""
 query_text=""
+pr_seen=""
 want_jq=0
 saw_graphql=0
 saw_paginate=0
@@ -212,10 +235,15 @@ for arg in "$@"; do
   fi
   case "$arg" in
     graphql) saw_graphql=1 ;;
-    repos/*/reactions) kind="reactions" ;;
+    repos/*/reactions)
+      kind="reactions"
+      pr_seen="${arg%/reactions}"
+      pr_seen="${pr_seen##*/}"
+      ;;
     --paginate) saw_paginate=1 ;;
     --jq) want_jq=1 ;;
     query=*) query_text="${arg#query=}" ;;
+    pr=*) pr_seen="${arg#pr=}" ;;
   esac
 done
 if [ -z "$kind" ] && [ "$saw_graphql" -eq 1 ]; then
@@ -224,6 +252,7 @@ if [ -z "$kind" ] && [ "$saw_graphql" -eq 1 ]; then
 fi
 [ -n "$kind" ] || { echo "fake gh: unrecognized call: $*" >&2; exit 1; }
 [ -n "${FAKE_GH_STATE_DIR:-}" ] || { echo "fake gh: FAKE_GH_STATE_DIR unset" >&2; exit 1; }
+printf '%s:%s\n' "$kind" "$pr_seen" >> "$FAKE_GH_STATE_DIR/gh.prs" || exit 1
 seq_file="$FAKE_GH_STATE_DIR/$kind.seq"
 n_file="$FAKE_GH_STATE_DIR/$kind.n"
 if [ "$kind" = "latestreviews" ] && [ ! -f "$seq_file" ]; then
@@ -290,13 +319,39 @@ chmod +x "$STUB_BIN/gh"
 # before poll N reads epoch + N-1 and MAX_WATCH counts polls. The real deadline arithmetic
 # still runs; only the clock's source is faked. Any other `date` call exits non-zero so a new use
 # of the clock cannot silently read the virtual one.
+#
+# The fake counts its calls in the state dir's `date.n`, which new_state zeroes, so a case reads
+# how many clock reads a run made. When the state dir carries `date.seq`, call N serves line N:
+# the literal `FAIL` exits non-zero with no output, the literal `CLOCK` reads the virtual clock,
+# the literal `PADDED` reads the virtual clock left-padded with zeros to 18 digits, and any other
+# line, an empty one included, is printed as the reading. Calls past the list, and every call in a
+# state with no `date.seq`, read the virtual clock unchanged. The epoch holds the digit 8, so a
+# padded reading that skips the base-10 coercion is not valid octal: Bash arithmetic on it errors
+# instead of silently reading another number.
 cat > "$STUB_BIN/date" <<'STUB'
 #!/usr/bin/env bash
 set -u
 [ "$#" -eq 1 ] && [ "$1" = "+%s" ] || { echo "fake date: unsupported call: $*" >&2; exit 1; }
 [ -n "${FAKE_GH_STATE_DIR:-}" ] || { echo "fake date: FAKE_GH_STATE_DIR unset" >&2; exit 1; }
-capture_count=$(cat "$FAKE_GH_STATE_DIR/graphql.n") || exit 1
-printf '%s\n' "$((1700000000 + capture_count))"
+call_number=$(cat "$FAKE_GH_STATE_DIR/date.n") || exit 1
+call_number=$((call_number + 1))
+printf '%s' "$call_number" > "$FAKE_GH_STATE_DIR/date.n" || exit 1
+seq_file="$FAKE_GH_STATE_DIR/date.seq"
+reading="CLOCK"
+if [ -f "$seq_file" ] && [ "$call_number" -le "$(wc -l < "$seq_file")" ]; then
+  reading=$(sed -n "${call_number}p" "$seq_file")
+fi
+[ "$reading" != "FAIL" ] || exit 1
+if [ "$reading" = "CLOCK" ] || [ "$reading" = "PADDED" ]; then
+  capture_count=$(cat "$FAKE_GH_STATE_DIR/graphql.n") || exit 1
+  virtual_seconds="$((1800000000 + capture_count))"
+  if [ "$reading" = "PADDED" ]; then
+    reading="$(printf '%018d' "$virtual_seconds")"
+  else
+    reading="$virtual_seconds"
+  fi
+fi
+printf '%s\n' "$reading"
 STUB
 chmod +x "$STUB_BIN/date"
 
@@ -324,11 +379,14 @@ new_state() {
   printf '0' > "$dir/graphql.n"
   printf '0' > "$dir/latestreviews.n"
   printf '0' > "$dir/reactions.n"
+  printf '0' > "$dir/date.n"
   : > "$dir/sleep.calls"
+  : > "$dir/gh.prs"
   printf '%s' "$dir"
 }
 
-# set_seq <state_dir> <graphql|latestreviews|reactions> <entry>...: the per-call fixture sequence.
+# set_seq <state_dir> <graphql|latestreviews|reactions|date> <entry>...: the per-call fixture (or
+# clock reading) sequence.
 set_seq() {
   local dir="$1" kind="$2"
   shift 2
@@ -1910,6 +1968,13 @@ fi
 #       bound that keeps Bash's 64-bit arithmetic from wrapping), is POLL_ERROR / CHECK_ERROR,
 #       exit 1, with zero gh calls.
 
+# seed_with_failed_checks <value>: the shared seed with its failed_checks field set to <value>.
+seed_with_failed_checks() {
+  local field_pos
+  field_pos=$(($(declared_fields | grep -nx 'failed_checks' | cut -d: -f1) + 1))
+  printf '%s' "$SEED" | awk -F'|' -v OFS='|' -v pos="$field_pos" -v value="$1" '{$pos = value; print}'
+}
+
 # ci_route_poll <state_name> <seed> <max_watch> <graphql_entry>...: a poll armed with <seed> under
 # a <max_watch>-poll window, serving the graphql entries in order and no reaction to every poll.
 ci_route_poll() {
@@ -1976,10 +2041,8 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
 
   ci_seed_ok=1
   ci_seed_detail=""
-  ci_failed_checks_pos=$(($(declared_fields | grep -nx 'failed_checks' | cut -d: -f1) + 1))
   for ci_bad_value in 1a -1 1234567890123456789; do
-    ci_bad_seed="$(printf '%s' "$SEED" | awk -F'|' -v OFS='|' -v pos="$ci_failed_checks_pos" \
-      -v bad="$ci_bad_value" '{$pos = bad; print}')"
+    ci_bad_seed="$(seed_with_failed_checks "$ci_bad_value")"
     for ci_seed_mode in poll check; do
       st="$(new_state "ci-bad-seed-$ci_bad_value-$ci_seed_mode")"
       set_seq "$st" graphql "$PRE"
@@ -2096,6 +2159,469 @@ if [ "$(printf '%s\n' "$sleep_commands" | grep -c .)" = "1" ] \
   pass "watch:one-sleep-primitive" "the poll's only sleep command is inside sleep_to_next_poll"
 else
   failed "watch:one-sleep-primitive" "expected exactly one sleep command, inside sleep_to_next_poll, got line:in_helper=[$(printf '%s' "$sleep_commands" | tr '\n' ' ')]"
+fi
+
+# ── 43. every number is read through one checked source ──────────────────────────────
+# The poll checks each number where it is read, never where it is used: read_decimal is the only
+# bounded-decimal check and base-10 coercion, and read_clock holds the only `date` command. No scan
+# of the poll's text decides whether a number is checked: Bash evaluates a number in many syntax
+# forms (arithmetic expansion, `(( ))`, `let`, `declare -i`, `[[ -eq ]]`, subscripts, substring
+# offsets), so a list of them cannot be complete. The rule is held by running the poll through the
+# checked-number grid (section 44), generated from one source table. The cases here hold the clock
+# behaviour the grid does not: the read count, a failed `date`, and the modes that never read it.
+# The fake `date` serves `date.seq` and counts its calls in `date.n`.
+#   (a) each bad reading (FAIL, empty, abc, -1, 19 digits) served on clock read N, N = 1 to 4, over
+#       the steady pre-cycle-0 state armed with the shared seed, prints exactly POLL_ERROR, exit 1,
+#       after exactly N clock reads. Reads 1 to 4 are arm time, the first loop top, the first
+#       sleep_to_next_poll and the second loop top. On N = 1 the fake gh sees zero calls.
+#   (b) with every clock read failing, --snapshot prints its BASELINE= line and --check with the
+#       shared seed prints UNCHANGED, each exit 0 with zero clock reads.
+#   (c) a 19-digit PR number is POLL_ERROR, exit 1, with zero gh calls.
+#   (d) STRUCTURAL: the executable, non-comment lines of the poll hold exactly one `date` command,
+#       inside read_clock.
+CLOCK_BAD_READINGS=(FAIL "" abc -1 9999999999999999999)
+CLOCK_BAD_READ_COUNT=4
+
+# clock_poll_outcome <state_name> <bad_reading> <read_number>: a poll armed with the shared seed
+# over the steady pre-cycle-0 state, its clock reads 1 to <read_number> - 1 serving the virtual
+# clock and read <read_number> serving <bad_reading>, as `<status>:<date_calls>:<gh_calls>:<out>`.
+clock_poll_outcome() {
+  local st out status read_index
+  local -a clock_entries=()
+  st="$(new_state "$1")"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  for ((read_index = 1; read_index < $3; read_index++)); do
+    clock_entries+=(CLOCK)
+  done
+  clock_entries+=("$2")
+  set_seq "$st" date "${clock_entries[@]}"
+  out="$(arm_poll "$st" "$SEED")"
+  status=$?
+  printf '%s:%s:%s:%s' "$status" "$(cat "$st/date.n")" "$(gh_call_counts "$st")" \
+    "$(printf '%s' "$out" | tr '\n' ';')"
+}
+
+# poll_date_commands: `<line>:<in_helper>` for each `date` command on an executable, non-comment
+# line of the poll, <in_helper> 1 inside read_clock and 0 elsewhere.
+poll_date_commands() {
+  awk '
+    /^read_clock\(\) \{/ { in_helper = 1 }
+    /^[[:space:]]*#/ { next }
+    /(^|[^[:alnum:]_-])date([[:space:]]|$)/ { print NR ":" in_helper + 0 }
+    in_helper && /^\}/ { in_helper = 0 }
+  ' "$POLL"
+}
+
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  clock_ok=1
+  clock_detail=""
+  for clock_bad_index in "${!CLOCK_BAD_READINGS[@]}"; do
+    clock_bad_value="${CLOCK_BAD_READINGS[$clock_bad_index]}"
+    for ((clock_read = 1; clock_read <= CLOCK_BAD_READ_COUNT; clock_read++)); do
+      clock_outcome="$(clock_poll_outcome "clock-bad-$clock_bad_index-$clock_read" \
+        "$clock_bad_value" "$clock_read")"
+      clock_expected="1:$clock_read:$(cut -d: -f3 <<<"$clock_outcome"):POLL_ERROR"
+      [ "$clock_read" -ne 1 ] || clock_expected="1:1:0 0 0:POLL_ERROR"
+      if [ "$clock_outcome" != "$clock_expected" ]; then
+        clock_ok=0
+        clock_detail="$clock_detail reading=[$clock_bad_value] read=$clock_read: status:date_calls:gh_calls:out=$clock_outcome"
+      fi
+    done
+  done
+  if [ "$clock_ok" -eq 1 ]; then
+    pass "clock:bad-reading-fails-closed" "a failed, empty, non-digit, negative or 19-digit reading on clock read 1 to 4 -> POLL_ERROR, exit 1, after exactly that many reads"
+  else
+    failed "clock:bad-reading-fails-closed" "$clock_detail"
+  fi
+
+  st="$(new_state clock-snapshot)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  set_seq "$st" date FAIL
+  snapshot_out="$(run_poll "$st" --snapshot initial "$OWNER" "$REPO_NAME" "$PR_NUMBER" \
+    "$MAX_WATCH" "$POLL_INTERVAL" "$REVIEWER_FILTER" "$SELF_LOGIN")"
+  snapshot_status=$?
+  snapshot_date_calls="$(cat "$st/date.n")"
+  st="$(new_state clock-check)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  set_seq "$st" date FAIL
+  check_out="$(run_check "$st" "$SEED")"
+  check_status=$?
+  check_date_calls="$(cat "$st/date.n")"
+  if [ "$(printf '%s\n' "$snapshot_out" | grep -c .)" = "1" ] \
+    && printf '%s\n' "$snapshot_out" | grep -q '^BASELINE=.' && [ "$snapshot_status" -eq 0 ] \
+    && [ "$snapshot_date_calls" = "0" ] && [ "$check_out" = "UNCHANGED" ] \
+    && [ "$check_status" -eq 0 ] && [ "$check_date_calls" = "0" ]; then
+    pass "clock:snapshot-and-check-never-read-clock" "--snapshot printed BASELINE= and --check printed UNCHANGED, each exit 0 with zero clock reads"
+  else
+    failed "clock:snapshot-and-check-never-read-clock" "snapshot: status=$snapshot_status date_calls=$snapshot_date_calls out=$(printf '%s' "$snapshot_out" | tr '\n' ';') check: status=$check_status date_calls=$check_date_calls out=$(printf '%s' "$check_out" | tr '\n' ';')"
+  fi
+
+  st="$(new_state oversized-pr)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(run_poll "$st" "$OWNER" "$REPO_NAME" "1234567890123456789" "$MAX_WATCH" "$POLL_INTERVAL" \
+    "$REVIEWER_FILTER" "$SELF_LOGIN" "$SEED")"
+  status=$?
+  calls="$(gh_call_counts "$st")"
+  if [ "$out" = "POLL_ERROR" ] && [ "$status" -eq 1 ] && [ "$calls" = "0 0 0" ]; then
+    pass "validation:oversized-pr-number" "19-digit PR number -> POLL_ERROR, exit 1, zero gh calls"
+  else
+    failed "validation:oversized-pr-number" "status=$status calls=$calls out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+else
+  skipped "clock:bad-reading-fails-closed" "$SKIP_REASON"
+  skipped "clock:snapshot-and-check-never-read-clock" "$SKIP_REASON"
+  skipped "validation:oversized-pr-number" "$SKIP_REASON"
+fi
+
+date_commands="$(poll_date_commands)"
+if [ "$(printf '%s\n' "$date_commands" | grep -c .)" = "1" ] \
+  && printf '%s\n' "$date_commands" | grep -qx '[0-9]*:1'; then
+  pass "numbers:one-clock-read" "the poll's only date command is inside read_clock"
+else
+  failed "numbers:one-clock-read" "expected exactly one date command, inside read_clock, got line:in_helper=[$(printf '%s' "$date_commands" | tr '\n' ' ')]"
+fi
+
+# ── 44. the checked-number grid ──────────────────────────────────────────────────────
+# One table, NUMBER_SOURCES, names every number the poll reads from outside itself through
+# read_decimal or read_clock, how to inject a reading into it, and the modes that read it. The
+# runner generates every probe kind for every (source, mode) pair of the table, so a source never
+# gets a hand-picked subset of probes. Each probe is one case, `numbers:<source>:<kind>:<mode>`:
+#   hostile      ARITH_PAYLOAD, a reading that arithmetic evaluation runs: it creates
+#                ARITH_CANARY, so any syntax form that evaluates a reading before its check leaves
+#                the canary behind. Its base name is BASH_VERSINFO, an array every Bash sets, because
+#                the poll runs under `set -u` and an unset base name would abort the evaluation
+#                before the subscript runs.
+#   non-digit    abc
+#   negative     -1
+#   empty        the empty string
+#   19-digits    1234567890123456789, past the 18-digit bound that keeps Bash's 64-bit arithmetic
+#                from wrapping
+#   padded       the row's padded reading against its plain one
+# A hostile or rejected reading prints exactly the mode's error marker (POLL_ERROR, SNAPSHOT_ERROR,
+# CHECK_ERROR), exit 1, and leaves no ARITH_CANARY; a source read before any gh call also leaves the
+# fake gh at zero calls. The padded probe runs the poll once with the plain reading and once with
+# the padded one: the plain run exits 0, and the padded run gives identical status, gh calls,
+# sleeps, PR numbers handed to gh and output. A padded reading that skips the base-10 coercion
+# changes one of them: the window, interval and clock readings hold a digit octal lacks, so Bash
+# arithmetic on them errors, and the fake gh records the PR number it was handed.
+#
+# Row fields, joined by `|`: name|injector|modes|before_gh|plain|padded|not_applicable
+#   name            the case-name segment.
+#   injector        a function and its leading arguments; the runner appends the reading. It sets
+#                   the GRID_* run inputs.
+#   modes           comma list of the modes that read the source, from poll, snapshot and check.
+#   before_gh       yes when the source is read before any gh call.
+#   plain, padded   the reading the padded probe runs plain, and the same value zero-padded.
+#   not_applicable  `;`-joined `padded@<mode>=<reason>` items, one per padded probe the source
+#                   cannot take; the runner prints each as an N/A line with its reason. Only the
+#                   padded probe is excludable: a fail-closed probe (hostile, non-digit, negative,
+#                   empty, 19-digits) always runs, and a row excluding one fails the row check.
+# A new source is one row. check_source_row validates every row before the grid runs; a row
+# missing its injector or mode list, or any other defect, fails numbers:source-table, and the
+# grid skips only that row.
+#
+# The capture rows drive a failed-check count as a JSON string. The poll sums the FAILURE counts
+# of checkRunCountsByState and statusContextCountsByState with jq's add; the injector sets the
+# other bucket's FAILURE count to the empty string, so add concatenates and the reading reaches the
+# poll's FAILED_CHECKS line unchanged, the payload and the padding included. The seed row carries
+# a reading the seed shape ([A-Za-z0-9_-]) cannot hold through an exported variable whose name is
+# the field value, because arithmetic on a name runs its value. The clock rows serve the reading
+# on one read_clock call site through `date.seq`; their plain and padded readings are the fake
+# date's CLOCK and PADDED literals.
+ARITH_CANARY="$TMPDIR_TEST/arith-canary"
+ARITH_PAYLOAD="BASH_VERSINFO[\$(touch $(printf '%q' "$ARITH_CANARY"))]"
+GRID_MAX_WATCH=3
+GRID_POLL_INTERVAL=1
+GRID_INTERVAL_WINDOW=9
+GRID_FAIL_CLOSED_KINDS=(hostile non-digit negative empty 19-digits)
+GRID_PROBE_KINDS=("${GRID_FAIL_CLOSED_KINDS[@]}" padded)
+GRID_UNUSED_DURATION="the mode reads this argument through read_decimal but never uses it, so a padded reading has nothing to change"
+NUMBER_SOURCES=(
+  "pr-number|inject_pr_number|poll,snapshot,check|yes|4242|004242|"
+  "watch-window|inject_watch_window|poll,snapshot,check|yes|9|0009|padded@snapshot=$GRID_UNUSED_DURATION;padded@check=$GRID_UNUSED_DURATION"
+  "poll-interval|inject_poll_interval|poll,snapshot,check|yes|8|0008|padded@snapshot=$GRID_UNUSED_DURATION;padded@check=$GRID_UNUSED_DURATION"
+  "seed-failed-checks|inject_seed_failed_checks|poll,check|yes|0|000|"
+  "clock-arm-read|inject_clock_reading 1|poll|yes|CLOCK|PADDED|"
+  "clock-loop-top-read|inject_clock_reading 2|poll|yes|CLOCK|PADDED|"
+  "clock-sleep-read|inject_clock_reading 3|poll|no|CLOCK|PADDED|"
+  "capture-check-run-failures|inject_capture_failures checkRunCountsByState|poll,snapshot,check|no|0|000|"
+  "capture-status-context-failures|inject_capture_failures statusContextCountsByState|poll,snapshot,check|no|0|000|"
+)
+
+# inject_pr_number <reading>: the PR number argument.
+inject_pr_number() { GRID_PR="$1"; }
+
+# inject_watch_window <reading>: the watch window argument.
+inject_watch_window() { GRID_WINDOW="$1"; }
+
+# inject_poll_interval <reading>: the poll interval argument, under a window of
+# GRID_INTERVAL_WINDOW, so an interval of 8 reaches sleep (8 seconds are left after the first
+# capture) instead of being cut to the seconds left.
+inject_poll_interval() {
+  GRID_INTERVAL="$1"
+  GRID_WINDOW="$GRID_INTERVAL_WINDOW"
+}
+
+# inject_seed_failed_checks <reading>: the shared seed's failed_checks field. A reading the seed
+# shape cannot hold travels as the name of the exported variable grid_seed_reading.
+inject_seed_failed_checks() {
+  local field_value="$1"
+  if ! [[ "$1" =~ ^[A-Za-z0-9_-]*$ ]]; then
+    export grid_seed_reading="$1"
+    field_value="grid_seed_reading"
+  fi
+  GRID_SEED="$(seed_with_failed_checks "$field_value")"
+}
+
+# inject_clock_reading <read_number> <reading>: clock reads before <read_number> serve the virtual
+# clock and read <read_number> serves <reading>.
+inject_clock_reading() {
+  local read_index
+  GRID_CLOCK=()
+  for ((read_index = 1; read_index < $1; read_index++)); do
+    GRID_CLOCK+=(CLOCK)
+  done
+  GRID_CLOCK+=("$2")
+}
+
+# inject_capture_failures <bucket> <reading>: the snapshot state with <reading> as the JSON string
+# FAILURE count of <bucket> and the empty string as the other bucket's FAILURE count.
+inject_capture_failures() {
+  case "$1" in
+    checkRunCountsByState|statusContextCountsByState) ;;
+    *) return 1 ;;
+  esac
+  GRID_GRAPHQL="$TMPDIR_TEST/$GRID_STATE_NAME-capture.json"
+  jq --arg bucket "$1" --arg reading "$2" '
+    def failure_count($name): if $bucket == $name then $reading else "" end;
+    .data.repository.pullRequest.statusCheckRollup.contexts = {
+      checkRunCountsByState: [{state: "SUCCESS", count: 3},
+                              {state: "FAILURE", count: failure_count("checkRunCountsByState")}],
+      statusContextCountsByState: [{state: "FAILURE",
+                                    count: failure_count("statusContextCountsByState")}]
+    }' "$PRE" > "$GRID_GRAPHQL"
+}
+
+# probe_reading <kind>: the reading a fail-closed probe kind serves.
+probe_reading() {
+  case "$1" in
+    hostile) printf '%s' "$ARITH_PAYLOAD" ;;
+    non-digit) printf '%s' abc ;;
+    negative) printf '%s' -1 ;;
+    empty) ;;
+    19-digits) printf '%s' 1234567890123456789 ;;
+    *) return 1 ;;
+  esac
+}
+
+# mode_error_marker <mode>: the terminal error marker of <mode>.
+mode_error_marker() {
+  case "$1" in
+    poll) printf 'POLL_ERROR' ;;
+    snapshot) printf 'SNAPSHOT_ERROR' ;;
+    check) printf 'CHECK_ERROR' ;;
+    *) return 1 ;;
+  esac
+}
+
+# probe_exclusion <not_applicable> <kind> <mode>: prints the reason and returns 0 when
+# <not_applicable> excludes <kind> in <mode>; returns 1 otherwise.
+probe_exclusion() {
+  local item
+  local -a items=()
+  IFS=';' read -r -a items <<<"$1"
+  for item in ${items[@]+"${items[@]}"}; do
+    if [ "${item%%=*}" = "$2@$3" ]; then
+      printf '%s' "${item#*=}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# check_source_row <row>: 0 when <row> has its seven fields, an injector naming a declared
+# function, a mode list drawn from poll, snapshot and check, a yes or no before_gh, well-formed
+# not_applicable items that exclude only the padded probe in one of the row's modes with a reason
+# (a fail-closed probe is never excludable), and distinct non-empty plain and padded readings unless every mode excludes the padded probe.
+# Otherwise prints the defect and returns 1.
+check_source_row() {
+  local row="$1" name injector modes before_gh plain padded not_applicable mode item padded_mode_count=0
+  local -a injector_words=() mode_list=() items=()
+  if [ "$(printf '%s\n' "$row" | awk -F'|' '{print NF}')" != "7" ]; then
+    printf 'row [%s] does not have 7 fields' "$row"
+    return 1
+  fi
+  IFS='|' read -r name injector modes before_gh plain padded not_applicable <<<"$row"
+  [[ "$name" =~ ^[a-z0-9-]+$ ]] || { printf 'row [%s] has no name' "$row"; return 1; }
+  read -r -a injector_words <<<"$injector"
+  if [ "${#injector_words[@]}" -eq 0 ] || ! declare -F "${injector_words[0]}" >/dev/null; then
+    printf 'source %s names no declared injector' "$name"
+    return 1
+  fi
+  [ -n "$modes" ] || { printf 'source %s has no mode list' "$name"; return 1; }
+  IFS=',' read -r -a mode_list <<<"$modes"
+  for mode in "${mode_list[@]}"; do
+    mode_error_marker "$mode" >/dev/null || { printf 'source %s names unknown mode [%s]' "$name" "$mode"; return 1; }
+    probe_exclusion "$not_applicable" padded "$mode" >/dev/null || padded_mode_count=$((padded_mode_count + 1))
+  done
+  case "$before_gh" in
+    yes|no) ;;
+    *) printf 'source %s has before_gh [%s], not yes or no' "$name" "$before_gh"; return 1 ;;
+  esac
+  IFS=';' read -r -a items <<<"$not_applicable"
+  for item in ${items[@]+"${items[@]}"}; do
+    mode="${item#*@}"
+    mode="${mode%%=*}"
+    if ! [[ "$item" =~ ^padded@[a-z]+=.+$ ]] || ! [[ ",$modes," == *",$mode,"* ]]; then
+      printf 'source %s has a malformed not_applicable item [%s]: only a padded probe can be excluded' "$name" "$item"
+      return 1
+    fi
+  done
+  if [ "$padded_mode_count" -gt 0 ] && { [ -z "$plain" ] || [ -z "$padded" ] || [ "$plain" = "$padded" ]; }; then
+    printf 'source %s needs distinct plain and padded readings' "$name"
+    return 1
+  fi
+  return 0
+}
+
+# invoke_grid_mode <state_dir> <mode>: the poll in <mode> with the GRID_* run inputs.
+invoke_grid_mode() {
+  case "$2" in
+    poll)
+      run_poll "$1" "$OWNER" "$REPO_NAME" "$GRID_PR" "$GRID_WINDOW" "$GRID_INTERVAL" \
+        "$REVIEWER_FILTER" "$SELF_LOGIN" "$GRID_SEED"
+      ;;
+    snapshot)
+      run_poll "$1" --snapshot initial "$OWNER" "$REPO_NAME" "$GRID_PR" "$GRID_WINDOW" \
+        "$GRID_INTERVAL" "$REVIEWER_FILTER" "$SELF_LOGIN"
+      ;;
+    check)
+      run_poll "$1" --check "$OWNER" "$REPO_NAME" "$GRID_PR" "$GRID_WINDOW" "$GRID_INTERVAL" \
+        "$REVIEWER_FILTER" "$SELF_LOGIN" "$GRID_SEED"
+      ;;
+    *) return 2 ;;
+  esac
+}
+
+# grid_outcome <state_name> <mode> <injector> <reading>: one run in <mode> over the steady
+# pre-cycle-0 state with the shared seed, the grid window and interval, and <reading> injected by
+# <injector>, as `<status>|<gh_calls>|<sleeps>|<gh_pr_numbers>|<out>`. Call it inside $( ) only:
+# the GRID_* inputs and an injector's export stay in that subshell.
+grid_outcome() {
+  local st out status
+  local -a injector_words=()
+  GRID_STATE_NAME="$1"
+  GRID_PR="$PR_NUMBER"
+  GRID_WINDOW="$GRID_MAX_WATCH"
+  GRID_INTERVAL="$GRID_POLL_INTERVAL"
+  GRID_SEED="$SEED"
+  GRID_GRAPHQL="$PRE"
+  GRID_CLOCK=()
+  read -r -a injector_words <<<"$3"
+  "${injector_words[@]}" "$4" || { printf 'injector [%s] failed' "$3"; return 1; }
+  st="$(new_state "$1")"
+  set_seq "$st" graphql "$GRID_GRAPHQL"
+  set_seq "$st" reactions "$REACT_NONE"
+  [ "${#GRID_CLOCK[@]}" -eq 0 ] || set_seq "$st" date "${GRID_CLOCK[@]}"
+  out="$(invoke_grid_mode "$st" "$2")"
+  status=$?
+  printf '%s|%s|%s|%s|%s' "$status" "$(gh_call_counts "$st")" "$(recorded_sleeps "$st")" \
+    "$(sort -u "$st/gh.prs" | paste -sd, -)" "$(printf '%s' "$out" | tr '\n' ';')"
+}
+
+# judge_fail_closed_probe <case_name> <mode> <injector> <before_gh> <kind>: one fail-closed probe
+# case. It passes when the run prints exactly the mode's error marker, exit 1, leaves no
+# ARITH_CANARY, and, when <before_gh> is yes, makes no gh call. The canary is removed after each
+# case, so a later case cannot inherit it.
+judge_fail_closed_probe() {
+  local case_name="$1" mode="$2" injector="$3" before_gh="$4" kind="$5" reading outcome
+  local status gh_calls sleeps gh_prs out canary="absent" expected_marker
+  reading="$(probe_reading "$kind")"
+  expected_marker="$(mode_error_marker "$mode")"
+  outcome="$(grid_outcome "${case_name//:/-}" "$mode" "$injector" "$reading")"
+  if [ -e "$ARITH_CANARY" ]; then
+    canary="created"
+    rm -f "$ARITH_CANARY"
+  fi
+  IFS='|' read -r status gh_calls sleeps gh_prs out <<<"$outcome"
+  if [ "$status" = "1" ] && [ "$out" = "$expected_marker" ] && [ "$canary" = "absent" ] \
+    && { [ "$before_gh" = "no" ] || [ "$gh_calls" = "0 0 0" ]; }; then
+    pass "$case_name" "$expected_marker, exit 1, no canary$([ "$before_gh" = "no" ] || printf ', zero gh calls')"
+  else
+    failed "$case_name" "expected $expected_marker exit 1 canary absent (zero gh calls: $before_gh), got canary=$canary status|gh_calls|sleeps|gh_prs|out=$outcome"
+  fi
+}
+
+# judge_padded_probe <case_name> <mode> <injector> <plain> <padded>: one padded probe case. It
+# passes when the plain run exits 0 and the padded run's outcome is identical.
+judge_padded_probe() {
+  local case_name="$1" mode="$2" injector="$3" plain_outcome padded_outcome
+  plain_outcome="$(grid_outcome "${case_name//:/-}-plain" "$mode" "$injector" "$4")"
+  padded_outcome="$(grid_outcome "${case_name//:/-}-padded" "$mode" "$injector" "$5")"
+  if [ "${plain_outcome%%|*}" = "0" ] && [ "$padded_outcome" = "$plain_outcome" ]; then
+    pass "$case_name" "[$5] behaves exactly as [$4]: $(printf '%s' "$plain_outcome" | cut -d'|' -f1,3,5)"
+  else
+    failed "$case_name" "expected the plain run to exit 0 and the padded run to match it; status|gh_calls|sleeps|gh_prs|out plain=$plain_outcome padded=$padded_outcome"
+  fi
+}
+
+# run_source_probes <row>: every probe kind of the row in every mode it lists, each a case or,
+# when the row excludes it, an N/A line with the row's reason.
+run_source_probes() {
+  local name injector modes before_gh plain padded not_applicable mode kind case_name reason
+  local -a mode_list=()
+  IFS='|' read -r name injector modes before_gh plain padded not_applicable <<<"$1"
+  IFS=',' read -r -a mode_list <<<"$modes"
+  for mode in "${mode_list[@]}"; do
+    for kind in "${GRID_PROBE_KINDS[@]}"; do
+      case_name="numbers:$name:$kind:$mode"
+      if reason="$(probe_exclusion "$not_applicable" "$kind" "$mode")"; then
+        echo "N/A  [$case_name] $reason"
+      elif [ "$kind" = "padded" ]; then
+        judge_padded_probe "$case_name" "$mode" "$injector" "$plain" "$padded"
+      else
+        judge_fail_closed_probe "$case_name" "$mode" "$injector" "$before_gh" "$kind"
+      fi
+    done
+  done
+}
+
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  table_ok=1
+  table_detail=""
+  declare -a checked_sources=()
+  for source_row in "${NUMBER_SOURCES[@]}"; do
+    if row_defect="$(check_source_row "$source_row")"; then
+      checked_sources+=("$source_row")
+    else
+      table_ok=0
+      table_detail="$table_detail $row_defect;"
+    fi
+  done
+  declare -a broken_rows=("no-injector||poll|yes|1|01|" "no-modes|inject_pr_number||yes|1|01|")
+  for kind in "${GRID_FAIL_CLOSED_KINDS[@]}"; do
+    broken_rows+=("excludes-$kind|inject_pr_number|poll|yes|1|01|$kind@poll=a fail-closed probe must not be excludable")
+  done
+  for broken_row in "${broken_rows[@]}"; do
+    if check_source_row "$broken_row" >/dev/null; then
+      table_ok=0
+      table_detail="$table_detail self-check accepted the broken row [$broken_row];"
+    fi
+  done
+  if [ "$table_ok" -eq 1 ]; then
+    pass "numbers:source-table" "${#NUMBER_SOURCES[@]} sources pass the row self-check, which rejects a row missing its injector or mode list and a row excluding any fail-closed probe"
+  else
+    failed "numbers:source-table" "$table_detail"
+  fi
+  for source_row in ${checked_sources[@]+"${checked_sources[@]}"}; do
+    run_source_probes "$source_row"
+  done
+else
+  skipped "numbers:source-table" "$SKIP_REASON"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
