@@ -1,8 +1,8 @@
 /*
- * standard-delivery review.js: the local review gate of the
- * standard-delivery workflow. It holds the review prompt, the routes of
- * each exit_reason, the review stops, questions and replans, and the
- * review gate step. Its result schema lives in review-schema.js.
+ * standard-delivery review.js: the local review gate of the standard-delivery
+ * workflow. It holds the review prompt, the routes of each exit_reason, the
+ * review stops, questions and replans, and the review gate step. Its result
+ * schema lives in review-schema.js.
  *
  * Inputs
  *   run    the run state of main.js createRunState: pass, decisions,
@@ -19,139 +19,136 @@
  *
  * Outputs
  *   runReviewGate(run, plan, gates)  {held, note}, {held: false} on a
- *          skip, {replan}, {draft: reason} at a loop cap, so the pull
- *          request opens as a draft, or {result}: a pause, a wait or a
- *          blocked finish, or {rerun: true} when the user replied to a
- *          stop of its commit step or to a blocked review, or a wait ended,
- *          so local review runs again, its commit runner reading the head.
+ *          skip, {replan}, {draft: reason} at a loop cap, so the pull request
+ *          opens as a draft, or {result}: a pause, a wait or a blocked finish,
+ *          or {rerun: true} when the user replied to a stop of its commit step
+ *          or to a blocked review, or a wait ended, so local review runs
+ *          again, its commit runner reading the head.
  *   The step, as meta.js names it:
  *   Review  a gate when configured. hivemind:local-reviewer runs its loop on
  *           the branch with base, working_branch, trunk, max_iterations and
  *           caller_validates true in its inputs block, and commits its own
  *           fixes. caller_validates true holds because a review that ends on a
- *           new commit sends the run back to the first gate, so validation runs
- *           again on that commit, and the reviewer checks only the files each
- *           fix touched. Then the commit runner runs with an empty file list
- *           and the texts reviewCommitTexts() gives, so any edit left behind
- *           stops it, and the gate holds on the commit it reports.
- *           localReviewRoutes() routes each exit_reason: clean holds,
- *           skipped, a review that could not run, sets run.reviewSkip
- *           and returns {held: false}, so configuredGateIds (gates.js)
- *           drops local review for the rest of the run and the pull request
- *           opens, its gates part and the complete message naming the skip
- *           (describeGateSkip, gates.js), never held or not configured,
- *           diminishing returns resolve through decide() and a take holds, a
- *           planner escalation or root cluster resolves through
- *           decide() and a take, counted in run.replans and
- *           run.reviewReplans, starts a new pass with replan data: the review
- *           projected to its exit_reason and the fields reviewExitFields()
- *           names for it, so rejected_findings, undone_fixes, ledger_path and
- *           the counts never reach the planner. A question of the review,
- *           user-input-required or high-severity-rejection, carries finding_id
- *           and the reviewer's user_question: found, ask, 2 to 4 options with
- *           ids A, B, C and D in that order, a recommendation with its
- *           strength, and the gate: irreversible and architectural. Per
- *           decision-autonomy.md (Review Calls), decide() reads the brief
- *           removeReviewerText builds in code from those choices, with safety
- *           false because clause 3 is not read, so it takes an agreed call that
- *           is reversible, not architectural and lists no destructive change,
- *           and asks every other one. Each option's destructive list is shown
- *           with its items encoded, and decide() reads each entry's category
- *           with its item unshownBriefText(), so a recommended option that
- *           lists a change asks gate_safety and is never taken. An ask's items
- *           are the raw lists, so a letter reply approves the chosen option's
- *           changes (applyApprovalChoices, approvals.js). When the review run
- *           right after a take returns a hold readGateHold (approvals.js)
- *           reads, askHeldReviewCall removes that call from run.taken and asks
- *           its question of the user, through buildUndecidedAsk with
- *           gate.safety true, its lead saying local review held back the call
- *           the run took. The inputs block carries run.approvals as approvals
- *           only when it is not empty, and listAnswerEntries(run) (main.js),
- *           each launch decision then run.answerLog, as answers only when it
- *           is not empty, so a run with no answers gets the same prompt as
- *           before. A take never pauses and never touches
- *           run.answerLog: takeReviewCall
- *           lists the call in run.taken, named by the short finding id with the
- *           encoded ask, and reruns the review gate with the next gateLabel
- *           count and user_answer {question, reply, decided_by: 'run'}, the
- *           reply being the recommended option id. An ask pauses with the lead
- *           describeReviewQuestionLead builds, the commit, the short finding id
- *           and the encoded found, then that question as the reviewer wrote it:
- *           the encoded ask, the reviewer's options with encoded summaries and
- *           its recommendation with the encoded why. No option and no strength
- *           comes from code. The reply, kept in run.answerLog for every later
- *           plan prompt, reruns the review gate with user_answer, whose
- *           question is that lead and the question (askTail, tails.js).
- *           Every other exit_reason stops with one line naming the exit and its
- *           cause, the head, the iterations and the open finding count, and at
- *           most one detail line built by describeReviewStop. break-fix-break
- *           gives the count of conflicting findings and no entry text.
- *           injection-suspect names the short finding id and the category in its
- *           line, and its detail line shows the whole encoded excerpt. blocked
- *           gives the blocker, quoted with a limit equal to its maxLength, so a
- *           valid value is never cut. max-iterations-reached and
- *           break-fix-break return {draft} with the lead, the head and the
- *           open finding count (issue 549); an escalation or root cluster at
- *           maxReplans() or at maxReviewReplans() returns {draft} naming
- *           that limit before decide() reads it. blocked
- *           with retry_minutes 1 or more waits (waitForService) while the
- *           wait fits the waits left, maxServiceWaits() of at most
- *           maxWaitMinutes() each, and the resume args fit: with no reply for
- *           its round it pauses through pauseForRetry (lib/result.js), and the
- *           reply, logged with settled [] and decided_by run, runs local
- *           review again; past the waits it returns {draft}. blocked with no
+ *           new commit sends the run back to the first gate, so validation
+ *           runs again on that commit, and the reviewer checks only the files
+ *           each fix touched. Then the commit runner runs with an empty file
+ *           list and the texts reviewCommitTexts() gives, so any edit left
+ *           behind stops it, and the gate holds on the commit it reports.
+ *           localReviewRoutes() routes each exit_reason: clean holds, skipped,
+ *           a review that could not run, sets run.reviewSkip and returns
+ *           {held: false}, so configuredGateIds (gates.js) drops local review
+ *           for the rest of the run and the pull request opens, its gates part
+ *           and the complete message naming the skip (describeGateSkip,
+ *           gates.js), never held or not configured, diminishing returns
+ *           resolve through decide() and a take holds, a planner escalation or
+ *           root cluster resolves through decide(), and a take or a reply,
+ *           counted in run.replans and run.reviewReplans, starts a new pass
+ *           with replan data: the review projected to its exit_reason and the
+ *           fields reviewExitFields() names for it, so rejected_findings,
+ *           undone_fixes, ledger_path and the counts never reach the planner.
+ *           A question of the review, user-input-required or
+ *           high-severity-rejection, carries finding_id and the reviewer's
+ *           user_question: found, ask, 2 to 4 options with ids A, B, C and D
+ *           in that order, a recommendation with its strength, and the gate:
+ *           irreversible and architectural. Per decision-autonomy.md (Review
+ *           Calls), decide() reads the brief removeReviewerText builds in code
+ *           from those choices, with safety false because clause 3 is not
+ *           read, so it takes an agreed call that is reversible, not
+ *           architectural and lists no destructive change, and asks every
+ *           other one. Each option's destructive list is shown with its items
+ *           encoded, and decide() reads each entry's category with its item
+ *           unshownBriefText(), so a recommended option that lists a change
+ *           asks gate_safety and is never taken. An ask's items are the raw
+ *           lists, so a letter reply approves the chosen option's changes
+ *           (applyApprovalChoices, approvals.js). When the review run right
+ *           after a take returns a hold readGateHold (approvals.js) reads,
+ *           askHeldReviewCall removes that call from run.taken and asks its
+ *           question of the user, through buildUndecidedAsk with gate.safety
+ *           true, its lead saying local review held back the call the run
+ *           took. The inputs block carries run.approvals as approvals only
+ *           when it is not empty, and listAnswerEntries(run) (main.js), each
+ *           launch decision then run.answerLog, as answers only when it is not
+ *           empty, so a run with no answers gets the same prompt as before. A
+ *           take never pauses and never touches run.answerLog: takeReviewCall
+ *           lists the call in run.taken, named by the short finding id with
+ *           the encoded ask, and reruns the review gate with the next
+ *           gateLabel count and user_answer {question, reply, decided_by:
+ *           'run'}, the reply being the recommended option id. An ask pauses
+ *           with the lead describeReviewQuestionLead builds, the commit, the
+ *           short finding id and the encoded found, then that question as the
+ *           reviewer wrote it: the encoded ask, the reviewer's options with
+ *           encoded summaries and its recommendation with the encoded why. No
+ *           option and no strength comes from code. The reply, kept in
+ *           run.answerLog for every later plan prompt, reruns the review gate
+ *           with user_answer, whose question is that lead and the question
+ *           (askTail, tails.js). Every other exit_reason stops with one line
+ *           naming the exit and its cause, the head, the iterations and the
+ *           open finding count, and at most one detail line built by
+ *           describeReviewStop. break-fix-break gives the count of conflicting
+ *           findings and no entry text. injection-suspect names the short
+ *           finding id and the category in its line, and its detail line shows
+ *           the whole encoded excerpt. blocked gives the blocker, quoted with
+ *           a limit equal to its maxLength, so a valid value is never cut.
+ *           max-iterations-reached and break-fix-break return {draft} with the
+ *           lead, the head and the open finding count (issue 549); an
+ *           escalation or root cluster at maxReplans(), or at
+ *           maxReviewReplans() unless the zoom-out trigger holds, returns
+ *           {draft} naming that limit before decide() reads it. blocked with
+ *           retry_minutes 1 or more waits (waitForService) while the wait fits
+ *           the waits left, maxServiceWaits() of at most maxWaitMinutes()
+ *           each, and the resume args fit: with no reply for its round it
+ *           pauses through pauseForRetry (lib/result.js), and the reply,
+ *           logged with settled [] and decided_by run, runs local review
+ *           again; past the waits it returns {draft}. blocked with no
  *           retry_minutes asks one fix_cause step_stop question through
- *           stopDelivery (lib/record.js), and the reply runs local review again;
- *           injection-suspect is terminal. Either rerun of a blocked
+ *           stopDelivery (lib/record.js), and the reply runs local review
+ *           again; injection-suspect is terminal. Either rerun of a blocked
  *           review, and the next review run after a review replan, gets
  *           fixLedgerPath() as resume_from_ledger, once, so it keeps its
- *           break-fix and root-cluster history. Local review counts only
- *           the iterations after the ledger's last replan exit
- *           (planner-escalation or root-cluster-suspected), so a rerun of a
- *           blocked review keeps its iteration count and the run after a
- *           review replan does not. The
- *           engine sets that path in code, never from the reviewer's
- *           ledger_path. A
- *           review result that fails REVIEW_SCHEMA, gives option ids other than
- *           A, B, C and D in that order, or recommends no option has a report
- *           lead, so stopDelivery ends the run blocked. describeReviewProblem reads the result before the
- *           commit runner, which takes that problem as its step cause, so a
- *           commit stop never hides it, and a null result, an agent failure that
- *           ends the run, gets the describeNoResult sentence and the run_again
- *           Next line through describeUnusableResult (lib/stop.js). The script
- *           sets no zoom-out trigger: the planner makes that call by judgment
- *           from the branch commits in its fresh facts, per
- *           remediation-doctrine.md. No message cuts a reviewer value:
- *           REVIEW_SCHEMA (review-schema.js) bounds each field that reaches a
- *           message or the planner, and a field with no bound is not shown.
- *           rejected_findings lists the findings the loop rejected under
- *           recorded decisions (remediation-doctrine.md, Recorded Decisions and
- *           Repeat Findings), and undone_fixes the findings whose failed fix the
- *           loop undid. keepReviewLists keeps each new finding_id of a usable
- *           review in run.rejected or run.undone, and sets run.open to its
- *           open_findings, before its route: a held gate's
- *           note counts each run list, and the block of the final complete
- *           message and the pull request record names each finding by its short
- *           id alone. localReviewRoutes() keys only on exit_reason.
+ *           break-fix and root-cluster history. Local review counts only the
+ *           iterations after the ledger's last replan exit (planner-escalation
+ *           or root-cluster-suspected), so a rerun of a blocked review keeps
+ *           its iteration count and the run after a review replan does not.
+ *           The engine sets that path in code, never from the reviewer's
+ *           ledger_path. A review result that fails REVIEW_SCHEMA, gives
+ *           option ids other than A, B, C and D in that order, or recommends
+ *           no option has a report lead, so stopDelivery ends the run blocked.
+ *           describeReviewProblem reads the result before the commit runner,
+ *           which takes that problem as its step cause, so a commit stop never
+ *           hides it, and a null result, an agent failure that ends the run,
+ *           gets the describeNoResult sentence and the run_again Next line
+ *           through describeUnusableResult (lib/stop.js). The zoom-out trigger
+ *           of requestReviewReplan asks the approach question, gate
+ *           architectural, so decide() always asks. No message cuts a reviewer
+ *           value: REVIEW_SCHEMA (review-schema.js) bounds each field that
+ *           reaches a message or the planner, and a field with no bound is not
+ *           shown. rejected_findings lists the findings the loop rejected
+ *           under recorded decisions (remediation-doctrine.md, Recorded
+ *           Decisions and Repeat Findings), and undone_fixes the findings
+ *           whose failed fix the loop undid. keepReviewLists keeps each new
+ *           finding_id of a usable review in run.rejected or run.undone, and
+ *           sets run.open to its open_findings, before its route: a held
+ *           gate's note counts each run list, and the block of the final
+ *           complete message and the pull request record names each finding by
+ *           its short id alone. localReviewRoutes() keys only on exit_reason.
  *
  * Invariants
- *   A contractRows() check is a function of the built script, not of
- *   main.js: the build bundles this module into it, so a row can name a
- *   function of this module.
+ *   A contractRows() check is a function of the built script, not of main.js:
+ *   the build bundles this module into it, so a row can name a function of
+ *   this module.
  *   Trust boundary: the overlord is a trusted relay, as in analysis-only
  *   (ADR-0036 decision 13). The local review result carries review-tool text:
- *   REVIEW_SCHEMA labels each such field, it reaches the planner only in a data
- *   block under the boundary sentence, it reaches local review, encoded in a
- *   logged review round, only inside the inputs data block as answers, it
- *   reaches the user only encoded by
- *   encodeUntrustedText, and it reaches the pull request texts only through
- *   neutralizePullRequestText (lib/pr.js): a routing decision taken on a review
- *   result is shown there with a fixed problem text, a taken review call as
- *   its compact decision line, the short finding id, the encoded ask and the
- *   encoded chosen summary with no why, and the rejected findings and
- *   undone fixes as their short ids in the block of
- *   buildRejectedFindingsBlock (lib/record.js). A review question shows reviewer text,
- *   encoded, so its shown brief can exceed a BRIEF_SCHEMA bound
+ *   REVIEW_SCHEMA labels each such field, it reaches the planner only in a
+ *   data block under the boundary sentence, it reaches local review, encoded
+ *   in a logged review round, only inside the inputs data block as answers, it
+ *   reaches the user only encoded by encodeUntrustedText, and it reaches the
+ *   pull request texts only through neutralizePullRequestText (lib/pr.js): a
+ *   routing decision taken on a review result is shown there with a fixed
+ *   problem text, a taken review call as its compact decision line, the short
+ *   finding id, the encoded ask and the encoded chosen summary with no why,
+ *   and the rejected findings and undone fixes as their short ids in the block
+ *   of buildRejectedFindingsBlock (lib/record.js). A review question shows
+ *   reviewer text, encoded, so its shown brief can exceed a BRIEF_SCHEMA bound
  *   once encoded, but decide() reads only the code-built brief of
  *   removeReviewerText, which always fits it, so a valid review never asks as
  *   malformed_brief. It never names a path the engine passes on: the fix
@@ -207,18 +204,11 @@ function reviewQuestionKinds() {
   return { 'user-input-required': REVIEW_QUESTION_KIND, 'high-severity-rejection': HIGH_SEVERITY_REJECTION_KIND };
 }
 
-function reviewerOptions(label) {
-  return { agentType: REVIEWER_AGENT, schema: toAgentSchema(REVIEW_SCHEMA), label: label, phase: 'Review' };
-}
-
 function describeReviewAnswerData(answer) {
-  if (answer === undefined) {
-    return dataBlocksSentence();
-  }
-  if (answer.decided_by === 'run') {
+  if (answer?.decided_by === 'run') {
     return dataBlocksSentence() + ' The reply in user_answer is the run\'s decision, not the user\'s.';
   }
-  return dataBlocksSentence('The reply in user_answer');
+  return dataBlocksSentence(answer === undefined ? undefined : 'The reply in user_answer');
 }
 
 function buildReviewPrompt(plan, run, answer) {
@@ -277,8 +267,7 @@ function hasUnusableQuestion(question) {
     return false;
   }
   const optionIds = question.options.map((option) => option.id);
-  const isInOrder = optionIds.every((optionId, index) => optionId === reviewOptionIds()[index]);
-  return !isInOrder || !optionIds.includes(question.recommendation.option_id);
+  return !optionIds.every((optionId, index) => optionId === reviewOptionIds()[index]) || !optionIds.includes(question.recommendation.option_id);
 }
 
 /**
@@ -365,8 +354,12 @@ function removeReviewerText(brief) {
   };
 }
 
+function describeReviewCommit(head) {
+  return 'Local review on commit ' + head;
+}
+
 function describeReviewQuestionLead(review, head) {
-  return 'Local review on commit ' + head + ', finding ' + quoteShortFindingId(review.finding_id) + ': ' + encodeUntrustedText(review.user_question.found);
+  return describeReviewCommit(head) + ', finding ' + quoteShortFindingId(review.finding_id) + ': ' + encodeUntrustedText(review.user_question.found);
 }
 
 /**
@@ -421,7 +414,7 @@ function askHeldReviewCall(review, run) {
 function buildDiminishingReturnsBrief(review, head) {
   return buildTailBrief({
     kind: DIMINISHING_RETURNS_EXIT_KIND,
-    problem: 'Local review on commit ' + head + ' sees diminishing returns, with ' + describeCount(review.findings_open, 'finding') + ' still open. Stop fixing and hold the local review gate on this commit with those findings open?',
+    problem: describeReviewCommit(head) + ' sees diminishing returns, with ' + describeCount(review.findings_open, 'finding') + ' still open. Stop fixing and hold the local review gate on this commit with those findings open?',
     goOn: 'Stop fixing and go on with the open findings.',
     strength: 'strong',
     why: 'More review rounds fix little now, and the open findings stay on the record for you before the merge.'
@@ -459,17 +452,17 @@ function resolveDiminishingReturns(review, run) {
   return isRunEnd(decided) ? decided : { held: true, note: 'diminishing returns, ' + review.findings_open + ' findings still open' + describeHeldCounts(run) };
 }
 
-function buildReviewEscalationBrief(review) {
+function buildReviewEscalationBrief(review, isRepeat) {
   const isCluster = review.exit_reason === 'root-cluster-suspected';
-  return buildTailBrief({
+  const found = isCluster ? 'Local review found ' + describeCount(review.cluster_ids.length, 'finding') + ' in ' + describeCount(review.cluster_files.length, 'file') + ' that share one suspected root.' : 'Local review escalated finding ' + quoteShortFindingId(review.finding_id) + ' to the planner.';
+  const brief = buildTailBrief({
     kind: isCluster ? ROOT_CLUSTER_ROUTING_KIND : PLANNER_ESCALATION_ROUTING_KIND,
-    problem: (isCluster
-      ? 'Local review found ' + describeCount(review.cluster_ids.length, 'finding') + ' in ' + describeCount(review.cluster_files.length, 'file') + ' that share one suspected root.'
-      : 'Local review escalated finding ' + quoteShortFindingId(review.finding_id) + ' to the planner.') + ' Go back to planning, from fresh facts, for ' + (isCluster ? 'a remediation that closes the class?' : 'its remediation?'),
+    problem: found + ' Go back to planning, from fresh facts, for ' + (isCluster ? 'a remediation that closes the class?' : 'its remediation?'),
     goOn: 'Plan the remediation from fresh facts.',
     strength: 'strong',
     why: 'The finding needs more than a simple fix, and a remediation plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.'
   });
+  return isRepeat ? { ...brief, problem: found + ' The last remediation changed those files.', ...buildApproachChoice(), gate: { ...brief.gate, architectural: true } } : brief;
 }
 
 /**
@@ -486,23 +479,28 @@ function projectReplanReview(review) {
   return projected;
 }
 
-function requestReviewReplan(review, run) {
+/**
+ * Returns {replan}, {draft} or a pause. The zoom-out trigger is a root
+ * cluster, the one review with cluster_files, after a review replan, whose
+ * cluster_files names a step file of plan, the plan the run just ran.
+ */
+function requestReviewReplan(review, run, plan) {
   const returned = 'Local review returned ' + review.exit_reason;
   if (run.replans >= maxReplans()) {
     return { draft: returned + ' after ' + maxReplans() + ' replans.' };
   }
-  if (run.reviewReplans >= maxReviewReplans()) {
+  const isRepeat = run.reviewReplans >= 1 && review.cluster_files?.some((file) => plan.steps.some((step) => step.files.includes(file)));
+  if (!isRepeat && run.reviewReplans >= maxReviewReplans()) {
     return { draft: returned + ' after ' + describeCount(maxReviewReplans(), 'review replan') + '.' };
   }
-  const brief = buildReviewEscalationBrief(review);
+  const brief = buildReviewEscalationBrief(review, isRepeat);
   const decided = resolveTailDecision(brief.kind, brief, run);
-  if (isRunEnd(decided)) {
+  if (decided.result !== undefined) {
     return decided;
   }
   run.replans += 1;
   run.reviewReplans += 1;
-  const reason = returned + ', so plan the remediation of what the review block reports, from the fresh facts.';
-  return { replan: { reason: reason, review: projectReplanReview(review) } };
+  return { replan: { reason: returned + ', so plan the remediation of what the review block reports, from the fresh facts.', review: projectReplanReview(review) } };
 }
 
 /**
@@ -533,7 +531,7 @@ function waitForService(review, run) {
   return { rerun: true };
 }
 
-function routeLocalReview(review, run) {
+function routeLocalReview(review, run, plan) {
   switch (localReviewRoutes()[review.exit_reason]) {
     case 'hold':
       return { held: true, note: 'clean' + describeHeldCounts(run) };
@@ -541,17 +539,14 @@ function routeLocalReview(review, run) {
       return resolveDiminishingReturns(review, run);
     case 'replan':
       run.resumeLedger = true;
-      return requestReviewReplan(review, run);
+      return requestReviewReplan(review, run, plan);
     case 'question':
       return askReviewQuestion(review, run);
     case 'draft':
       return { draft: describeReviewOpen(review, run.head, '') + '.' };
     case 'stop_rerun':
       run.resumeLedger = true;
-      if (review.retry_minutes >= 1) {
-        return waitForService(review, run);
-      }
-      return stopDelivery([{ problem: describeReviewStop(review, run.head) }], run);
+      return review.retry_minutes >= 1 ? waitForService(review, run) : stopDelivery([{ problem: describeReviewStop(review, run.head) }], run);
     case 'stop':
       return stopDelivery([{ problem: describeReviewStop(review, run.head), terminal: true }], run);
     case 'skip':
@@ -572,13 +567,13 @@ function reviewCommitTexts() {
 
 async function runReviewGate(run, plan, gates) {
   const count = gates.runs.review;
-  const answer = gates.answer;
-  const takenReview = gates.takenReview;
+  const { answer, takenReview } = gates;
   gates.answer = undefined;
   gates.takenReview = undefined;
   phase('Review');
-  const prompt = answer === undefined ? addResumeNote(buildReviewPrompt(plan, run), run) : buildReviewPrompt(plan, run, answer);
-  const review = await agent(prompt, reviewerOptions(gateLabel('review', run, count)));
+  const built = buildReviewPrompt(plan, run, answer);
+  const prompt = answer === undefined ? addResumeNote(built, run) : built;
+  const review = await agent(prompt, { agentType: REVIEWER_AGENT, schema: toAgentSchema(REVIEW_SCHEMA), label: gateLabel('review', run, count), phase: 'Review' });
   const unusable = describeReviewProblem(review);
   if (unusable === undefined) {
     keepReviewLists(run, review);
@@ -588,8 +583,8 @@ async function runReviewGate(run, plan, gates) {
     return committed;
   }
   const isHeldCall = takenReview !== undefined && readGateHold(review, run.approvals).holds !== undefined;
-  const routed = isHeldCall ? askHeldReviewCall(takenReview, run) : routeLocalReview(review, run);
-  if (routed.answer !== undefined && routed.answer.decided_by === 'run') {
+  const routed = isHeldCall ? askHeldReviewCall(takenReview, run) : routeLocalReview(review, run, plan);
+  if (routed.answer?.decided_by === 'run') {
     gates.takenReview = review;
   }
   return routed;

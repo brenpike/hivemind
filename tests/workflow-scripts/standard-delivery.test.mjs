@@ -5260,6 +5260,16 @@ const ROW_TESTS = {
         assertTailPause(run, [surfacedAsk(main.buildReviewEscalationBrief(review))]);
         assert.deepEqual(labelsOf(run), PASS_ONE_LABELS);
       });
+      test(`a reply to a surfaced ${kind} starts a new pass with the projected review as replan data and the reply in the answers block`, async () => {
+        const target = buildWithSurfaceKinds([kind]);
+        const paused = await runWorkflow(LAUNCH, remediationResults(review), target);
+        const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'A'), remediationResults(review), target);
+        assert.deepEqual(labelsOf(run).slice(0, PASS_ONE_LABELS.length + 3), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2']);
+        const prompt = callOf(run, 'plan-2').prompt;
+        assert.equal(readDataBlock(prompt, 'replan'), 'Local review returned ' + review.exit_reason + ', so plan the remediation of what the review block reports, from the fresh facts.');
+        assert.deepEqual(readDataBlock(prompt, 'review'), structuredClone(main.projectReplanReview(review)));
+        assert.equal(readDataBlock(prompt, 'answers').at(-1).reply, 'A');
+      });
     }
     test('local review passes count against maxReplans() and maxReviewReplans(), and an escalation at either limit opens a draft pull request with no decide() call and no pause', async () => {
       const results = happyResults({ 'work-1-STEP-001': { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved.' } });
@@ -5287,13 +5297,13 @@ const ROW_TESTS = {
         const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
         state.head = OTHER;
         state.replans = 3;
-        assert.deepEqual(structuredClone(main.requestReviewReplan(review, state)), { draft: 'Local review returned ' + review.exit_reason + ' after 3 replans.' });
+        assert.deepEqual(structuredClone(main.requestReviewReplan(review, state, REMEDIATION_PLAN)), { draft: 'Local review returned ' + review.exit_reason + ' after 3 replans.' });
         assert.deepEqual([state.replans, state.taken.length], [3, 0]);
         state.replans = 2;
-        assert.deepEqual(Object.keys(main.requestReviewReplan(review, state)), ['replan']);
+        assert.deepEqual(Object.keys(main.requestReviewReplan(review, state, REMEDIATION_PLAN)), ['replan']);
         assert.deepEqual([state.replans, state.reviewReplans, state.taken.length], [3, 1, 1]);
         state.replans = 0;
-        assert.deepEqual(structuredClone(main.requestReviewReplan(review, state)), { draft: 'Local review returned ' + review.exit_reason + ' after 1 review replan.' });
+        assert.deepEqual(structuredClone(main.requestReviewReplan(review, state, REMEDIATION_PLAN)), { draft: 'Local review returned ' + review.exit_reason + ' after 1 review replan.' });
         assert.deepEqual([state.replans, state.reviewReplans, state.taken.length], [0, 1, 1]);
       }
       const replanSource = stripCommentsAndStrings(main.requestReviewReplan.toString());
@@ -6506,11 +6516,11 @@ const ROW_TESTS = {
       assert.deepEqual(stray, []);
       assert.ok(allowed.throw > 0 && allowed.questionKey === 1 && allowed.acceptResolution === 1 && allowed.pullRequestInputs === 1, JSON.stringify(allowed));
     });
-    test('every reviewFieldTexts() field marked isExternal read by name in the workflow modules, but for its length, is the user_question or the encoded argument of a field REVIEW_SCHEMA bounds', () => {
+    test('every reviewFieldTexts() field marked isExternal read by name in the workflow modules, but for its length, is the user_question, the encoded argument of a field REVIEW_SCHEMA bounds, or cluster_files, which the zoom-out trigger only compares', () => {
       const external = Object.entries(main.reviewFieldTexts()).filter(([, entry]) => entry.isExternal).map(([name]) => name);
       const reads = [...moduleCode.matchAll(/\breview\.(\w+)(?!\w|\.length\b)/g)].map((match) => match[1]);
       assert.ok(external.includes('blocker') && external.includes('field_excerpt') && reads.includes('exit_reason'));
-      assert.deepEqual(reads.filter((name) => external.includes(name)).sort(), ['blocker', 'field_excerpt', 'finding_id', 'finding_id', 'finding_id', 'finding_id', 'user_question', 'user_question', 'user_question', 'user_question']);
+      assert.deepEqual(reads.filter((name) => external.includes(name)).sort(), ['blocker', 'cluster_files', 'field_excerpt', 'finding_id', 'finding_id', 'finding_id', 'finding_id', 'user_question', 'user_question', 'user_question', 'user_question']);
       const encodedReads = [...moduleCode.matchAll(/\b(?:quoteShortFindingId|encodeUntrustedText|quoteOrEmpty)\(review\.(\w+)(?!\w|\.)/g)].map((match) => match[1]);
       assert.deepEqual(encodedReads.sort(), ['blocker', 'field_excerpt', 'finding_id', 'finding_id', 'finding_id', 'finding_id']);
       const schemaProperties = main.buildReviewSchema().properties;
@@ -10269,6 +10279,109 @@ const ROW_TESTS = {
         assert.ok(!lib.validateSchema(schema, review).ok, label);
         assert.notEqual(main.describeReviewProblem(review), undefined, label);
       }
+    });
+  },
+  'SD-87': () => {
+    const SAME_SURFACE_PLAN = { ...CLEAN_REMEDIATION_PLAN, steps: [makeStep('STEP-002', ['src/cache.js'])] };
+    const APPROACH_PLAN = { ...CLEAN_REMEDIATION_PLAN, steps: [makeStep('STEP-003', ['src/key.js'])] };
+    const REPLAN_REASON = 'Local review returned root-cluster-suspected, so plan the remediation of what the review block reports, from the fresh facts.';
+    const NEEDS_REPLAN = { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved.' };
+    const OPEN_FINDING = { finding_id: 'c7c7c7c7', title: 'The key builder still reads raw input.' };
+    const SECOND_PASS_LABELS = [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2).slice(0, -1)];
+    const repeatedBrief = () => main.buildReviewEscalationBrief(CLUSTER, true);
+    function sameSurfaceResults(changes = {}) {
+      return remediationResults(ESCALATION, {
+        'plan-2': planResult(SAME_SURFACE_PLAN),
+        'review-2-1': CLUSTER,
+        'facts-3': onPlanBranchFacts(THIRD),
+        'plan-3': planResult(APPROACH_PLAN),
+        'branch-3': branchRelay({ created: 'false', commit: THIRD }),
+        'work-3-STEP-003': WORKER_DONE,
+        'commit-3-1': commitRelay({ commit: FOURTH }),
+        ...tailResults(3, FOURTH),
+        ...changes
+      });
+    }
+    function createReplannedState() {
+      const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      Object.assign(state, { head: THIRD, branch: 'feature/cache', replans: 1, reviewReplans: 1 });
+      return state;
+    }
+    test('the repeated cluster brief is root_cluster_routing with the cluster sentence, the last remediation sentence, buildApproachChoice() and an architectural gate', () => {
+      const brief = repeatedBrief();
+      assert.equal(brief.kind, 'root_cluster_routing');
+      assert.equal(brief.problem, 'Local review found 2 findings in 1 file that share one suspected root. The last remediation changed those files.');
+      assert.deepEqual(structuredClone([brief.options, brief.recommendation]), structuredClone([main.buildApproachChoice().options, main.buildApproachChoice().recommendation]));
+      assert.deepEqual({ ...brief.gate }, { irreversible: false, architectural: true, safety: false });
+      assert.ok(lib.validateSchema(briefSchema, brief).ok);
+      assert.deepEqual(structuredClone(main.buildReviewEscalationBrief(CLUSTER, false)), structuredClone(main.buildReviewEscalationBrief(CLUSTER)));
+    });
+    test('a second root cluster that names a file of the plan just run pauses on the approach question, with no draft and no new pass', async () => {
+      const run = await runWorkflow(LAUNCH, sameSurfaceResults());
+      assertTailPause(run, [{ brief: repeatedBrief(), reason: 'gate_architectural' }], 'review-commit-2-1');
+      assert.deepEqual(labelsOf(run), SECOND_PASS_LABELS);
+      assert.ok(!run.result.message.includes('src/cache.js'), run.result.message);
+    });
+    test('reply B to the approach question starts pass 3 with the projected review as replan data and the reply in the answers block, counted in run.replans and run.reviewReplans', async () => {
+      const results = sameSurfaceResults();
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'B'), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), [...SECOND_PASS_LABELS, 'facts-3', 'scope-3', 'plan-3', 'branch-3', 'work-3-STEP-003', 'commit-3-1', ...tailLabels(3)]);
+      const prompt = callOf(run, 'plan-3').prompt;
+      assert.equal(readDataBlock(prompt, 'replan'), REPLAN_REASON);
+      assert.deepEqual(readDataBlock(prompt, 'review'), structuredClone(main.projectReplanReview(CLUSTER)));
+      const answer = readDataBlock(prompt, 'answers').at(-1);
+      assert.deepEqual([answer.reply, answer.settled], ['B', ['Q1']]);
+      assert.ok(answer.question.endsWith(lib.renderQuestions([{ brief: repeatedBrief(), reason: 'gate_architectural' }])), answer.question);
+      const state = createReplannedState();
+      state.pendingReply = 'B';
+      assert.deepEqual(structuredClone(main.requestReviewReplan(CLUSTER, state, SAME_SURFACE_PLAN)), { replan: { reason: REPLAN_REASON, review: structuredClone(main.projectReplanReview(CLUSTER)) } });
+      assert.deepEqual([state.replans, state.reviewReplans, state.taken.length, state.answerLog.length], [2, 2, 0, 1]);
+    });
+    test('a second root cluster that names no file of the plan just run still opens a draft pull request', async () => {
+      const run = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(CLEAN_REMEDIATION_PLAN), 'review-2-1': { ...CLUSTER, open_findings: [OPEN_FINDING] } }));
+      assertDraftPullRequest(run, 'pr-2', 'Local review returned root-cluster-suspected after 1 review replan.', [OPEN_FINDING]);
+      assert.deepEqual(labelsOf(run), [...SECOND_PASS_LABELS, 'pr-2']);
+      assert.ok(!run.result.message.includes(repeatedBrief().problem), run.result.message);
+    });
+    test('a first root cluster on the files of the plan just run is still taken and routed to a new pass', async () => {
+      const run = await runWorkflow(LAUNCH, remediationResults(CLUSTER, { 'plan-2': planResult(SAME_SURFACE_PLAN) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), [...SECOND_PASS_LABELS, 'pr-2']);
+      assert.deepEqual(readDataBlock(callOf(run, 'plan-2').prompt, 'review'), structuredClone(main.projectReplanReview(CLUSTER)));
+      assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: main.buildReviewEscalationBrief(CLUSTER) }])), run.result.message);
+    });
+    test('a repeated root cluster at maxReplans() opens a draft pull request first, with no decide() call and no pause', async () => {
+      const results = happyResults({ 'work-1-STEP-001': NEEDS_REPLAN });
+      const passes = [[2, WORKER_DONE, ESCALATION], [3, NEEDS_REPLAN, REVIEW_CLEAN], [4, WORKER_DONE, { ...CLUSTER, open_findings: [OPEN_FINDING] }]];
+      for (const [pass, work, review] of passes) {
+        Object.assign(results, {
+          ['facts-' + pass]: onPlanBranchFacts(OTHER),
+          ['plan-' + pass]: planResult(),
+          ['branch-' + pass]: branchRelay({ created: 'false', commit: OTHER }),
+          ['work-' + pass + '-STEP-001']: work,
+          ['commit-' + pass + '-1']: commitRelay({ commit: OTHER, committed: 'false' }),
+          ...tailResults(pass, OTHER, { ['review-' + pass + '-1']: review })
+        });
+      }
+      const run = await runWorkflow(LAUNCH, results);
+      assertDraftPullRequest(run, 'pr-4', 'Local review returned root-cluster-suspected after 3 replans.', [OPEN_FINDING]);
+      assert.deepEqual(labelsOf(run).slice(-3), ['review-4-1', 'review-commit-4-1', 'pr-4']);
+      assert.ok(labelsOf(run).includes('review-2-1') && !labelsOf(run).includes('facts-5'));
+      assert.ok(!run.result.message.includes(repeatedBrief().problem), run.result.message);
+      const state = createReplannedState();
+      state.replans = main.maxReplans();
+      assert.deepEqual(structuredClone(main.requestReviewReplan(CLUSTER, state, makePlan())), { draft: 'Local review returned root-cluster-suspected after 3 replans.' });
+      assert.deepEqual([state.replans, state.reviewReplans, state.taken.length, state.answerLog.length], [3, 1, 0, 0]);
+    });
+    test('the approach question asks gate_architectural at every level but low, which asks table_surface, and a surfaced row pauses with table_surface', async () => {
+      for (const level of autonomyTable.levels) {
+        assert.deepEqual({ ...lib.decide({ kind: 'root_cluster_routing', level: level, brief: repeatedBrief() }, autonomyTable, briefSchema) }, { action: 'ask', reason: level === 'low' ? 'table_surface' : 'gate_architectural' }, level);
+      }
+      const run = await runWorkflow(LAUNCH, sameSurfaceResults(), buildWithSurfaceKinds(['root_cluster_routing']));
+      assertTailPause(run, [surfacedAsk(repeatedBrief())], 'review-commit-2-1');
+      assert.deepEqual(labelsOf(run), SECOND_PASS_LABELS);
     });
   }
 };
