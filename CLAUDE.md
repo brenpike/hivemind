@@ -115,7 +115,7 @@ CI runs via `.github/workflows/policy-check.yml` (job: `policy-check`), enforced
 - Adding/renaming a load-bearing governance section with named consumers (or editing a `tests/policy/safety-*.json`) without adding the consumer-assertion fixture → unprotected coupling (P3).
 - Authoring a `tests/policy/safety-*.json` fixture without reading the pin-authoring contract in `tests/policy/README.md` → overclaimed or wrong-clause pins that leave the suite green through a real regression.
 - Adding a bare or never-matching file-tool entry (`Read`, `Write`, `Edit`, `Glob`, `Grep`) to a non-executor skill's `allowed-tools` → fails CHECK 16. Use `Read(~/.claude/plugins/cache/brenpike/hivemind/**)` or the navigator's own `Edit(.hivemind/...)` inputs-file entry (`docs/skill-authoring.md` "Skill File-Tool Grants").
-- A `tools/` script that calls `mktemp` directly (inside `$( )` or backticks) → fails CHECK 19. Use `make_scratch_dir` or `make_scratch_file` from `tools/lib/scratch.sh`, called as a bare statement.
+- A `tools/` script that runs `mktemp` as a command (bare, by path, behind `env` or `command`, in any substitution) or calls a scratch helper inside a substitution → fails CHECK 19. Use `make_scratch_dir` or `make_scratch_file` from `tools/lib/scratch.sh`, called as a bare statement.
 
 ## Companion plugins referenced
 

@@ -4697,11 +4697,23 @@ mark_time 'CHECK18'
 # statement: inside a command substitution they exit only that subshell. So in
 # every tools/ *.sh file except tools/lib/scratch.sh itself, each line that is
 # not a whole-line comment is a finding naming the file and line when it:
-#   * runs mktemp in a command substitution: $(mktemp, $( command mktemp, or
-#     the backtick form, `mktemp or ` command mktemp
-#   * calls make_scratch_dir or make_scratch_file inside $( )
-# mktemp run through a variable, such as a test's "$REAL_MKTEMP" seam, is not
-# flagged.
+#   * runs mktemp as a command, in any form: by bare name or a path ending
+#     /mktemp, at the start of a line (so a $( ) split across lines counts),
+#     after a separator, keyword, $( , <( , >( or backtick, or behind a
+#     runner such as env, command, exec or timeout with its options and
+#     VAR=value assignments
+#   * calls make_scratch_dir or make_scratch_file inside $( ), <( ), >( ) or
+#     backticks
+# mktemp named as an argument, such as type -P mktemp or command -v mktemp, or
+# run through a variable, such as a test's "$REAL_MKTEMP" seam, is not flagged.
+#
+# Threat model (decided 2026-11-18 on review finding c636ea12, option A, a
+# call the run took per plugin/governance/decision-autonomy.md (Review
+# Calls)): this lint guards against mistakes, not deliberate evasion. It
+# checks where mktemp runs, line by line, not a full shell parse: a quoted
+# command name, a helper call split across lines, or mktemp text inside a
+# string or heredoc body after a separator can slip past or be flagged. Reword
+# such a line rather than widen the scan.
 
 echo ''
 echo '=== CHECK 19: tools/ scripts take scratch paths only from the checked helper ==='
@@ -4710,16 +4722,56 @@ CHECK19_HELPER_REL='tools/lib/scratch.sh'
 
 # CHECK19_SCAN_AWK
 # Prints "line_num<TAB>kind" for every line that is not a whole-line comment
-# and runs mktemp in a command substitution (kind `mktemp`) or calls a scratch
-# helper inside $( ) (kind `helper`). One line prints at most one finding.
+# and runs mktemp as a command (kind `mktemp`) or calls a scratch helper inside
+# a substitution (kind `helper`). One line prints at most one finding.
 # POSIX awk only, so gawk and mawk both run it.
 CHECK19_SCAN_AWK='
+    # cmd_start(p): 1 when text p, the line before a command word, leaves that
+    # word in command position: after nothing, a separator, a keyword, or a
+    # runner such as env or command with its options and assignments.
+    function cmd_start(p) {
+        while (1) {
+            sub(/[ \t]+$/, "", p)
+            if (p == "" || p ~ /[(`;|&!]$/) return 1
+            if (p ~ /(^|[ \t;&|(`])(then|do|else|elif|if|while|until|time|[{])$/) return 1
+            if (p ~ /(^|[ \t;&|(`])command[ \t]+-[A-Za-z]*[vV][A-Za-z]*$/) return 0
+            if (p ~ /(^|[ \t;&|(`])(command|exec|builtin|env|nohup|sudo|nice|timeout|xargs|stdbuf|setsid)$/) {
+                sub(/[A-Za-z]+$/, "", p)
+                continue
+            }
+            if (p ~ /(^|[ \t;&|(`])([A-Za-z_][A-Za-z0-9_]*=[^ \t(`]*|-[^ \t]*|[0-9][0-9.]*[smhd]?)$/) {
+                sub(/[^ \t;&|(`]+$/, "", p)
+                continue
+            }
+            return 0
+        }
+    }
+    # runs_mktemp(line): 1 when line runs mktemp, by bare name or a path ending
+    # /mktemp, in command position.
+    function runs_mktemp(line,   rest, off, i, j, c) {
+        rest = line
+        off = 0
+        while ((i = index(rest, "mktemp")) > 0) {
+            i += off
+            off = i + 5
+            rest = substr(line, off + 1)
+            if (substr(line, i + 6, 1) ~ /[A-Za-z0-9_.-]/) continue
+            j = i - 1
+            if (substr(line, j, 1) == "/") {
+                while (j > 0 && substr(line, j, 1) !~ /[ \t;|&()<>`=]/) j--
+            }
+            c = substr(line, j, 1)
+            if (j > 0 && c !~ /[ \t(`;|&!]/) continue
+            if (cmd_start(substr(line, 1, j))) return 1
+        }
+        return 0
+    }
     /^[ \t]*#/ { next }
-    /\$\([ \t]*(command[ \t]+)?mktemp([^A-Za-z0-9_-]|$)/ || /`[ \t]*(command[ \t]+)?mktemp([^A-Za-z0-9_-]|$)/ {
+    runs_mktemp($0) {
         print NR "\tmktemp"
         next
     }
-    /\$\([^)]*make_scratch_(dir|file)([^A-Za-z0-9_]|$)/ {
+    /[$<>]\([^)]*make_scratch_(dir|file)([^A-Za-z0-9_]|$)/ || /`[^`]*make_scratch_(dir|file)([^A-Za-z0-9_]|$)/ {
         print NR "\thelper"
     }
 '
@@ -4753,10 +4805,10 @@ for shell_script in "${check19_shell_scripts[@]}"; do
         check19_found=true
         if [[ "$hit_kind" == 'helper' ]]; then
             add_finding 'CHECK19' "$shell_script" "$line_num" \
-                "make_scratch_dir or make_scratch_file is called inside a command substitution, where a failure exits only that subshell and the assignment never reaches the caller -- ${CHECK19_POLICY_TEXT}"
+                "make_scratch_dir or make_scratch_file is called inside a command or process substitution, where a failure exits only that subshell and the assignment never reaches the caller -- ${CHECK19_POLICY_TEXT}"
         else
             add_finding 'CHECK19' "$shell_script" "$line_num" \
-                "mktemp runs inside a command substitution, which reads an empty path when mktemp fails -- ${CHECK19_POLICY_TEXT}"
+                "mktemp runs as a command outside the helper, where a failure leaves an empty path behind -- ${CHECK19_POLICY_TEXT}"
         fi
     done <<< "$check19_hits"
 done
@@ -4818,6 +4870,19 @@ check19_expect_flagged helper 'tmp_dir="$({scratch}_dir tmp_dir)"'
 check19_expect_flagged helper 'tmp_file="$({scratch}_file tmp_file)"'
 check19_expect_flagged helper 'tmp_dir="$(set -e; {scratch}_dir tmp_dir; printf %s "$tmp_dir")"'
 check19_expect_flagged helper 'printf %s "$( {scratch}_dir)"'
+check19_expect_flagged mktemp '    {mktemp} -d \'
+check19_expect_flagged mktemp '{mktemp} -d >/dev/null'
+check19_expect_flagged mktemp 'tmp_dir="$(env {mktemp} -d)"'
+check19_expect_flagged mktemp 'tmp_dir="$(env -i PATH=/bin TMPDIR=/x {mktemp} -d)"'
+check19_expect_flagged mktemp 'tmp_dir="$(FOO=1 exec {mktemp} -d)"'
+check19_expect_flagged mktemp 'tmp_file="$(timeout 5 {mktemp})"'
+check19_expect_flagged mktemp 'tmp_dir="$(/usr/bin/{mktemp} -d)"'
+check19_expect_flagged mktemp 'tmp_dir="$("$bin_dir/{mktemp}" -d)"'
+check19_expect_flagged mktemp 'done < <({mktemp} -d)'
+check19_expect_flagged mktemp 'if {mktemp} -d; then :; fi'
+check19_expect_flagged mktemp 'x=1; {mktemp} | cat'
+check19_expect_flagged helper 'tmp_dir=`{scratch}_dir tmp_dir`'
+check19_expect_flagged helper 'cat <({scratch}_file tmp_file)'
 
 check19_expect_admitted '# tmp_dir="$({mktemp} -d)"'
 check19_expect_admitted '    # tmp_dir=`{mktemp} -d`'
@@ -4830,9 +4895,15 @@ check19_expect_admitted 'tmp_dir="$({mktemp}_wrapper -d)"'
 check19_expect_admitted 'tmp_dir="$(my{mktemp} -d)"'
 check19_expect_admitted 'cat > "$bin_dir/{mktemp}" <<STUB'
 check19_expect_admitted 'tmp_dir="$({scratch}_dirs tmp_dir)"'
+check19_expect_admitted 'command -v {mktemp} >/dev/null'
+check19_expect_admitted 'echo "{mktemp} failed"'
+check19_expect_admitted '    "{mktemp} runs as a command" \'
+check19_expect_admitted 'chmod +x "$bin_dir/{mktemp}"'
+check19_expect_admitted 'tool=/usr/bin/{mktemp}'
+check19_expect_admitted 'echo "${{mktemp}}" $(grep -c {mktemp} file)'
 
 if [[ "$check19_found" == false ]]; then
-    echo "[PASS] Check 19: None of the $check19_script_count tools/ shell scripts outside ${CHECK19_HELPER_REL} runs mktemp or a scratch helper inside a command substitution"
+    echo "[PASS] Check 19: None of the $check19_script_count tools/ shell scripts outside ${CHECK19_HELPER_REL} runs mktemp outside the helper or a scratch helper inside a substitution"
     CHECKS_PASSED=$((CHECKS_PASSED + 1))
 else
     CHECKS_FAILED=$((CHECKS_FAILED + 1))
