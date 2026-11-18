@@ -4687,6 +4687,159 @@ fi
 
 mark_time 'CHECK18'
 
+# ── CHECK 19: tools/ scripts take scratch paths only from the checked helper ──
+#
+# A bare scratch path read from mktemp through a command substitution is empty
+# when mktemp fails, and most tools/ scripts run without set -e, so later
+# writes, and a cleanup trap's rm -rf, aim at the filesystem root. The checked
+# helpers make_scratch_dir and make_scratch_file in tools/lib/scratch.sh assign
+# a path only on success and exit 2 otherwise, and only when called as a bare
+# statement: inside a command substitution they exit only that subshell. So in
+# every tools/ *.sh file except tools/lib/scratch.sh itself, each line that is
+# not a whole-line comment is a finding naming the file and line when it:
+#   * runs mktemp in a command substitution: $(mktemp, $( command mktemp, or
+#     the backtick form, `mktemp or ` command mktemp
+#   * calls make_scratch_dir or make_scratch_file inside $( )
+# mktemp run through a variable, such as a test's "$REAL_MKTEMP" seam, is not
+# flagged.
+
+echo ''
+echo '=== CHECK 19: tools/ scripts take scratch paths only from the checked helper ==='
+
+CHECK19_HELPER_REL='tools/lib/scratch.sh'
+
+# CHECK19_SCAN_AWK
+# Prints "line_num<TAB>kind" for every line that is not a whole-line comment
+# and runs mktemp in a command substitution (kind `mktemp`) or calls a scratch
+# helper inside $( ) (kind `helper`). One line prints at most one finding.
+# POSIX awk only, so gawk and mawk both run it.
+CHECK19_SCAN_AWK='
+    /^[ \t]*#/ { next }
+    /\$\([ \t]*(command[ \t]+)?mktemp([^A-Za-z0-9_-]|$)/ || /`[ \t]*(command[ \t]+)?mktemp([^A-Za-z0-9_-]|$)/ {
+        print NR "\tmktemp"
+        next
+    }
+    /\$\([^)]*make_scratch_(dir|file)([^A-Za-z0-9_]|$)/ {
+        print NR "\thelper"
+    }
+'
+
+# check19_scan_file FILE
+# Prints CHECK19_SCAN_AWK's findings for FILE and returns awk's exit status, so
+# an unreadable file is a failure the caller reports.
+check19_scan_file() {
+    awk "$CHECK19_SCAN_AWK" "$1"
+}
+
+CHECK19_POLICY_TEXT="take a scratch path from make_scratch_dir <var> [<template>] or make_scratch_file <var> [<template>] in ${CHECK19_HELPER_REL}, called as a bare statement, so a failed mktemp exits 2 before any write or cleanup instead of leaving an empty path"
+
+check19_found=false
+check19_script_count=0
+declare -a check19_shell_scripts=()
+discover_checked_paths 'CHECK19' check19_shell_scripts files 'tools/ shell scripts' "$REPO_ROOT/tools" -- -name '*.sh' || check19_found=true
+for shell_script in "${check19_shell_scripts[@]}"; do
+    [[ "$shell_script" == "$REPO_ROOT/$CHECK19_HELPER_REL" ]] && continue
+    check19_script_count=$((check19_script_count + 1))
+    check19_scan_rc=0
+    check19_hits="$(check19_scan_file "$shell_script")" || check19_scan_rc=$?
+    if [[ "$check19_scan_rc" -ne 0 ]]; then
+        check19_found=true
+        add_finding 'CHECK19' "$shell_script" 0 \
+            "the scratch-path scan exited ${check19_scan_rc} on this file, so its scratch paths are unchecked -- make the file readable text"
+        continue
+    fi
+    [[ -z "$check19_hits" ]] && continue
+    while IFS=$'\t' read -r line_num hit_kind; do
+        check19_found=true
+        if [[ "$hit_kind" == 'helper' ]]; then
+            add_finding 'CHECK19' "$shell_script" "$line_num" \
+                "make_scratch_dir or make_scratch_file is called inside a command substitution, where a failure exits only that subshell and the assignment never reaches the caller -- ${CHECK19_POLICY_TEXT}"
+        else
+            add_finding 'CHECK19' "$shell_script" "$line_num" \
+                "mktemp runs inside a command substitution, which reads an empty path when mktemp fails -- ${CHECK19_POLICY_TEXT}"
+        fi
+    done <<< "$check19_hits"
+done
+
+# ── CHECK 19 DETECTION CANARY ──────────────────────────────────────────────
+# The scan over fixed lines, in BOTH directions. A narrowed pattern, a widened
+# comment skip, or a dropped line number turns this run red while every tools/
+# script still passes. Canary lines write {mktemp} for mktemp and {scratch} for
+# make_scratch, and check19_canary_text expands them, so this file's own source
+# never matches the scan that CHECK 19 runs over it.
+
+check19_canary_finding() {
+    check19_found=true
+    add_finding 'CHECK19' 'tools/policy_check.sh' 0 "detection canary: $1"
+    return 0
+}
+
+# check19_canary_text LINE
+# Prints LINE with {mktemp} expanded to mktemp and {scratch} to make_scratch.
+check19_canary_text() {
+    local mktemp_token='{mktemp}' scratch_token='{scratch}' canary_text="$1"
+    canary_text="${canary_text//"$mktemp_token"/mktemp}"
+    canary_text="${canary_text//"$scratch_token"/make_scratch}"
+    printf '%s\n' "$canary_text"
+}
+
+# check19_expect_flagged KIND LINE
+# Scans an admitted line followed by LINE and requires exactly one finding of
+# KIND, reported on line 2.
+check19_expect_flagged() {
+    local canary_output
+    canary_output="$(check19_scan_file <(check19_canary_text '{scratch}_dir tmp_dir' && check19_canary_text "$2"))"
+    if [[ "$canary_output" != $'2\t'"$1" ]]; then
+        check19_canary_finding "line \"$2\" produced [${canary_output//$'\n'/ | }], expected exactly one $1 finding on line 2 -- the scan admits a form it must flag, misses a line, or drops the line number"
+    fi
+    return 0
+}
+
+# check19_expect_admitted LINE
+check19_expect_admitted() {
+    local canary_output
+    canary_output="$(check19_scan_file <(check19_canary_text "$1"))"
+    if [[ -n "$canary_output" ]]; then
+        check19_canary_finding "line \"$1\" produced [${canary_output//$'\n'/ | }], expected no finding -- an admitted form is now flagged"
+    fi
+    return 0
+}
+
+check19_expect_flagged mktemp 'tmp_dir="$({mktemp} -d)"'
+check19_expect_flagged mktemp 'tmp_file=$({mktemp})'
+check19_expect_flagged mktemp 'tmp_dir="$( {mktemp} -d "${TMPDIR:-/tmp}/x.XXXXXX")"'
+check19_expect_flagged mktemp 'tmp_dir="$( command {mktemp} -d)"'
+check19_expect_flagged mktemp 'tmp_dir="$(command	{mktemp} -d)"'
+check19_expect_flagged mktemp 'tmp_dir=`{mktemp} -d`'
+check19_expect_flagged mktemp 'tmp_dir=` command {mktemp} -d`'
+check19_expect_flagged mktemp '    local tmp_dir="$({mktemp} -d)" # a trailing comment'
+check19_expect_flagged mktemp 'tmp_dir="$({mktemp} -d)" || exit 2'
+check19_expect_flagged helper 'tmp_dir="$({scratch}_dir tmp_dir)"'
+check19_expect_flagged helper 'tmp_file="$({scratch}_file tmp_file)"'
+check19_expect_flagged helper 'tmp_dir="$(set -e; {scratch}_dir tmp_dir; printf %s "$tmp_dir")"'
+check19_expect_flagged helper 'printf %s "$( {scratch}_dir)"'
+
+check19_expect_admitted '# tmp_dir="$({mktemp} -d)"'
+check19_expect_admitted '    # tmp_dir=`{mktemp} -d`'
+check19_expect_admitted '{scratch}_dir tmp_dir'
+check19_expect_admitted '{scratch}_file tmp_file "$tmp_dir/x.XXXXXX" || exit 2'
+check19_expect_admitted '{scratch}_dir tmp_dir; parent_dir="$(dirname "$tmp_dir")"'
+check19_expect_admitted 'tmp_dir="$("$REAL_MKTEMP" -d)"'
+check19_expect_admitted 'REAL_MKTEMP="$(type -P {mktemp})"'
+check19_expect_admitted 'tmp_dir="$({mktemp}_wrapper -d)"'
+check19_expect_admitted 'tmp_dir="$(my{mktemp} -d)"'
+check19_expect_admitted 'cat > "$bin_dir/{mktemp}" <<STUB'
+check19_expect_admitted 'tmp_dir="$({scratch}_dirs tmp_dir)"'
+
+if [[ "$check19_found" == false ]]; then
+    echo "[PASS] Check 19: None of the $check19_script_count tools/ shell scripts outside ${CHECK19_HELPER_REL} runs mktemp or a scratch helper inside a command substitution"
+    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+else
+    CHECKS_FAILED=$((CHECKS_FAILED + 1))
+fi
+
+mark_time 'CHECK19'
+
 # ── SAFETY REGRESSION TESTS ────────────────────────────────────────────────
 
 echo ''
