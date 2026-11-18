@@ -55,9 +55,12 @@
  *   key, so a settled label never keys it: a step_stop asked again is asked,
  *   never skipped. A reply to a local review question reruns the review
  *   gate on the current head, after any stale gate, with the next gateLabel
- *   count and user_answer {question, reply}. Any other tail reply starts a
- *   new pass from the facts step with the answers block, outside
- *   maxReplans().
+ *   count and user_answer {question, reply}. A reply to a review-routing
+ *   ask (planner_escalation_routing, root_cluster_routing) in standard-delivery
+ *   starts a new pass that carries the review block and counts against
+ *   maxReplans() and maxReviewReplans() (requestReviewReplan). Any other tail
+ *   reply starts a new pass from the facts step with the answers block,
+ *   outside maxReplans().
  *
  * Why
  *   Every question after the last wave pauses and logs its reply the same

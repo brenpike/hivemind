@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [10.0.4] - 2026-11-18
+
+### Fixed
+
+- A remediation plan that repeats a fix that did not close its class now asks you instead of being taken and listed, in standard-delivery and pr-feedback-remediation. The choices are: keep patching this class, change approach (recommended), or stop and ship what closes. Stop records your rejection of the cluster.
+- standard-delivery: after a review replan, a root cluster on files the last remediation plan changed now asks the same question instead of opening a draft. A reply to any review-routing question now carries the review findings to the planner and counts against the replan limits.
+- No prose budget raised. Every built workflow script changed, so its BUILD_ID changed and a run paused on an older build cannot resume.
+
+Issue: #587. Follow-up: #593. See the ADR-0037 amendment of 2026-11-18 (`docs/adr/0037-standard-delivery-on-script-engine.md`).
+
 ## [10.0.3] - 2026-11-17
 
 ### Fixed
