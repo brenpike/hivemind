@@ -3,10 +3,14 @@
 # Behavior test runner for the molt engine (plugin/skills/molt/scripts/molt.sh, with the shared
 # libraries plugin/skills/_shared/allowlist.sh, containment.sh and git-refusals.sh).
 #
-# The engine takes REQUIRED `--trunk <branch> --inputs <path>`. It gates trunk as an identifier,
-# moves to the top of the work tree, reads the inputs file once (after the containment read-guard),
-# deletes it when it is a .hivemind/molt-inputs-<token>.json leaf directly under a real .hivemind
-# folder in the folder it was started in (read or not as JSON), and checks its fields, then refuses an in-progress operation, unmerged paths, a detached or
+# The engine takes REQUIRED `--trunk <branch> --inputs <path> --subject-file <path>` and OPTIONAL
+# `--files-file <path> --body-file <path>`. It gates trunk as an identifier, moves to the top of
+# the work tree, checks that every given file exists, is contained and names a different file,
+# reads each file once (the inputs file as JSON holding only type, scope and breaking; the
+# subject, files and body files as raw text), deletes each right after its read when it is a
+# .hivemind/molt-inputs-<token>.json leaf directly under a real .hivemind folder in the folder it
+# was started in (read or not), and checks the fields, then refuses an in-progress operation,
+# unmerged paths, a detached or
 # unborn HEAD, a branch name that fails the identifier gate, a trunk that names the current
 # branch, and an unreadable trunk. Trunk names the current branch only by ref identity: one of
 # git's six lookup candidates for it, or the end a candidate resolves to, is refs/heads/<b> or
@@ -95,14 +99,29 @@ failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 
 BRANCH='feature/x'
 INPUTS_REL='.hivemind/molt-inputs-t.json'
-USAGE_REASON='invalid arguments; usage: molt.sh --trunk <branch> --inputs <path>'
+SUBJECT_REL='.hivemind/molt-inputs-t-subj.json'
+FILES_REL='.hivemind/molt-inputs-t-files.json'
+BODY_REL='.hivemind/molt-inputs-t-body.json'
+USAGE_REASON='invalid arguments; usage: molt.sh --trunk <branch> --inputs <path> --subject-file <path> [--files-file <path>] [--body-file <path>]'
 TRUNK_IDENTIFIER_REASON='trunk contains characters outside the safe allowlist'
 NOT_A_CHECKOUT_REASON='not inside a git checkout'
 INPUTS_MISSING_REASON='inputs file not found'
 INPUTS_OUTSIDE_REASON='inputs file resolves outside the checkout'
 INPUTS_JSON_REASON='inputs file is not valid JSON'
+SUBJECT_MISSING_REASON='subject file not found'
+FILES_MISSING_REASON='files file not found'
+BODY_MISSING_REASON='body file not found'
+SUBJECT_OUTSIDE_REASON='subject file resolves outside the checkout'
+FILES_OUTSIDE_REASON='files file resolves outside the checkout'
+BODY_OUTSIDE_REASON='body file resolves outside the checkout'
+SUBJECT_SAME_REASON='subject file is the inputs file'
+FILES_SAME_REASON='files file is the inputs file or the subject file'
+BODY_SAME_REASON='body file is the inputs file, the subject file or the files file'
+SUBJECT_UNREADABLE_REASON='subject file cannot be read'
+FILES_UNREADABLE_REASON='files file cannot be read'
+BODY_UNREADABLE_REASON='body file cannot be read'
 NOT_OBJECT_REASON='inputs must be a JSON object'
-UNKNOWN_FIELD_REASON='inputs have a field other than type, scope, breaking, subject, body and files'
+UNKNOWN_FIELD_REASON='inputs have a field other than type, scope and breaking'
 TYPE_REASON='type must be one of feat fix hotfix refactor docs test chore ci'
 SCOPE_REASON='scope contains characters outside the safe allowlist'
 BREAKING_REASON='breaking must be true or false'
@@ -137,11 +156,13 @@ run_git() {
 
 # create_world <name> -> builds $WORKDIR/<name>/w on BRANCH, one commit ahead of main. main has
 # f.txt, g.txt, sub/keep.txt and a .gitignore that ignores *.log and .hivemind/. Sets WORLD_ROOT,
-# WORK_TREE, INPUTS_PATH, MAIN_SHA and HEAD_SHA (the BRANCH tip).
+# WORK_TREE, INPUTS_PATH, SUBJECT_PATH, FILES_PATH, BODY_PATH, MAIN_SHA and HEAD_SHA (the BRANCH
+# tip), and resets BODY_GIVEN to no.
 create_world() {
     WORLD_ROOT="$WORKDIR/$1"
     WORK_TREE="$WORLD_ROOT/w"
-    INPUTS_PATH="$WORK_TREE/$INPUTS_REL"
+    set_inputs_path "$WORK_TREE/$INPUTS_REL"
+    BODY_GIVEN=no
     mkdir -p "$WORK_TREE/sub" "$WORK_TREE/.hivemind"
     run_git "$WORK_TREE" init -q
     run_git "$WORK_TREE" symbolic-ref HEAD refs/heads/main
@@ -159,20 +180,56 @@ create_world() {
     HEAD_SHA="$(run_git "$WORK_TREE" rev-parse HEAD)"
 }
 
-# write_inputs <json text> -> writes the inputs file of the current world.
-write_inputs() {
-    printf '%s\n' "$1" >"$INPUTS_PATH"
+# set_inputs_path <absolute inputs path> -> sets INPUTS_PATH and the subject, files and body file
+# paths beside it (<stem>-subj.json, <stem>-files.json, <stem>-body.json).
+set_inputs_path() {
+    INPUTS_PATH="$1"
+    SUBJECT_PATH="${1%.json}-subj.json"
+    FILES_PATH="${1%.json}-files.json"
+    BODY_PATH="${1%.json}-body.json"
 }
 
-# write_basic_inputs <files json array> -> a valid inputs file (feat, scope core, subject s).
+# set_engine_args <inputs path> -> sets ENGINE_ARGS to `--inputs <inputs path>` and the subject
+# and files file paths beside it, plus the body file path when BODY_GIVEN is yes.
+set_engine_args() {
+    local stem="${1%.json}"
+    ENGINE_ARGS=(--inputs "$1" --subject-file "$stem-subj.json" --files-file "$stem-files.json")
+    if [[ "$BODY_GIVEN" == yes ]]; then
+        ENGINE_ARGS+=(--body-file "$stem-body.json")
+    fi
+}
+
+# write_raw_inputs <inputs json> <subject text> <files text> [body text] -> writes the inputs file
+# (the JSON plus a line feed) and the subject and files files byte for byte. With [body text] it
+# writes the body file byte for byte and sets BODY_GIVEN to yes; without it, it removes any body
+# file and sets BODY_GIVEN to no. Then sets ENGINE_ARGS for INPUTS_REL.
+write_raw_inputs() {
+    printf '%s\n' "$1" >"$INPUTS_PATH"
+    printf '%s' "$2" >"$SUBJECT_PATH"
+    printf '%s' "$3" >"$FILES_PATH"
+    if [[ "$#" -ge 4 ]]; then
+        printf '%s' "$4" >"$BODY_PATH"
+        BODY_GIVEN=yes
+    else
+        rm -f "$BODY_PATH"
+        BODY_GIVEN=no
+    fi
+    set_engine_args "$INPUTS_REL"
+}
+
+# write_basic_inputs <files json array> -> valid inputs (feat, scope core, subject `add thing`)
+# with the array's paths in the files file, one per line, each ending in a line feed.
 write_basic_inputs() {
-    write_inputs "{\"type\":\"feat\",\"scope\":\"core\",\"subject\":\"add thing\",\"files\":$1}"
+    local files_text
+    files_text="$(jq -r '.[]' <<<"$1")"
+    [[ -z "$files_text" ]] || files_text+=$'\n'
+    write_raw_inputs '{"type":"feat","scope":"core"}' $'add thing\n' "$files_text"
 }
 
 # repo_snapshot -> prints HEAD, every ref, the index and the tree status (ignored files included)
-# of the current world, for before/after equality. The status line of the inputs file at
-# INPUTS_REL is left out: the engine deletes that file once it has read it, and that delete is
-# not a change.
+# of the current world, for before/after equality. The status lines of the inputs, subject,
+# files and body files at INPUTS_REL, SUBJECT_REL, FILES_REL and BODY_REL are left out: the engine
+# deletes each once it has read it, and that delete is not a change.
 repo_snapshot() {
     run_git "$WORK_TREE" symbolic-ref -q HEAD || printf 'detached'
     printf '\n'
@@ -180,7 +237,9 @@ repo_snapshot() {
     run_git "$WORK_TREE" for-each-ref --format='%(refname) %(objectname)'
     run_git "$WORK_TREE" ls-files -s
     run_git "$WORK_TREE" status --porcelain=v1 --untracked-files=all --ignored \
-        | awk -v inputs_rel="$INPUTS_REL" 'substr($0, 4) != inputs_rel'
+        | awk -v inputs_rel="$INPUTS_REL" -v subject_rel="$SUBJECT_REL" -v files_rel="$FILES_REL" -v body_rel="$BODY_REL" \
+            '{ status_path = substr($0, 4) }
+            status_path != inputs_rel && status_path != subject_rel && status_path != files_rel && status_path != body_rel'
 }
 
 # assert_path_kept <name> <path> -> asserts <path> still exists (a symlink counts, dangling or not).
@@ -276,11 +335,34 @@ assert_refused_unchanged() {
     assert_equal "$name-unchanged" "$before" "$after" "HEAD, refs, index and tree"
 }
 
-# assert_input_refused <name> <inputs json> <reason> -> writes the inputs and asserts the refusal
-# with nothing changed. The tree carries a dirty listed file, so a missed refusal would commit.
+# assert_input_refused <name> <reason> <inputs json> <subject text> <files text> [body text] ->
+# writes the inputs (write_raw_inputs) and asserts the refusal with nothing changed. The tree
+# carries a dirty listed file, so a missed refusal would commit.
 assert_input_refused() {
-    write_inputs "$2"
-    assert_refused_unchanged "$1" "$WORK_TREE" "$3" '' --trunk main --inputs "$INPUTS_REL"
+    local name="$1" reason="$2"
+    shift 2
+    write_raw_inputs "$@"
+    assert_refused_unchanged "$name" "$WORK_TREE" "$reason" '' --trunk main "${ENGINE_ARGS[@]}"
+}
+
+# assert_raw_files_kept <name> -> asserts the inputs, subject and files files of the current world
+# are still there, and the body file too when BODY_GIVEN is yes.
+assert_raw_files_kept() {
+    assert_path_kept "$1-inputs" "$INPUTS_PATH"
+    assert_path_kept "$1-subject" "$SUBJECT_PATH"
+    assert_path_kept "$1-files" "$FILES_PATH"
+    if [[ "$BODY_GIVEN" == yes ]]; then
+        assert_path_kept "$1-body" "$BODY_PATH"
+    fi
+}
+
+# assert_raw_files_gone <name> -> asserts the inputs, subject, files and body files of the current
+# world are all gone.
+assert_raw_files_gone() {
+    assert_path_gone "$1-inputs" "$INPUTS_PATH"
+    assert_path_gone "$1-subject" "$SUBJECT_PATH"
+    assert_path_gone "$1-files" "$FILES_PATH"
+    assert_path_gone "$1-body" "$BODY_PATH"
 }
 
 # assert_committed <name> <expected name-status> <expected message>
@@ -305,15 +387,50 @@ test_usage_errors() {
     write_basic_inputs '[]'
     assert_refused_unchanged usage-no-args "$WORK_TREE" "$USAGE_REASON" ''
     assert_refused_unchanged usage-unknown-flag "$WORK_TREE" "$USAGE_REASON" '' \
-        --trunk main --inputs "$INPUTS_REL" --force yes
+        --trunk main "${ENGINE_ARGS[@]}" --force yes
     assert_refused_unchanged usage-duplicate-trunk "$WORK_TREE" "$USAGE_REASON" '' \
-        --trunk main --trunk main --inputs "$INPUTS_REL"
-    assert_refused_unchanged usage-missing-inputs "$WORK_TREE" "$USAGE_REASON" '' --trunk main
-    assert_refused_unchanged usage-missing-trunk "$WORK_TREE" "$USAGE_REASON" '' --inputs "$INPUTS_REL"
-    assert_refused_unchanged usage-valueless-inputs "$WORK_TREE" "$USAGE_REASON" '' --trunk main --inputs
-    assert_refused_unchanged usage-empty-inputs "$WORK_TREE" "$USAGE_REASON" '' --trunk main --inputs ''
-    assert_refused_unchanged usage-positional "$WORK_TREE" "$USAGE_REASON" '' main "$INPUTS_REL"
-    assert_path_kept usage-inputs-kept "$INPUTS_PATH"
+        --trunk main --trunk main "${ENGINE_ARGS[@]}"
+    assert_refused_unchanged usage-missing-inputs "$WORK_TREE" "$USAGE_REASON" '' \
+        --trunk main --subject-file "$SUBJECT_REL" --files-file "$FILES_REL"
+    assert_refused_unchanged usage-missing-trunk "$WORK_TREE" "$USAGE_REASON" '' "${ENGINE_ARGS[@]}"
+    assert_refused_unchanged usage-valueless-inputs "$WORK_TREE" "$USAGE_REASON" '' \
+        --trunk main --subject-file "$SUBJECT_REL" --inputs
+    assert_refused_unchanged usage-empty-inputs "$WORK_TREE" "$USAGE_REASON" '' \
+        --trunk main --inputs '' --subject-file "$SUBJECT_REL"
+    assert_refused_unchanged usage-positional "$WORK_TREE" "$USAGE_REASON" '' main "$INPUTS_REL" "$SUBJECT_REL"
+    assert_refused_unchanged usage-old-two-flag-form "$WORK_TREE" "$USAGE_REASON" '' --trunk main --inputs "$INPUTS_REL"
+    assert_refused_unchanged usage-missing-subject-file "$WORK_TREE" "$USAGE_REASON" '' \
+        --trunk main --inputs "$INPUTS_REL" --files-file "$FILES_REL" --body-file "$BODY_REL"
+    assert_refused_unchanged usage-valueless-subject-file "$WORK_TREE" "$USAGE_REASON" '' \
+        --trunk main --inputs "$INPUTS_REL" --subject-file
+    assert_refused_unchanged usage-empty-subject-file "$WORK_TREE" "$USAGE_REASON" '' \
+        --trunk main --inputs "$INPUTS_REL" --subject-file ''
+    assert_refused_unchanged usage-empty-files-file "$WORK_TREE" "$USAGE_REASON" '' \
+        "${ENGINE_ARGS[@]:0:4}" --trunk main --files-file ''
+    assert_refused_unchanged usage-empty-body-file "$WORK_TREE" "$USAGE_REASON" '' \
+        --trunk main "${ENGINE_ARGS[@]}" --body-file ''
+    assert_refused_unchanged usage-valueless-body-file "$WORK_TREE" "$USAGE_REASON" '' \
+        --trunk main "${ENGINE_ARGS[@]}" --body-file
+    assert_refused_unchanged usage-repeated-subject-file "$WORK_TREE" "$USAGE_REASON" '' \
+        --trunk main "${ENGINE_ARGS[@]}" --subject-file "$SUBJECT_REL"
+    assert_refused_unchanged usage-repeated-files-file "$WORK_TREE" "$USAGE_REASON" '' \
+        --trunk main "${ENGINE_ARGS[@]}" --files-file "$FILES_REL"
+    assert_refused_unchanged usage-repeated-body-file "$WORK_TREE" "$USAGE_REASON" '' \
+        --trunk main "${ENGINE_ARGS[@]}" --body-file "$BODY_REL" --body-file "$BODY_REL"
+    assert_raw_files_kept usage-kept
+}
+
+# Every flag may come in any order: the engine reads them by name.
+test_flag_order() {
+    create_world flag-order
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_raw_inputs '{"type":"fix"}' $'reorder\n' $'f.txt\n' $'Body text.\n'
+    local errfile="$WORKDIR/flag-order.err" out rc=0
+    run_engine "$WORK_TREE" out "$errfile" --body-file "$BODY_REL" --files-file "$FILES_REL" \
+        --subject-file "$SUBJECT_REL" --inputs "$INPUTS_REL" --trunk main || rc=$?
+    assert_equal flag-order "0|$(expected_block "$(run_git "$WORK_TREE" rev-parse HEAD)" true)"$'\n' "$rc|$out" "exit and stdout"
+    assert_committed flag-order "$(printf 'M\tf.txt')" "$(printf 'fix: reorder\n\nBody text.')"
+    assert_raw_files_gone flag-order-deleted
 }
 
 test_trunk_gate() {
@@ -323,17 +440,18 @@ test_trunk_gate() {
     for bad_trunk in '$(touch pwned)' '-main' 'a..b' 'ma in' '' "$(printf 'main\nx')"; do
         index=$((index + 1))
         assert_refused_unchanged "trunk-gate-$index" "$WORK_TREE" "$TRUNK_IDENTIFIER_REASON" '' \
-            --trunk "$bad_trunk" --inputs "$INPUTS_REL"
+            --trunk "$bad_trunk" "${ENGINE_ARGS[@]}"
     done
     assert_equal trunk-gate-no-expansion '' "$(ls "$WORK_TREE" | grep -x pwned || true)" "no command ran"
-    assert_path_kept trunk-gate-inputs-kept "$INPUTS_PATH"
+    assert_raw_files_kept trunk-gate-kept
 }
 
 test_not_a_checkout() {
     mkdir -p "$WORKDIR/nogit"
     printf '{}\n' >"$WORKDIR/nogit/in.json"
+    printf 's\n' >"$WORKDIR/nogit/subj.json"
     local errfile="$WORKDIR/not-a-checkout.err" out rc=0
-    run_engine "$WORKDIR/nogit" out "$errfile" --trunk main --inputs in.json || rc=$?
+    run_engine "$WORKDIR/nogit" out "$errfile" --trunk main --inputs in.json --subject-file subj.json || rc=$?
     assert_equal not-a-checkout "1|blocker: $NOT_A_CHECKOUT_REASON" "$rc|$(cat "$errfile")" "exit and stderr"
 }
 
@@ -344,133 +462,280 @@ test_inputs_file_refusals() {
     create_world inputs-file
     printf 'changed\n' >"$WORK_TREE/f.txt"
 
+    write_basic_inputs '["f.txt"]'
     assert_refused_unchanged inputs-missing "$WORK_TREE" "$INPUTS_MISSING_REASON" '' \
-        --trunk main --inputs .hivemind/none.json
-    assert_input_refused inputs-invalid-json '{"type":' "$INPUTS_JSON_REASON"
-    assert_input_refused inputs-two-values '{"type":"feat"} {"type":"fix"}' "$INPUTS_JSON_REASON"
-    write_inputs ''
+        --trunk main --inputs .hivemind/none.json --subject-file "$SUBJECT_REL"
+    assert_input_refused inputs-invalid-json "$INPUTS_JSON_REASON" '{"type":' $'s\n' $'f.txt\n'
+    assert_input_refused inputs-two-values "$INPUTS_JSON_REASON" '{"type":"feat"} {"type":"fix"}' $'s\n' $'f.txt\n'
+    write_raw_inputs '' $'s\n' $'f.txt\n'
     : >"$INPUTS_PATH"
     assert_refused_unchanged inputs-empty-file "$WORK_TREE" "$INPUTS_JSON_REASON" '' \
-        --trunk main --inputs "$INPUTS_REL"
+        --trunk main "${ENGINE_ARGS[@]}"
 
     outside_dir="$WORKDIR/outside-target"
     mkdir -p "$outside_dir"
-    printf '{"type":"feat","subject":"s","files":["f.txt"]}\n' >"$outside_dir/in.json"
+    printf '{"type":"feat"}\n' >"$outside_dir/in.json"
+    write_basic_inputs '["f.txt"]'
     ln -s "$outside_dir/in.json" "$WORK_TREE/.hivemind/leaf.json"
     assert_refused_unchanged inputs-symlink-leaf "$WORK_TREE" "$INPUTS_OUTSIDE_REASON" '' \
-        --trunk main --inputs .hivemind/leaf.json
+        --trunk main --inputs .hivemind/leaf.json --subject-file "$SUBJECT_REL"
     ln -s "$outside_dir" "$WORK_TREE/.hivemind/linked"
     assert_refused_unchanged inputs-symlink-folder "$WORK_TREE" "$INPUTS_OUTSIDE_REASON" '' \
-        --trunk main --inputs .hivemind/linked/in.json
+        --trunk main --inputs .hivemind/linked/in.json --subject-file "$SUBJECT_REL"
     assert_refused_unchanged inputs-absolute-outside "$WORK_TREE" "$INPUTS_OUTSIDE_REASON" '' \
-        --trunk main --inputs "$outside_dir/in.json"
+        --trunk main --inputs "$outside_dir/in.json" --subject-file "$SUBJECT_REL"
+    assert_raw_files_kept inputs-file-refusals-kept
+}
+
+# assert_raw_refused_kept <name> <reason> <engine args...> -> asserts the refusal with nothing
+# changed in the current world, and that the inputs, subject and files files, and the body file
+# when BODY_GIVEN is yes, are all still there: every such refusal comes before the first read.
+assert_raw_refused_kept() {
+    local name="$1" reason="$2"
+    shift 2
+    assert_refused_unchanged "$name" "$WORK_TREE" "$reason" '' --trunk main "$@"
+    assert_raw_files_kept "$name-kept"
+}
+
+# The subject, files and body files are refused before any read when one is missing, resolves
+# outside the checkout, or names a file an earlier flag names, by the same path, another
+# spelling or a hard link. Each refusal keeps every file and changes nothing.
+test_raw_file_refusals() {
+    local outside_dir
+    create_world raw-files
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    outside_dir="$WORLD_ROOT/outside"
+    mkdir -p "$outside_dir"
+    printf 'outside\n' >"$outside_dir/raw.json"
+    write_raw_inputs '{"type":"feat"}' $'s\n' $'f.txt\n' $'Body.\n'
+
+    assert_raw_refused_kept subject-missing "$SUBJECT_MISSING_REASON" \
+        --inputs "$INPUTS_REL" --subject-file .hivemind/molt-inputs-none-subj.json --files-file "$FILES_REL" --body-file "$BODY_REL"
+    assert_raw_refused_kept files-missing "$FILES_MISSING_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL" --files-file .hivemind/molt-inputs-none-files.json --body-file "$BODY_REL"
+    assert_raw_refused_kept body-missing "$BODY_MISSING_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL" --files-file "$FILES_REL" --body-file .hivemind/molt-inputs-none-body.json
+
+    ln -s "$outside_dir/raw.json" "$WORK_TREE/.hivemind/molt-inputs-link.json"
+    assert_raw_refused_kept subject-outside "$SUBJECT_OUTSIDE_REASON" \
+        --inputs "$INPUTS_REL" --subject-file .hivemind/molt-inputs-link.json --files-file "$FILES_REL" --body-file "$BODY_REL"
+    assert_raw_refused_kept files-outside "$FILES_OUTSIDE_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL" --files-file .hivemind/molt-inputs-link.json --body-file "$BODY_REL"
+    assert_raw_refused_kept body-outside "$BODY_OUTSIDE_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL" --files-file "$FILES_REL" --body-file .hivemind/molt-inputs-link.json
+    assert_raw_refused_kept body-outside-absolute "$BODY_OUTSIDE_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL" --files-file "$FILES_REL" --body-file "$outside_dir/raw.json"
+    assert_path_kept raw-outside-link-kept "$WORK_TREE/.hivemind/molt-inputs-link.json"
+    assert_path_kept raw-outside-target-kept "$outside_dir/raw.json"
+
+    assert_raw_refused_kept subject-is-inputs "$SUBJECT_SAME_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "$INPUTS_REL" --files-file "$FILES_REL"
+    assert_raw_refused_kept subject-is-inputs-spelling "$SUBJECT_SAME_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "./.hivemind/../$INPUTS_REL" --files-file "$FILES_REL"
+    assert_raw_refused_kept subject-is-inputs-absolute "$SUBJECT_SAME_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "$INPUTS_PATH"
+    ln "$INPUTS_PATH" "$WORK_TREE/.hivemind/molt-inputs-hard.json"
+    assert_raw_refused_kept subject-is-inputs-hard-link "$SUBJECT_SAME_REASON" \
+        --inputs "$INPUTS_REL" --subject-file .hivemind/molt-inputs-hard.json
+    assert_raw_refused_kept files-is-inputs "$FILES_SAME_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL" --files-file "$INPUTS_PATH"
+    assert_raw_refused_kept files-is-subject "$FILES_SAME_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL" --files-file "$SUBJECT_REL"
+    assert_raw_refused_kept files-is-inputs-hard-link "$FILES_SAME_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL" --files-file .hivemind/molt-inputs-hard.json
+    assert_raw_refused_kept body-is-inputs "$BODY_SAME_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL" --files-file "$FILES_REL" --body-file "$INPUTS_REL"
+    assert_raw_refused_kept body-is-subject "$BODY_SAME_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL" --files-file "$FILES_REL" --body-file "$SUBJECT_PATH"
+    assert_raw_refused_kept body-is-files "$BODY_SAME_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL" --files-file "$FILES_REL" --body-file "./$FILES_REL"
+    assert_raw_refused_kept body-is-subject-no-files "$BODY_SAME_REASON" \
+        --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL" --body-file "$SUBJECT_REL"
+    assert_path_kept raw-hard-link-kept "$WORK_TREE/.hivemind/molt-inputs-hard.json"
+}
+
+# assert_unreadable_refused <name> <reason> <path> -> makes <path> unreadable, runs the engine on
+# the current world's files and asserts the refusal with nothing changed, then asserts every
+# file of the world is gone: each is deleted right after its read, whether or not the read
+# succeeded. Skipped (no assertion) when the file stays readable, as it does for root.
+assert_unreadable_refused() {
+    chmod 000 "$3"
+    if [[ -r "$3" ]]; then
+        echo "SKIP [$1] the file stays readable for this user"
+        return 0
+    fi
+    assert_refused_unchanged "$1" "$WORK_TREE" "$2" '' --trunk main "${ENGINE_ARGS[@]}"
+    assert_raw_files_gone "$1-deleted"
+}
+
+# A subject, files or body file that cannot be read stops the run after every read, with every
+# file deleted and nothing changed.
+test_raw_file_unreadable() {
+    local raw_kind
+    for raw_kind in subject files body; do
+        create_world "unreadable-$raw_kind"
+        printf 'changed\n' >"$WORK_TREE/f.txt"
+        write_raw_inputs '{"type":"feat"}' $'s\n' $'f.txt\n' $'Body.\n'
+        case "$raw_kind" in
+            subject) assert_unreadable_refused unreadable-subject "$SUBJECT_UNREADABLE_REASON" "$SUBJECT_PATH" ;;
+            files) assert_unreadable_refused unreadable-files "$FILES_UNREADABLE_REASON" "$FILES_PATH" ;;
+            body) assert_unreadable_refused unreadable-body "$BODY_UNREADABLE_REASON" "$BODY_PATH" ;;
+        esac
+    done
 }
 
 test_inputs_field_refusals() {
     local long_subject
+    local subject_ok=$'s\n' files_ok=$'f.txt\n'
     create_world fields
     printf 'changed\n' >"$WORK_TREE/f.txt"
     long_subject="$(printf 'a%.0s' $(seq 1 73))"
 
-    assert_input_refused field-array '["f.txt"]' "$NOT_OBJECT_REASON"
-    assert_input_refused field-string '"feat"' "$NOT_OBJECT_REASON"
-    assert_input_refused field-unknown '{"type":"feat","subject":"s","files":["f.txt"],"file":"x"}' "$UNKNOWN_FIELD_REASON"
-    assert_input_refused field-type-missing '{"subject":"s","files":["f.txt"]}' "$TYPE_REASON"
-    assert_input_refused field-type-number '{"type":1,"subject":"s","files":["f.txt"]}' "$TYPE_REASON"
-    assert_input_refused field-type-unknown '{"type":"feature","subject":"s","files":["f.txt"]}' "$TYPE_REASON"
-    assert_input_refused field-type-case '{"type":"Feat","subject":"s","files":["f.txt"]}' "$TYPE_REASON"
-    assert_input_refused field-scope-number '{"type":"feat","scope":1,"subject":"s","files":["f.txt"]}' "$SCOPE_REASON"
-    assert_input_refused field-scope-space '{"type":"feat","scope":"a b","subject":"s","files":["f.txt"]}' "$SCOPE_REASON"
-    assert_input_refused field-scope-dash '{"type":"feat","scope":"-a","subject":"s","files":["f.txt"]}' "$SCOPE_REASON"
-    assert_input_refused field-scope-dotdot '{"type":"feat","scope":"a..b","subject":"s","files":["f.txt"]}' "$SCOPE_REASON"
-    assert_input_refused field-scope-paren '{"type":"feat","scope":"a)b","subject":"s","files":["f.txt"]}' "$SCOPE_REASON"
-    assert_input_refused field-scope-newline '{"type":"feat","scope":"a\n","subject":"s","files":["f.txt"]}' "$SCOPE_REASON"
-    assert_input_refused field-scope-empty '{"type":"feat","scope":"","subject":"s","files":["f.txt"]}' "$SCOPE_REASON"
-    assert_input_refused field-breaking-string '{"type":"feat","breaking":"yes","subject":"s","files":["f.txt"]}' "$BREAKING_REASON"
-    assert_input_refused field-subject-missing '{"type":"feat","files":["f.txt"]}' "$SUBJECT_LINE_REASON"
-    assert_input_refused field-subject-number '{"type":"feat","subject":5,"files":["f.txt"]}' "$SUBJECT_LINE_REASON"
-    assert_input_refused field-subject-empty '{"type":"feat","subject":"","files":["f.txt"]}' "$SUBJECT_LINE_REASON"
-    assert_input_refused field-subject-spaces '{"type":"feat","subject":"   ","files":["f.txt"]}' "$SUBJECT_LINE_REASON"
-    assert_input_refused field-subject-two-lines '{"type":"feat","subject":"a\nb","files":["f.txt"]}' "$SUBJECT_LINE_REASON"
-    assert_input_refused field-subject-cr '{"type":"feat","subject":"a\rb","files":["f.txt"]}' "$SUBJECT_LINE_REASON"
-    assert_input_refused field-subject-tab '{"type":"feat","subject":"a\tb","files":["f.txt"]}' "$SUBJECT_LINE_REASON"
-    assert_input_refused field-subject-nul '{"type":"feat","subject":"a\u0000b","files":["f.txt"]}' "$SUBJECT_LINE_REASON"
-    assert_input_refused field-subject-73 "{\"type\":\"feat\",\"subject\":\"$long_subject\",\"files\":[\"f.txt\"]}" "$SUBJECT_LENGTH_REASON"
-    assert_input_refused field-body-number '{"type":"feat","subject":"s","body":1,"files":["f.txt"]}' "$BODY_REASON"
-    assert_input_refused field-body-null '{"type":"feat","subject":"s","body":null,"files":["f.txt"]}' "$BODY_REASON"
-    assert_input_refused field-body-cr '{"type":"feat","subject":"s","body":"a\r\nb","files":["f.txt"]}' "$BODY_REASON"
-    assert_input_refused field-body-nul '{"type":"feat","subject":"s","body":"a\u0000b","files":["f.txt"]}' "$BODY_REASON"
-    assert_input_refused field-marker-subject '{"type":"feat","subject":"x!: y","files":["f.txt"]}' "$MARKER_REASON"
-    assert_input_refused field-marker-body '{"type":"feat","subject":"s","body":"a\nBREAKING CHANGE: z","files":["f.txt"]}' "$MARKER_REASON"
-    assert_input_refused field-marker-body-first '{"type":"feat","subject":"s","body":"BREAKING-CHANGE: z","breaking":false,"files":["f.txt"]}' "$MARKER_REASON"
-    assert_input_refused field-files-missing '{"type":"feat","subject":"s"}' "$FILES_REASON"
-    assert_input_refused field-files-string '{"type":"feat","subject":"s","files":"f.txt"}' "$FILES_REASON"
-    assert_input_refused field-files-number '{"type":"feat","subject":"s","files":["f.txt",1]}' "$FILES_REASON"
-    assert_input_refused field-files-empty-entry '{"type":"feat","subject":"s","files":[""]}' "$FILES_REASON"
-    assert_input_refused field-files-absolute "{\"type\":\"feat\",\"subject\":\"s\",\"files\":[\"$WORK_TREE/f.txt\"]}" "$FILES_REASON"
-    assert_input_refused field-files-dotdot '{"type":"feat","subject":"s","files":["sub/../f.txt"]}' "$FILES_REASON"
-    assert_input_refused field-files-dot '{"type":"feat","subject":"s","files":["./f.txt"]}' "$FILES_REASON"
-    assert_input_refused field-files-double-slash '{"type":"feat","subject":"s","files":["sub//keep.txt"]}' "$FILES_REASON"
-    assert_input_refused field-files-trailing-slash '{"type":"feat","subject":"s","files":["sub/"]}' "$FILES_REASON"
-    assert_input_refused field-files-git '{"type":"feat","subject":"s","files":[".git/config"]}' "$FILES_REASON"
-    assert_input_refused field-files-git-case '{"type":"feat","subject":"s","files":["sub/.GIT/x"]}' "$FILES_REASON"
-    assert_input_refused field-files-newline '{"type":"feat","subject":"s","files":["f.txt\ng.txt"]}' "$FILES_REASON"
-    assert_input_refused field-files-directory '{"type":"feat","subject":"s","files":["f.txt","sub"]}' "$DIRECTORY_REASON"
+    assert_input_refused field-array "$NOT_OBJECT_REASON" '["f.txt"]' "$subject_ok" "$files_ok"
+    assert_input_refused field-string "$NOT_OBJECT_REASON" '"feat"' "$subject_ok" "$files_ok"
+    assert_input_refused field-unknown "$UNKNOWN_FIELD_REASON" '{"type":"feat","file":"x"}' "$subject_ok" "$files_ok"
+    assert_input_refused field-old-subject "$UNKNOWN_FIELD_REASON" '{"type":"feat","subject":"s"}' "$subject_ok" "$files_ok"
+    assert_input_refused field-old-subject-number "$UNKNOWN_FIELD_REASON" '{"type":"feat","subject":5}' "$subject_ok" "$files_ok"
+    assert_input_refused field-old-body "$UNKNOWN_FIELD_REASON" '{"type":"feat","body":"b"}' "$subject_ok" "$files_ok"
+    assert_input_refused field-old-body-number "$UNKNOWN_FIELD_REASON" '{"type":"feat","body":1}' "$subject_ok" "$files_ok"
+    assert_input_refused field-old-body-null "$UNKNOWN_FIELD_REASON" '{"type":"feat","body":null}' "$subject_ok" "$files_ok"
+    assert_input_refused field-old-files "$UNKNOWN_FIELD_REASON" '{"type":"feat","files":["f.txt"]}' "$subject_ok" "$files_ok"
+    assert_input_refused field-old-files-string "$UNKNOWN_FIELD_REASON" '{"type":"feat","files":"f.txt"}' "$subject_ok" "$files_ok"
+    assert_input_refused field-old-files-number "$UNKNOWN_FIELD_REASON" '{"type":"feat","files":["f.txt",1]}' "$subject_ok" "$files_ok"
+    assert_input_refused field-type-missing "$TYPE_REASON" '{}' "$subject_ok" "$files_ok"
+    assert_input_refused field-type-number "$TYPE_REASON" '{"type":1}' "$subject_ok" "$files_ok"
+    assert_input_refused field-type-unknown "$TYPE_REASON" '{"type":"feature"}' "$subject_ok" "$files_ok"
+    assert_input_refused field-type-case "$TYPE_REASON" '{"type":"Feat"}' "$subject_ok" "$files_ok"
+    assert_input_refused field-scope-number "$SCOPE_REASON" '{"type":"feat","scope":1}' "$subject_ok" "$files_ok"
+    assert_input_refused field-scope-space "$SCOPE_REASON" '{"type":"feat","scope":"a b"}' "$subject_ok" "$files_ok"
+    assert_input_refused field-scope-dash "$SCOPE_REASON" '{"type":"feat","scope":"-a"}' "$subject_ok" "$files_ok"
+    assert_input_refused field-scope-dotdot "$SCOPE_REASON" '{"type":"feat","scope":"a..b"}' "$subject_ok" "$files_ok"
+    assert_input_refused field-scope-paren "$SCOPE_REASON" '{"type":"feat","scope":"a)b"}' "$subject_ok" "$files_ok"
+    assert_input_refused field-scope-newline "$SCOPE_REASON" '{"type":"feat","scope":"a\n"}' "$subject_ok" "$files_ok"
+    assert_input_refused field-scope-empty "$SCOPE_REASON" '{"type":"feat","scope":""}' "$subject_ok" "$files_ok"
+    assert_input_refused field-breaking-string "$BREAKING_REASON" '{"type":"feat","breaking":"yes"}' "$subject_ok" "$files_ok"
+    assert_input_refused field-type-before-subject "$TYPE_REASON" '{"type":"feature"}' '' "$files_ok"
+    assert_input_refused field-breaking-before-subject "$BREAKING_REASON" '{"type":"feat","breaking":1}' '' "$files_ok"
+
+    assert_input_refused field-subject-empty "$SUBJECT_LINE_REASON" '{"type":"feat"}' '' "$files_ok"
+    assert_input_refused field-subject-lone-line-feed "$SUBJECT_LINE_REASON" '{"type":"feat"}' $'\n' "$files_ok"
+    assert_input_refused field-subject-spaces "$SUBJECT_LINE_REASON" '{"type":"feat"}' $'   \n' "$files_ok"
+    assert_input_refused field-subject-two-lines "$SUBJECT_LINE_REASON" '{"type":"feat"}' $'a\nb\n' "$files_ok"
+    assert_input_refused field-subject-two-final-line-feeds "$SUBJECT_LINE_REASON" '{"type":"feat"}' $'s\n\n' "$files_ok"
+    assert_input_refused field-subject-cr "$SUBJECT_LINE_REASON" '{"type":"feat"}' $'a\rb\n' "$files_ok"
+    assert_input_refused field-subject-crlf "$SUBJECT_LINE_REASON" '{"type":"feat"}' $'s\r\n' "$files_ok"
+    assert_input_refused field-subject-tab "$SUBJECT_LINE_REASON" '{"type":"feat"}' $'a\tb\n' "$files_ok"
+    write_raw_inputs '{"type":"feat"}' 's' "$files_ok"
+    printf 'a\000b\n' >"$SUBJECT_PATH"
+    assert_refused_unchanged field-subject-nul "$WORK_TREE" "$SUBJECT_LINE_REASON" '' --trunk main "${ENGINE_ARGS[@]}"
+    assert_input_refused field-subject-73 "$SUBJECT_LENGTH_REASON" '{"type":"feat"}' "$long_subject"$'\n' "$files_ok"
+    assert_input_refused field-subject-before-body "$SUBJECT_LINE_REASON" '{"type":"feat"}' '' "$files_ok" $'a\rb'
+    assert_input_refused field-body-cr "$BODY_REASON" '{"type":"feat"}' "$subject_ok" "$files_ok" $'a\r\nb\n'
+    assert_input_refused field-body-escape "$BODY_REASON" '{"type":"feat"}' "$subject_ok" "$files_ok" $'a\033[31mb\n'
+    write_raw_inputs '{"type":"feat"}' "$subject_ok" "$files_ok" 'x'
+    printf 'a\000b\n' >"$BODY_PATH"
+    assert_refused_unchanged field-body-nul "$WORK_TREE" "$BODY_REASON" '' --trunk main "${ENGINE_ARGS[@]}"
+    assert_input_refused field-body-before-marker "$BODY_REASON" '{"type":"feat"}' $'x!: y\n' "$files_ok" $'a\rb'
+    assert_input_refused field-marker-subject "$MARKER_REASON" '{"type":"feat"}' $'x!: y\n' "$files_ok"
+    assert_input_refused field-marker-body "$MARKER_REASON" '{"type":"feat"}' "$subject_ok" "$files_ok" $'a\nBREAKING CHANGE: z\n'
+    assert_input_refused field-marker-body-first "$MARKER_REASON" '{"type":"feat","breaking":false}' "$subject_ok" "$files_ok" 'BREAKING-CHANGE: z'
+    assert_input_refused field-marker-before-files "$MARKER_REASON" '{"type":"feat"}' $'x!: y\n' $'/f.txt\n'
+
+    assert_input_refused field-files-empty-entry "$FILES_REASON" '{"type":"feat"}' "$subject_ok" $'\n\n'
+    assert_input_refused field-files-blank-line-between "$FILES_REASON" '{"type":"feat"}' "$subject_ok" $'f.txt\n\ng.txt\n'
+    assert_input_refused field-files-two-final-line-feeds "$FILES_REASON" '{"type":"feat"}' "$subject_ok" $'f.txt\n\n'
+    assert_input_refused field-files-leading-blank-line "$FILES_REASON" '{"type":"feat"}' "$subject_ok" $'\nf.txt\n'
+    assert_input_refused field-files-absolute "$FILES_REASON" '{"type":"feat"}' "$subject_ok" "$WORK_TREE/f.txt"$'\n'
+    assert_input_refused field-files-dotdot "$FILES_REASON" '{"type":"feat"}' "$subject_ok" $'sub/../f.txt\n'
+    assert_input_refused field-files-dot "$FILES_REASON" '{"type":"feat"}' "$subject_ok" $'./f.txt\n'
+    assert_input_refused field-files-double-slash "$FILES_REASON" '{"type":"feat"}' "$subject_ok" $'sub//keep.txt\n'
+    assert_input_refused field-files-trailing-slash "$FILES_REASON" '{"type":"feat"}' "$subject_ok" $'sub/\n'
+    assert_input_refused field-files-git "$FILES_REASON" '{"type":"feat"}' "$subject_ok" $'.git/config\n'
+    assert_input_refused field-files-git-case "$FILES_REASON" '{"type":"feat"}' "$subject_ok" $'sub/.GIT/x\n'
+    assert_input_refused field-files-cr "$FILES_REASON" '{"type":"feat"}' "$subject_ok" $'f.txt\r\n'
+    assert_input_refused field-files-tab "$FILES_REASON" '{"type":"feat"}' "$subject_ok" $'f.txt\tg.txt\n'
+    assert_input_refused field-files-directory "$DIRECTORY_REASON" '{"type":"feat"}' "$subject_ok" $'f.txt\nsub\n'
 }
 
-# ── Inputs file lifetime ────────────────────────────────────────────────────
+# ── Inputs, subject, files and body file lifetime ───────────────────────────
 
-# assert_read_and_kept <name> <inputs rel> -> writes a valid inputs file that lists nothing at
-# <inputs rel> in the current world, asserts the run reads it and prints committed false, and
-# asserts the file is still there.
+# assert_read_and_kept <name> <inputs rel> -> writes valid inputs that list nothing at <inputs
+# rel> in the current world, with the subject and files files beside it (<stem>-subj.json,
+# <stem>-files.json), asserts the run reads them and prints committed false, and asserts all
+# three are still there.
 assert_read_and_kept() {
     local name="$1" kept_path="$WORK_TREE/$2"
     mkdir -p "$(dirname "$kept_path")"
-    printf '%s\n' '{"type":"feat","subject":"s","files":[]}' >"$kept_path"
-    assert_success "$name" "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" --trunk main --inputs "$2"
-    assert_path_kept "$name-kept" "$kept_path"
+    set_inputs_path "$kept_path"
+    BODY_GIVEN=no
+    write_raw_inputs '{"type":"feat"}' $'s\n' ''
+    set_engine_args "$2"
+    assert_success "$name" "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" --trunk main "${ENGINE_ARGS[@]}"
+    assert_raw_files_kept "$name-kept"
+    set_inputs_path "$WORK_TREE/$INPUTS_REL"
 }
 
-# The engine deletes its own inputs file once it has read it: after committed true, committed
-# false, a field refusal and invalid JSON. A symlinked inputs leaf is refused before the read and
-# neither the link nor its target is deleted. A file with another name, in another folder, or
-# under a .hivemind that is a symlink is read and kept. With .hivemind/ not ignored, the deleted
-# inputs file is no dirty path outside files. A rerun on the same path, the file written again
-# first, succeeds.
+# The engine deletes its own inputs, subject, files and body files once it has read them: after
+# committed true, committed false, a field refusal, invalid JSON, and with only the subject file
+# given. A symlinked leaf is refused before the read and neither the link nor its target is
+# deleted. A file with another name, in another folder, or under a .hivemind that is a symlink is
+# read and kept. With .hivemind/ not ignored, the deleted files are no dirty path outside files. A
+# rerun on the same paths, the files written again first, succeeds.
 test_inputs_file_lifetime() {
     local outside_dir
     create_world lifetime-committed
     printf 'changed\n' >"$WORK_TREE/f.txt"
-    write_basic_inputs '["f.txt"]'
+    write_raw_inputs '{"type":"feat","scope":"core"}' $'add thing\n' $'f.txt\n' $'Why.\n'
     assert_commit_run lifetime-committed "$WORK_TREE" "$INPUTS_REL"
-    assert_committed lifetime-committed "$(printf 'M\tf.txt')" 'feat(core): add thing'
-    assert_path_gone lifetime-committed-deleted "$INPUTS_PATH"
+    assert_committed lifetime-committed "$(printf 'M\tf.txt')" "$(printf 'feat(core): add thing\n\nWhy.')"
+    assert_raw_files_gone lifetime-committed-deleted
 
     create_world lifetime-not-committed
-    write_basic_inputs '[]'
+    write_raw_inputs '{"type":"feat"}' $'s\n' '' ''
     assert_success lifetime-not-committed "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" \
-        --trunk main --inputs "$INPUTS_REL"
-    assert_path_gone lifetime-not-committed-deleted "$INPUTS_PATH"
+        --trunk main "${ENGINE_ARGS[@]}"
+    assert_raw_files_gone lifetime-not-committed-deleted
+
+    create_world lifetime-subject-only
+    write_raw_inputs '{"type":"feat"}' $'s\n' ''
+    rm -f "$FILES_PATH"
+    assert_success lifetime-subject-only "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" \
+        --trunk main --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL"
+    assert_raw_files_gone lifetime-subject-only-deleted
 
     create_world lifetime-refused
     printf 'changed\n' >"$WORK_TREE/f.txt"
-    assert_input_refused lifetime-field-refusal '{"type":"feature","subject":"s","files":["f.txt"]}' "$TYPE_REASON"
-    assert_path_gone lifetime-field-refusal-deleted "$INPUTS_PATH"
-    assert_input_refused lifetime-invalid-json '{"type":' "$INPUTS_JSON_REASON"
-    assert_path_gone lifetime-invalid-json-deleted "$INPUTS_PATH"
+    assert_input_refused lifetime-field-refusal "$TYPE_REASON" '{"type":"feature"}' $'s\n' $'f.txt\n' $'b\n'
+    assert_raw_files_gone lifetime-field-refusal-deleted
+    assert_input_refused lifetime-invalid-json "$INPUTS_JSON_REASON" '{"type":' $'s\n' $'f.txt\n' $'b\n'
+    assert_raw_files_gone lifetime-invalid-json-deleted
+    assert_input_refused lifetime-subject-refusal "$SUBJECT_LINE_REASON" '{"type":"feat"}' $'a\nb\n' $'f.txt\n' $'b\n'
+    assert_raw_files_gone lifetime-subject-refusal-deleted
+    assert_input_refused lifetime-files-refusal "$FILES_REASON" '{"type":"feat"}' $'s\n' $'/f.txt\n' $'b\n'
+    assert_raw_files_gone lifetime-files-refusal-deleted
+    assert_input_refused lifetime-body-refusal "$BODY_REASON" '{"type":"feat"}' $'s\n' $'f.txt\n' $'b\r\n'
+    assert_raw_files_gone lifetime-body-refusal-deleted
 
     create_world lifetime-symlink-leaf
     outside_dir="$WORLD_ROOT/outside"
     mkdir -p "$outside_dir"
-    printf '{"type":"feat","subject":"s","files":[]}\n' >"$outside_dir/in.json"
+    printf '{"type":"feat"}\n' >"$outside_dir/in.json"
+    printf 's\n' >"$outside_dir/subj.json"
+    write_raw_inputs '{"type":"feat"}' $'s\n' ''
     ln -s "$outside_dir/in.json" "$WORK_TREE/.hivemind/molt-inputs-s.json"
     assert_refused_unchanged lifetime-symlink-leaf "$WORK_TREE" "$INPUTS_OUTSIDE_REASON" '' \
-        --trunk main --inputs .hivemind/molt-inputs-s.json
+        --trunk main --inputs .hivemind/molt-inputs-s.json --subject-file "$SUBJECT_REL"
     assert_path_kept lifetime-symlink-leaf-link "$WORK_TREE/.hivemind/molt-inputs-s.json"
     assert_path_kept lifetime-symlink-leaf-target "$outside_dir/in.json"
+    ln -s "$outside_dir/subj.json" "$WORK_TREE/.hivemind/molt-inputs-s-subj.json"
+    assert_refused_unchanged lifetime-symlink-subject "$WORK_TREE" "$SUBJECT_OUTSIDE_REASON" '' \
+        --trunk main --inputs "$INPUTS_REL" --subject-file .hivemind/molt-inputs-s-subj.json
+    assert_path_kept lifetime-symlink-subject-link "$WORK_TREE/.hivemind/molt-inputs-s-subj.json"
+    assert_path_kept lifetime-symlink-subject-target "$outside_dir/subj.json"
+    assert_raw_files_kept lifetime-symlink-kept
 
     create_world lifetime-kept
-    printf '/molt-inputs-t.json\n' >>"$WORK_TREE/.git/info/exclude"
+    printf '/molt-inputs-t.json\n/molt-inputs-t-subj.json\n/molt-inputs-t-files.json\n' >>"$WORK_TREE/.git/info/exclude"
     assert_read_and_kept lifetime-kept-other-kind .hivemind/pr-inputs-t.json
     assert_read_and_kept lifetime-kept-other-name .hivemind/in.json
     assert_read_and_kept lifetime-kept-subfolder .hivemind/sub/molt-inputs-t.json
@@ -487,21 +752,29 @@ test_inputs_file_lifetime() {
     printf '*.log\n' >"$WORK_TREE/.gitignore"
     run_git "$WORK_TREE" commit -q -am 'track .hivemind'
     HEAD_SHA="$(run_git "$WORK_TREE" rev-parse HEAD)"
-    write_basic_inputs '[]'
+    write_raw_inputs '{"type":"feat"}' $'s\n' '' $'b\n'
     assert_success lifetime-not-ignored "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" \
-        --trunk main --inputs "$INPUTS_REL"
-    assert_path_gone lifetime-not-ignored-deleted "$INPUTS_PATH"
+        --trunk main "${ENGINE_ARGS[@]}"
+    assert_raw_files_gone lifetime-not-ignored-deleted
 
     create_world lifetime-rerun
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
     assert_commit_run lifetime-rerun-first "$WORK_TREE" "$INPUTS_REL"
     assert_committed lifetime-rerun-first "$(printf 'M\tf.txt')" 'feat(core): add thing'
-    assert_path_gone lifetime-rerun-first-deleted "$INPUTS_PATH"
+    assert_raw_files_gone lifetime-rerun-first-deleted
     write_basic_inputs '["f.txt"]'
     assert_success lifetime-rerun-second "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" \
-        --trunk main --inputs "$INPUTS_REL"
-    assert_path_gone lifetime-rerun-second-deleted "$INPUTS_PATH"
+        --trunk main "${ENGINE_ARGS[@]}"
+    assert_raw_files_gone lifetime-rerun-second-deleted
+
+    create_world lifetime-long-token
+    set_inputs_path "$WORK_TREE/.hivemind/molt-inputs-$(printf 'a%.0s' $(seq 1 58)).json"
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_raw_inputs '{"type":"feat"}' $'s\n' $'f.txt\n' $'b\n'
+    assert_commit_run lifetime-long-token "$WORK_TREE" "${INPUTS_PATH#"$WORK_TREE/"}"
+    assert_committed lifetime-long-token "$(printf 'M\tf.txt')" "$(printf 'feat: s\n\nb')"
+    assert_raw_files_gone lifetime-long-token-deleted
 }
 
 # ── Git state refusals ──────────────────────────────────────────────────────
@@ -518,7 +791,7 @@ test_git_state_refusals() {
     HEAD_SHA="$(run_git "$WORK_TREE" rev-parse HEAD)"
     run_git "$WORK_TREE" merge -q other >/dev/null 2>&1 || true
     write_basic_inputs '["f.txt"]'
-    assert_refused_unchanged merge-in-progress "$WORK_TREE" "$MERGE_REASON" '' --trunk main --inputs "$INPUTS_REL"
+    assert_refused_unchanged merge-in-progress "$WORK_TREE" "$MERGE_REASON" '' --trunk main "${ENGINE_ARGS[@]}"
 
     create_world unmerged
     blob="$(run_git "$WORK_TREE" hash-object -w f.txt)"
@@ -526,24 +799,24 @@ test_git_state_refusals() {
         "0000000000000000000000000000000000000000" "$blob" "$blob" "$blob" \
         | run_git "$WORK_TREE" update-index --index-info
     write_basic_inputs '["f.txt"]'
-    assert_refused_unchanged unmerged-paths "$WORK_TREE" "$UNMERGED_REASON" '' --trunk main --inputs "$INPUTS_REL"
+    assert_refused_unchanged unmerged-paths "$WORK_TREE" "$UNMERGED_REASON" '' --trunk main "${ENGINE_ARGS[@]}"
 
     create_world detached
     run_git "$WORK_TREE" checkout -q --detach HEAD
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
-    assert_refused_unchanged detached-head "$WORK_TREE" "$DETACHED_REASON" '' --trunk main --inputs "$INPUTS_REL"
+    assert_refused_unchanged detached-head "$WORK_TREE" "$DETACHED_REASON" '' --trunk main "${ENGINE_ARGS[@]}"
 
     create_world unborn
     run_git "$WORK_TREE" symbolic-ref HEAD refs/heads/newborn
     write_basic_inputs '["f.txt"]'
-    assert_refused_unchanged unborn-head "$WORK_TREE" "$UNBORN_REASON" '' --trunk main --inputs "$INPUTS_REL"
+    assert_refused_unchanged unborn-head "$WORK_TREE" "$UNBORN_REASON" '' --trunk main "${ENGINE_ARGS[@]}"
 
     create_world bad-branch-name
     run_git "$WORK_TREE" checkout -q -b 'feat$(touch${IFS}pwned)'
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
-    assert_refused_unchanged bad-branch-name "$WORK_TREE" "$BRANCH_NAME_REASON" '' --trunk main --inputs "$INPUTS_REL"
+    assert_refused_unchanged bad-branch-name "$WORK_TREE" "$BRANCH_NAME_REASON" '' --trunk main "${ENGINE_ARGS[@]}"
     assert_equal bad-branch-name-no-expansion '' "$(ls "$WORK_TREE" | grep -x pwned || true)" "no command ran"
 }
 
@@ -557,7 +830,7 @@ test_trunk_refusals() {
         index=$((index + 1))
         write_basic_inputs '["f.txt"]'
         assert_refused_unchanged "on-trunk-$index" "$WORK_TREE" "$IS_TRUNK_REASON" '' \
-            --trunk "$trunk_spelling" --inputs "$INPUTS_REL"
+            --trunk "$trunk_spelling" "${ENGINE_ARGS[@]}"
     done
 
     create_world trunk-alias
@@ -565,13 +838,13 @@ test_trunk_refusals() {
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
     assert_refused_unchanged trunk-symbolic-alias "$WORK_TREE" "$IS_TRUNK_REASON" '' \
-        --trunk trunk-alias --inputs "$INPUTS_REL"
+        --trunk trunk-alias "${ENGINE_ARGS[@]}"
 
     create_world trunk-unreadable
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
     assert_refused_unchanged trunk-unreadable "$WORK_TREE" "$UNREADABLE_TRUNK_REASON" '' \
-        --trunk main.lock --inputs "$INPUTS_REL"
+        --trunk main.lock "${ENGINE_ARGS[@]}"
 
     create_world trunk-ambiguous
     run_git "$WORK_TREE" tag main "$HEAD_SHA"
@@ -611,11 +884,11 @@ test_trunk_ref_identity() {
     write_basic_inputs '["f.txt"]'
     run_git "$WORK_TREE" remote add origin "$WORLD_ROOT/origin.git"
     assert_refused_unchanged trunk-identity-remote-origin "$WORK_TREE" "$IS_TRUNK_REASON" '' \
-        --trunk "origin/$BRANCH" --inputs "$INPUTS_REL"
+        --trunk "origin/$BRANCH" "${ENGINE_ARGS[@]}"
     run_git "$WORK_TREE" remote add team "$WORLD_ROOT/team.git"
     write_basic_inputs '["f.txt"]'
     assert_refused_unchanged trunk-identity-remote-team "$WORK_TREE" "$IS_TRUNK_REASON" '' \
-        --trunk "team/$BRANCH" --inputs "$INPUTS_REL"
+        --trunk "team/$BRANCH" "${ENGINE_ARGS[@]}"
 }
 
 # set_remote_head <remote> <end> -> adds <remote> to the current world's `git remote` list (a
@@ -650,61 +923,61 @@ test_remote_default_branch() {
         index=$((index + 1))
         write_basic_inputs '[]'
         assert_refused_unchanged "remote-default-spoofed-$index" "$WORK_TREE" "$IS_TRUNK_REASON" '' \
-            --trunk "$trunk_spelling" --inputs "$INPUTS_REL"
+            --trunk "$trunk_spelling" "${ENGINE_ARGS[@]}"
     done
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
     assert_refused_unchanged remote-default-dirty "$WORK_TREE" "$IS_TRUNK_REASON" '' \
-        --trunk develop --inputs "$INPUTS_REL"
+        --trunk develop "${ENGINE_ARGS[@]}"
 
     create_main_world remote-default-case
     set_remote_head origin refs/remotes/origin/MAIN
     assert_refused_unchanged remote-default-case "$WORK_TREE" "$IS_TRUNK_REASON" '' \
-        --trunk develop --inputs "$INPUTS_REL"
+        --trunk develop "${ENGINE_ARGS[@]}"
 
     create_main_world remote-default-dangling
     set_remote_head origin refs/remotes/origin/main
     assert_refused_unchanged remote-default-dangling "$WORK_TREE" "$IS_TRUNK_REASON" '' \
-        --trunk develop --inputs "$INPUTS_REL"
+        --trunk develop "${ENGINE_ARGS[@]}"
 
     create_main_world remote-default-local-end
     set_remote_head origin refs/heads/main
     assert_refused_unchanged remote-default-local-end "$WORK_TREE" "$IS_TRUNK_REASON" '' \
-        --trunk develop --inputs "$INPUTS_REL"
+        --trunk develop "${ENGINE_ARGS[@]}"
 
     create_main_world remote-default-slash-name
     set_remote_head team/up refs/remotes/team/up/main
     assert_refused_unchanged remote-default-slash-name "$WORK_TREE" "$IS_TRUNK_REASON" '' \
-        --trunk develop --inputs "$INPUTS_REL"
+        --trunk develop "${ENGINE_ARGS[@]}"
 
     create_main_world remote-default-second-remote
     set_remote_head origin refs/remotes/origin/develop
     set_remote_head upstream refs/remotes/upstream/main
     assert_refused_unchanged remote-default-second-remote "$WORK_TREE" "$IS_TRUNK_REASON" '' \
-        --trunk develop --inputs "$INPUTS_REL"
+        --trunk develop "${ENGINE_ARGS[@]}"
 
     create_main_world remote-default-unreadable
     set_remote_head origin refs/remotes/origin/main
     printf 'garbage\n' >"$WORK_TREE/.git/refs/remotes/origin/HEAD"
     assert_refused_unchanged remote-default-unreadable "$WORK_TREE" "$UNREADABLE_TRUNK_REASON" '' \
-        --trunk develop --inputs "$INPUTS_REL"
+        --trunk develop "${ENGINE_ARGS[@]}"
 
     create_main_world remote-default-absent
     set_remote_head origin refs/remotes/origin/main
     run_git "$WORK_TREE" symbolic-ref --delete refs/remotes/origin/HEAD
     assert_refused_unchanged remote-default-absent "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" '' \
-        --trunk develop --inputs "$INPUTS_REL"
+        --trunk develop "${ENGINE_ARGS[@]}"
 
     create_main_world remote-default-not-symbolic
     run_git "$WORK_TREE" remote add origin "$WORLD_ROOT/origin.git"
     run_git "$WORK_TREE" update-ref refs/remotes/origin/HEAD "$MAIN_SHA"
     assert_refused_unchanged remote-default-not-symbolic "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" '' \
-        --trunk develop --inputs "$INPUTS_REL"
+        --trunk develop "${ENGINE_ARGS[@]}"
 
     create_main_world remote-default-elsewhere
     set_remote_head origin refs/remotes/origin/develop
     assert_success remote-default-elsewhere-proceeds "$WORK_TREE" \
-        "$(printf 'branch: main\ncommit: %s\ncommitted: false' "$MAIN_SHA")" --trunk develop --inputs "$INPUTS_REL"
+        "$(printf 'branch: main\ncommit: %s\ncommitted: false' "$MAIN_SHA")" --trunk develop "${ENGINE_ARGS[@]}"
 
     create_world remote-default-other-branch
     run_git "$WORK_TREE" update-ref refs/remotes/origin/main "$MAIN_SHA"
@@ -766,7 +1039,7 @@ test_remote_listing_fails() {
         printf 'changed\n' >"$WORK_TREE/f.txt"
         write_basic_inputs '["f.txt"]'
         with_failing_remote "$fail_at" assert_refused_unchanged "$case_name" "$WORK_TREE" \
-            "$CANNOT_COMPARE_REASON" '' --trunk main --inputs "$INPUTS_REL"
+            "$CANNOT_COMPARE_REASON" '' --trunk main "${ENGINE_ARGS[@]}"
         assert_equal "$case_name-reads" "$fail_at" "$(cat "$MOLT_TEST_REMOTE_COUNT_FILE")" "git remote reads before the stop"
     done
 
@@ -793,26 +1066,26 @@ test_outside_paths() {
     write_basic_inputs '["f.txt"]'
     assert_refused_unchanged outside-named "$WORK_TREE" "$OUTSIDE_REASON" \
         "$(printf '%s\n' 'outside: "g.txt"' 'outside: "staged.txt"' 'outside: "q\"uo\\te.txt"' 'outside: "sub/new file.txt"' 'outside: "ünï.txt"')"$'\n' \
-        --trunk main --inputs "$INPUTS_REL"
+        --trunk main "${ENGINE_ARGS[@]}"
 
     create_world outside-rename
     run_git "$WORK_TREE" mv g.txt h.txt
     write_basic_inputs '["h.txt"]'
     assert_refused_unchanged outside-rename-old-side "$WORK_TREE" "$OUTSIDE_REASON" \
-        'outside: "g.txt"'$'\n' --trunk main --inputs "$INPUTS_REL"
+        'outside: "g.txt"'$'\n' --trunk main "${ENGINE_ARGS[@]}"
 
     create_world outside-deleted
     rm "$WORK_TREE/g.txt"
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
     assert_refused_unchanged outside-deletion "$WORK_TREE" "$OUTSIDE_REASON" \
-        'outside: "g.txt"'$'\n' --trunk main --inputs "$INPUTS_REL"
+        'outside: "g.txt"'$'\n' --trunk main "${ENGINE_ARGS[@]}"
 
     create_world outside-directory
     printf 'changed\n' >"$WORK_TREE/sub/keep.txt"
     write_basic_inputs '["sub/keep.txt.bak"]'
     assert_refused_unchanged outside-not-a-prefix "$WORK_TREE" "$OUTSIDE_REASON" \
-        'outside: "sub/keep.txt"'$'\n' --trunk main --inputs "$INPUTS_REL"
+        'outside: "sub/keep.txt"'$'\n' --trunk main "${ENGINE_ARGS[@]}"
 }
 
 # ── Nothing to commit ───────────────────────────────────────────────────────
@@ -820,16 +1093,16 @@ test_outside_paths() {
 test_nothing_to_commit() {
     create_world clean
     write_basic_inputs '[]'
-    assert_success clean-empty-files "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" --trunk main --inputs "$INPUTS_REL"
+    assert_success clean-empty-files "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" --trunk main "${ENGINE_ARGS[@]}"
     write_basic_inputs '["f.txt","not-there.txt"]'
-    assert_success clean-listed-not-dirty "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" --trunk main --inputs "$INPUTS_REL"
+    assert_success clean-listed-not-dirty "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" --trunk main "${ENGINE_ARGS[@]}"
     assert_equal clean-head-unchanged "$HEAD_SHA" "$(run_git "$WORK_TREE" rev-parse HEAD)" "HEAD"
 
     create_world ignored-scratch
     printf 'scratch\n' >"$WORK_TREE/.hivemind/other-scratch.json"
     printf 'log\n' >"$WORK_TREE/run.log"
     write_basic_inputs '[]'
-    assert_success ignored-scratch-allowed "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" --trunk main --inputs "$INPUTS_REL"
+    assert_success ignored-scratch-allowed "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" --trunk main "${ENGINE_ARGS[@]}"
 }
 
 # ── Commits ─────────────────────────────────────────────────────────────────
@@ -840,7 +1113,8 @@ test_nothing_to_commit() {
 assert_commit_run() {
     local name="$1" run_cwd="$2" inputs_rel="$3" trunk_name="${4:-main}"
     local errfile="$WORKDIR/$name.err" out rc=0
-    run_engine "$run_cwd" out "$errfile" --trunk "$trunk_name" --inputs "$inputs_rel" || rc=$?
+    set_engine_args "$inputs_rel"
+    run_engine "$run_cwd" out "$errfile" --trunk "$trunk_name" "${ENGINE_ARGS[@]}" || rc=$?
     if [[ "$rc" -ne 0 ]]; then
         failed "$name" "expected exit 0, got $rc (stderr: $(tr '\n' '|' <"$errfile"))"
         return 0
@@ -907,7 +1181,8 @@ test_commits() {
 test_messages() {
     create_world message-full
     printf 'changed\n' >"$WORK_TREE/f.txt"
-    write_inputs '{"type":"fix","scope":"skills/molt","breaking":true,"subject":"keep $(touch pwned) and `touch pwned2` literal","body":"Why: reason.\n\nBREAKING CHANGE: new contract\n\tindented","files":["f.txt"]}'
+    write_raw_inputs '{"type":"fix","scope":"skills/molt","breaking":true}' \
+        'keep $(touch pwned) and `touch pwned2` literal'$'\n' $'f.txt\n' $'Why: reason.\n\nBREAKING CHANGE: new contract\n\tindented'
     assert_commit_run message-full "$WORK_TREE" "$INPUTS_REL"
     assert_committed message-full "$(printf 'M\tf.txt')" \
         "$(printf 'fix(skills/molt)!: keep $(touch pwned) and `touch pwned2` literal\n\nWhy: reason.\n\nBREAKING CHANGE: new contract\n\tindented')"
@@ -915,19 +1190,81 @@ test_messages() {
 
     create_world message-plain
     printf 'changed\n' >"$WORK_TREE/f.txt"
-    write_inputs '{"type":"docs","subject":"say it plainly","body":" \n\t\n","breaking":false,"files":["f.txt"]}'
+    write_raw_inputs '{"type":"docs","breaking":false}' $'say it plainly\n' $'f.txt\n' $' \n\t\n'
     assert_commit_run message-plain "$WORK_TREE" "$INPUTS_REL"
     assert_committed message-plain "$(printf 'M\tf.txt')" 'docs: say it plainly'
 
     create_world message-72-unicode
     printf 'changed\n' >"$WORK_TREE/f.txt"
-    write_inputs "{\"type\":\"chore\",\"subject\":\"$(printf 'é%.0s' $(seq 1 72))\",\"files\":[\"f.txt\"]}"
+    write_raw_inputs '{"type":"chore"}' "$(printf 'é%.0s' $(seq 1 72))"$'\n' $'f.txt\n'
     assert_commit_run message-72-unicode "$WORK_TREE" "$INPUTS_REL"
     assert_committed message-72-unicode "$(printf 'M\tf.txt')" "chore: $(printf 'é%.0s' $(seq 1 72))"
 }
 
-# A subfolder run reads a relative inputs path from the subfolder. The subfolder's own
-# .hivemind/<leaf> is deleted after the read; ../.hivemind/<leaf>, the top's file, is read and kept.
+# A subject, body and listed path holding JSON and markup characters (", \, ], }, [, { and <)
+# reach the commit byte for byte: the raw files are never parsed as JSON. A stray `]"\` copy fault
+# in the subject is plain text.
+test_raw_bytes() {
+    local odd_text='a "q" \ ] } [ { <x>'
+    local odd_path='p"\]}[{<.txt'
+    create_world raw-bytes
+    printf 'odd\n' >"$WORK_TREE/$odd_path"
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_raw_inputs '{"type":"fix"}' "$odd_text"$'\n' "$odd_path"$'\n'$'f.txt\n' "$odd_text"$'\nline two ]"\\\n'
+    assert_commit_run raw-bytes "$WORK_TREE" "$INPUTS_REL"
+    assert_committed raw-bytes "$(printf 'M\tf.txt\nA\t"p\\"\\\\]}[{<.txt"')" \
+        "$(printf 'fix: %s\n\n%s\nline two ]"\\' "$odd_text" "$odd_text")"
+    assert_equal raw-bytes-path 'odd' "$(run_git "$WORK_TREE" show "HEAD:$odd_path")" "the listed path committed byte for byte"
+
+    create_world raw-copy-fault
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_raw_inputs '{"type":"fix"}' $'send the subject raw ]"\\\n' $'f.txt\n'
+    assert_commit_run raw-copy-fault "$WORK_TREE" "$INPUTS_REL"
+    assert_committed raw-copy-fault "$(printf 'M\tf.txt')" 'fix: send the subject raw ]"\'
+}
+
+# The subject and files files may end in one line feed or none. An empty files file, a lone line
+# feed and an absent --files-file are each an empty list, so a dirty file then lies outside files.
+test_line_feeds() {
+    create_world line-feed-none
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    printf 'new\n' >"$WORK_TREE/g2.txt"
+    write_raw_inputs '{"type":"test"}' 'no final line feed' $'f.txt\ng2.txt'
+    assert_commit_run line-feed-none "$WORK_TREE" "$INPUTS_REL"
+    assert_committed line-feed-none "$(printf 'M\tf.txt\nA\tg2.txt')" 'test: no final line feed'
+
+    create_world line-feed-one
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_raw_inputs '{"type":"test"}' $'one final line feed\n' $'f.txt\n'
+    assert_commit_run line-feed-one "$WORK_TREE" "$INPUTS_REL"
+    assert_committed line-feed-one "$(printf 'M\tf.txt')" 'test: one final line feed'
+
+    create_world empty-list-clean
+    write_raw_inputs '{"type":"test"}' $'s\n' ''
+    assert_success empty-list-empty-file "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" --trunk main "${ENGINE_ARGS[@]}"
+    write_raw_inputs '{"type":"test"}' $'s\n' $'\n'
+    assert_success empty-list-lone-line-feed "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" --trunk main "${ENGINE_ARGS[@]}"
+    write_raw_inputs '{"type":"test"}' $'s\n' ''
+    rm -f "$FILES_PATH"
+    assert_success empty-list-absent-flag "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" \
+        --trunk main --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL"
+
+    create_world empty-list-dirty
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_raw_inputs '{"type":"test"}' $'s\n' ''
+    assert_refused_unchanged empty-list-dirty-empty-file "$WORK_TREE" "$OUTSIDE_REASON" 'outside: "f.txt"'$'\n' \
+        --trunk main "${ENGINE_ARGS[@]}"
+    write_raw_inputs '{"type":"test"}' $'s\n' $'\n'
+    assert_refused_unchanged empty-list-dirty-lone-line-feed "$WORK_TREE" "$OUTSIDE_REASON" 'outside: "f.txt"'$'\n' \
+        --trunk main "${ENGINE_ARGS[@]}"
+    write_raw_inputs '{"type":"test"}' $'s\n' ''
+    rm -f "$FILES_PATH"
+    assert_refused_unchanged empty-list-dirty-absent-flag "$WORK_TREE" "$OUTSIDE_REASON" 'outside: "f.txt"'$'\n' \
+        --trunk main --inputs "$INPUTS_REL" --subject-file "$SUBJECT_REL"
+}
+
+# A subfolder run reads relative inputs, subject and files paths from the subfolder. The subfolder's own
+# .hivemind/<leaf> files are deleted after the read; ../.hivemind/<leaf>, the top's files, are read and kept.
 test_subfolder_invocation() {
     create_world subfolder
     printf 'changed\n' >"$WORK_TREE/sub/keep.txt"
@@ -935,39 +1272,39 @@ test_subfolder_invocation() {
     write_basic_inputs '["sub/keep.txt","f.txt"]'
     assert_commit_run subfolder "$WORK_TREE/sub" "../$INPUTS_REL"
     assert_committed subfolder "$(printf 'M\tf.txt\nM\tsub/keep.txt')" 'feat(core): add thing'
-    assert_path_kept subfolder-parent-inputs-kept "$INPUTS_PATH"
+    assert_raw_files_kept subfolder-parent-kept
 
     create_world subfolder-own-hivemind
     printf 'changed\n' >"$WORK_TREE/sub/keep.txt"
-    INPUTS_PATH="$WORK_TREE/sub/$INPUTS_REL"
+    set_inputs_path "$WORK_TREE/sub/$INPUTS_REL"
     mkdir -p "$WORK_TREE/sub/.hivemind"
     write_basic_inputs '["sub/keep.txt"]'
     assert_commit_run subfolder-own-hivemind "$WORK_TREE/sub" "$INPUTS_REL"
     assert_committed subfolder-own-hivemind "$(printf 'M\tsub/keep.txt')" 'feat(core): add thing'
-    assert_path_gone subfolder-own-hivemind-deleted "$INPUTS_PATH"
+    assert_raw_files_gone subfolder-own-hivemind-deleted
 
     create_world subfolder-own-hivemind-absolute
     printf 'changed\n' >"$WORK_TREE/f.txt"
-    INPUTS_PATH="$WORK_TREE/sub/$INPUTS_REL"
+    set_inputs_path "$WORK_TREE/sub/$INPUTS_REL"
     mkdir -p "$WORK_TREE/sub/.hivemind"
     write_basic_inputs '["f.txt"]'
     assert_commit_run subfolder-own-hivemind-absolute "$WORK_TREE/sub" "$INPUTS_PATH"
     assert_committed subfolder-own-hivemind-absolute "$(printf 'M\tf.txt')" 'feat(core): add thing'
-    assert_path_gone subfolder-own-hivemind-absolute-deleted "$INPUTS_PATH"
+    assert_raw_files_gone subfolder-own-hivemind-absolute-deleted
 
     create_world subfolder-top-absolute
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
     assert_commit_run subfolder-top-absolute "$WORK_TREE/sub" "$INPUTS_PATH"
     assert_committed subfolder-top-absolute "$(printf 'M\tf.txt')" 'feat(core): add thing'
-    assert_path_kept subfolder-top-absolute-kept "$INPUTS_PATH"
+    assert_raw_files_kept subfolder-top-absolute-kept
 
     create_world subfolder-relative-missing
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
     assert_refused_unchanged subfolder-relative-to-start "$WORK_TREE/sub" "$INPUTS_MISSING_REASON" '' \
-        --trunk main --inputs "$INPUTS_REL"
-    assert_path_kept subfolder-relative-to-start-inputs-kept "$INPUTS_PATH"
+        --trunk main "${ENGINE_ARGS[@]}"
+    assert_raw_files_kept subfolder-relative-to-start-kept
 }
 
 test_hooks() {
@@ -976,7 +1313,7 @@ test_hooks() {
     chmod +x "$WORK_TREE/.git/hooks/pre-commit"
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
-    assert_blocker hook-rewrites "$WORK_TREE" "$STILL_DIRTY_REASON" '' --trunk main --inputs "$INPUTS_REL"
+    assert_blocker hook-rewrites "$WORK_TREE" "$STILL_DIRTY_REASON" '' --trunk main "${ENGINE_ARGS[@]}"
     assert_equal hook-rewrites-committed "$HEAD_SHA" "$(run_git "$WORK_TREE" rev-parse HEAD~1)" "the commit was made on the old HEAD"
 
     create_world hook-stages-unlisted
@@ -984,7 +1321,7 @@ test_hooks() {
     chmod +x "$WORK_TREE/.git/hooks/pre-commit"
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
-    assert_blocker hook-stages-unlisted "$WORK_TREE" "$COMMIT_OUTSIDE_REASON" '' --trunk main --inputs "$INPUTS_REL"
+    assert_blocker hook-stages-unlisted "$WORK_TREE" "$COMMIT_OUTSIDE_REASON" '' --trunk main "${ENGINE_ARGS[@]}"
     assert_equal hook-stages-unlisted-parent "$HEAD_SHA" "$(run_git "$WORK_TREE" rev-parse HEAD~1)" "the commit was made on the old HEAD"
     assert_equal hook-stages-unlisted-paths "$(printf 'M\tf.txt\nM\tg.txt')" \
         "$(run_git "$WORK_TREE" show --no-renames --name-status --format= HEAD)" "the hook's path is in the commit the blocker names"
@@ -1019,7 +1356,7 @@ assert_hook_message() {
     write_failing_hook "cat '$WORLD_ROOT/hook-message' $redirect"
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
-    assert_refused_unchanged "$1" "$WORK_TREE" "$3" '' --trunk main --inputs "$INPUTS_REL"
+    assert_refused_unchanged "$1" "$WORK_TREE" "$3" '' --trunk main "${ENGINE_ARGS[@]}"
 }
 
 # A failing commit puts back the index entries of exactly the paths the engine staged: a
@@ -1039,7 +1376,7 @@ test_failed_commit_restores_index() {
     printf 'fully staged\n' >"$WORK_TREE/sub/keep.txt"
     run_git "$WORK_TREE" add sub/keep.txt
     write_basic_inputs '["f.txt","new.txt","g.txt","sub/keep.txt"]'
-    assert_refused_unchanged restore-index "$WORK_TREE" "$COMMIT_FAILED_REASON" '' --trunk main --inputs "$INPUTS_REL"
+    assert_refused_unchanged restore-index "$WORK_TREE" "$COMMIT_FAILED_REASON" '' --trunk main "${ENGINE_ARGS[@]}"
     assert_equal restore-index-partly-staged "$staged_blob" "$(run_git "$WORK_TREE" rev-parse :f.txt)" "earlier staged blob back"
     assert_equal restore-index-untracked '?? new.txt' "$(run_git "$WORK_TREE" status --porcelain=v1 -- new.txt)" "listed untracked path untracked again"
     assert_equal restore-index-deleted ' D g.txt' "$(run_git "$WORK_TREE" status --porcelain=v1 -- g.txt)" "listed deleted path back in the index"
@@ -1079,7 +1416,7 @@ test_failed_commit_identity() {
     mkdir -p "$WORKDIR/empty-home"
     export HOME="$WORKDIR/empty-home" XDG_CONFIG_HOME="$WORKDIR/empty-home/.config"
     unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL EMAIL
-    run_engine "$WORK_TREE" out "$errfile" --trunk main --inputs "$INPUTS_REL" || rc=$?
+    run_engine "$WORK_TREE" out "$errfile" --trunk main "${ENGINE_ARGS[@]}" || rc=$?
     export HOME="$saved_home" XDG_CONFIG_HOME="$saved_xdg"
     after="$(repo_snapshot)"
     assert_equal identity-missing-exit "1|" "$rc|$out" "exit 1, empty stdout"
@@ -1101,7 +1438,7 @@ test_failed_commit_restore_fails() {
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
     assert_blocker restore-fails "$WORK_TREE" \
-        'the commit failed and the index could not be restored: git said "lock left"' '' --trunk main --inputs "$INPUTS_REL"
+        'the commit failed and the index could not be restored: git said "lock left"' '' --trunk main "${ENGINE_ARGS[@]}"
     assert_equal restore-fails-head "$HEAD_SHA" "$(run_git "$WORK_TREE" rev-parse HEAD)" "HEAD unchanged"
 }
 
@@ -1115,7 +1452,7 @@ test_failed_commit_keeps_hook_entries() {
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
     assert_blocker restore-hook-listed "$WORK_TREE" \
-        'the commit failed and the index could not be restored' '' --trunk main --inputs "$INPUTS_REL"
+        'the commit failed and the index could not be restored' '' --trunk main "${ENGINE_ARGS[@]}"
     hook_blob="$(run_git "$WORK_TREE" hash-object f.txt)"
     assert_equal restore-hook-listed-entry "$hook_blob" "$(run_git "$WORK_TREE" rev-parse :f.txt)" "the hook's staged blob kept"
     assert_equal restore-hook-listed-head "$HEAD_SHA" "$(run_git "$WORK_TREE" rev-parse HEAD)" "HEAD unchanged"
@@ -1124,7 +1461,7 @@ test_failed_commit_keeps_hook_entries() {
     write_failing_hook 'printf "hooked\n" >>g.txt; git add g.txt'
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
-    assert_blocker restore-hook-unlisted "$WORK_TREE" "$COMMIT_FAILED_REASON" '' --trunk main --inputs "$INPUTS_REL"
+    assert_blocker restore-hook-unlisted "$WORK_TREE" "$COMMIT_FAILED_REASON" '' --trunk main "${ENGINE_ARGS[@]}"
     assert_equal restore-hook-unlisted-listed ' M f.txt' "$(run_git "$WORK_TREE" status --porcelain=v1 -- f.txt)" "listed path put back"
     assert_equal restore-hook-unlisted-hook 'M  g.txt' "$(run_git "$WORK_TREE" status --porcelain=v1 -- g.txt)" "the hook's unlisted entry kept"
 }
@@ -1132,9 +1469,12 @@ test_failed_commit_keeps_hook_entries() {
 # ── Run ──────────────────────────────────────────────────────────────────────
 
 test_usage_errors
+test_flag_order
 test_trunk_gate
 test_not_a_checkout
 test_inputs_file_refusals
+test_raw_file_refusals
+test_raw_file_unreadable
 test_inputs_field_refusals
 test_inputs_file_lifetime
 test_git_state_refusals
@@ -1146,6 +1486,8 @@ test_outside_paths
 test_nothing_to_commit
 test_commits
 test_messages
+test_raw_bytes
+test_line_feeds
 test_subfolder_invocation
 test_hooks
 test_failed_commit_restores_index

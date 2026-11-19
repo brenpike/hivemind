@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [10.0.6] - 2026-11-19
+
+### Fixed
+
+- The commit step in standard-delivery and pr-feedback-remediation, and the molt skill, now send the commit subject and the file list in their own raw files. The inputs JSON holds only the type, the scope and the breaking flag. A runner copy mistake in the subject or the file list can no longer make the inputs file invalid.
+- No prose budget raised. Every built workflow script changed, so a run paused on an older build cannot resume.
+
+Issue: #595. See the ADR-0037 amendment of 2026-11-19 (`docs/adr/0037-standard-delivery-on-script-engine.md`).
+
 ## [10.0.5] - 2026-11-18
 
 ### Fixed
