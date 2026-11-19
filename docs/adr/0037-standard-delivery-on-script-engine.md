@@ -2216,6 +2216,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/506 and https:
 - **Not covered.** `jq -R` replaces each invalid UTF-8 sequence of the body file with U+FFFD, so such a body is changed, not refused.
 - **Bounded impact.** The workflow body is a JavaScript string and the Write tool writes text, so neither path produces invalid UTF-8. A replaced sequence shows as a visible character in editable pull request text and adds no control character.
 - **Ground.** That is how jq reads raw input. A separate byte check would guard a case the Write tool does not produce.
+- **Closed 2026-11-19 (local review finding da9b2eac).** The body, and every other caller-written file of `molt.sh` and `open-plan-pr.sh`, is now read back byte for byte, and a file that is not valid UTF-8 is refused with a fixed blocker (see Amendment 2026-11-19: the commit subject and file list are sent in their own files (issue 595), "Local review finding da9b2eac").
 
 The rest of ADR-0037 is unchanged.
 
@@ -3046,10 +3047,52 @@ The seeded-sentence check of `tests/workflow-scripts/build.test.mjs` still fits,
   - **Bounded impact.** It needs a runner to change the command the engine built and an exact match with a live file of another run in the same checkout. Brood strains run in separate worktrees. The worst case is that the other run's commit step stops with a visible error and this run's commit carries a subject or file list the other run wrote. `molt.sh` still stages only listed dirty paths and refuses any other dirty path, and the commit step pushes nothing.
   - **Decision.** Keep the code and add no shared-token check to the hook, as for the PR files.
   - **Decided by.** The user, 2026-11-18, on local review finding e3e6fa3d for the PR files (see Amendment 2026-11-18: the pull request comment is sent in its own file (issue 592)). Extended to the molt files by the run on Q3, option A, on 2026-11-19.
+- **Failed deletes of read input files are ignored (local review finding 097102a1).**
+  - **Not covered.** A failed delete of a used inputs, subject, files, body or comment file is ignored, and the run can succeed and leave that file behind.
+  - **Bounded impact.** A leftover file is inert. The `molt.sh` dirty check refuses it before any change, and a retry uses paths of its own.
+  - **Ground.** The issue 488 amendment (2026-10-31, "Options ruled out: A new stop on a failed delete") ruled out a new stop on a failed delete. The best-effort delete stays.
+  - **Decision.** Keep the best-effort delete and record this rejection. No code change.
+  - **Decided by.** The user, 2026-11-19, answering Q1 (A: keep best-effort and record; B: stop both scripts; C: issue later). The reply was "Take recs", which is A.
 
-**Version.** Patch, 10.0.6. It is a fix: a runner copy mistake in the subject or the file list can no longer make the inputs file invalid. Every built workflow script changed, so a run paused on an older build cannot resume.
+### Local review finding da9b2eac: a raw file must read back byte for byte (2026-11-19)
 
-It updates these places in place, each with a dated note: the residuals "molt's inputs JSON is model-written" and "the runner is trusted to name only its own run's PR files" of Amendment 2026-11-18: the pull request comment is sent in its own file (issue 592), and the residual "a first file is left when the second Write fails" of Amendment 2026-11-06: the pull request body is built in code and sent in its own file (issues 506 and 501).
+The finding: reads of a caller-written file through jq do not keep every byte. jq reads the file as UTF-8 and puts U+FFFD in place of each invalid sequence, with no error, so a file that is not valid UTF-8 was changed and then used.
+
+**Root cause.** One read path, `jq -R -s` or `jq --rawfile`, was used at seven sites, and none compared what it read with the file. The 2026-11-06 residual "invalid UTF-8 in the body becomes U+FFFD" had judged the body alone and the Write tool as the only producer. The raw files of this amendment made the class larger, since a runner copy fault can now put a bad byte in a subject, a file list or a title.
+
+**The seven sites.**
+
+- `molt.sh`: the inputs file, the subject file, the files file and the body file.
+- `open-plan-pr.sh`: the inputs file, which holds the title and was inherited from the issue 592 shape, the body file and the comment file.
+
+**The change.**
+
+- **The helper.** `hivemind_read_input_file <file> <copy>` in `plugin/skills/_shared/containment.sh` reads the file once, whole, with `jq -n -j --rawfile text <file> '$text'` into a private copy, then compares the copy with the file with `cmp -s` before the delete. It returns 0 when the copy is byte for byte the file, 2 when they differ and 1 when the read or the compare could not run. It prints nothing, never exits and sets no shell option.
+- **The scripts.** Both read every one of their files through the helper, and each file is still deleted right after its own read, whether or not the read or the check passed, and before any blocker. The inputs file goes to a raw copy that the existing one-JSON-value jq step then parses. After the deletes the blockers run in order: inputs read failed gives `inputs file is not valid JSON`; inputs copy differs gives `inputs file is not valid UTF-8`; inputs parse failed gives `inputs file is not valid JSON`; then, per file in turn, a failed read gives `<kind> file cannot be read` and a differing copy gives `<kind> file is not valid UTF-8`. Any other helper return maps to the cannot-be-read text.
+- **Unchanged.** Field rules, staging, commit, push, PR create and reuse, result checks, output and exit contract.
+
+**The class eliminated.** Every caller-written file read of the two scripts goes through the one helper, so no read can change a byte without a refusal. Both scripts name the helper in their headers, and the seven sites are the whole set, so a new file added to either script has one read to copy.
+
+**Why `cmp`, not a U+FFFD refusal.** A literal U+FFFD is valid UTF-8 and some text holds it on purpose: `pr.js` maps a lone surrogate in a title to U+FFFD (`tests/workflow-scripts/standard-delivery.test.mjs`, the issue 592 title case near line 5704). Refusing the character would refuse that title. The copy comparison refuses only a file that jq changed.
+
+**Why refuse, not preserve.** `jq` 1.6 has no flag that keeps invalid bytes in a string, and `jq -b` is rejected by 1.6. Preserving the bytes would also put them in a commit subject or a pull request title. A fixed blocker before any change is the same contract as every other bad file.
+
+**Surface.** Surface-Growth Escalation was approved by the user for the one shared read at all seven sites. The surface grows by one function, the blockers `inputs file is not valid UTF-8` and `<kind> file is not valid UTF-8` for each non-inputs file of both scripts, and `jq` and `cmp` become named dependencies of the helper. No prose budget raised, no hook, workflow, runner or skill text changed, and `tests/policy` fixture pins are kept.
+
+**Native Windows.** A native Windows `jq.exe` writes CRLF for LF, so every multi-line file fails the comparison there. Native Windows is unsupported (README), so this is noted in both script headers and not worked around. A file changed between the read and the compare is refused by the same blocker.
+
+**Enforcement.** Tests by execution, measured after the change:
+
+- `tools/test_shared_libs.sh`: 1676 passed, 27 of them new assertions in subsection 7g (exact copy and return 0 for an empty file, a lone line feed, multi-byte text, a literal U+FFFD and one line over 9000 bytes of multi-byte characters; return 2 for a lone 0xFF byte, a truncated 3-byte sequence at end of file, `C0 80` and `ED A0 80`; return 1 for a missing file; no output; survives `set -e` in a condition).
+- `tools/test_molt.sh`: 834 passed, 0 failed. Red proof: the 7 new UTF-8 cases fail on the old engine. The cases cover each of the four files holding an invalid byte, a truncated sequence at the end of the subject file, the blocker order, and a literal U+FFFD and a long multi-byte body line committed byte for byte.
+- `tools/test_open_plan_pr.sh`: 1284 passed, 0 failed. A body, a comment and an inputs title each holding an invalid byte get their blocker with no push and no `gh` call; a title holding a literal U+FFFD and a long multi-byte body line reach `gh` byte for byte.
+- Local `jq` is 1.6, which keeps NUL bytes under `--rawfile -j`, so the existing NUL cases still reach the control-character rules. No test pins which rule refuses NUL.
+
+**The user's decision.** Q2, option A, 2026-11-19 (reply "Take recs"): apply one shared byte-exact read at all seven caller-file reads. The run decisions taken with the planner's recommendation: both inputs files are included, native Windows is not worked around, and no `jq -b`.
+
+**Version.** Patch, 10.0.6. It is a fix: a runner copy mistake in the subject or the file list can no longer make the inputs file invalid. Every built workflow script changed, so a run paused on an older build cannot resume. The local review fix da9b2eac stays in 10.0.6 and `plugin.json` is unchanged.
+
+It updates these places in place, each with a dated note: the residuals "molt's inputs JSON is model-written" and "the runner is trusted to name only its own run's PR files" of Amendment 2026-11-18: the pull request comment is sent in its own file (issue 592), the residual "a first file is left when the second Write fails" and the residual "invalid UTF-8 in the body becomes U+FFFD" of Amendment 2026-11-06: the pull request body is built in code and sent in its own file (issues 506 and 501).
 
 The rest of ADR-0037 is unchanged.
 
