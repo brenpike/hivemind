@@ -2,8 +2,8 @@
 #
 # open-plan-pr: THIN executable entrypoint (ADR-0020) that places the working branch on its
 # remote and opens its pull request, or reuses the open one, in ONE process. It reads the inputs
-# file and the body file once each, refuses before any change, pushes through push-branch.sh as a
-# child process, then
+# file, the body file and, when given, the comment file once each, refuses before any change,
+# pushes through push-branch.sh as a child process, then
 # reuses or creates the PR and verifies it against the values it checked. A change is a push, a
 # write to a branch ref, HEAD, the index, the work tree or git config, a PR created on GitHub, or
 # a comment posted on a PR.
@@ -22,6 +22,10 @@
 #   --body-file <path>       REQUIRED. The body file, the PR body as raw Markdown the caller
 #                            wrote with the Write tool (`.hivemind/pr-inputs-<token>-body.json`).
 #                            A relative path is resolved like --inputs.
+#   --comment-file <path>    OPTIONAL. The comment file, the reuse comment as raw Markdown the
+#                            caller wrote with the Write tool
+#                            (`.hivemind/pr-inputs-<token>-comment.json`). A relative path is
+#                            resolved like --inputs.
 # head, base, and remote pass hivemind_assert_identifier (_shared/allowlist.sh: non-empty, no
 # leading `-`, no `..`, charset ^[A-Za-z0-9._/-]+$) before any git or gh command runs (`head,
 # base or push_remote contains characters outside the safe allowlist`). Then an expect-commit
@@ -35,9 +39,8 @@
 # FILE) in the body's place:
 #   title     REQUIRED. One line of text with a non-space character and no control character.
 #   draft     optional. true or false. true opens the PR as a draft. A reused PR is not changed.
-#   comment   optional. Text with a character other than space, newline and tab, and no control
-#             character other than newline and tab. It is posted only on a reused PR (REUSE).
-# No other field is allowed, so a `body` field is refused. The title reaches gh as one
+# No other field is allowed, so a `body` or `comment` field is refused (`inputs have a field other
+# than title and draft`). The title reaches gh as one
 # `--title=<value>` argument from a quoted shell variable, and the body and the comment as files
 # in the private work folder (`--body-file=<path>`), so none of them is ever part of shell source
 # or an argument's text. The rule that the PR content carries no attribution string is the
@@ -48,9 +51,17 @@
 # other than newline and tab, and it may be empty. Its path must not name the inputs file: a
 # path that names the same file, by any spelling or a hard link, is refused before either read.
 #
-# INPUTS AND BODY FILE LIFETIME: the script deletes each file once it has read it, the inputs file
-# right after the jq read into the private copy and the body file right after the jq read into
-# the private body, each whether or not its read succeeded, and both before the `inputs file is
+# COMMENT FILE (only with --comment-file; read once, with `jq -R -s`, into the private
+# `comment.md`; its text enters no shell or jq program source): the whole file is the comment. Its
+# rule is checked after the draft rule: text with a character other than space, newline and tab,
+# and no control character other than newline and tab. It is posted only on a reused PR (REUSE).
+# Its path must not name the inputs file or the body file: a path that names either, by any
+# spelling or a hard link, is refused before any read.
+#
+# INPUTS, BODY AND COMMENT FILE LIFETIME: the script deletes each file once it has read it, the
+# inputs file right after the jq read into the private copy, the body file right after the jq read
+# into the private body and the comment file right after the jq read into the private comment,
+# each whether or not its read succeeded, and all before the `inputs file is
 # not valid JSON` blocker and every later check (hivemind_remove_inputs_file in
 # _shared/containment.sh; ADR-0037). Only a leaf named `pr-inputs-<token>.json`, <token> 1 to 64
 # characters of [A-Za-z0-9-], directly under a real `.hivemind` folder in the folder the script was
@@ -58,28 +69,35 @@
 # that folder and never through a symlink. The path is `.hivemind/<leaf>`, or an absolute path whose
 # folder above `.hivemind` resolves to the start folder. For the body file the token is
 # `<token>-body`, so the caller's <token> must be at most 59 characters for the body file to be
-# deleted. Any other path, `../.hivemind/<leaf>` from a subfolder included, is read and kept. A failed delete leaves the file and does not stop the
+# deleted. For the comment file the token is `<token>-comment`, so the caller's <token> must be at
+# most 56 characters for the comment file to be deleted. Any other path, `../.hivemind/<leaf>`
+# from a subfolder included, is read and kept. A failed delete leaves the file and does not stop the
 # run: its result and output are discarded, so stdout, stderr and the exit contract are
 # unchanged. A refusal before the reads (usage, the identifier gates, the expect-commit format,
 # the delay, a missing tool, not a checkout, a file not found, a file that resolves outside the
-# checkout, the body file naming the inputs file) leaves both files. A rerun must write both
-# files again. Deleting this caller's scratch files is not a change in the REFUSALS sense, so a
-# refusal after the reads still makes no change. Because the deletes come before the dirty check,
-# a deleted inputs or body file is never an untracked file there, even when `.hivemind/` is not
-# ignored; any other untracked file still is.
+# checkout, the body file naming the inputs file, the comment file naming the inputs file or the
+# body file) leaves every file. A rerun must write every file again. Deleting this caller's scratch
+# files is not a change in the REFUSALS sense, so a refusal after the reads still makes no change.
+# Because the deletes come before the dirty check, a deleted inputs, body or comment file is never
+# an untracked file there, even when `.hivemind/` is not ignored; any other untracked file still
+# is.
 #
 # REFUSALS (fixed blockers, checked in this order, before any change; ADR-0037 invariant 1):
 #   delay        HIVEMIND_OPEN_PLAN_PR_REREAD_DELAY, when set, is not a whole number of seconds.
 #   tools        git, jq, or gh is not on PATH (`gh not found on PATH`).
 #   checkout     not inside a git work tree.
-#   inputs       the inputs file, then the body file, is missing (`inputs file not found`, `body
-#                file not found`); the inputs file, then the body file, resolves outside the
-#                checkout through a symlinked leaf or folder (`inputs file resolves outside the
-#                checkout`, `body file resolves outside the checkout`); the body file names the
-#                inputs file (`body file is the inputs file`), all checked before the first read;
-#                the inputs file is not exactly one valid JSON value (`inputs file is not valid
-#                JSON`); the body file cannot be read (`body file cannot be read`); or a field
-#                rule or the body rule above is broken (one fixed reason per rule).
+#   inputs       the inputs file, then the body file, then the comment file, is missing (`inputs
+#                file not found`, `body file not found`, `comment file not found`); the inputs
+#                file, then the body file, then the comment file, resolves outside the checkout
+#                through a symlinked leaf or folder (`inputs file resolves outside the checkout`,
+#                `body file resolves outside the checkout`, `comment file resolves outside the
+#                checkout`); the body file names the inputs file (`body file is the inputs file`);
+#                the comment file names the inputs file or the body file (`comment file is the
+#                inputs file or the body file`), all checked before the first read; the inputs
+#                file is not exactly one valid JSON value (`inputs file is not valid JSON`); the
+#                body file cannot be read (`body file cannot be read`); the comment file cannot
+#                be read (`comment file cannot be read`); or a field rule, the body rule or the
+#                comment rule above is broken (one fixed reason per rule).
 #   in progress  a merge, rebase, cherry-pick, revert, cherry-pick or revert sequence, or bisect,
 #                each looked up with `git rev-parse --git-path` so a linked worktree reads its own
 #                state (_shared/git-refusals.sh).
@@ -124,8 +142,8 @@
 # 2), because GitHub updates a PR's head SHA a moment after a push. When no read finds a PR on the
 # pushed commit, or the id is unknown, CREATE runs. More than one open PR carrying the pushed
 # commit stops the run.
-#   When the inputs carry comment, the script then posts it on the reused PR: `gh pr comment <n>
-# --body-file=<private file>`, where <n> is the number at the end of the reused PR URL and passes
+#   When --comment-file was given, the script then posts the comment on the reused PR: `gh pr
+# comment <n> --body-file=<private file>`, where <n> is the number at the end of the reused PR URL and passes
 # the identifier gate. The comment text never reaches gh as an argument. gh's stderr is relayed
 # only when the run blocks, and a failed post stops the run with `the PR comment could not be posted`. Each run that reuses
 # a PR posts its own comment, by design: a rerun that reuses the PR posts the comment again
@@ -147,13 +165,13 @@
 #   head_ref_oid: <pushed commit>
 #   created: true|false
 #   commented: true|false
-#                       only when the inputs carry comment: true when the comment was posted on
+#                       only when --comment-file was given: true when the comment was posted on
 #                       a reused PR, false when the PR was created
 #   warning: <text>     only when the push warned (push-branch.sh's warning), or when the push
 #                       did not warn and the head repository id is unknown (`gh cannot read the
 #                       push remote as a GitHub repository; the PR head repository was not
 #                       checked`)
-# Without comment in the inputs, there is no `commented:` line and the output is as above.
+# Without --comment-file, there is no `commented:` line and the output is as above.
 # EXIT CONTRACT:
 #   0  routing lines on stdout, NOTHING on stderr
 #   1  NOTHING on stdout. stderr carries any relayed push-branch.sh or gh stderr, in call
@@ -245,16 +263,16 @@
 #   Linkage:     review thread r4331751745.
 #
 # RECORDED RESIDUAL R4 (one decisions comment per reusing run): REUSE above posts the comment
-# input on a reused PR in every run that reuses it, so the PR can carry the comment more than
+# file on a reused PR in every run that reuses it, so the PR can carry the comment more than
 # once.
 #   Root cause:  each run that reuses an open PR posts its own decisions comment. A new run after
 #                an ADR-0037 decision 2 restart reuses the PR and posts again. A resume by name
 #                gets the runner result from cache (ADR-0037 decision 8), so it does not post
-#                again. A pr-feedback-remediation run passes the comment input only when it took
+#                again. A pr-feedback-remediation run passes the comment file only when it took
 #                a decision, so it adds at most one decisions comment to the reused PR, and a
 #                resume by name posts none (ADR-0040 edge case d).
-#   Inherited:   no. The comment input is new with this script; on main, open-plan-pr had no
-#                comment input and posted nothing on a reused PR.
+#   Inherited:   no. The comment is new with this script; on main, open-plan-pr had no
+#                comment and posted nothing on a reused PR.
 #   Bounded impact: at most one redundant comment, and one notification, per new run or per
 #                pr-feedback-remediation run that took a decision. No wrong
 #                state, no data loss, no security effect. The PR, its branch and the pushed commit
@@ -279,7 +297,7 @@
 # id, so an open PR from another repository, such as a fork with the same branch name and the
 # same commit, is never reused. The push URL behind that id is read again from git config after
 # the push, and git config is trusted. The private work folder
-# (mktemp -d under TMPDIR) holds the inputs copy, the body copy, the comment file, and the gh
+# (mktemp -d under TMPDIR) holds the inputs copy, the body copy, the comment copy, and the gh
 # and push-branch.sh output, and is removed by the EXIT trap.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
@@ -332,7 +350,7 @@ export LC_ALL=C
 export GIT_TERMINAL_PROMPT=0
 export GH_PROMPT_DISABLED=1
 
-usage_reason='invalid arguments; usage: open-plan-pr.sh --head <branch> --base <branch> [--remote <name>] --expect-commit <sha> --inputs <path> --body-file <path>'
+usage_reason='invalid arguments; usage: open-plan-pr.sh --head <branch> --base <branch> [--remote <name>] --expect-commit <sha> --inputs <path> --body-file <path> [--comment-file <path>]'
 reject_warning='push was rejected; the branch is not on its remote'
 deferred_warning='no upstream and no origin remote; push deferred'
 reread_limit=5
@@ -349,6 +367,8 @@ inputs_arg=''
 inputs_seen=false
 body_file_arg=''
 body_file_seen=false
+comment_file_arg=''
+comment_given=false
 while [ "$#" -gt 0 ]; do
   [ "$#" -ge 2 ] || blocker "$usage_reason"
   case "$1" in
@@ -382,6 +402,11 @@ while [ "$#" -gt 0 ]; do
       body_file_arg="$2"
       body_file_seen=true
       ;;
+    --comment-file)
+      [ "$comment_given" = false ] || blocker "$usage_reason"
+      comment_file_arg="$2"
+      comment_given=true
+      ;;
     *)
       blocker "$usage_reason"
       ;;
@@ -393,6 +418,7 @@ done
   && [ "$body_file_seen" = true ] || blocker "$usage_reason"
 [ -n "$inputs_arg" ] || blocker "$usage_reason"
 [ -n "$body_file_arg" ] || blocker "$usage_reason"
+[ "$comment_given" = false ] || [ -n "$comment_file_arg" ] || blocker "$usage_reason"
 
 identifier_reason='head, base or push_remote contains characters outside the safe allowlist'
 hivemind_assert_identifier "$head_name" || blocker "$identifier_reason"
@@ -427,6 +453,10 @@ case "$body_file_arg" in
   /*) BODY_INPUT_FILE="$body_file_arg" ;;
   *) BODY_INPUT_FILE="$start_dir/$body_file_arg" ;;
 esac
+case "$comment_file_arg" in
+  /*) COMMENT_INPUT_FILE="$comment_file_arg" ;;
+  *) COMMENT_INPUT_FILE="$start_dir/$comment_file_arg" ;;
+esac
 
 command -v git >/dev/null 2>&1 || blocker "git not found on PATH"
 command -v jq >/dev/null 2>&1 || blocker "jq not found on PATH"
@@ -459,9 +489,18 @@ repo_file="$work_dir/repo.json"
 
 [ -f "$INPUTS_FILE" ] || blocker "inputs file not found"
 [ -f "$BODY_INPUT_FILE" ] || blocker "body file not found"
+[ "$comment_given" = false ] || [ -f "$COMMENT_INPUT_FILE" ] || blocker "comment file not found"
 hivemind_assert_inputs_contained "$work_tree_top" "$INPUTS_FILE" >/dev/null 2>&1 || blocker "inputs file resolves outside the checkout"
 hivemind_assert_inputs_contained "$work_tree_top" "$BODY_INPUT_FILE" >/dev/null 2>&1 || blocker "body file resolves outside the checkout"
+if [ "$comment_given" = true ]; then
+  hivemind_assert_inputs_contained "$work_tree_top" "$COMMENT_INPUT_FILE" >/dev/null 2>&1 \
+    || blocker "comment file resolves outside the checkout"
+fi
 [ ! "$INPUTS_FILE" -ef "$BODY_INPUT_FILE" ] || blocker "body file is the inputs file"
+if [ "$comment_given" = true ]; then
+  [ ! "$COMMENT_INPUT_FILE" -ef "$INPUTS_FILE" ] && [ ! "$COMMENT_INPUT_FILE" -ef "$BODY_INPUT_FILE" ] \
+    || blocker "comment file is the inputs file or the body file"
+fi
 inputs_read_rc=0
 jq -c -s 'if length == 1 then .[0] else error("not one JSON value") end' "$INPUTS_FILE" >"$inputs_copy" 2>/dev/null \
   || inputs_read_rc=$?
@@ -469,35 +508,39 @@ hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$inputs_arg" pr >/dev
 body_read_rc=0
 jq -R -s -j '.' "$BODY_INPUT_FILE" >"$body_file" 2>/dev/null || body_read_rc=$?
 hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$body_file_arg" pr >/dev/null 2>&1 || :
+comment_read_rc=0
+comment_jq_args=(--arg comment '')
+if [ "$comment_given" = true ]; then
+  jq -R -s -j '.' "$COMMENT_INPUT_FILE" >"$comment_file" 2>/dev/null || comment_read_rc=$?
+  hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$comment_file_arg" pr >/dev/null 2>&1 || :
+  comment_jq_args=(--rawfile comment "$comment_file")
+fi
 [ "$inputs_read_rc" = 0 ] || blocker "inputs file is not valid JSON"
 [ "$body_read_rc" = 0 ] || blocker "body file cannot be read"
+[ "$comment_read_rc" = 0 ] || blocker "comment file cannot be read"
 
-# The field rules from the header, in order, with the body rule on $body, the private body copy.
-# Prints the fixed reason of the first rule the inputs break, or an empty line when every rule
-# holds.
+# The field rules from the header, in order, with the body rule on $body, the private body copy,
+# and, when $comment_given, the comment rule on $comment, the private comment copy. Prints the
+# fixed reason of the first rule the inputs break, or an empty line when every rule holds.
 validate_program='
-def known_keys: ["title", "draft", "comment"];
+def known_keys: ["title", "draft"];
 def is_one_line: explode | all(.[]; . >= 32 and . != 127);
 def is_text_block: explode | all(.[]; . == 9 or . == 10 or (. >= 32 and . != 127));
 if type != "object" then "inputs must be a JSON object"
-elif (keys - known_keys | length) > 0 then "inputs have a field other than title, draft and comment"
+elif (keys - known_keys | length) > 0 then "inputs have a field other than title and draft"
 elif (.title | type) != "string" then "title must be one line of text"
 elif (.title | is_one_line | not) or (.title | test("[^ ]") | not) then "title must be one line of text"
 elif ($body | is_text_block | not) then "body must be text with no control characters other than newline and tab"
 elif has("draft") and (.draft | type) != "boolean" then "draft must be true or false"
-elif has("comment") and (.comment | type) != "string" then "comment must be non-blank text with no control characters other than newline and tab"
-elif has("comment") and ((.comment | is_text_block | not) or (.comment | test("[^ \t\n]") | not)) then "comment must be non-blank text with no control characters other than newline and tab"
+elif $comment_given and (($comment | is_text_block | not) or ($comment | test("[^ \t\n]") | not)) then "comment must be non-blank text with no control characters other than newline and tab"
 else "" end
 '
-inputs_reason="$(jq -r --rawfile body "$body_file" "$validate_program" "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
+inputs_reason="$(jq -r --rawfile body "$body_file" --argjson comment_given "$comment_given" "${comment_jq_args[@]}" \
+  "$validate_program" "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
 [ -z "$inputs_reason" ] || blocker "$inputs_reason"
 
 title_text="$(jq -r '.title' "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
 draft_value="$(jq -r '.draft == true' "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
-comment_given="$(jq -r 'has("comment")' "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
-if [ "$comment_given" = true ]; then
-  jq -j '.comment' "$inputs_copy" >"$comment_file" 2>/dev/null || blocker "cannot read the inputs file"
-fi
 commented_value=false
 
 # ── Git state ───────────────────────────────────────────────────────────────
@@ -785,7 +828,7 @@ else
 fi
 
 # The warning line carries push-branch.sh's warning or the HEAD REPOSITORY warning. The
-# commented line appears only when the inputs carry comment.
+# commented line appears only when --comment-file was given.
 if [ "$comment_given" = true ]; then
   if [ -n "$push_warning" ]; then
     printf 'url: %s\nhead_ref_oid: %s\ncreated: %s\ncommented: %s\nwarning: %s\n' "$pr_url" "$pushed_commit" "$created_value" "$commented_value" "$push_warning"

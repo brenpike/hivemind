@@ -692,7 +692,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '13b789dca733104d';
+const BUILD_ID = '5952b985447d8939';
 
 function supportedSchemaKeywords(){
 return[
@@ -2168,6 +2168,7 @@ return formatDataBlock('body_file',{path:path,content:text});
 }
 function runnerValuePatterns(){
 const name=gitIdentifierPattern();
+const prFile=/^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/;
 return{
 '--trunk':name,
 '--base':name,
@@ -2178,7 +2179,8 @@ return{
 '--classification':/^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
 '--trunk-freshness':/^(?:fresh|stale|skipped)$/,
 '--inputs':/^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/,
-'--body-file':/^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/
+'--body-file':prFile,
+'--comment-file':prFile
 };
 }
 function describeRunnerWordProblem(words){
@@ -2310,15 +2312,18 @@ return values.trunk===trunk
 &&(values.trunk_commit!=='none'||hasFactsStop(stops,'history_unavailable'))
 &&matchesFreshnessCounts(values.trunk_freshness,values.trunk_ahead,values.trunk_behind);
 }
+function describePlanningStop(runNoun){
+return describeRunNoun(runNoun)+' stopped before planning';
+}
 function malformedFactsMessage(runNoun){
-return'The facts step returned malformed facts, so '+describeRunNoun(runNoun)+' stopped before planning.';
+return'The facts step returned malformed facts, so '+describePlanningStop(runNoun)+'.';
 }
 function blockedFactsMessage(runNoun,blocker){
 const reason=isNonEmptyString(blocker)?blocker:'it gave no reason.';
-return'The facts step was blocked, so '+describeRunNoun(runNoun)+' stopped before planning: '+reason;
+return'The facts step was blocked, so '+describePlanningStop(runNoun)+': '+reason;
 }
 function cutFactsMessage(runNoun,cut){
-return'The facts are incomplete: GitHub could not be read in full for '+cut.split(',').join(', ')+'. Planning needs complete facts, so '+describeRunNoun(runNoun)+' stopped before planning.';
+return'The facts are incomplete: GitHub could not be read in full for '+cut.split(',').join(', ')+'. Planning needs complete facts, so '+describePlanningStop(runNoun)+'.';
 }
 function buildFactsBlock(facts){
 return formatDataBlock('facts',{file:facts.facts_file,lines:facts.facts_lines});
@@ -2398,7 +2403,7 @@ seenIndexes.add(index);
 return true;
 }
 function describeScanProblem(scan,facts,runNoun){
-const stopped='so '+describeRunNoun(runNoun)+' stopped before planning.';
+const stopped='so '+describePlanningStop(runNoun)+'.';
 if(!validateSchema(scanStepSchema(),scan).ok){
 return'The injection scan returned a result it could not use, '+stopped;
 }
@@ -4368,7 +4373,7 @@ return text.split(/((?:https?:\/\/|www\.)[^\s`]+|(?<![\w.-])[\w.-]+\/[\w.-]+#\d+
 function buildPullRequestTitle(plan){
 const prefix=buildTitlePrefix(plan);
 const text=buildTitleText(plan);
-return text===''?prefix:prefix+' '+text;
+return(text===''?prefix:prefix+' '+text).replace(/"/g,'\'').replace(/\\/g,'/').replace(/\p{Cs}/gu,'\uFFFD');
 }
 function describePullRequestGate(run,gates,gateId){
 if(!configuredGateIds(run).includes(gateId)){
@@ -4379,29 +4384,21 @@ return gates.held[gateId]===undefined?'did not hold':gates.notes[gateId]+', held
 function renderPullRequestGates(run,gates){
 return['Gates:',...gateIds().map((gateId)=>'- '+gateNames()[gateId]+': '+describePullRequestGate(run,gates,gateId))].join('\n');
 }
-function renderPullRequestPart(part){
-return part.external?neutralizePullRequestText(part.text):part.text;
-}
 function renderPullRequestRecord(run,gates){
-return buildRunRecordParts(run,run.taken.map(toPullRequestDecision),gates).map(renderPullRequestPart);
+return buildRunRecordParts(run,run.taken.map(toPullRequestDecision),gates).map((part)=>(part.external?neutralizePullRequestText(part.text):part.text));
 }
 function renderClosingLines(plan){
 return[...new Set(listCloses(plan))].map((number)=>'Closes #'+number);
 }
-function renderDigestParagraph(plan){
-return[plan.digest.problem,plan.digest.change].filter((text)=>text.trim()!=='').map(renderText).join(' ');
-}
-function renderStepLines(plan){
-return['Steps:',...plan.steps.map((step)=>'- '+renderText(step.id)+' ('+step.files.map(renderText).join(', ')+'): '+renderText(step.outcome))].join('\n');
-}
 function buildPullRequestBody(run,plan,gates){
 const closingLines=renderClosingLines(plan);
 const parts=closingLines.length===0?[]:[closingLines.join('\n')];
-const digest=renderDigestParagraph(plan);
+const digest=[plan.digest.problem,plan.digest.change].filter((text)=>text.trim()!=='').map(renderText).join(' ');
 if(digest!==''){
 parts.push(neutralizePullRequestText(digest));
 }
-parts.push(neutralizePullRequestText(renderStepLines(plan)),...renderPullRequestRecord(run,gates));
+const stepLines=plan.steps.map((step)=>'- '+renderText(step.id)+' ('+step.files.map(renderText).join(', ')+'): '+renderText(step.outcome));
+parts.push(neutralizePullRequestText(['Steps:',...stepLines].join('\n')),...renderPullRequestRecord(run,gates));
 return cleanPullRequestText(parts.join('\n\n'),true);
 }
 function describePullRequestCause(cause,end){
@@ -4410,15 +4407,12 @@ return'The pull request '+cause+', so '+RUN_NAME+end;
 function describeNoPush(){
 return' stopped. This step pushed nothing.';
 }
-function describePullRequestTextSize(noun,size){
-return describePullRequestCause(noun+' would be '+size+' characters, over the limit of '+maxPullRequestTextLength(),describeNoPush());
-}
 function buildPullRequestTexts(run,plan,gates){
 const comment=buildPullRequestComment(run,gates);
 const texts={title:buildPullRequestTitle(plan),body:buildPullRequestBody(run,plan,gates),...(comment===undefined?{}:{comment:comment})};
 const longNoun=['body','comment'].find((noun)=>texts[noun]?.length>maxPullRequestTextLength());
 if(longNoun!==undefined){
-return{problem:describePullRequestTextSize(longNoun,texts[longNoun].length)};
+return{problem:describePullRequestCause(longNoun+' would be '+texts[longNoun].length+' characters, over the limit of '+maxPullRequestTextLength(),describeNoPush())};
 }
 const attributedNoun=Object.keys(texts).find((noun)=>forbiddenSubjectTexts().some((forbidden)=>texts[noun].toLowerCase().includes(forbidden)));
 if(attributedNoun!==undefined){
@@ -4426,9 +4420,9 @@ return{problem:describePullRequestCause(attributedNoun+' would hold an attributi
 }
 return texts;
 }
-function listPullRequestWords(plan,run,label){
-const[inputsPath,bodyPath]=[label,label+'-body'].map((name)=>buildInputsPath(run,'pr',name));
-return['--head',plan.branch,'--base',plan.base,'--expect-commit',run.head,'--inputs',inputsPath,'--body-file',bodyPath];
+function listPullRequestWords(plan,run,label,texts){
+const[inputsPath,bodyPath,commentPath]=[label,label+'-body',label+'-comment'].map((name)=>buildInputsPath(run,'pr',name));
+return['--head',plan.branch,'--base',plan.base,'--expect-commit',run.head,'--inputs',inputsPath,'--body-file',bodyPath,...(texts.comment===undefined?[]:['--comment-file',commentPath])];
 }
 function buildPullRequestPrompt(words,texts,draft,pluginRoot){
 return[
@@ -4436,8 +4430,9 @@ return[
 dataBlocksSentence(),
 '',
 formatCommandBlock(buildRunnerCommand('open-plan-pr',words,pluginRoot)),
-formatInputsFileBlock(words[7],JSON.stringify({title:texts.title,comment:texts.comment,draft:draft})),
-formatBodyFileBlock(words[9],texts.body)
+formatInputsFileBlock(words[7],JSON.stringify({title:texts.title,draft:draft})),
+formatBodyFileBlock(words[9],texts.body),
+...(words[11]===undefined?[]:[formatDataBlock('comment_file',{path:words[11],content:texts.comment})])
 ].join('\n');
 }
 function isInputsRefusal(stderr){
@@ -4472,21 +4467,18 @@ return{problem:describePullRequestCause('step reported a head commit other than 
 }
 return{values:values};
 }
-function describePullRequestLabel(run,count){
-return'pr-'+run.pass+(count===1?'':'-'+count);
-}
 async function runPullRequestStep(run,plan,gates){
 const texts=buildPullRequestTexts(run,plan,gates);
 if(texts.problem!==undefined){
 return stopDelivery([{problem:texts.problem,terminal:true,nextAction:'report'}],run);
 }
 phase('PR');
-const label=describePullRequestLabel(run,gates.runs.pr);
-const commandStop=describeCommandStop('pull request',listPullRequestWords(plan,run,label),listPullRequestWords(plan,run,label+'-retry'));
+const label='pr-'+run.pass+(gates.runs.pr===1?'':'-'+gates.runs.pr);
+const commandStop=describeCommandStop('pull request',listPullRequestWords(plan,run,label,texts),listPullRequestWords(plan,run,label+'-retry',texts));
 if(commandStop!==undefined){
 return stopDelivery([commandStop],run);
 }
-const buildPrompt=(callLabel)=>addResumeNote(buildPullRequestPrompt(listPullRequestWords(plan,run,callLabel),texts,run.draft||gates.draft!==undefined,run.pluginRoot),run);
+const buildPrompt=(callLabel)=>addResumeNote(buildPullRequestPrompt(listPullRequestWords(plan,run,callLabel,texts),texts,run.draft||gates.draft!==undefined,run.pluginRoot),run);
 const relay=await runRunnerRelay(buildPrompt,label,'PR');
 const checked=checkPullRequestRelay(relay,run.head,texts.comment!==undefined);
 if(checked.problem===undefined){

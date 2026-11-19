@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [10.0.5] - 2026-11-18
+
+### Fixed
+
+- The PR step in standard-delivery and pr-feedback-remediation now sends the reuse comment in its own raw file. The inputs file holds only the title, free of quotes and backslashes, and the draft flag. A runner copy mistake can no longer make the inputs file invalid.
+- No prose budget raised. Every built workflow script changed, so a run paused on an older build cannot resume.
+
+Issue: #592. Follow-up: #595. See the ADR-0037 amendment of 2026-11-18 on the pull request comment file (issue 592) (`docs/adr/0037-standard-delivery-on-script-engine.md`).
+
 ## [10.0.4] - 2026-11-18
 
 ### Fixed

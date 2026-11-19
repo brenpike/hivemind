@@ -143,6 +143,13 @@ expect_bash 'exact:pr-minimal' "$SYNAPSE" allow "bash $QUOTED_PR --head feature/
 expect_bash 'exact:pr-commit-40' "$SYNAPSE" allow "bash $QUOTED_PR --head feature/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json --body-file .hivemind/pr-inputs-a-body.json"
 expect_bash 'exact:pr-body-file-first' "$SYNAPSE" allow "bash $QUOTED_PR --body-file .hivemind/pr-inputs-a-body.json --head feature/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json"
 expect_bash 'exact:pr-body-file-token-64' "$SYNAPSE" allow "bash $QUOTED_PR --head feature/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json --body-file .hivemind/pr-inputs-$TOKEN64.json"
+PR_COMMENT_COMMAND="bash $QUOTED_PR --head feature/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json --body-file .hivemind/pr-inputs-a-body.json --comment-file .hivemind/pr-inputs-a-comment.json"
+expect_bash 'exact:pr-comment-file-last' "$SYNAPSE" allow "$PR_COMMENT_COMMAND"
+expect_bash 'exact:pr-comment-file-last:drone' "$DRONE" none "$PR_COMMENT_COMMAND"
+expect_bash 'exact:pr-comment-file-last:main-session' '' none "$PR_COMMENT_COMMAND"
+expect_bash 'exact:pr-comment-file-first' "$SYNAPSE" allow "bash $QUOTED_PR --comment-file .hivemind/pr-inputs-a-comment.json --head feature/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json --body-file .hivemind/pr-inputs-a-body.json"
+expect_bash 'exact:pr-comment-file-middle' "$SYNAPSE" allow "bash $QUOTED_PR --head feature/x --base main --comment-file .hivemind/pr-inputs-a-comment.json --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json --body-file .hivemind/pr-inputs-a-body.json"
+expect_bash 'exact:pr-comment-file-token-64' "$SYNAPSE" allow "bash $QUOTED_PR --head feature/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json --body-file .hivemind/pr-inputs-a-body.json --comment-file .hivemind/pr-inputs-$TOKEN64.json"
 expect_bash 'exact:bump-no-version-file' "$SYNAPSE" allow "bash $QUOTED_BUMP main --bump-trigger no --no-bump-match yes"
 expect_bash 'exact:token-64' "$SYNAPSE" allow "bash $QUOTED_MOLT --trunk main --inputs .hivemind/molt-inputs-$TOKEN64.json"
 expect_bash 'exact:value-naming-a-script' "$SYNAPSE" allow "bash $QUOTED_FACTS --trunk molt.sh"
@@ -230,6 +237,11 @@ NOT_EXACT_CASES=(
   "pr-body-file-token-65|$PR_NO_BODY --body-file .hivemind/pr-inputs-$TOKEN65.json"
   "pr-body-file-without-value|$PR_NO_BODY --body-file"
   "pr-body-file-equals-form|$PR_NO_BODY --body-file=.hivemind/pr-inputs-a-body.json"
+  "pr-duplicate-comment-file|$PR_NO_BODY --body-file .hivemind/pr-inputs-a-body.json --comment-file .hivemind/pr-inputs-a-comment.json --comment-file .hivemind/pr-inputs-a-comment.json"
+  "pr-comment-file-molt-inputs|$PR_NO_BODY --body-file .hivemind/pr-inputs-a-body.json --comment-file .hivemind/molt-inputs-a-comment.json"
+  "pr-comment-file-token-65|$PR_NO_BODY --body-file .hivemind/pr-inputs-a-body.json --comment-file .hivemind/pr-inputs-$TOKEN65.json"
+  "pr-comment-file-absolute|$PR_NO_BODY --body-file .hivemind/pr-inputs-a-body.json --comment-file /tmp/pr-inputs-a-comment.json"
+  "pr-comment-file-without-value|$PR_NO_BODY --body-file .hivemind/pr-inputs-a-body.json --comment-file"
 )
 for case_row in "${NOT_EXACT_CASES[@]}"; do
   case_id="${case_row%%|*}"
@@ -290,8 +302,8 @@ esac
 run_hook "$PLUGIN_ROOT" "$(bash_input "$DRONE" "git diff -- plugin/skills/open-plan-pr/scripts/open-plan-pr.sh")"
 deny_reason="$(printf '%s' "$hook_output" | jq -r '.hookSpecificOutput.permissionDecisionReason' 2>/dev/null)"
 case "$deny_reason" in
-  *"bash $QUOTED_PR --head <branch> --base <branch> [--remote <remote>] --expect-commit <commit> --inputs .hivemind/pr-inputs-<token>.json --body-file .hivemind/pr-inputs-<token>-body.json "*"Read tool"*)
-    pass 'lookalike:reason:open-plan-pr' 'deny reason states the exact form with --body-file' ;;
+  *"bash $QUOTED_PR --head <branch> --base <branch> [--remote <remote>] --expect-commit <commit> --inputs .hivemind/pr-inputs-<token>.json --body-file .hivemind/pr-inputs-<token>-body.json [--comment-file .hivemind/pr-inputs-<token>-comment.json] "*"Read tool"*)
+    pass 'lookalike:reason:open-plan-pr' 'deny reason states the exact form with --body-file and --comment-file' ;;
   *) failed 'lookalike:reason:open-plan-pr' "reason=$deny_reason" ;;
 esac
 

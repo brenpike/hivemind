@@ -136,7 +136,7 @@ function callOf(run, label) {
 }
 
 function readDataBlock(prompt, name) {
-  const match = new RegExp('<' + name + '>\\n(.*)\\n</' + name + '>').exec(prompt);
+  const match = new RegExp('<' + name + '>\\n([^\\n]*)\\n</' + name + '>').exec(prompt);
   assert.ok(match !== null, 'the prompt has a ' + name + ' block');
   return JSON.parse(match[1]);
 }
@@ -276,8 +276,13 @@ function readCommandWord(prompt, flag) {
   return words[words.indexOf(flag) + 1];
 }
 
+/**
+ * Returns the inputs_file fields of a pull request runner prompt, with the
+ * comment_file content as comment when the prompt has that block.
+ */
 function readPrInputs(prompt) {
-  return JSON.parse(readDataBlock(prompt, 'inputs_file').content);
+  const inputs = JSON.parse(readDataBlock(prompt, 'inputs_file').content);
+  return prompt.split('\n').includes('<comment_file>') ? { ...inputs, comment: readDataBlock(prompt, 'comment_file').content } : inputs;
 }
 
 /**
@@ -460,17 +465,46 @@ function makeReuseScratch() {
 
 /**
  * Does what synapse.md says a runner does with a prompt: writes the
- * inputs_file and body_file contents to their paths, then runs the command
- * with bash -c and relays it.
+ * inputs_file, body_file and comment_file contents to their paths, then
+ * runs the command with bash -c and relays it.
  */
 function runCommandBlock(scratch, prompt) {
-  for (const name of ['inputs_file', 'body_file'].filter((blockName) => prompt.split('\n').includes('<' + blockName + '>'))) {
+  for (const name of ['inputs_file', 'body_file', 'comment_file'].filter((blockName) => prompt.split('\n').includes('<' + blockName + '>'))) {
     const file = readDataBlock(prompt, name);
     writeRepoFile(scratch, file.path, typeof file.content === 'string' ? file.content : JSON.stringify(file.content));
   }
   const command = readDataBlock(prompt, 'command').split('{plugin-root}').join(PLUGIN_ROOT);
   const run = spawnSync('bash', ['-c', command], { cwd: scratch.repo, env: scratch.env, encoding: 'utf8' });
   return run.status === 0 ? { outcome: 'ran', stdout: run.stdout } : { outcome: 'blocked', stderr: run.stderr };
+}
+
+const COPY_FAULT = ']"\\';
+const HOSTILE_COMMENT = 'Chose "A": keep C:\\cache\\x and \\"esc\\"\nline ] } [ { <b> & `tick` \u2028 \u{1F600}\n';
+
+/**
+ * Returns prompt with COPY_FAULT, a stray ], a double quote and a
+ * backslash, put after the first character of its body_file and
+ * comment_file contents: a runner copy mistake (issue 592).
+ */
+function injectCopyFault(prompt) {
+  const lines = prompt.split('\n');
+  for (const name of ['body_file', 'comment_file']) {
+    const start = lines.indexOf('<' + name + '>');
+    if (start !== -1) {
+      const file = JSON.parse(lines[start + 1]);
+      lines[start + 1] = JSON.stringify({ ...file, content: file.content.slice(0, 1) + COPY_FAULT + file.content.slice(1) });
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Returns the PR runner prompt for label on the reuse scratch at head, its
+ * words from listPullRequestWords for texts.
+ */
+function buildReusePrompt(head, label, texts) {
+  const state = { ...main.createRunState({ trunk: 'main', pr: PR }), head: head, factsStem: 'issue592' };
+  return main.buildPullRequestPrompt(main.listPullRequestWords({ branch: 'feature/cache', base: 'main' }, state, label, texts), texts, false, PLUGIN_ROOT);
 }
 
 /**
@@ -1048,6 +1082,27 @@ const ROW_TESTS = {
       assert.equal(quiet.stdout, 'url: ' + PR_URL + '\nhead_ref_oid: ' + head + '\ncreated: false\n');
       assert.equal(readFileSync(join(scratch.logDir, 'comments.md'), 'utf8'), comment);
     });
+    test('issue 592: the real open-plan-pr.sh reuse path posts a comment holding JSON and Markdown marks byte for byte, and still posts under a runner copy fault', () => {
+      const scratch = makeReuseScratch();
+      const head = runGitIn(scratch, ['rev-parse', 'HEAD']);
+      const texts = { title: 'fix: Close the unchecked path', body: 'Body.', comment: HOSTILE_COMMENT };
+      const prompt = buildReusePrompt(head, 'pr-1', texts);
+      assert.equal(readCommandWord(prompt, '--comment-file'), '.hivemind/pr-inputs-issue592-pr-1-comment.json');
+      assert.deepEqual(JSON.parse(readDataBlock(prompt, 'inputs_file').content), { title: texts.title, draft: false });
+      const clean = runCommandBlock(scratch, prompt);
+      assert.equal(clean.outcome, 'ran', clean.stderr);
+      assert.ok(clean.stdout.endsWith('created: false\ncommented: true\n'), clean.stdout);
+      assert.equal(readFileSync(join(scratch.logDir, 'comments.md'), 'utf8'), HOSTILE_COMMENT);
+      const faulted = injectCopyFault(buildReusePrompt(head, 'pr-1-retry', texts));
+      const relay = runCommandBlock(scratch, faulted);
+      assert.equal(relay.outcome, 'ran', relay.stderr);
+      const faultedComment = readDataBlock(faulted, 'comment_file').content;
+      assert.ok(faultedComment.includes(COPY_FAULT), faultedComment);
+      assert.equal(readFileSync(join(scratch.logDir, 'comments.md'), 'utf8'), HOSTILE_COMMENT + faultedComment);
+      for (const name of ['inputs_file', 'body_file', 'comment_file']) {
+        assert.equal(existsSync(join(scratch.repo, readDataBlock(faulted, name).path)), false, name);
+      }
+    });
   },
   'PFR-25': () => {
     test('the comment is the remediation lead naming H, then the run record', async () => {
@@ -1056,7 +1111,7 @@ const ROW_TESTS = {
       const gates = 'Gates:\n- validation: passed, held on commit ' + OTHER;
       assert.equal(comment, ['The remediation pushed commit ' + OTHER + '.', gates, decidedBlock(ESCALATION_ASK)].join('\n\n'));
     });
-    test('with no shown decision the inputs file carries no comment', () => {
+    test('with no shown decision the run sends no comment file: no comment_file block and no --comment-file', () => {
       const state = main.createRunState({ trunk: 'main', pr: PR });
       state.head = OTHER;
       const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, slow: [] };
@@ -1065,6 +1120,11 @@ const ROW_TESTS = {
       assert.equal(main.buildPullRequestComment(state, gates), undefined);
       const words = ['--head', 'feature/cache', '--base', 'main', '--expect-commit', OTHER, '--inputs', 'i.json', '--body-file', 'b.json'];
       assert.ok(!Object.hasOwn(readPrInputs(main.buildPullRequestPrompt(words, { title: 'T', body: 'B' }, false, PLUGIN_ROOT)), 'comment'));
+      const texts = { title: 'T', body: 'B', comment: main.buildPullRequestComment(state, gates) };
+      const prompt = buildReusePrompt(OTHER, 'pr-2', texts);
+      assert.ok(!prompt.split('\n').includes('<comment_file>'), prompt);
+      assert.ok(!readDataBlock(prompt, 'command').includes('--comment-file'), prompt);
+      assert.deepEqual(Object.keys(JSON.parse(readDataBlock(prompt, 'inputs_file').content)), ['title', 'draft']);
     });
   },
   'PFR-26': () => {

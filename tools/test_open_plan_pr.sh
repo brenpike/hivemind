@@ -5,17 +5,17 @@
 # plugin/skills/_shared/allowlist.sh, containment.sh and git-refusals.sh).
 #
 # The engine takes REQUIRED `--head <branch> --base <branch> --expect-commit <sha> --inputs <path>
-# --body-file <path>` plus optional `--remote <name>`. It gates the identifiers, reads the inputs
-# file and the body file once each (after the containment read-guard and the same-file check),
-# deletes each right after its read when it is a .hivemind/pr-inputs-<token>.json leaf in the
-# folder it was started in, and
-# checks the fields and the body, refuses gh missing, an
+# --body-file <path>` plus optional `--remote <name>` and `--comment-file <path>`. It gates the
+# identifiers, reads the inputs file, the body file and the comment file once each (after the
+# containment read-guard and the same-file checks), deletes each right after its read when it is a
+# .hivemind/pr-inputs-<token>.json leaf in the folder it was started in, and
+# checks the fields, the body and the comment, refuses gh missing, an
 # in-progress operation, unmerged paths, a dirty tree and a failed open-PR lookup, then pushes
 # through push-branch.sh, reuses the open PR on the pushed commit (re-reading to absorb head SHA
 # lag) or creates one, and verifies the created PR. On success it prints
 #     url: <url> / head_ref_oid: <sha> / created: true|false [/ warning: <text>]
-# on stdout, exit 0, with `commented: true|false` after `created:` only when the inputs carry
-# comment (posted with `gh pr comment` on a reused PR only). On any blocker it prints nothing on stdout, exit 1, and the LAST stderr line
+# on stdout, exit 0, with `commented: true|false` after `created:` only when --comment-file was
+# given (the comment is posted with `gh pr comment` on a reused PR only). On any blocker it prints nothing on stdout, exit 1, and the LAST stderr line
 # is `blocker: <fixed reason>`, right after a `pushed: yes|no` line once the push output was
 # parsed and with no such line before that.
 #
@@ -165,10 +165,11 @@ failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 BRANCH='feat/x'
 INPUTS_REL='.hivemind/pr-inputs-t.json'
 BODY_REL='.hivemind/pr-inputs-t-body.json'
+COMMENT_REL='.hivemind/pr-inputs-t-comment.json'
 DEFAULT_BODY="$(printf 'Summary\n\n- one\nx')"
 DEFAULT_BODY="${DEFAULT_BODY%x}"
 PR_URL='https://github.com/o/r/pull/7'
-USAGE_REASON='invalid arguments; usage: open-plan-pr.sh --head <branch> --base <branch> [--remote <name>] --expect-commit <sha> --inputs <path> --body-file <path>'
+USAGE_REASON='invalid arguments; usage: open-plan-pr.sh --head <branch> --base <branch> [--remote <name>] --expect-commit <sha> --inputs <path> --body-file <path> [--comment-file <path>]'
 IDENTIFIER_REASON='head, base or push_remote contains characters outside the safe allowlist'
 EXPECT_FORMAT_REASON='expected commit is not a full object id'
 DELAY_REASON='HIVEMIND_OPEN_PLAN_PR_REREAD_DELAY must be a whole number of seconds'
@@ -181,8 +182,12 @@ BODY_MISSING_REASON='body file not found'
 BODY_OUTSIDE_REASON='body file resolves outside the checkout'
 BODY_SAME_REASON='body file is the inputs file'
 BODY_READ_REASON='body file cannot be read'
+COMMENT_MISSING_REASON='comment file not found'
+COMMENT_OUTSIDE_REASON='comment file resolves outside the checkout'
+COMMENT_SAME_REASON='comment file is the inputs file or the body file'
+COMMENT_READ_REASON='comment file cannot be read'
 NOT_OBJECT_REASON='inputs must be a JSON object'
-UNKNOWN_FIELD_REASON='inputs have a field other than title, draft and comment'
+UNKNOWN_FIELD_REASON='inputs have a field other than title and draft'
 TITLE_REASON='title must be one line of text'
 BODY_REASON='body must be text with no control characters other than newline and tab'
 DRAFT_REASON='draft must be true or false'
@@ -229,9 +234,9 @@ run_git() {
 # has remote origin at ORIGIN_URL (served by the fake ssh transport) with its local HEAD ref on
 # main as `git clone` writes it, no upstream, and HEAD on
 # feat/x one commit ahead of main (unpushed). main has a .gitignore that ignores .hivemind/. Sets
-# WORLD_ROOT, WORK_TREE, ORIGIN_DIR, INPUTS_PATH, BODY_PATH, GH_STUB_DIR and FAKE_SSH_ROOT
-# (exported), TRUNK_SHA and HEAD_SHA, writes a valid inputs file and the body file DEFAULT_BODY,
-# and scripts `gh repo view` to print R_o.
+# WORLD_ROOT, WORK_TREE, ORIGIN_DIR, INPUTS_PATH, BODY_PATH, COMMENT_PATH, GH_STUB_DIR and
+# FAKE_SSH_ROOT (exported), TRUNK_SHA and HEAD_SHA, writes a valid inputs file and the body file
+# DEFAULT_BODY, and scripts `gh repo view` to print R_o. It writes no comment file.
 create_world() {
     WORLD_ROOT="$WORKDIR/$1"
     WORK_TREE="$WORLD_ROOT/w"
@@ -239,6 +244,7 @@ create_world() {
     ORIGIN_DIR="$FAKE_SSH_ROOT/o/r.git"
     INPUTS_PATH="$WORK_TREE/$INPUTS_REL"
     BODY_PATH="$WORK_TREE/$BODY_REL"
+    COMMENT_PATH="$WORK_TREE/$COMMENT_REL"
     export GH_STUB_DIR="$WORLD_ROOT/gh"
     mkdir -p "$WORK_TREE/sub" "$GH_STUB_DIR" "$FAKE_SSH_ROOT/o"
     run_git "$FAKE_SSH_ROOT/o" init -q --bare r.git
@@ -273,6 +279,11 @@ write_inputs() {
 # write_body <text> -> writes <text>, byte for byte, as the body file of the current world.
 write_body() {
     printf '%s' "$1" >"$BODY_PATH"
+}
+
+# write_comment <text> -> writes <text>, byte for byte, as the comment file of the current world.
+write_comment() {
+    printf '%s' "$1" >"$COMMENT_PATH"
 }
 
 # stub_respond <call key> <k or empty> <stdout text> [rc] [stderr text] -> scripts the stub's
@@ -375,7 +386,7 @@ expected_block() {
 }
 
 # expected_comment_block <created> <commented> [warning] -> the exact success stdout for PR_URL at
-# HEAD_SHA when the inputs carry comment.
+# HEAD_SHA when --comment-file was given.
 expected_comment_block() {
     printf 'url: %s\nhead_ref_oid: %s\ncreated: %s\ncommented: %s\n' "$PR_URL" "$HEAD_SHA" "$1" "$2"
     if [[ -n "${3:-}" ]]; then
@@ -470,6 +481,28 @@ assert_body_refused() {
     assert_input_refused "$1" '{"title":"t"}' "$3"
 }
 
+# assert_comment_file_refused <name> <reason> [inputs json] -> writes the inputs (default
+# {"title":"t"}), asserts the refusal with the comment file already written, and asserts the
+# inputs, body and comment files were deleted (the refusal comes after the reads).
+assert_comment_file_refused() {
+    local inputs_text='{"title":"t"}'
+    [[ -z "${3:-}" ]] || inputs_text="$3"
+    write_inputs "$inputs_text"
+    assert_refused_unchanged "$1" "$WORK_TREE" "$2" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" \
+        --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "$COMMENT_REL"
+    assert_inputs_present "$1-deleted" "$INPUTS_PATH" no
+    assert_inputs_present "$1-body-deleted" "$BODY_PATH" no
+    assert_inputs_present "$1-comment-deleted" "$COMMENT_PATH" no
+    write_body "$DEFAULT_BODY"
+}
+
+# assert_comment_refused <name> <comment text> <reason> [inputs json] -> writes <comment text> as
+# the comment file, then runs assert_comment_file_refused.
+assert_comment_refused() {
+    write_comment "$2"
+    assert_comment_file_refused "$1" "$3" "${4:-}"
+}
+
 # assert_inputs_present <name> <path> <yes|no> -> asserts the inputs file at <path> is still there
 # (yes) or is gone (no). A symlink counts as there, even when its target is missing.
 assert_inputs_present() {
@@ -510,6 +543,15 @@ test_usage_errors() {
         --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file
     assert_refused_unchanged usage-empty-body-file "$WORK_TREE" "$USAGE_REASON" \
         --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file ''
+    write_comment 'c'
+    assert_refused_unchanged usage-duplicate-comment-file "$WORK_TREE" "$USAGE_REASON" \
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" \
+        --comment-file "$COMMENT_REL" --comment-file "$COMMENT_REL"
+    assert_refused_unchanged usage-valueless-comment-file "$WORK_TREE" "$USAGE_REASON" \
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file
+    assert_refused_unchanged usage-empty-comment-file "$WORK_TREE" "$USAGE_REASON" \
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file ''
+    assert_inputs_present usage-comment-kept "$COMMENT_PATH" yes
     assert_equal usage-no-gh 0 "$(call_count pr-list)" "no gh call"
     assert_inputs_present usage-inputs-kept "$INPUTS_PATH" yes
     assert_inputs_present usage-body-kept "$BODY_PATH" yes
@@ -666,7 +708,7 @@ test_body_file_refusals() {
     write_body "$(printf 'a\rb')"
     assert_input_refused body-before-draft '{"title":"t","draft":"yes"}' "$BODY_REASON"
     write_body "$(printf 'a\rb')"
-    assert_input_refused body-before-comment '{"title":"t","comment":""}' "$BODY_REASON"
+    assert_comment_refused body-before-comment '' "$BODY_REASON"
     write_body "$(printf 'a\rb')"
     assert_input_refused body-after-invalid-json '{"title":' "$INPUTS_JSON_REASON"
     assert_equal body-fields-no-gh 0 "$(call_count pr-list)" "no gh call"
@@ -965,32 +1007,130 @@ test_draft() {
 
 test_comment_field_refusals() {
     create_world comment-fields
-    assert_input_refused comment-number '{"title":"t","comment":1}' "$COMMENT_REASON"
-    assert_input_refused comment-null '{"title":"t","comment":null}' "$COMMENT_REASON"
-    assert_input_refused comment-array '{"title":"t","comment":["c"]}' "$COMMENT_REASON"
-    assert_input_refused comment-empty '{"title":"t","comment":""}' "$COMMENT_REASON"
-    assert_input_refused comment-blank '{"title":"t","comment":" \t\n "}' "$COMMENT_REASON"
-    assert_input_refused comment-cr '{"title":"t","comment":"a\r\nb"}' "$COMMENT_REASON"
-    assert_input_refused comment-nul '{"title":"t","comment":"a\u0000b"}' "$COMMENT_REASON"
-    assert_input_refused comment-del '{"title":"t","comment":"a\u007fb"}' "$COMMENT_REASON"
-    assert_input_refused comment-esc '{"title":"t","comment":"a\u001bb"}' "$COMMENT_REASON"
-    assert_input_refused comment-after-unknown '{"title":"t","comment":"","head":"x"}' "$UNKNOWN_FIELD_REASON"
-    assert_input_refused comment-after-title '{"title":"","comment":""}' "$TITLE_REASON"
+    write_comment 'c'
+    assert_input_refused comment-field-in-inputs '{"title":"t","comment":"c"}' "$UNKNOWN_FIELD_REASON"
+    assert_inputs_present comment-field-in-inputs-comment-kept "$COMMENT_PATH" yes
+    assert_comment_refused comment-empty '' "$COMMENT_REASON"
+    assert_comment_refused comment-blank "$(printf ' \t\n ')" "$COMMENT_REASON"
+    assert_comment_refused comment-cr "$(printf 'a\r\nb')" "$COMMENT_REASON"
+    assert_comment_refused comment-soh "$(printf 'a\001b')" "$COMMENT_REASON"
+    assert_comment_refused comment-del "$(printf 'a\177b')" "$COMMENT_REASON"
+    assert_comment_refused comment-esc "$(printf 'a\033b')" "$COMMENT_REASON"
+    printf 'a\000b' >"$COMMENT_PATH"
+    assert_comment_file_refused comment-nul-byte "$COMMENT_REASON"
+    assert_comment_refused comment-after-unknown '' "$UNKNOWN_FIELD_REASON" '{"title":"t","head":"x"}'
+    assert_comment_refused comment-after-title '' "$TITLE_REASON" '{"title":""}'
     write_body "$(printf 'a\rb')"
-    assert_input_refused comment-after-body '{"title":"t","comment":""}' "$BODY_REASON"
-    assert_input_refused comment-after-draft '{"title":"t","draft":"yes","comment":""}' "$DRAFT_REASON"
+    assert_comment_refused comment-after-body '' "$BODY_REASON"
+    assert_comment_refused comment-after-draft '' "$DRAFT_REASON" '{"title":"t","draft":"yes"}'
+    assert_comment_refused comment-after-invalid-json '' "$INPUTS_JSON_REASON" '{"title":'
     assert_equal comment-fields-no-gh 0 "$(call_count pr-list)" "no gh call"
+}
+
+# Each comment file refusal comes before any read, so it keeps the inputs, body and comment files.
+test_comment_file_refusals() {
+    local outside_dir="$WORKDIR/outside-comment"
+    create_world comment-file
+    mkdir -p "$outside_dir"
+    printf 'outside comment\n' >"$outside_dir/comment.json"
+    write_comment 'c'
+
+    assert_refused_unchanged comment-missing "$WORK_TREE" "$COMMENT_MISSING_REASON" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file .hivemind/none-comment.json
+    assert_refused_unchanged comment-and-body-missing "$WORK_TREE" "$BODY_MISSING_REASON" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file .hivemind/none-body.json --comment-file .hivemind/none-comment.json
+
+    ln -s "$outside_dir/comment.json" "$WORK_TREE/.hivemind/pr-inputs-s-comment.json"
+    assert_refused_unchanged comment-symlink-leaf "$WORK_TREE" "$COMMENT_OUTSIDE_REASON" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file .hivemind/pr-inputs-s-comment.json
+    assert_equal comment-symlink-leaf-link-kept yes \
+        "$([[ -L "$WORK_TREE/.hivemind/pr-inputs-s-comment.json" ]] && printf yes || printf no)" "symlink leaf kept"
+    assert_equal comment-symlink-leaf-target-kept 'outside comment' "$(cat "$outside_dir/comment.json")" "symlink target kept unchanged"
+    ln -s "$outside_dir" "$WORK_TREE/.hivemind/linked-comment"
+    assert_refused_unchanged comment-symlink-folder "$WORK_TREE" "$COMMENT_OUTSIDE_REASON" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file .hivemind/linked-comment/comment.json
+    assert_refused_unchanged comment-absolute-outside "$WORK_TREE" "$COMMENT_OUTSIDE_REASON" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "$outside_dir/comment.json"
+    assert_refused_unchanged comment-and-body-outside "$WORK_TREE" "$BODY_OUTSIDE_REASON" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file .hivemind/pr-inputs-s-comment.json --comment-file "$outside_dir/comment.json"
+
+    assert_refused_unchanged comment-same-inputs "$WORK_TREE" "$COMMENT_SAME_REASON" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "$INPUTS_REL"
+    assert_refused_unchanged comment-same-body "$WORK_TREE" "$COMMENT_SAME_REASON" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "$BODY_REL"
+    assert_refused_unchanged comment-same-body-other-spelling "$WORK_TREE" "$COMMENT_SAME_REASON" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "./.hivemind/../$BODY_REL"
+    assert_refused_unchanged comment-same-inputs-absolute "$WORK_TREE" "$COMMENT_SAME_REASON" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "$INPUTS_PATH"
+    ln "$INPUTS_PATH" "$WORK_TREE/.hivemind/pr-inputs-h-comment.json"
+    assert_refused_unchanged comment-hard-link-inputs "$WORK_TREE" "$COMMENT_SAME_REASON" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file .hivemind/pr-inputs-h-comment.json
+    ln "$BODY_PATH" "$WORK_TREE/.hivemind/pr-inputs-b-comment.json"
+    assert_refused_unchanged comment-hard-link-body "$WORK_TREE" "$COMMENT_SAME_REASON" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file .hivemind/pr-inputs-b-comment.json
+    assert_refused_unchanged comment-same-after-body-same "$WORK_TREE" "$BODY_SAME_REASON" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$INPUTS_REL" --comment-file "$INPUTS_REL"
+    assert_inputs_present comment-refusals-inputs-kept "$INPUTS_PATH" yes
+    assert_inputs_present comment-refusals-body-kept "$BODY_PATH" yes
+    assert_inputs_present comment-refusals-comment-kept "$COMMENT_PATH" yes
+    assert_inputs_present comment-refusals-hard-link-inputs-kept "$WORK_TREE/.hivemind/pr-inputs-h-comment.json" yes
+    assert_inputs_present comment-refusals-hard-link-body-kept "$WORK_TREE/.hivemind/pr-inputs-b-comment.json" yes
+    assert_equal comment-refusals-no-gh 0 "$(call_count pr-list)" "no gh call"
+
+    if [[ "$(id -u)" -ne 0 ]]; then
+        chmod 000 "$COMMENT_PATH"
+        assert_comment_file_refused comment-unreadable "$COMMENT_READ_REASON"
+        write_comment 'c'
+        chmod 000 "$COMMENT_PATH"
+        assert_comment_file_refused comment-unreadable-after-invalid-json "$INPUTS_JSON_REASON" '{"title":'
+        write_comment 'c'
+        chmod 000 "$COMMENT_PATH"
+        chmod 000 "$BODY_PATH"
+        assert_comment_file_refused comment-unreadable-after-body-unreadable "$BODY_READ_REASON"
+    fi
+}
+
+# assert_comment_kept_path <name> <comment path relative to the work tree> <yes|no> -> writes the
+# comment file at <path>, runs a reuse with --comment-file <path>, and asserts the comment was
+# posted and the file at <path> was kept (yes) or deleted (no).
+assert_comment_kept_path() {
+    mkdir -p "$(dirname "$WORK_TREE/$2")"
+    printf 'c' >"$WORK_TREE/$2"
+    stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
+    assert_success "$1" "$WORK_TREE" "$(expected_comment_block false true)" \
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "$2"
+    assert_inputs_present "$1-kept" "$WORK_TREE/$2" "$3"
+    assert_equal "$1-body" 'cx' "$(cat "$GH_STUB_DIR/pr-comment.1.body"; printf 'x')" "comment passed verbatim"
+}
+
+test_comment_kept_paths() {
+    create_world comment-molt-name
+    assert_comment_kept_path comment-molt-name .hivemind/molt-inputs-t-comment.json yes
+    create_world comment-other-name
+    assert_comment_kept_path comment-other-name .hivemind/comment.md yes
+    create_world comment-token-too-long
+    assert_comment_kept_path comment-token-too-long ".hivemind/pr-inputs-$(printf 'a%.0s' $(seq 1 57))-comment.json" yes
+    create_world comment-token-longest
+    assert_comment_kept_path comment-token-longest ".hivemind/pr-inputs-$(printf 'a%.0s' $(seq 1 56))-comment.json" no
+
+    create_world comment-subfolder
+    write_comment 'c'
+    stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
+    assert_success comment-subfolder "$WORK_TREE/sub" "$(expected_comment_block false true)" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "../$INPUTS_REL" --body-file "../$BODY_REL" --comment-file "../$COMMENT_REL"
+    assert_inputs_present comment-subfolder-parent-comment-kept "$COMMENT_PATH" yes
 }
 
 test_comment() {
     local comment_text comment_args
-    comment_text="Run again"$'\n\n'"- \$(touch pwned5) \`touch pwned6\`"$'\t'"tab"$'\n'
+    comment_text="Run again: \"f1\" and \"f2\", path a\\b\\\\c ] } [ { <tag> </x>"$'\n\n'"- \$(touch pwned5) \`touch pwned6\`"$'\t'"tab"$'\n'"\"],\"draft\":false}"$'\n'
     create_world comment-reuse
     run_git "$WORK_TREE" push -q origin "refs/heads/$BRANCH:refs/heads/$BRANCH"
     stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
-    write_inputs "$(jq -cn --arg comment "$comment_text" '{title: "t", comment: $comment}')"
+    write_inputs '{"title":"t"}'
+    write_comment "$comment_text"
     assert_success comment-reuse "$WORK_TREE" "$(expected_comment_block false true)" \
-        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "$COMMENT_REL"
     assert_equal comment-reuse-calls 1 "$(call_count pr-comment)" "one gh pr comment"
     comment_args="$(cat "$GH_STUB_DIR/pr-comment.1.args")"
     assert_equal comment-reuse-args "$(printf 'pr\ncomment\n7')" \
@@ -999,53 +1139,66 @@ test_comment() {
     assert_equal comment-reuse-body-file-arg "--body-file=$TMPDIR/" \
         "$(printf '%s\n' "$comment_args" | sed -n '4p' | sed 's#hivemind-open-plan-pr\.[^/]*/comment\.md$##')" \
         "comment file in the private work folder"
-    assert_equal comment-reuse-body "${comment_text}x" "$(cat "$GH_STUB_DIR/pr-comment.1.body"; printf 'x')" "comment passed verbatim"
+    assert_equal comment-reuse-body "${comment_text}x" "$(cat "$GH_STUB_DIR/pr-comment.1.body"; printf 'x')" "comment passed byte for byte"
     assert_equal comment-reuse-no-expansion '' "$(find "$WORKDIR" -name 'pwned*')" "no command ran"
     assert_equal comment-reuse-no-create 0 "$(call_count pr-create)" "no gh pr create"
+    assert_inputs_present comment-reuse-comment-deleted "$COMMENT_PATH" no
+    assert_inputs_present comment-reuse-inputs-deleted "$INPUTS_PATH" no
+    assert_inputs_present comment-reuse-body-deleted "$BODY_PATH" no
     assert_equal comment-reuse-work-dir-removed '' "$(ls "$TMPDIR")" "private work folder removed"
+
+    create_world comment-no-flag
+    stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
+    write_comment 'c'
+    assert_success comment-no-flag "$WORK_TREE" "$(expected_block false)" \
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL"
+    assert_equal comment-no-flag-no-comment 0 "$(call_count pr-comment)" "no gh pr comment without --comment-file"
+    assert_inputs_present comment-no-flag-comment-untouched "$COMMENT_PATH" yes
 
     create_world comment-reuse-rerun
     stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
-    write_inputs '{"title":"t","comment":"again"}'
+    write_comment 'again'
     assert_success comment-rerun-1 "$WORK_TREE" "$(expected_comment_block false true)" \
-        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL"
-    write_inputs '{"title":"t","comment":"again"}'
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "$COMMENT_REL"
+    write_inputs '{"title":"t"}'
     write_body "$DEFAULT_BODY"
+    write_comment 'again'
     assert_success comment-rerun-2 "$WORK_TREE" "$(expected_comment_block false true)" \
-        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "$COMMENT_REL"
     assert_equal comment-rerun-calls 2 "$(call_count pr-comment)" "each run that reuses the PR posts its own comment"
 
     create_world comment-gh-stderr
     stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
     stub_respond pr-comment '' '' 0 'Warning: comment posted with a notice'
-    write_inputs '{"title":"t","comment":"c"}'
+    write_comment 'c'
     assert_success comment-gh-stderr "$WORK_TREE" "$(expected_comment_block false true)" \
-        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "$COMMENT_REL"
 
     create_world comment-create
     stub_respond pr-list '' '[]'
     stub_create_ok
-    write_inputs '{"title":"t","comment":"c"}'
+    write_comment 'c'
     assert_success comment-create "$WORK_TREE" "$(expected_comment_block true false)" \
-        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "$COMMENT_REL"
     assert_equal comment-create-no-comment 0 "$(call_count pr-comment)" "no gh pr comment on a created PR"
     assert_equal comment-create-body "${DEFAULT_BODY}x" "$(cat "$GH_STUB_DIR/pr-create.1.body"; printf 'x')" "body unchanged by the comment"
+    assert_inputs_present comment-create-comment-deleted "$COMMENT_PATH" no
 
     create_world comment-create-warning
     stub_respond pr-list '' '[]'
     stub_respond repo-view '' '' 1
     stub_create_ok
-    write_inputs '{"title":"t","comment":"c"}'
+    write_comment 'c'
     assert_success comment-create-warning "$WORK_TREE" "$(expected_comment_block true false "$REPO_UNKNOWN_WARNING")" \
-        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "$COMMENT_REL"
     assert_equal comment-create-warning-no-comment 0 "$(call_count pr-comment)" "no gh pr comment on a created PR"
 
     create_world comment-post-fails
     stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
     stub_respond pr-comment '' '' 1 'HTTP 403: Resource not accessible'
-    write_inputs '{"title":"t","comment":"c"}'
+    write_comment 'c'
     assert_blocker comment-post-fails "$WORK_TREE" "$COMMENT_POST_REASON" \
-        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "$COMMENT_REL"
     assert_pushed_line "comment-post-fails-pushed-line" "comment-post-fails" yes
     assert_equal comment-post-fails-gh-stderr 1 "$(grep -c 'HTTP 403: Resource not accessible' "$WORKDIR/comment-post-fails.err")" "gh stderr relayed"
     assert_equal comment-post-fails-calls 1 "$(call_count pr-comment)" "one gh pr comment, no retry"
@@ -1652,6 +1805,8 @@ test_create
 test_title_not_expanded
 test_draft
 test_comment_field_refusals
+test_comment_file_refusals
+test_comment_kept_paths
 test_comment
 test_reuse
 test_head_repository

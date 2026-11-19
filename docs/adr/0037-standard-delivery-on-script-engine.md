@@ -2182,6 +2182,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/506 and https:
 - **Not covered.** The runner copies the `inputs_file` and `body_file` contents into their files, and nothing compares a copy with what the code built.
 - **Bounded impact.** A bad inputs file breaks a field rule and is refused before the push. A bad body ships, but into pull request text the user sees and can edit before merge.
 - **Ground.** The script has no expected digest to check against. Tracked as https://github.com/brenpike/hivemind/issues/538, after the user chose no digest now (Q6).
+- **Narrowed 2026-11-18 (issue 592).** The inputs file no longer holds free text, only a title with no double quote or backslash and the draft flag, so its validity no longer rests on copying free text. A copy mistake in the raw body or comment file changes only its text. Still tracked as https://github.com/brenpike/hivemind/issues/538 (see Amendment 2026-11-18: the pull request comment is sent in its own file (issue 592)).
 
 **Recorded residual: the relayed `pushed:` line is the runner's copy.**
 
@@ -2201,6 +2202,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/506 and https:
 - **Not covered.** The reuse comment still travels as a JSON field, and on the skill path the agent writes that JSON itself.
 - **Bounded impact.** An invalid inputs file is refused (`inputs file is not valid JSON`) before any change. On the workflow, code serializes it and the runner writes the string as is.
 - **Ground.** The comment posts only on a reused pull request. Moving it out would add a third file, flag and hook form for a failure the script already refuses.
+- **Closed 2026-11-18 (issue 592).** A runner copy of the comment JSON did break the inputs file, and the refusal still stopped the run. The comment now goes in its own raw file, passed with `--comment-file` (see Amendment 2026-11-18: the pull request comment is sent in its own file (issue 592)).
 
 **Recorded residual: a first file is left when the second Write fails.**
 
@@ -2897,3 +2899,78 @@ It updates these places in place, each with a dated note:
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/587, https://github.com/brenpike/hivemind/issues/593, `docs/adr/0038-root-cause-at-the-first-finding.md`.
+
+## Amendment 2026-11-18: the pull request comment is sent in its own file (issue 592)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/592. A pull request step on a reused pull request wrote an inputs file that was not valid JSON.
+
+**Evidence.** In run wf_540092f4-b17 the engine built the inputs JSON correctly: `buildPullRequestPrompt` (`plugin/workflow-src/lib/pr.js`) serialized it with `JSON.stringify`. The haiku runner then copied about 1.4 KB of escaped JSON, mostly the reuse comment with its quoted finding ids and decisions. It inserted a stray `]`, so the file ended `...run its steps."],"draft":false}`. `open-plan-pr.sh` refuses such a file (`inputs file is not valid JSON`) before any change, so the step pushed nothing and opened nothing.
+
+**Root cause.** Free text sat inside a JSON file that a model must copy byte for byte. Every quote, backslash and line feed of the comment was an escape the runner had to keep exact. The engine's serialization was right; the copy was not.
+
+**The user's decision.** Q1, option A: the comment goes to its own raw file. This changes the open-plan-pr script interface, its skill, the synapse runner text, and the exact `open-plan-pr` form of the synapse gate hook, which gains one optional flag. The hook change is destructive category 5, approved by the user.
+
+**The change.**
+
+- **The script.** `open-plan-pr.sh` takes an optional `--comment-file <path>`: the reuse comment as raw Markdown, read once with `jq -R -s` into the private `comment.md`. The path is resolved like `--body-file`. It must exist, sit inside the checkout, and not name the inputs file or the body file by any spelling or hard link, all checked before any read. The script deletes the file right after its read, as it does the other two, under the token `<token>-comment`. The text keeps the comment rule: non-blank, with no control character other than newline and tab. It is still posted only on a reused pull request. `commented:` is printed exactly when `--comment-file` was given. The new refusals start with `comment file` and come before any change.
+- **The inputs file.** It allows only `title` and `draft`. A `comment` field is refused with `inputs have a field other than title and draft`.
+- **The title.** `buildPullRequestTitle` (`pr.js`) maps each double quote to an apostrophe, each backslash to a slash and each lone surrogate to U+FFFD. The JSON text of the title is then the title between two quotes, and the inputs file is one short line, `{"title":...,"draft":...}`, with no escape.
+- **The workflow.** When the comment hook returns a comment, the pull request step sends it raw in a `comment_file` block of `{path, content}`. The command carries `--comment-file`, the path `buildInputsPath` builds for the call label plus `-comment`. The `-retry` label gets its own path, and `describeCommandStop` checks both labels before the call. With no comment there is no block and no flag. `runnerValuePatterns()` (`plugin/workflow-src/lib/facts.js`) gives `--comment-file` the pr-inputs class of `--body-file`.
+- **The runner.** `plugin/agents/synapse.md` names `comment_file` and writes it after `body_file`, as is.
+- **The hook.** The exact `open-plan-pr` form in `plugin/hooks/synapse-gate.sh` accepts `--comment-file` at most once, in the pr-inputs value class. The Write rule and every other flag rule are unchanged.
+- **The skill path.** `plugin/skills/open-plan-pr/SKILL.md` writes a given comment as raw Markdown to `.hivemind/pr-inputs-<token>-comment.json` and passes `--comment-file` only then. The path keeps the pr-inputs form, so the skill `allowed-tools` glob and the hook's Write rule cover it.
+- Rows SD-42, SD-44, SD-74 and PFR-25 name the new rules.
+
+**Options ruled out.**
+
+- **The status quo.** The issue 506 amendment kept the comment in the JSON because the script refuses a bad file. This run shows the refusal still stops the step, for a fault the engine did not make.
+- **Object content.** An `inputs_file` object leaves the JSON text to the runner, the model that made the fault.
+- **A digest check.** The user chose no digest check on 2026-11-05 (Q6 of the issue 506 amendment). A check would also only catch a bad copy, not prevent it.
+- **Dropping the comment.** The user chose on Q3 of the issue 506 amendment that the reuse comment carries the run record.
+- **A retry.** A copy fault is not a transient failure. A retry copies the same long text again.
+- **A stronger runner model.** It lowers the odds of a copy fault but leaves the class, and costs more on every call.
+
+**Enforcement.** Tests by execution:
+
+- `tools/test_open_plan_pr.sh` posts a comment file holding double quotes, backslashes, line feeds, `]`, `}`, `[`, `{` and `<` byte for byte on a reused pull request. Each new refusal comes before any push, an inputs `comment` field is refused, there is no `commented:` line without the flag, and the comment file is gone after its read.
+- `tools/test_synapse_gate.sh` allows `--comment-file` in any flag position, and denies a repeated flag, a molt-kind path, a 65-character token and an absolute path.
+- `tests/workflow-scripts/standard-delivery.test.mjs` opens a pull request through the real script with plan texts and a shown decision holding JSON and Markdown marks. The title is the mapped title and the body is byte for byte the built body. A runner stand-in that copies a stray `]`, a double quote and a backslash into the body and comment files still opens the pull request.
+- `tests/workflow-scripts/pr-feedback-remediation.test.mjs` posts such a comment byte for byte on the real reuse path, also under the copy fault. With no shown decision there is no `comment_file` block and no `--comment-file`.
+- `tests/workflow-scripts/facts.test.mjs` shows `describeRunnerWordProblem` takes a `--comment-file` value exactly when the real gate allows it.
+
+**Budget.** No prose budget raise and no length cap raise. Measured after the change:
+
+- `plugin/workflows/standard-delivery.js`: prose 41,966 of 42,100; length 190,851 of 191,000, from 190,863.
+- `plugin/workflows/pr-feedback-remediation.js`: prose 38,043 of 38,200; length 176,075.
+- `plugin/workflows/analysis-only.js`: prose 15,522 of 16,050; length 64,296.
+- `plugin/agents/synapse.md`: 1,727 of 1,727 bytes.
+
+The growth was cut inside `pr.js`, where the single-use helpers `renderPullRequestPart`, `renderDigestParagraph`, `renderStepLines`, `describePullRequestTextSize` and `describePullRequestLabel` were inlined.
+
+**Recorded residuals.**
+
+- **The runner's copy has no digest check, narrowed.**
+  - **Not covered.** The runner still copies the body and comment contents into their files, and nothing compares a copy with what the code built.
+  - **Bounded impact.** The validity of the inputs file no longer rests on copying free text. A copy mistake in a raw file changes only the body or comment text, which the user sees and can edit.
+  - **Ground.** Still tracked as https://github.com/brenpike/hivemind/issues/538.
+- **molt's inputs JSON is model-written.**
+  - **Not covered.** The commit step passes its `inputs_file` content as an object, so the runner writes that JSON itself. The same kind of copy fault can make it invalid.
+  - **Bounded impact.** `molt.sh` refuses an invalid inputs file (`inputs file is not valid JSON`) before any commit.
+  - **Ground.** Beyond this fix. Tracked as https://github.com/brenpike/hivemind/issues/595.
+- **The skill path still writes the title JSON.**
+  - **Not covered.** On the JSON state machine the agent writes the inputs file, and its title is not mapped.
+  - **Bounded impact.** The file is one short title and a draft flag. An invalid file is refused before any change.
+- **The runner is trusted to name only its own run's PR files.**
+  - **Not covered.** The synapse-gate hook (`plugin/hooks/synapse-gate.sh`) and `runnerValuePatterns()` (`plugin/workflow-src/lib/facts.js`) accept any `.hivemind/pr-inputs-<token>.json`-class path for `--inputs`, `--body-file` and `--comment-file`. Nothing requires the three paths to share one token. A runner that changed the engine-built command could name another live run's PR files in the same checkout, and `open-plan-pr.sh` would read them and then delete them.
+  - **Introduced or inherited.** Inherited. `--inputs` and `--body-file` already had this check on main; this change gives `--comment-file` the same check.
+  - **Bounded impact.** It needs a runner to change the command the engine built and an exact match with a live file of another run in the same checkout. Brood strains run in separate worktrees. The worst case is that the other run's pull request step stops with a visible error and this run posts text the other run wrote. No git change.
+  - **Decision.** Keep the code and add no shared-token check to the hook. The engine already treats the runner's command as trusted within the gate's path classes.
+  - **Decided by.** The user, 2026-11-18, answering local review finding e3e6fa3d45aca51186e8b096e3c34a0763eddc9f8a0534f7ba053c393b00028d ("Comment and body file flags can name and delete another run's state file"). The options were: A, keep the code and record the trust here; B, require one shared token in this PR; C, keep the code and open an issue to fix it later. The user chose A.
+
+**Version.** Patch, 10.0.5. It is a fix: a runner copy mistake can no longer make the inputs file invalid.
+
+It updates these places in place, each with a dated note: the residuals "the runner's copy has no digest check" and "the comment stays in the JSON inputs file" of Amendment 2026-11-06: the pull request body is built in code and sent in its own file (issues 506 and 501).
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/592, https://github.com/brenpike/hivemind/issues/595, https://github.com/brenpike/hivemind/issues/538.
