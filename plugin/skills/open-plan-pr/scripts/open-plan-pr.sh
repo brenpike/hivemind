@@ -33,7 +33,14 @@
 # not a full object id`. The script then runs plain git from the top of the work tree (`git
 # rev-parse --show-toplevel`), never `git -C` (ADR-0037 decision 25).
 #
-# INPUTS FILE (read once, with jq, into a private copy; no field enters shell or jq program
+# READ: each caller file is read once, whole, with hivemind_read_input_file (_shared/containment.sh)
+# into a private copy, which must then be byte for byte the file. jq puts U+FFFD in place of each
+# invalid UTF-8 sequence and reports no error, so a file that is not valid UTF-8 is refused (`inputs
+# file is not valid UTF-8`, `body file is not valid UTF-8`, `comment file is not valid UTF-8`)
+# rather than sent on changed.
+#
+# INPUTS FILE (read once, by READ, into a private raw copy, which one jq step then parses as
+# exactly one JSON value into the private inputs.json; no field enters shell or jq program
 # source, per ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md, Inert Inputs-File Navigator
 # Pattern). Fields, checked in this order, first failure wins, with the body file's rule (BODY
 # FILE) in the body's place:
@@ -46,22 +53,22 @@
 # or an argument's text. The rule that the PR content carries no attribution string is the
 # caller's judgment (the open-plan-pr SKILL.md), not checked here.
 #
-# BODY FILE (read once, with `jq -R -s`, into the private `body.md`; its text enters no shell or
-# jq program source): the whole file is the PR body. It must be text with no control character
-# other than newline and tab, and it may be empty. Its path must not name the inputs file: a
+# BODY FILE (read once, by READ, into the private `body.md`; its text enters no shell or jq
+# program source): the whole file is the PR body. It must be valid UTF-8 text with no control
+# character other than newline and tab, and it may be empty. Its path must not name the inputs file: a
 # path that names the same file, by any spelling or a hard link, is refused before either read.
 #
-# COMMENT FILE (only with --comment-file; read once, with `jq -R -s`, into the private
-# `comment.md`; its text enters no shell or jq program source): the whole file is the comment. Its
-# rule is checked after the draft rule: text with a character other than space, newline and tab,
-# and no control character other than newline and tab. It is posted only on a reused PR (REUSE).
+# COMMENT FILE (only with --comment-file; read once, by READ, into the private `comment.md`; its
+# text enters no shell or jq program source): the whole file is the comment. It must be valid
+# UTF-8. Its rule is checked after the draft rule: text with a character other than space, newline
+# and tab, and no control character other than newline and tab. It is posted only on a reused PR (REUSE).
 # Its path must not name the inputs file or the body file: a path that names either, by any
 # spelling or a hard link, is refused before any read.
 #
 # INPUTS, BODY AND COMMENT FILE LIFETIME: the script deletes each file once it has read it, the
-# inputs file right after the jq read into the private copy, the body file right after the jq read
-# into the private body and the comment file right after the jq read into the private comment,
-# each whether or not its read succeeded, and all before the `inputs file is
+# inputs file right after its READ into the private raw copy, the body file right after its READ
+# into the private body and the comment file right after its READ into the private comment,
+# each whether or not its read or its byte check passed, and all before the `inputs file is
 # not valid JSON` blocker and every later check (hivemind_remove_inputs_file in
 # _shared/containment.sh; ADR-0037). Only a leaf named `pr-inputs-<token>.json`, <token> 1 to 64
 # characters of [A-Za-z0-9-], directly under a real `.hivemind` folder in the folder the script was
@@ -93,11 +100,14 @@
 #                `body file resolves outside the checkout`, `comment file resolves outside the
 #                checkout`); the body file names the inputs file (`body file is the inputs file`);
 #                the comment file names the inputs file or the body file (`comment file is the
-#                inputs file or the body file`), all checked before the first read; the inputs
-#                file is not exactly one valid JSON value (`inputs file is not valid JSON`); the
-#                body file cannot be read (`body file cannot be read`); the comment file cannot
-#                be read (`comment file cannot be read`); or a field rule, the body rule or the
-#                comment rule above is broken (one fixed reason per rule).
+#                inputs file or the body file`), all checked before the first read; then, after
+#                the reads and deletes, the inputs file cannot be read (`inputs file is not valid
+#                JSON`), is not valid UTF-8 (`inputs file is not valid UTF-8`) or is not exactly
+#                one valid JSON value (`inputs file is not valid JSON`); the body file cannot be
+#                read (`body file cannot be read`) or is not valid UTF-8 (`body file is not valid
+#                UTF-8`); the comment file cannot be read (`comment file cannot be read`) or is
+#                not valid UTF-8 (`comment file is not valid UTF-8`); or a field rule, the body
+#                rule or the comment rule above is broken (one fixed reason per rule).
 #   in progress  a merge, rebase, cherry-pick, revert, cherry-pick or revert sequence, or bisect,
 #                each looked up with `git rev-parse --git-path` so a linked worktree reads its own
 #                state (_shared/git-refusals.sh).
@@ -297,13 +307,17 @@
 # id, so an open PR from another repository, such as a fork with the same branch name and the
 # same commit, is never reused. The push URL behind that id is read again from git config after
 # the push, and git config is trusted. The private work folder
-# (mktemp -d under TMPDIR) holds the inputs copy, the body copy, the comment copy, and the gh
-# and push-branch.sh output, and is removed by the EXIT trap.
+# (mktemp -d under TMPDIR) holds the raw inputs copy, the parsed inputs, the body copy, the
+# comment copy, and the gh and push-branch.sh output, and is removed by the EXIT trap. The UTF-8
+# refusal also covers a file changed between its read and its byte check. Native Windows jq.exe
+# writes CRLF for LF, so every multi-line file fails the byte check there; native Windows is not
+# supported.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
 # compatible (no mapfile / associative arrays / ${var,,}). The identifier gate comes from
-# _shared/allowlist.sh, the inputs read-guard and delete from _shared/containment.sh, and the
+# _shared/allowlist.sh, the inputs read-guard, byte-exact read and delete from
+# _shared/containment.sh, and the
 # in-progress, unmerged and dirty checks from _shared/git-refusals.sh; this script maps their
 # results to its own blockers.
 
@@ -475,6 +489,7 @@ remove_work_dir() {
   return 0
 }
 trap 'remove_work_dir; :' EXIT
+inputs_raw_file="$work_dir/inputs.raw"
 inputs_copy="$work_dir/inputs.json"
 body_file="$work_dir/body.md"
 list_file="$work_dir/list.json"
@@ -502,22 +517,40 @@ if [ "$comment_given" = true ]; then
     || blocker "comment file is the inputs file or the body file"
 fi
 inputs_read_rc=0
-jq -c -s 'if length == 1 then .[0] else error("not one JSON value") end' "$INPUTS_FILE" >"$inputs_copy" 2>/dev/null \
-  || inputs_read_rc=$?
+hivemind_read_input_file "$INPUTS_FILE" "$inputs_raw_file" || inputs_read_rc=$?
 hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$inputs_arg" pr >/dev/null 2>&1 || :
 body_read_rc=0
-jq -R -s -j '.' "$BODY_INPUT_FILE" >"$body_file" 2>/dev/null || body_read_rc=$?
+hivemind_read_input_file "$BODY_INPUT_FILE" "$body_file" || body_read_rc=$?
 hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$body_file_arg" pr >/dev/null 2>&1 || :
 comment_read_rc=0
 comment_jq_args=(--arg comment '')
 if [ "$comment_given" = true ]; then
-  jq -R -s -j '.' "$COMMENT_INPUT_FILE" >"$comment_file" 2>/dev/null || comment_read_rc=$?
+  hivemind_read_input_file "$COMMENT_INPUT_FILE" "$comment_file" || comment_read_rc=$?
   hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$comment_file_arg" pr >/dev/null 2>&1 || :
   comment_jq_args=(--rawfile comment "$comment_file")
 fi
-[ "$inputs_read_rc" = 0 ] || blocker "inputs file is not valid JSON"
-[ "$body_read_rc" = 0 ] || blocker "body file cannot be read"
-[ "$comment_read_rc" = 0 ] || blocker "comment file cannot be read"
+
+# refuse_failed_read <hivemind_read_input_file return> <file kind>
+#   Blocks with `<kind> file is not valid UTF-8` on return 2 and `<kind> file cannot be read` on
+#   any other non-zero return. <kind> is a fixed word, never a caller value. Runs in the main
+#   shell so blocker exits it.
+refuse_failed_read() {
+  case "$1" in
+    0) ;;
+    2) blocker "$2 file is not valid UTF-8" ;;
+    *) blocker "$2 file cannot be read" ;;
+  esac
+}
+
+case "$inputs_read_rc" in
+  0) ;;
+  2) blocker "inputs file is not valid UTF-8" ;;
+  *) blocker "inputs file is not valid JSON" ;;
+esac
+jq -c -s 'if length == 1 then .[0] else error("not one JSON value") end' "$inputs_raw_file" >"$inputs_copy" 2>/dev/null \
+  || blocker "inputs file is not valid JSON"
+refuse_failed_read "$body_read_rc" body
+refuse_failed_read "$comment_read_rc" comment
 
 # The field rules from the header, in order, with the body rule on $body, the private body copy,
 # and, when $comment_given, the comment rule on $comment, the private comment copy. Prints the

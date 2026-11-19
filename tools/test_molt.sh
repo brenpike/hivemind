@@ -9,7 +9,8 @@
 # reads each file once (the inputs file as JSON holding only type, scope and breaking; the
 # subject, files and body files as raw text), deletes each right after its read when it is a
 # .hivemind/molt-inputs-<token>.json leaf directly under a real .hivemind folder in the folder it
-# was started in (read or not), and checks the fields, then refuses an in-progress operation,
+# was started in (read or not), refuses a file whose copy is not byte for byte the file (not
+# valid UTF-8), and checks the fields, then refuses an in-progress operation,
 # unmerged paths, a detached or
 # unborn HEAD, a branch name that fails the identifier gate, a trunk that names the current
 # branch, and an unreadable trunk. Trunk names the current branch only by ref identity: one of
@@ -120,6 +121,10 @@ BODY_SAME_REASON='body file is the inputs file, the subject file or the files fi
 SUBJECT_UNREADABLE_REASON='subject file cannot be read'
 FILES_UNREADABLE_REASON='files file cannot be read'
 BODY_UNREADABLE_REASON='body file cannot be read'
+INPUTS_UTF8_REASON='inputs file is not valid UTF-8'
+SUBJECT_UTF8_REASON='subject file is not valid UTF-8'
+FILES_UTF8_REASON='files file is not valid UTF-8'
+BODY_UTF8_REASON='body file is not valid UTF-8'
 NOT_OBJECT_REASON='inputs must be a JSON object'
 UNKNOWN_FIELD_REASON='inputs have a field other than type, scope and breaking'
 TYPE_REASON='type must be one of feat fix hotfix refactor docs test chore ci'
@@ -582,6 +587,45 @@ test_raw_file_unreadable() {
             body) assert_unreadable_refused unreadable-body "$BODY_UNREADABLE_REASON" "$BODY_PATH" ;;
         esac
     done
+}
+
+# assert_invalid_utf8_refused <name> <reason> <inputs json> <subject text> <files text> <body
+# text> -> writes the four files byte for byte (write_raw_inputs), asserts the refusal with
+# nothing changed, then asserts every file is gone: each is deleted right after its read, before
+# the check that refuses it.
+assert_invalid_utf8_refused() {
+    local name="$1"
+    assert_input_refused "$@"
+    assert_raw_files_gone "$name-deleted"
+}
+
+# jq puts U+FFFD in place of invalid UTF-8 with no error, so the engine checks each copy byte for
+# byte against its file. An inputs, subject, files or body file holding an invalid byte, or ending
+# in a cut multi-byte sequence, is refused with its own blocker, after every read and delete and
+# in file order. A literal U+FFFD is valid UTF-8, and it and a body line over 9000 bytes of
+# multi-byte characters reach the commit byte for byte.
+test_invalid_utf8() {
+    local long_line
+    local subject_ok=$'s\n' files_ok=$'f.txt\n' body_ok=$'b\n'
+    create_world invalid-utf8
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+
+    assert_invalid_utf8_refused utf8-inputs "$INPUTS_UTF8_REASON" $'{"type":"feat","scope":"a\xffb"}' "$subject_ok" "$files_ok" "$body_ok"
+    assert_invalid_utf8_refused utf8-subject "$SUBJECT_UTF8_REASON" '{"type":"feat"}' $'s\xff\n' "$files_ok" "$body_ok"
+    assert_invalid_utf8_refused utf8-subject-cut-sequence "$SUBJECT_UTF8_REASON" '{"type":"feat"}' $'s\xe2\x82' "$files_ok" "$body_ok"
+    assert_invalid_utf8_refused utf8-files "$FILES_UTF8_REASON" '{"type":"feat"}' "$subject_ok" $'f.txt\n\xff.txt\n' "$body_ok"
+    assert_invalid_utf8_refused utf8-body "$BODY_UTF8_REASON" '{"type":"feat"}' "$subject_ok" "$files_ok" $'a\xffb\n'
+    assert_invalid_utf8_refused utf8-order-inputs-json "$INPUTS_JSON_REASON" '{"type":' $'s\xff\n' "$files_ok" "$body_ok"
+    assert_invalid_utf8_refused utf8-order-subject-first "$SUBJECT_UTF8_REASON" '{"type":"feat"}' $'s\xff\n' "$files_ok" $'a\xffb\n'
+
+    create_world replacement-character
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    long_line="$(printf 'é€%.0s' $(seq 1 1900))"
+    write_raw_inputs '{"type":"fix"}' $'keep \xef\xbf\xbd literal\n' "$files_ok" $'kept \xef\xbf\xbd too\n'"$long_line"$'\n'
+    assert_commit_run replacement-character "$WORK_TREE" "$INPUTS_REL"
+    assert_committed replacement-character "$(printf 'M\tf.txt')" \
+        "$(printf 'fix: keep \357\277\275 literal\n\nkept \357\277\275 too\n%s' "$long_line")"
+    assert_raw_files_gone replacement-character-deleted
 }
 
 test_inputs_field_refusals() {
@@ -1475,6 +1519,7 @@ test_not_a_checkout
 test_inputs_file_refusals
 test_raw_file_refusals
 test_raw_file_unreadable
+test_invalid_utf8
 test_inputs_field_refusals
 test_inputs_file_lifetime
 test_git_state_refusals

@@ -31,9 +31,11 @@
 # outside the safe allowlist`). The script then runs plain git from the top of the work tree
 # (`git rev-parse --show-toplevel`), never `git -C` (ADR-0037 decision 25).
 #
-# INPUTS FILE (read once, with jq, into a private copy; no field enters shell or jq program
-# source, per ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md, Inert Inputs-File Navigator
-# Pattern). It holds only fixed values. Fields, checked in this order, first failure wins, with
+# INPUTS FILE (read once, whole, with hivemind_read_input_file into a private raw copy that must
+# be byte for byte the file, then parsed by jq from that copy as exactly one JSON value into a
+# private copy; no field enters shell or jq program source, per
+# ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md, Inert Inputs-File Navigator Pattern). It
+# holds only fixed values. Fields, checked in this order, first failure wins, with
 # the subject, body and files rules (SUBJECT FILE, BODY FILE, FILES FILE) after them:
 #   type      REQUIRED. feat|fix|hotfix|refactor|docs|test|chore|ci.
 #   scope     optional. A string that passes hivemind_assert_identifier.
@@ -47,18 +49,20 @@
 # followed by a blank line and the body when there is one. The rule that the message carries no
 # attribution string is the caller's judgment (the molt SKILL.md), not checked here.
 #
-# SUBJECT FILE (read once, with `jq -R -s`, into the private `subject.txt`; its text enters no
-# shell or jq program source): the subject is the whole file less one final line feed. It must be
+# SUBJECT FILE (read once, whole, with hivemind_read_input_file into the private `subject.txt`,
+# which must be byte for byte the file; its text enters no shell or jq program source): the subject is the whole file less one final line feed. It must be
 # one line of text with a non-space character and no control character, a carriage return
 # included, at most 72 characters (Unicode code points).
 #
-# BODY FILE (only with --body-file; read once, with `jq -R -s`, into the private `body.txt`; its
-# text enters no shell or jq program source): the whole file is the body. It must be text with no
+# BODY FILE (only with --body-file; read once, whole, with hivemind_read_input_file into the
+# private `body.txt`, which must be byte for byte the file; its text enters no shell or jq program
+# source): the whole file is the body. It must be text with no
 # control character other than newline and tab. A body of only spaces, tabs and newlines, an
 # empty file included, is the same as no body.
 #
-# FILES FILE (only with --files-file; read once, with `jq -R -s`, into the private `files.txt`;
-# its text enters no shell or jq program source): one exact path relative to the top of the work
+# FILES FILE (only with --files-file; read once, whole, with hivemind_read_input_file into the
+# private `files.txt`, which must be byte for byte the file; its text enters no shell or jq program
+# source): one exact path relative to the top of the work
 # tree per line, with one final line feed allowed. An empty file or a lone line feed is an empty
 # list, as is an absent --files-file. Each path is non-empty, has no control character, a
 # carriage return included, no leading `/`, and no empty, `.`, `..` or `.git` (any case) path
@@ -70,9 +74,9 @@
 # read.
 #
 # INPUTS, SUBJECT, FILES AND BODY FILE LIFETIME: the script deletes each file once it has read
-# it, the inputs file right after the jq read into the private copy and each other file right
-# after its own jq read, each whether or not its read succeeded, and all before the `inputs file
-# is not valid JSON` blocker and every later check (hivemind_remove_inputs_file in
+# it, right after its own hivemind_read_input_file read into its private copy, whether or not the
+# read or the byte for byte check passed, and all before the `inputs file is not valid JSON`
+# blocker, every `not valid UTF-8` blocker and every later check (hivemind_remove_inputs_file in
 # _shared/containment.sh; ADR-0037). Only a leaf named `molt-inputs-<token>.json`, <token> 1 to 64
 # characters of [A-Za-z0-9-], directly under a real `.hivemind` folder in the folder the script was
 # started in is deleted (hivemind_inputs_path_problem, anchored on that start folder), from inside
@@ -100,10 +104,14 @@
 #                file names the inputs file or the subject file (`files file is the inputs file or
 #                the subject file`); the body file names any of the other three (`body file is the
 #                inputs file, the subject file or the files file`), all checked before the first
-#                read; the inputs file is not exactly one valid JSON value (`inputs file is not
-#                valid JSON`); the subject, files or body file cannot be read (`subject file cannot
-#                be read`, `files file cannot be read`, `body file cannot be read`); or a field
-#                rule, the subject, body or files rule above is broken (one fixed reason per
+#                read; after the reads and deletes, the inputs file cannot be read (`inputs file is
+#                not valid JSON`), its copy is not byte for byte the file (`inputs file is not
+#                valid UTF-8`), or it is not exactly one valid JSON value (`inputs file is not
+#                valid JSON`); then the subject, files and body file in turn cannot be read
+#                (`subject file cannot be read`, `files file cannot be read`, `body file cannot be
+#                read`) or its copy is not byte for byte the file (`subject file is not valid
+#                UTF-8`, `files file is not valid UTF-8`, `body file is not valid UTF-8`); or a
+#                field rule, the subject, body or files rule above is broken (one fixed reason per
 #                rule).
 #   in progress  a merge (MERGE_HEAD), rebase (rebase-merge, rebase-apply, REBASE_HEAD),
 #                cherry-pick (CHERRY_PICK_HEAD), revert (REVERT_HEAD), cherry-pick or revert
@@ -244,21 +252,29 @@
 # check against what `git add` left and the write-back has that change undone: a race on the
 # shared live index of the same kind as RECORDED RESIDUAL R1, with the same trusted actors.
 # jq decodes status paths as UTF-8, so a path with bytes that are not UTF-8 shows with
-# replacement characters on its outside line and can never be listed. A listed path that is an
+# replacement characters on its outside line and can never be listed: a files file holding such
+# a path is refused at its read (`files file is not valid UTF-8`). jq puts U+FFFD in place of
+# each invalid UTF-8 sequence with no error, so the byte for byte check after each read is what
+# refuses such a file; it also refuses, with the same blocker, a file that changed between its
+# read and the check. A literal U+FFFD in a file is valid UTF-8 and is kept. Native Windows jq.exe
+# writes CRLF for LF, so there every multi-line file fails the check; native Windows is not
+# supported. A listed path that is an
 # untracked ignored file is not dirty, so it is not committed. A submodule path is a directory,
 # so it cannot be listed, and its changes are dirty paths outside files. The trunk lookup order
 # is mirrored from git, not asked of git, and git 2.25 shows only the end of a symbolic-ref chain,
 # with the same residuals as create-working-branch.sh. A local remote HEAD
 # that went stale after a default branch rename still names the old default, and a remote that
 # `git remote` does not list is not read. The private work
-# folder (mktemp -d under TMPDIR) holds the inputs copy, the subject, files and body copies, the
+# folder (mktemp -d under TMPDIR) holds the raw and parsed inputs copies, the subject, files and
+# body copies, the
 # checked fields, the status listing, the index entry
 # records from before and after `git add`, the commit's error text and the commit's path listing, and is removed by the EXIT trap.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
 # compatible (no mapfile / associative arrays / ${var,,}). The identifier gate comes from
-# _shared/allowlist.sh, the inputs read-guard and delete from _shared/containment.sh, and the
+# _shared/allowlist.sh, the inputs read-guard, the byte for byte read and the delete from
+# _shared/containment.sh, and the
 # name rule, the in-progress and unmerged checks, the trunk ref walk and the remote default branch
 # read from _shared/git-refusals.sh; this script maps their results to its own blockers.
 
@@ -370,6 +386,7 @@ remove_work_dir() {
   return 0
 }
 trap 'remove_work_dir; :' EXIT
+inputs_raw_copy="$work_dir/inputs-raw.txt"
 inputs_copy="$work_dir/inputs.json"
 subject_copy="$work_dir/subject.txt"
 files_copy="$work_dir/files.txt"
@@ -412,27 +429,44 @@ if [ "$body_given" = true ]; then
     && { [ "$files_given" = false ] || [ ! "$BODY_INPUT_FILE" -ef "$FILES_INPUT_FILE" ]; } \
     || blocker "body file is the inputs file, the subject file or the files file"
 fi
+# refuse_failed_read <kind> <read result>
+#   Blocks when hivemind_read_input_file did not copy the <kind> file byte for byte: 2 (the copy
+#   differs) gives `<kind> file is not valid UTF-8`, any other non-zero result `<kind> file cannot
+#   be read`. Runs in the main shell so blocker exits it.
+refuse_failed_read() {
+  case "$2" in
+    0) ;;
+    2) blocker "$1 file is not valid UTF-8" ;;
+    *) blocker "$1 file cannot be read" ;;
+  esac
+}
+
 inputs_read_rc=0
-jq -c -s 'if length == 1 then .[0] else error("not one JSON value") end' "$INPUTS_FILE" >"$inputs_copy" 2>/dev/null \
-  || inputs_read_rc=$?
+hivemind_read_input_file "$INPUTS_FILE" "$inputs_raw_copy" || inputs_read_rc=$?
 hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$inputs_arg" molt >/dev/null 2>&1 || :
 subject_read_rc=0
-jq -R -s -j '.' "$SUBJECT_INPUT_FILE" >"$subject_copy" 2>/dev/null || subject_read_rc=$?
+hivemind_read_input_file "$SUBJECT_INPUT_FILE" "$subject_copy" || subject_read_rc=$?
 hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$subject_file_arg" molt >/dev/null 2>&1 || :
 files_read_rc=0
 if [ "$files_given" = true ]; then
-  jq -R -s -j '.' "$FILES_INPUT_FILE" >"$files_copy" 2>/dev/null || files_read_rc=$?
+  hivemind_read_input_file "$FILES_INPUT_FILE" "$files_copy" || files_read_rc=$?
   hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$files_file_arg" molt >/dev/null 2>&1 || :
 fi
 body_read_rc=0
 if [ "$body_given" = true ]; then
-  jq -R -s -j '.' "$BODY_INPUT_FILE" >"$body_copy" 2>/dev/null || body_read_rc=$?
+  hivemind_read_input_file "$BODY_INPUT_FILE" "$body_copy" || body_read_rc=$?
   hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$body_file_arg" molt >/dev/null 2>&1 || :
 fi
-[ "$inputs_read_rc" = 0 ] || blocker "inputs file is not valid JSON"
-[ "$subject_read_rc" = 0 ] || blocker "subject file cannot be read"
-[ "$files_read_rc" = 0 ] || blocker "files file cannot be read"
-[ "$body_read_rc" = 0 ] || blocker "body file cannot be read"
+case "$inputs_read_rc" in
+  0) ;;
+  2) blocker "inputs file is not valid UTF-8" ;;
+  *) blocker "inputs file is not valid JSON" ;;
+esac
+jq -c -s 'if length == 1 then .[0] else error("not one JSON value") end' "$inputs_raw_copy" >"$inputs_copy" 2>/dev/null \
+  || blocker "inputs file is not valid JSON"
+refuse_failed_read subject "$subject_read_rc"
+refuse_failed_read files "$files_read_rc"
+refuse_failed_read body "$body_read_rc"
 
 # The subject, the body and the file list from the private copies of the subject, body and files
 # files ($subject_text, $body_text, $files_text): the subject less one final line feed, the body

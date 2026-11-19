@@ -8,8 +8,8 @@
 # --body-file <path>` plus optional `--remote <name>` and `--comment-file <path>`. It gates the
 # identifiers, reads the inputs file, the body file and the comment file once each (after the
 # containment read-guard and the same-file checks), deletes each right after its read when it is a
-# .hivemind/pr-inputs-<token>.json leaf in the folder it was started in, and
-# checks the fields, the body and the comment, refuses gh missing, an
+# .hivemind/pr-inputs-<token>.json leaf in the folder it was started in, refuses a file that is not
+# valid UTF-8 (its private copy does not read back byte for byte), and checks the fields, the body and the comment, refuses gh missing, an
 # in-progress operation, unmerged paths, a dirty tree and a failed open-PR lookup, then pushes
 # through push-branch.sh, reuses the open PR on the pushed commit (re-reading to absorb head SHA
 # lag) or creates one, and verifies the created PR. On success it prints
@@ -186,6 +186,9 @@ COMMENT_MISSING_REASON='comment file not found'
 COMMENT_OUTSIDE_REASON='comment file resolves outside the checkout'
 COMMENT_SAME_REASON='comment file is the inputs file or the body file'
 COMMENT_READ_REASON='comment file cannot be read'
+INPUTS_UTF8_REASON='inputs file is not valid UTF-8'
+BODY_UTF8_REASON='body file is not valid UTF-8'
+COMMENT_UTF8_REASON='comment file is not valid UTF-8'
 NOT_OBJECT_REASON='inputs must be a JSON object'
 UNKNOWN_FIELD_REASON='inputs have a field other than title and draft'
 TITLE_REASON='title must be one line of text'
@@ -985,6 +988,71 @@ test_title_not_expanded() {
     assert_success dash-title "$WORK_TREE" "$(expected_block true)" \
         --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL"
     assert_equal dash-title-arg '--title=--draft' "$(sed -n '5p' "$GH_STUB_DIR/pr-create.1.args")" "dash title bound to --title"
+}
+
+# ── Byte-exact reads ────────────────────────────────────────────────────────
+
+# Each caller file must read back byte for byte. jq puts U+FFFD in place of invalid UTF-8, so a file
+# holding an invalid byte is refused after the reads and deletes, before any push or gh call.
+test_invalid_utf8() {
+    create_world utf8-refusals
+    write_comment 'c'
+    write_inputs "$(printf '{"title":"a\377b"}')"
+    assert_refused_unchanged utf8-inputs "$WORK_TREE" "$INPUTS_UTF8_REASON" --head "$BRANCH" --base main \
+        --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" --comment-file "$COMMENT_REL"
+    assert_inputs_present utf8-inputs-deleted "$INPUTS_PATH" no
+    assert_inputs_present utf8-inputs-body-deleted "$BODY_PATH" no
+    assert_inputs_present utf8-inputs-comment-deleted "$COMMENT_PATH" no
+    write_body "$DEFAULT_BODY"
+    assert_input_refused utf8-inputs-before-json "$(printf '{"title":\377')" "$INPUTS_UTF8_REASON"
+    assert_body_refused utf8-body "$(printf 'a\377b')" "$BODY_UTF8_REASON"
+    assert_body_refused utf8-body-truncated-end "$(printf 'ok \342\234')" "$BODY_UTF8_REASON"
+    assert_body_refused utf8-body-surrogate "$(printf 'a\355\240\200b')" "$BODY_UTF8_REASON"
+    assert_body_refused utf8-body-overlong-nul "$(printf 'a\300\200b')" "$BODY_UTF8_REASON"
+    write_body "$(printf 'a\377b')"
+    assert_input_refused utf8-body-after-invalid-json '{"title":' "$INPUTS_JSON_REASON"
+    assert_comment_refused utf8-comment "$(printf 'c\377d')" "$COMMENT_UTF8_REASON"
+    write_body "$(printf 'a\377b')"
+    assert_comment_refused utf8-comment-after-body "$(printf 'c\377d')" "$BODY_UTF8_REASON"
+    assert_comment_refused utf8-comment-before-fields "$(printf 'c\377d')" "$COMMENT_UTF8_REASON" '{"title":""}'
+    assert_equal utf8-refusals-no-gh 0 "$(call_count pr-list)" "no gh call"
+    assert_equal utf8-refusals-no-comment 0 "$(call_count pr-comment)" "no gh pr comment"
+}
+
+test_byte_exact_reads() {
+    local replacement_title long_line_file expected_body_file body_match repeat_index
+    create_world replacement-title
+    replacement_title="$(printf 'Fix \357\277\275 handling')"
+    write_inputs "$(jq -cn --arg title "$replacement_title" '{title: $title}')"
+    write_body "$(printf 'body \357\277\275 kept\nx')"
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    assert_success replacement-title "$WORK_TREE" "$(expected_block true)" \
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL"
+    assert_equal replacement-title-arg "--title=$replacement_title" "$(sed -n '5p' "$GH_STUB_DIR/pr-create.1.args")" \
+        "literal U+FFFD title reaches gh byte for byte"
+    assert_equal replacement-title-body "$(printf 'body \357\277\275 kept\nxy')" "$(cat "$GH_STUB_DIR/pr-create.1.body"; printf 'y')" \
+        "literal U+FFFD body reaches gh byte for byte"
+
+    create_world long-line-body
+    long_line_file="$WORLD_ROOT/long-line.txt"
+    expected_body_file="$WORLD_ROOT/long-body.txt"
+    : >"$long_line_file"
+    for repeat_index in $(seq 1 2000); do
+        printf '\303\251\342\234\223' >>"$long_line_file"
+    done
+    { printf 'head\n'; cat "$long_line_file"; printf '\ntail\n'; } >"$expected_body_file"
+    cp "$expected_body_file" "$BODY_PATH"
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    assert_success long-line-body "$WORK_TREE" "$(expected_block true)" \
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL"
+    assert_equal long-line-body-size 10011 "$(wc -c <"$expected_body_file" | tr -d ' ')" "body over 9000 bytes on one line"
+    body_match=no
+    if cmp -s "$expected_body_file" "$GH_STUB_DIR/pr-create.1.body"; then
+        body_match=yes
+    fi
+    assert_equal long-line-body-bytes yes "$body_match" "long multi-byte body line reaches gh byte for byte"
 }
 
 test_draft() {
@@ -1803,6 +1871,8 @@ test_git_state_refusals
 test_lookup_refusals
 test_create
 test_title_not_expanded
+test_invalid_utf8
+test_byte_exact_reads
 test_draft
 test_comment_field_refusals
 test_comment_file_refusals
