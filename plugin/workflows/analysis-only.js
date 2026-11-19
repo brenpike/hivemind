@@ -412,7 +412,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = '908c7a2b4a7349cb';
+const BUILD_ID = '09ada98b4d42a4ce';
 
 function supportedSchemaKeywords(){
 return[
@@ -1535,6 +1535,7 @@ return formatDataBlock('command',command);
 }
 function runnerValuePatterns(){
 const name=gitIdentifierPattern();
+const prFile=/^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/;
 return{
 '--trunk':name,
 '--base':name,
@@ -1545,7 +1546,8 @@ return{
 '--classification':/^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
 '--trunk-freshness':/^(?:fresh|stale|skipped)$/,
 '--inputs':/^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/,
-'--body-file':/^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/
+'--body-file':prFile,
+'--comment-file':prFile
 };
 }
 function describeRunnerWordProblem(words){
@@ -1636,15 +1638,18 @@ return isUniqueFactsList('cut',cut);
 function isTextCount(value){
 return matchesFactsLine('external_texts',value)&&Number.isSafeInteger(Number(value));
 }
+function describePlanningStop(runNoun){
+return describeRunNoun(runNoun)+' stopped before planning';
+}
 function malformedFactsMessage(runNoun){
-return'The facts step returned malformed facts, so '+describeRunNoun(runNoun)+' stopped before planning.';
+return'The facts step returned malformed facts, so '+describePlanningStop(runNoun)+'.';
 }
 function blockedFactsMessage(runNoun,blocker){
 const reason=isNonEmptyString(blocker)?blocker:'it gave no reason.';
-return'The facts step was blocked, so '+describeRunNoun(runNoun)+' stopped before planning: '+reason;
+return'The facts step was blocked, so '+describePlanningStop(runNoun)+': '+reason;
 }
 function cutFactsMessage(runNoun,cut){
-return'The facts are incomplete: GitHub could not be read in full for '+cut.split(',').join(', ')+'. Planning needs complete facts, so '+describeRunNoun(runNoun)+' stopped before planning.';
+return'The facts are incomplete: GitHub could not be read in full for '+cut.split(',').join(', ')+'. Planning needs complete facts, so '+describePlanningStop(runNoun)+'.';
 }
 function buildFactsBlock(facts){
 return formatDataBlock('facts',{file:facts.facts_file,lines:facts.facts_lines});
@@ -1736,7 +1741,7 @@ seenIndexes.add(index);
 return true;
 }
 function describeScanProblem(scan,facts,runNoun){
-const stopped='so '+describeRunNoun(runNoun)+' stopped before planning.';
+const stopped='so '+describePlanningStop(runNoun)+'.';
 if(!validateSchema(scanStepSchema(),scan).ok){
 return'The injection scan returned a result it could not use, '+stopped;
 }

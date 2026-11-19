@@ -33,8 +33,9 @@
  *   formatBodyFileBlock(path, text)
  *       the synapse data blocks: command, a JSON string holding one whole
  *       command line, inputs_file, {path, content}, content an object or
- *       its JSON text, and body_file, {path, content}, content the raw
- *       pull request body. Their names and
+ *       its JSON text, body_file, {path, content}, content the raw pull
+ *       request body, and comment_file (formatDataBlock, lib/pr.js), the
+ *       same for the raw reuse comment. Their names and
  *       the one placeholder a command can hold, {plugin-root}, are the
  *       words of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md. A command holds
  *       the placeholder only when buildRunnerCommand got no root. An inputs
@@ -48,7 +49,7 @@
  *       --classification and --trunk-freshness their enums, and --inputs
  *       .hivemind/molt-inputs-<token>.json or .hivemind/pr-inputs-<token>.json,
  *       <token> 1 to 64 characters of A-Z, a-z, 0-9 and dash, and
- *       --body-file the pr form alone.
+ *       --body-file and --comment-file the pr form alone.
  *   describeRunnerWordProblem(words)
  *       undefined when words is flag and value pairs, each flag a
  *       runnerValuePatterns() key and each value a string its pattern
@@ -289,6 +290,7 @@ function formatBodyFileBlock(path, text) {
 
 function runnerValuePatterns() {
   const name = gitIdentifierPattern();
+  const prFile = /^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/;
   return {
     '--trunk': name,
     '--base': name,
@@ -299,7 +301,8 @@ function runnerValuePatterns() {
     '--classification': /^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
     '--trunk-freshness': /^(?:fresh|stale|skipped)$/,
     '--inputs': /^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/,
-    '--body-file': /^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/
+    '--body-file': prFile,
+    '--comment-file': prFile
   };
 }
 
@@ -456,17 +459,21 @@ function isConsistentFactsRelay(values, trunk) {
     && matchesFreshnessCounts(values.trunk_freshness, values.trunk_ahead, values.trunk_behind);
 }
 
+function describePlanningStop(runNoun) {
+  return describeRunNoun(runNoun) + ' stopped before planning';
+}
+
 function malformedFactsMessage(runNoun) {
-  return 'The facts step returned malformed facts, so ' + describeRunNoun(runNoun) + ' stopped before planning.';
+  return 'The facts step returned malformed facts, so ' + describePlanningStop(runNoun) + '.';
 }
 
 function blockedFactsMessage(runNoun, blocker) {
   const reason = isNonEmptyString(blocker) ? blocker : 'it gave no reason.';
-  return 'The facts step was blocked, so ' + describeRunNoun(runNoun) + ' stopped before planning: ' + reason;
+  return 'The facts step was blocked, so ' + describePlanningStop(runNoun) + ': ' + reason;
 }
 
 function cutFactsMessage(runNoun, cut) {
-  return 'The facts are incomplete: GitHub could not be read in full for ' + cut.split(',').join(', ') + '. Planning needs complete facts, so ' + describeRunNoun(runNoun) + ' stopped before planning.';
+  return 'The facts are incomplete: GitHub could not be read in full for ' + cut.split(',').join(', ') + '. Planning needs complete facts, so ' + describePlanningStop(runNoun) + '.';
 }
 
 function buildFactsBlock(facts) {
@@ -570,7 +577,7 @@ function coversEveryText(results, textCount) {
 }
 
 function describeScanProblem(scan, facts, runNoun) {
-  const stopped = 'so ' + describeRunNoun(runNoun) + ' stopped before planning.';
+  const stopped = 'so ' + describePlanningStop(runNoun) + '.';
   if (!validateSchema(scanStepSchema(), scan).ok) {
     return 'The injection scan returned a result it could not use, ' + stopped;
   }

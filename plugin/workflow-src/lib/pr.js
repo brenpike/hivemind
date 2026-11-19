@@ -43,23 +43,26 @@
  *           synapse runner runs the open-plan-pr command once. The
  *           command carries only --head, --base, --expect-commit H,
  *           --inputs, the path buildInputsPath (lib/commit.js) builds for
- *           the call label, and --body-file, the one it builds for that
- *           label and -body. The inputs_file content is a JSON string of
- *           only the title the code builds, the comment of the comment
- *           hook, left out when the hook returns undefined, and draft, true
- *           when the launch asks for a draft or gates.draft is set, and the
- *           body_file content the body the code builds, the raw text the
- *           script reads whole. This runner is the only push the workflow
+ *           the call label, --body-file, the one it builds for that label
+ *           and -body, and, only when the comment hook returns a comment,
+ *           --comment-file, the one it builds for that label and -comment.
+ *           The inputs_file content is the JSON text of only the title the
+ *           code builds and draft, true when the launch asks for a draft or
+ *           gates.draft is set. The body_file content is the body the code
+ *           builds and the comment_file content, a block sent only with
+ *           --comment-file, the comment, each the raw text the script reads
+ *           whole, so no free text sits in the JSON a runner copies (issue
+ *           592). This runner is the only push the workflow
  *           makes, so every push carries --expect-commit. A command value
  *           outside its class (describeCommandStop, lib/runner.js), a body
- *           path whose token passes 64 characters among them, is a terminal
- *           stop before the call. Its stdout parses with
+ *           or comment path whose token passes 64 characters among them, is
+ *           a terminal stop before the call. Its stdout parses with
  *           openPlanPrRoutingSpec() (lib/specs.js), head_ref_oid must equal
  *           H, commented must be present exactly when a comment was sent,
  *           and then unequal to created, and the run finishes complete with
  *           pr. The runner call goes through runRunnerRelay, so a transient
- *           block runs once more under pr-P-retry with the inputs and body
- *           paths of that label, and the step checks the words of both
+ *           block runs once more under pr-P-retry with the inputs, body and
+ *           comment paths of that label, and the step checks the words of both
  *           labels before the call. A pull request text over its size limit
  *           and a head_ref_oid other than H are terminal stops. A blocked,
  *           malformed or other unusable relay stops through stopDelivery.
@@ -70,7 +73,10 @@
  *           plan classification, the breaking marker, a colon and
  *           plan.title, never the summary, cut at a word only when longer
  *           than maxTitleLength() code points, never inside a bracket the
- *           cut text opened (issue 469). buildTitleText(plan) gives the
+ *           cut text opened (issue 469), each double quote then an
+ *           apostrophe, each backslash a slash and each lone surrogate
+ *           U+FFFD, so the JSON text of the title is the title between two
+ *           quotes (issue 592). buildTitleText(plan) gives the
  *           text after the prefix; the plan check refuses a plan whose text
  *           is empty, so the title is never only its type (issue 469). The
  *           body is the closing lines of renderClosingLines(plan), one
@@ -156,7 +162,7 @@ function neutralizePullRequestText(text) {
 function buildPullRequestTitle(plan) {
   const prefix = buildTitlePrefix(plan);
   const text = buildTitleText(plan);
-  return text === '' ? prefix : prefix + ' ' + text;
+  return (text === '' ? prefix : prefix + ' ' + text).replace(/"/g, '\'').replace(/\\/g, '/').replace(/\p{Cs}/gu, '\uFFFD');
 }
 
 /**
@@ -180,12 +186,8 @@ function renderPullRequestGates(run, gates) {
   return ['Gates:', ...gateIds().map((gateId) => '- ' + gateNames()[gateId] + ': ' + describePullRequestGate(run, gates, gateId))].join('\n');
 }
 
-function renderPullRequestPart(part) {
-  return part.external ? neutralizePullRequestText(part.text) : part.text;
-}
-
 function renderPullRequestRecord(run, gates) {
-  return buildRunRecordParts(run, run.taken.map(toPullRequestDecision), gates).map(renderPullRequestPart);
+  return buildRunRecordParts(run, run.taken.map(toPullRequestDecision), gates).map((part) => (part.external ? neutralizePullRequestText(part.text) : part.text));
 }
 
 /**
@@ -198,26 +200,20 @@ function renderClosingLines(plan) {
 }
 
 /**
- * Returns the digest paragraph of the body: digest.problem, then
- * digest.change, each through renderText, a blank one left out, or '' when
- * both are blank.
+ * Returns the body: the closing lines, the digest paragraph, digest.problem
+ * then digest.change through renderText with a blank one left out and the
+ * paragraph left out when both are blank, a Steps: line and one line per
+ * step, its id, files and outcome through renderText, and the run record.
  */
-function renderDigestParagraph(plan) {
-  return [plan.digest.problem, plan.digest.change].filter((text) => text.trim() !== '').map(renderText).join(' ');
-}
-
-function renderStepLines(plan) {
-  return ['Steps:', ...plan.steps.map((step) => '- ' + renderText(step.id) + ' (' + step.files.map(renderText).join(', ') + '): ' + renderText(step.outcome))].join('\n');
-}
-
 function buildPullRequestBody(run, plan, gates) {
   const closingLines = renderClosingLines(plan);
   const parts = closingLines.length === 0 ? [] : [closingLines.join('\n')];
-  const digest = renderDigestParagraph(plan);
+  const digest = [plan.digest.problem, plan.digest.change].filter((text) => text.trim() !== '').map(renderText).join(' ');
   if (digest !== '') {
     parts.push(neutralizePullRequestText(digest));
   }
-  parts.push(neutralizePullRequestText(renderStepLines(plan)), ...renderPullRequestRecord(run, gates));
+  const stepLines = plan.steps.map((step) => '- ' + renderText(step.id) + ' (' + step.files.map(renderText).join(', ') + '): ' + renderText(step.outcome));
+  parts.push(neutralizePullRequestText(['Steps:', ...stepLines].join('\n')), ...renderPullRequestRecord(run, gates));
   return cleanPullRequestText(parts.join('\n\n'), true);
 }
 
@@ -233,10 +229,6 @@ function describeNoPush() {
   return ' stopped. This step pushed nothing.';
 }
 
-function describePullRequestTextSize(noun, size) {
-  return describePullRequestCause(noun + ' would be ' + size + ' characters, over the limit of ' + maxPullRequestTextLength(), describeNoPush());
-}
-
 /**
  * Returns {title, body, comment} of the pull request, comment left out when
  * the comment hook returns undefined, or {problem} for a terminal stop.
@@ -246,7 +238,7 @@ function buildPullRequestTexts(run, plan, gates) {
   const texts = { title: buildPullRequestTitle(plan), body: buildPullRequestBody(run, plan, gates), ...(comment === undefined ? {} : { comment: comment }) };
   const longNoun = ['body', 'comment'].find((noun) => texts[noun]?.length > maxPullRequestTextLength());
   if (longNoun !== undefined) {
-    return { problem: describePullRequestTextSize(longNoun, texts[longNoun].length) };
+    return { problem: describePullRequestCause(longNoun + ' would be ' + texts[longNoun].length + ' characters, over the limit of ' + maxPullRequestTextLength(), describeNoPush()) };
   }
   const attributedNoun = Object.keys(texts).find((noun) => forbiddenSubjectTexts().some((forbidden) => texts[noun].toLowerCase().includes(forbidden)));
   if (attributedNoun !== undefined) {
@@ -255,14 +247,19 @@ function buildPullRequestTexts(run, plan, gates) {
   return texts;
 }
 
-function listPullRequestWords(plan, run, label) {
-  const [inputsPath, bodyPath] = [label, label + '-body'].map((name) => buildInputsPath(run, 'pr', name));
-  return ['--head', plan.branch, '--base', plan.base, '--expect-commit', run.head, '--inputs', inputsPath, '--body-file', bodyPath];
+/**
+ * Returns the words of the open-plan-pr command for label, with
+ * --comment-file only when texts holds a comment.
+ */
+function listPullRequestWords(plan, run, label, texts) {
+  const [inputsPath, bodyPath, commentPath] = [label, label + '-body', label + '-comment'].map((name) => buildInputsPath(run, 'pr', name));
+  return ['--head', plan.branch, '--base', plan.base, '--expect-commit', run.head, '--inputs', inputsPath, '--body-file', bodyPath, ...(texts.comment === undefined ? [] : ['--comment-file', commentPath])];
 }
 
 /**
- * Returns the PR runner prompt. JSON.stringify leaves out a comment that is
- * undefined, so the inputs file then carries no comment field.
+ * Returns the PR runner prompt: the inputs_file block holds only the title
+ * and draft, and the comment goes raw in a comment_file block when words
+ * carry --comment-file.
  */
 function buildPullRequestPrompt(words, texts, draft, pluginRoot) {
   return [
@@ -270,8 +267,9 @@ function buildPullRequestPrompt(words, texts, draft, pluginRoot) {
     dataBlocksSentence(),
     '',
     formatCommandBlock(buildRunnerCommand('open-plan-pr', words, pluginRoot)),
-    formatInputsFileBlock(words[7], JSON.stringify({ title: texts.title, comment: texts.comment, draft: draft })),
-    formatBodyFileBlock(words[9], texts.body)
+    formatInputsFileBlock(words[7], JSON.stringify({ title: texts.title, draft: draft })),
+    formatBodyFileBlock(words[9], texts.body),
+    ...(words[11] === undefined ? [] : [formatDataBlock('comment_file', { path: words[11], content: texts.comment })])
   ].join('\n');
 }
 
@@ -321,22 +319,18 @@ function checkPullRequestRelay(relay, head, hasComment) {
   return { values: values };
 }
 
-function describePullRequestLabel(run, count) {
-  return 'pr-' + run.pass + (count === 1 ? '' : '-' + count);
-}
-
 async function runPullRequestStep(run, plan, gates) {
   const texts = buildPullRequestTexts(run, plan, gates);
   if (texts.problem !== undefined) {
     return stopDelivery([{ problem: texts.problem, terminal: true, nextAction: 'report' }], run);
   }
   phase('PR');
-  const label = describePullRequestLabel(run, gates.runs.pr);
-  const commandStop = describeCommandStop('pull request', listPullRequestWords(plan, run, label), listPullRequestWords(plan, run, label + '-retry'));
+  const label = 'pr-' + run.pass + (gates.runs.pr === 1 ? '' : '-' + gates.runs.pr);
+  const commandStop = describeCommandStop('pull request', listPullRequestWords(plan, run, label, texts), listPullRequestWords(plan, run, label + '-retry', texts));
   if (commandStop !== undefined) {
     return stopDelivery([commandStop], run);
   }
-  const buildPrompt = (callLabel) => addResumeNote(buildPullRequestPrompt(listPullRequestWords(plan, run, callLabel), texts, run.draft || gates.draft !== undefined, run.pluginRoot), run);
+  const buildPrompt = (callLabel) => addResumeNote(buildPullRequestPrompt(listPullRequestWords(plan, run, callLabel, texts), texts, run.draft || gates.draft !== undefined, run.pluginRoot), run);
   const relay = await runRunnerRelay(buildPrompt, label, 'PR');
   const checked = checkPullRequestRelay(relay, run.head, texts.comment !== undefined);
   if (checked.problem === undefined) {
