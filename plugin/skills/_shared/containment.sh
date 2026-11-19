@@ -113,6 +113,16 @@
 #     left untouched), and 2 when the delete failed. Reasons go to stderr only, never stdout.
 #     Never exits.
 #
+#   hivemind_read_input_file <file> <copy>
+#     <file> a caller-written input file the engine reads as raw text.
+#     <copy> the engine's private copy, created or overwritten.
+#     Reads <file> once, whole, with `jq -n -j --rawfile text <file> '$text'` into <copy>, then
+#     compares <copy> with <file> with `cmp -s`. jq puts U+FFFD in place of each invalid UTF-8
+#     sequence and reports no error, so only a valid UTF-8 file copies exactly.
+#     Returns 0 when <copy> is byte for byte <file>, 2 when they differ, and 1 when the read or
+#     the compare could not run. Prints nothing, never exits, sets no shell option, and is safe
+#     under `set -e` when called in a condition.
+#
 # WHY A SEPARATE FILE-TARGET VARIANT (hivemind_assert_contained CANNOT take a file chain):
 #   hivemind_assert_contained's final containment step does `cd "$canon_root/$deepest_existing"
 #   && pwd -P`. When the deepest-existing component is a REGULAR FILE, that `cd` FAILS (you
@@ -144,7 +154,8 @@
 #
 # DEPENDENCY-FREE: pure bash / POSIX test builtins (cd, pwd, [ -L ], case), plus git ls-files
 #   and rm for hivemind_remove_inputs_file's tracked check and delete. No jq, no realpath, no
-#   external canonicalizer.
+#   external canonicalizer, except that hivemind_read_input_file alone runs jq and cmp for its
+#   read and compare.
 
 # hivemind_canon_root <raw_repo_root>
 # Echo the canonical checkout root (cd && pwd -P), or echo nothing and return 1 on failure.
@@ -657,5 +668,26 @@ hivemind_remove_inputs_file() {
       printf 'failed to delete %s\n' "$inputs_file_path" >&2
       return 2
       ;;
+  esac
+}
+
+# hivemind_read_input_file <file> <copy>
+# Copies <file> into <copy> through one jq raw read, then checks the copy byte for byte against
+# <file>. See the header CONTRACT for the rules.
+# Returns 0 when the copy is exact, 2 when it differs, 1 when the read or the compare could not
+# run. Prints nothing. Never exits.
+hivemind_read_input_file() {
+  local input_file="$1"
+  local copy_file="$2"
+
+  if ! jq -n -j --rawfile text "$input_file" '$text' 2>/dev/null >"$copy_file"; then
+    return 1
+  fi
+  local compare_status=0
+  cmp -s -- "$copy_file" "$input_file" 2>/dev/null || compare_status=$?
+  case "$compare_status" in
+    0) return 0 ;;
+    1) return 2 ;;
+    *) return 1 ;;
   esac
 }

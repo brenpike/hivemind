@@ -2072,6 +2072,71 @@ else
   pass "c7f:leaf-fifo" "path rule: FIFO leaf test skipped (mkfifo absent)"
 fi
 
+# ── 7g. hivemind_read_input_file — byte-exact raw read of a caller-written file ──
+# Every case asserts the return code and that the call printed nothing on stdout or stderr; a
+# return of 0 also asserts the copy is byte for byte the file.
+
+# check_read_input <case> <expected_rc> <file>
+#   Runs hivemind_read_input_file on <file> into a fresh copy, then asserts its return code, an
+#   empty combined stdout and stderr, and on an expected 0 an exact copy.
+check_read_input() {
+  local case_name="$1" expected_rc="$2" input_file="$3"
+  local copy_file="$WORKDIR/c7g/$case_name.copy" read_output read_rc
+  rm -f "$copy_file"
+  read_output="$(hivemind_read_input_file "$input_file" "$copy_file" 2>&1)"
+  read_rc=$?
+  assert_eq "$case_name-rc" "$expected_rc" "$read_rc" "raw read: return code"
+  assert_eq "$case_name-output" "" "$read_output" "raw read: nothing on stdout or stderr"
+  if [ "$expected_rc" = 0 ]; then
+    if cmp -s "$copy_file" "$input_file"; then
+      pass "$case_name-copy" "raw read: copy is byte for byte the file"
+    else
+      failed "$case_name-copy" "raw read: copy differs from the file"
+    fi
+  fi
+}
+
+c7g="$WORKDIR/c7g"
+mkdir -p "$c7g"
+: > "$c7g/empty"
+printf '\n' > "$c7g/line-feed"
+printf 'caf\303\251 \342\202\254 \360\237\230\200\nsecond line\n' > "$c7g/multi-byte"
+printf 'a\357\277\275b\n' > "$c7g/replacement-char"
+c7g_long_line="$(printf '%1900s' '')"
+c7g_long_line="${c7g_long_line// /$(printf '\303\251\342\202\254')}"
+printf '%s\n' "$c7g_long_line" > "$c7g/long-line"
+printf '\377' > "$c7g/lone-ff"
+printf 'ab\342\202' > "$c7g/truncated-end"
+printf 'a\300\200b' > "$c7g/overlong-nul"
+printf 'a\355\240\200b' > "$c7g/surrogate"
+
+# Exact copies: empty, a lone line feed, multi-byte text, a literal U+FFFD, and one line over 9000
+# bytes of 2- and 3-byte characters.
+check_read_input "c7g:empty" 0 "$c7g/empty"
+check_read_input "c7g:line-feed" 0 "$c7g/line-feed"
+check_read_input "c7g:multi-byte" 0 "$c7g/multi-byte"
+check_read_input "c7g:replacement-char" 0 "$c7g/replacement-char"
+c7g_long_size="$(wc -c < "$c7g/long-line" | tr -d ' ')"
+if [ "$c7g_long_size" -gt 9000 ]; then
+  pass "c7g:long-line-size" "raw read: long line fixture is $c7g_long_size bytes"
+else
+  failed "c7g:long-line-size" "raw read: long line fixture is only $c7g_long_size bytes"
+fi
+check_read_input "c7g:long-line" 0 "$c7g/long-line"
+
+# Invalid UTF-8 copies differently: a lone 0xFF, a truncated 3-byte sequence at end of file, the
+# overlong C0 80, and the surrogate ED A0 80.
+check_read_input "c7g:lone-ff" 2 "$c7g/lone-ff"
+check_read_input "c7g:truncated-end" 2 "$c7g/truncated-end"
+check_read_input "c7g:overlong-nul" 2 "$c7g/overlong-nul"
+check_read_input "c7g:surrogate" 2 "$c7g/surrogate"
+
+# A missing file cannot be read.
+check_read_input "c7g:missing" 1 "$c7g/no-such-file"
+
+c7g_errexit="$(set -e; if hivemind_read_input_file "$c7g/lone-ff" "$c7g/errexit.copy"; then :; fi; printf 'survived')"
+assert_eq "c7g:errexit-condition" "survived" "$c7g_errexit" "raw read: safe under set -e in a condition"
+
 # ── Section 8: ledger-reconstruct-parse.sh — git_log_to_findings (PURE parse) ────
 echo ''
 echo '=== ledger-reconstruct-parse.sh: git_log_to_findings (git-log fix-surface parse) ==='
