@@ -252,8 +252,8 @@ function buildPullRequestTexts(run, plan, gates) {
  * --comment-file only when texts holds a comment.
  */
 function listPullRequestWords(plan, run, label, texts) {
-  const [inputsPath, bodyPath, commentPath] = [label, label + '-body', label + '-comment'].map((name) => buildInputsPath(run, 'pr', name));
-  return ['--head', plan.branch, '--base', plan.base, '--expect-commit', run.head, '--inputs', inputsPath, '--body-file', bodyPath, ...(texts.comment === undefined ? [] : ['--comment-file', commentPath])];
+  const buildPath = (suffix) => buildInputsPath(run, 'pr', label + suffix);
+  return ['--head', plan.branch, '--base', plan.base, '--expect-commit', run.head, '--inputs', buildPath(''), '--body-file', buildPath('-body'), ...(texts.comment === undefined ? [] : ['--comment-file', buildPath('-comment')])];
 }
 
 /**
@@ -262,15 +262,8 @@ function listPullRequestWords(plan, run, label, texts) {
  * carry --comment-file.
  */
 function buildPullRequestPrompt(words, texts, draft, pluginRoot) {
-  return [
-    'Open or reuse the PR with the command below.',
-    dataBlocksSentence(),
-    '',
-    formatCommandBlock(buildRunnerCommand('open-plan-pr', words, pluginRoot)),
-    formatInputsFileBlock(words[7], JSON.stringify({ title: texts.title, draft: draft })),
-    formatBodyFileBlock(words[9], texts.body),
-    ...(words[11] === undefined ? [] : [formatDataBlock('comment_file', { path: words[11], content: texts.comment })])
-  ].join('\n');
+  const inputs = JSON.stringify({ title: texts.title, draft: draft });
+  return ['Open or reuse the PR with the command below.', dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('open-plan-pr', words, pluginRoot)), formatFileBlock(words, 6, inputs), formatFileBlock(words, 8, texts.body), ...(words[10] === undefined ? [] : [formatFileBlock(words, 10, texts.comment)])].join('\n');
 }
 
 function isInputsRefusal(stderr) {
@@ -303,15 +296,16 @@ function describePullRequestBlocker(stderr, head, unseenPush) {
 function checkPullRequestRelay(relay, head, hasComment) {
   const unseenPush = ' stopped and did not see whether this step pushed. Taking it again pushes the same commit and reuses a pull request open on it.';
   const stopped = 'so ' + RUN_NAME + unseenPush;
+  const stepNoun = 'pull request';
   if (!validateSchema(RELAY_SCHEMA, relay).ok) {
-    return describeUnusableRelay(relay, 'pull request', stopped);
+    return describeUnusableRelay(relay, stepNoun, stopped);
   }
   if (relay.outcome === 'blocked') {
     return describePullRequestBlocker(relay.stderr, head, unseenPush);
   }
   const values = readRelayedLines(relay, openPlanPrRoutingSpec());
   if (values === undefined || (values.commented !== undefined) !== hasComment || values.commented === values.created) {
-    return describeUnusableRelay(relay, 'pull request', stopped, true);
+    return describeUnusableRelay(relay, stepNoun, stopped, true);
   }
   if (values.head_ref_oid !== head) {
     return { problem: describePullRequestCause('step reported a head commit other than the commit every gate held on', unseenPush), terminal: true };

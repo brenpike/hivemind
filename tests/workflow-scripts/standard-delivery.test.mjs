@@ -249,32 +249,42 @@ function pathProblem(location) {
 }
 
 /**
- * Runs molt.sh on an inputs file whose files list holds only the value and
- * returns true when the files rule refuses it, false when the run gets past
- * every inputs check to the trunk refusal of the scratch repo on main.
+ * Writes .hivemind/molt-inputs-<token>.json with the JSON text of inputs,
+ * its -subj file with subject and its -files file with filesText, both
+ * raw, runs molt.sh on the three from the scratch repo and returns its
+ * stderr.
+ */
+function runMoltOnFiles(scratch, token, inputs, subject, filesText) {
+  const stem = '.hivemind/molt-inputs-' + token;
+  writeRepoFile(scratch, stem + '.json', JSON.stringify(inputs));
+  writeRepoFile(scratch, stem + '-subj.json', subject);
+  writeRepoFile(scratch, stem + '-files.json', filesText);
+  const run = spawnSync('bash', [moltPath, '--trunk', 'main', '--inputs', stem + '.json', '--subject-file', stem + '-subj.json', '--files-file', stem + '-files.json'], { cwd: scratch.repo, env: scratch.env, encoding: 'utf8' });
+  return run.stderr;
+}
+
+/**
+ * Runs molt.sh on a files file that holds only the value and returns true
+ * when the files rule refuses it, false when the run gets past every
+ * inputs check to the trunk refusal of the scratch repo on main.
  */
 function moltRefusesPath(scratch, value, index) {
-  const inputsPath = '.hivemind/parity-' + index + '.json';
-  writeRepoFile(scratch, inputsPath, JSON.stringify({ type: 'chore', subject: 'check the path rule', files: [value] }));
-  const run = spawnSync('bash', [moltPath, '--trunk', 'main', '--inputs', inputsPath], { cwd: scratch.repo, env: scratch.env, encoding: 'utf8' });
-  const lastLine = run.stderr.trim().split('\n').pop();
+  const stderr = runMoltOnFiles(scratch, 'parity-' + index, { type: 'chore' }, 'check the path rule', value);
+  const lastLine = stderr.trim().split('\n').pop();
   if (lastLine === 'blocker: files must be an array of exact paths relative to the top of the work tree') {
     return true;
   }
-  assert.equal(lastLine, 'blocker: the current branch is trunk', 'molt.sh on ' + JSON.stringify(value) + ': ' + run.stderr);
+  assert.equal(lastLine, 'blocker: the current branch is trunk', 'molt.sh on ' + JSON.stringify(value) + ': ' + stderr);
   return false;
 }
 
 /**
- * Runs molt.sh on an inputs file with the subject and returns the last
+ * Runs molt.sh on a subject file with the subject and returns the last
  * stderr line: the trunk refusal of the scratch repo on main when the
  * subject passes every inputs check.
  */
 function moltSubjectLine(scratch, subject, breaking, index) {
-  const inputsPath = '.hivemind/subject-' + index + '.json';
-  writeRepoFile(scratch, inputsPath, JSON.stringify({ type: 'feat', breaking: breaking, subject: subject, files: ['src/cache.js'] }));
-  const run = spawnSync('bash', [moltPath, '--trunk', 'main', '--inputs', inputsPath], { cwd: scratch.repo, env: scratch.env, encoding: 'utf8' });
-  return run.stderr.trim().split('\n').pop();
+  return runMoltOnFiles(scratch, 'subject-' + index, { type: 'feat', breaking: breaking }, subject, 'src/cache.js').trim().split('\n').pop();
 }
 
 /**
@@ -522,12 +532,14 @@ function hasDataBlock(prompt, name) {
 }
 
 /**
- * Reads the command, inputs_file, body_file and comment_file blocks of a
- * synapse runner prompt into one object: each flag value of the command
- * under the flag name, dashes made underscores and every --ref value in one
- * ref list, then the inputs_file content fields, a string content parsed as
- * JSON, then the body_file content as body and the comment_file content as
- * comment. The --inputs, --body-file and --comment-file paths are left out.
+ * Reads the command and file blocks of a synapse runner prompt into one
+ * object: each flag value of the command under the flag name, dashes made
+ * underscores and every --ref value in one ref list, then the inputs_file
+ * content fields, its content parsed as JSON, then, with a subject_file
+ * block, its content as subject and the files_file content split on line
+ * feeds as files, [] with no files_file block, then the body_file content
+ * as body and the comment_file content as comment. The file paths are left
+ * out.
  */
 function readRunnerInputs(prompt) {
   const words = readDataBlock(prompt, 'command').replace(/^bash "[^"]*" /, '').split(' ');
@@ -536,16 +548,17 @@ function readRunnerInputs(prompt) {
     const key = words[index].replace(/^--/, '').replace(/-/g, '_');
     if (key === 'ref') {
       inputs.ref = [...(inputs.ref ?? []), words[index + 1]];
-    } else if (!['inputs', 'body_file', 'comment_file'].includes(key)) {
+    } else if (!['inputs', 'subject_file', 'files_file', 'body_file', 'comment_file'].includes(key)) {
       inputs[key] = words[index + 1];
     }
   }
   if (!hasDataBlock(prompt, 'inputs_file')) {
     return inputs;
   }
-  const content = readDataBlock(prompt, 'inputs_file').content;
-  const fields = { ...inputs, ...(typeof content === 'string' ? JSON.parse(content) : content) };
-  const withBody = hasDataBlock(prompt, 'body_file') ? { ...fields, body: readDataBlock(prompt, 'body_file').content } : fields;
+  const fields = { ...inputs, ...JSON.parse(readDataBlock(prompt, 'inputs_file').content) };
+  const files = hasDataBlock(prompt, 'files_file') ? readDataBlock(prompt, 'files_file').content.split('\n') : [];
+  const withSubject = hasDataBlock(prompt, 'subject_file') ? { ...fields, subject: readDataBlock(prompt, 'subject_file').content, files: files } : fields;
+  const withBody = hasDataBlock(prompt, 'body_file') ? { ...withSubject, body: readDataBlock(prompt, 'body_file').content } : withSubject;
   return hasDataBlock(prompt, 'comment_file') ? { ...withBody, comment: readDataBlock(prompt, 'comment_file').content } : withBody;
 }
 
@@ -558,10 +571,10 @@ function withoutDataBlock(prompt, name) {
 
 /**
  * The prompt text outside its command block and, when it has them, its
- * inputs_file, body_file and comment_file blocks.
+ * file blocks.
  */
 function readTextOutsideRunnerBlocks(prompt) {
-  return ['inputs_file', 'body_file', 'comment_file'].reduce((outside, name) => (hasDataBlock(outside, name) ? withoutDataBlock(outside, name) : outside), withoutDataBlock(prompt, 'command'));
+  return listFileBlockNames(prompt).reduce((outside, name) => (hasDataBlock(outside, name) ? withoutDataBlock(outside, name) : outside), withoutDataBlock(prompt, 'command'));
 }
 
 function resumeWith(launchArgs, pausedResult, reply) {
@@ -670,13 +683,30 @@ function runScriptIn(scratch, scriptPath, scriptArgs) {
 const UNREAD_WRITE_ERROR = 'File has not been read yet. Read it first before writing to it.';
 
 /**
+ * Returns prompt with suffix added to the end of its subject_file content:
+ * a runner copy mistake (issue 595). An empty suffix gives prompt.
+ */
+function addSubjectCopyFault(prompt, suffix) {
+  const lines = prompt.split('\n');
+  const start = lines.indexOf('<subject_file>');
+  const file = JSON.parse(lines[start + 1]);
+  lines[start + 1] = JSON.stringify({ ...file, content: file.content + suffix });
+  return lines.join('\n');
+}
+
+/**
+ * The name of each *_file block of a runner prompt, in prompt order.
+ */
+function listFileBlockNames(prompt) {
+  return prompt.split('\n').filter((line) => /^<[a-z]+_file>$/.test(line)).map((line) => line.slice(1, -1));
+}
+
+/**
  * Does what synapse.md says a runner does with a prompt: it puts the plugin
- * root for {plugin-root} in the command, writes the inputs_file content,
- * then the body_file content, then the comment_file content, to its path as
- * given when the block is there,
- * a string content as is and an object as JSON, then runs the filled
- * command with bash -c, as the Bash tool does, so the double-quoted script
- * path stays one word. Like the Write tool, it refuses a file path that
+ * root for {plugin-root} in the command, writes each *_file block in prompt
+ * order, its content, which must be a string, as is to its path as given,
+ * then runs the filled command with bash -c, as the Bash tool does, so the
+ * double-quoted script path stays one word. Like the Write tool, it refuses a file path that
  * already exists, which it never read: blocked with UNREAD_WRITE_ERROR.
  * Each Write and the command run from cwd, the checkout top by default.
  * askGate(call) is asked first for each Write and Bash call, {tool_name,
@@ -684,9 +714,10 @@ const UNREAD_WRITE_ERROR = 'File has not been read yet. Read it first before wri
  * relay; the default asks nothing.
  */
 function runCommandBlock(scratch, prompt, cwd = scratch.repo, askGate = () => undefined) {
-  for (const name of ['inputs_file', 'body_file', 'comment_file'].filter((blockName) => hasDataBlock(prompt, blockName))) {
+  for (const name of listFileBlockNames(prompt)) {
     const file = readDataBlock(prompt, name);
-    const content = typeof file.content === 'string' ? file.content : JSON.stringify(file.content);
+    assert.equal(typeof file.content, 'string', name);
+    const content = file.content;
     const writeDenial = askGate({ tool_name: 'Write', tool_input: { file_path: file.path, content: content } });
     if (writeDenial !== undefined) {
       return { outcome: 'blocked', stderr: writeDenial };
@@ -2731,19 +2762,54 @@ const ROW_TESTS = {
     });
   },
   'SD-15': () => {
-    test('the commit runner commits the wave files with the mapped type, from its command and inputs_file blocks', async () => {
+    test('the commit runner commits the wave files with the mapped type, from its command, inputs_file, subject_file and files_file blocks', async () => {
       const plan = makePlan({ classification: 'bugfix', breaking: true, steps: [makeStep('S1', ['src/a.js', 'src/b.js']), makeStep('S2', ['src/c.js', 'src/b.js'])] });
       const results = happyResults({ 'plan-1': planResult(plan), 'work-1-S1': WORKER_DONE, 'work-1-S2': WORKER_DONE, 'commit-1-2': commitRelay({ commit: THIRD }), ...tailResults(1, THIRD) });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const call = callOf(run, 'commit-1-1');
-      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "' + pluginRoot + '/skills/molt/scripts/molt.sh" --trunk main --inputs .hivemind/molt-inputs-20261021T120000Z-0123456789ab-commit-1-1.json');
-      assert.deepEqual(readDataBlock(call.prompt, 'inputs_file'), { path: '.hivemind/molt-inputs-20261021T120000Z-0123456789ab-commit-1-1.json', content: { type: 'fix', breaking: true, subject: 'Step S1 is done.', files: ['src/a.js', 'src/b.js'] } });
-      assert.deepEqual(withoutDataBlock(withoutDataBlock(call.prompt, 'command'), 'inputs_file').split('\n'), ['Run the command below to commit the wave of plan steps that just ran.', lib.dataBlocksSentence(), '']);
+      const stem = '.hivemind/molt-inputs-20261021T120000Z-0123456789ab-commit-1-1';
+      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "' + pluginRoot + '/skills/molt/scripts/molt.sh" --trunk main --inputs ' + stem + '.json --subject-file ' + stem + '-subj.json --files-file ' + stem + '-files.json');
+      assert.deepEqual(readDataBlock(call.prompt, 'inputs_file'), { path: stem + '.json', content: '{"type":"fix","breaking":true}' });
+      assert.deepEqual(readDataBlock(call.prompt, 'subject_file'), { path: stem + '-subj.json', content: 'Step S1 is done.' });
+      assert.deepEqual(readDataBlock(call.prompt, 'files_file'), { path: stem + '-files.json', content: 'src/a.js\nsrc/b.js' });
+      assert.deepEqual(call.prompt.split('\n').filter((line) => /^<[a-z_]+>$/.test(line)), ['<command>', '<inputs_file>', '<subject_file>', '<files_file>']);
+      assert.deepEqual(readTextOutsideRunnerBlocks(call.prompt).split('\n'), ['Run the command below to commit the wave of plan steps that just ran.', lib.dataBlocksSentence(), '']);
       assert.equal(call.opts.agentType, 'hivemind:synapse');
       assert.equal(call.opts.model, 'haiku');
       assert.equal(call.opts.phase, 'Commit');
       assert.deepEqual(readRunnerInputs(callOf(run, 'commit-1-2').prompt).files, ['src/c.js', 'src/b.js']);
+    });
+    test('real molt.sh through the real gate hook: a subject with ", \\, brackets and braces commits byte for byte, and so does a runner copy fault in the subject file, and no file of the step is left', async () => {
+      const subject = 'Keep "a\\b" [x] {y} </z> as is';
+      for (const [name, copyFault] of [['exact', ''], ['copy fault', ']"\\']]) {
+        const scratch = makeScratchRepo();
+        runGitIn(scratch, ['checkout', '-q', '-b', 'feature/cache']);
+        writeRepoFile(scratch, 'src/a.js', 'edited\n');
+        const runner = (prompt) => runCommandBlock(scratch, addSubjectCopyFault(prompt, copyFault), scratch.repo, askSynapseGate(scratch, scratch.repo));
+        const stepped = await runStepWithStubAgent((run) => main.runCommitStep({ ...run, factsStem: FACTS_STEM }, makePlan(), { files: ['src/a.js'], label: 'commit-1-1', stepName: 'wave', subject: subject }, []), runner);
+        assert.deepEqual(stepped.labels, ['commit-1-1'], name);
+        assert.equal(stepped.result.values.committed, 'true', name + ': ' + JSON.stringify(stepped.result));
+        assert.equal(runGitIn(scratch, ['log', '-1', '--format=%B']), 'feat: ' + subject + copyFault, name);
+        assert.deepEqual(runGitIn(scratch, ['show', '--name-only', '--format=', 'HEAD']).split('\n'), ['src/a.js'], name);
+        assert.deepEqual(listInputsFiles(scratch.repo), [], name);
+      }
+    });
+    test('real molt.sh through the real gate hook: the head check sends no files_file block and no --files-file, reports the head, and leaves no file', async () => {
+      const scratch = makeScratchRepo();
+      runGitIn(scratch, ['checkout', '-q', '-b', 'feature/cache']);
+      const prompts = [];
+      const runner = (prompt) => {
+        prompts.push(prompt);
+        return runCommandBlock(scratch, prompt, scratch.repo, askSynapseGate(scratch, scratch.repo));
+      };
+      const stepped = await runStepWithStubAgent((run) => main.runCommitStep({ ...run, factsStem: FACTS_STEM }, makePlan(), { files: [], label: 'head-1-1', stepName: 'head' }, []), runner);
+      assert.deepEqual(stepped.labels, ['head-1-1']);
+      assert.deepEqual(stepped.result.values, { branch: 'feature/cache', commit: runGitIn(scratch, ['rev-parse', 'HEAD']), committed: 'false' });
+      assert.deepEqual(listFileBlockNames(prompts[0]), ['inputs_file', 'subject_file']);
+      assert.ok(!readDataBlock(prompts[0], 'command').includes('--files-file'), prompts[0]);
+      assert.equal(readDataBlock(prompts[0], 'subject_file').content, 'read the branch head');
+      assert.deepEqual(listInputsFiles(scratch.repo), []);
     });
     test('the commit type map covers the plan classifications and names only molt types', () => {
       const moltText = readText(moltPath);
@@ -6585,7 +6651,7 @@ const ROW_TESTS = {
             allowed.questionKey += 1;
           } else if (functionName === 'acceptResolution' && /JSON\.stringify\(listed\.brief\) === JSON\.stringify\(entry\.brief\)/.test(line)) {
             allowed.acceptResolution += 1;
-          } else if (functionName === 'buildPullRequestPrompt' && line.trim() === 'formatInputsFileBlock(words[7], JSON.stringify({ title: texts.title, draft: draft })),') {
+          } else if (functionName === 'buildPullRequestPrompt' && line.trim() === 'const inputs = JSON.stringify({ title: texts.title, draft: draft });') {
             allowed.pullRequestInputs += 1;
           } else {
             stray.push(line.trim());
@@ -8040,14 +8106,18 @@ const ROW_TESTS = {
       assert.equal(main.commitStepTexts('head').subject, 'read the branch head');
       assert.equal(main.commitStepTexts('wave').subject, undefined);
     });
-    test('every key of the commit inputs_file content is a field molt.sh takes', () => {
+    test('every key of the commit inputs_file content is a field molt.sh takes, and the subject and files go raw in their own blocks', () => {
       const moltFields = readMoltInputFields();
-      assert.ok(moltFields.includes('subject') && moltFields.includes('files'), moltFields.join(','));
+      assert.deepEqual(moltFields, ['type', 'scope', 'breaking']);
       for (const [stepName, texts] of [...['wave', 'fix', 'head'].map((name) => [name, main.commitStepTexts(name)]), ['review', main.reviewCommitTexts()]]) {
         const subject = texts.subject || 'Step S1 is done.';
-        const content = readDataBlock(main.buildCommitPrompt(['src/a.js'], makePlan(), 'main', '.hivemind/molt-inputs-x.json', texts.purpose, subject), 'inputs_file').content;
-        assert.deepEqual(Object.keys(content), ['type', 'breaking', 'subject', 'files'], stepName);
+        const words = main.listCommitWords({ trunk: 'main', factsStem: 'x' }, 'commit-1-1', ['src/a.js', 'src/b.js']);
+        const prompt = main.buildCommitPrompt(words, ['src/a.js', 'src/b.js'], makePlan(), texts.purpose, subject);
+        const content = JSON.parse(readDataBlock(prompt, 'inputs_file').content);
+        assert.deepEqual(Object.keys(content), ['type', 'breaking'], stepName);
         Object.keys(content).forEach((key) => assert.ok(moltFields.includes(key), stepName + ' ' + key));
+        assert.equal(readDataBlock(prompt, 'subject_file').content, subject, stepName);
+        assert.equal(readDataBlock(prompt, 'files_file').content, 'src/a.js\nsrc/b.js', stepName);
       }
     });
     test('real molt.sh: every subject passes its subject rules, and the raw fallback outcomes do not all', () => {
@@ -8778,6 +8848,9 @@ const ROW_TESTS = {
           assert.ok(firstPrompt.includes(firstPath) && retryPrompt.includes(retryPath), retryPrompt);
           if (kind === 'pr') {
             assert.deepEqual([readDataBlock(firstPrompt, 'body_file').path, readDataBlock(retryPrompt, 'body_file').path], [firstPath.replace(/\.json$/, '-body.json'), retryPath.replace(/\.json$/, '-body.json')]);
+          } else {
+            assert.deepEqual([readDataBlock(firstPrompt, 'subject_file').path, readDataBlock(retryPrompt, 'subject_file').path], [firstPath.replace(/\.json$/, '-subj.json'), retryPath.replace(/\.json$/, '-subj.json')]);
+            assert.deepEqual([readDataBlock(firstPrompt, 'files_file').path, readDataBlock(retryPrompt, 'files_file').path], [firstPath.replace(/\.json$/, '-files.json'), retryPath.replace(/\.json$/, '-files.json')]);
           }
           assert.notEqual(retryPrompt, firstPrompt);
           const stemLabel = FACTS_STEM + '-' + label;
@@ -8786,11 +8859,10 @@ const ROW_TESTS = {
         assert.deepEqual({ ...callOf(run, label + '-retry').opts, label: label }, { ...callOf(run, label).opts });
       });
     }
-    test('a commit runner that wrote its inputs file and then hit a transient failure leaves the retry a path of its own, and a real run completes', async () => {
+    test('a commit runner that wrote its files and then hit a transient failure leaves the retry paths of its own, and a real run completes', async () => {
       const scratch = makeScratchRepo();
       const writeThenFail = (prompt) => {
-        const inputsFile = readDataBlock(prompt, 'inputs_file');
-        writeRepoFile(scratch, inputsFile.path, JSON.stringify(inputsFile.content));
+        listFileBlockNames(prompt).map((name) => readDataBlock(prompt, name)).forEach((file) => writeRepoFile(scratch, file.path, file.content));
         return transientBlock;
       };
       const run = await runWorkflow(LAUNCH, realResults(scratch, { 'commit-1-1': writeThenFail, 'commit-1-1-retry': realCommitRunner(scratch) }));
@@ -8798,7 +8870,9 @@ const ROW_TESTS = {
       const firstPath = readDataBlock(callOf(run, 'commit-1-1').prompt, 'inputs_file').path;
       const retryPath = readDataBlock(callOf(run, 'commit-1-1-retry').prompt, 'inputs_file').path;
       assert.ok(firstPath.endsWith('-commit-1-1.json') && retryPath === firstPath.replace(/\.json$/, '-retry.json'), retryPath);
-      assert.ok(existsSync(join(scratch.repo, firstPath)));
+      for (const suffix of ['.json', '-subj.json', '-files.json']) {
+        assert.ok(existsSync(join(scratch.repo, firstPath.replace(/\.json$/, suffix))), suffix);
+      }
     });
     test('a transient block again at the retry is read as a blocked commit, which ends the run, and nothing retries twice', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'commit-1-1': transientBlock, 'commit-1-1-retry': transientBlock }));
@@ -9022,12 +9096,13 @@ const ROW_TESTS = {
     });
     test('the runner prompts use the block names and placeholders of synapse.md', async () => {
       const synapseText = readText(join(repoRoot, 'plugin/agents/synapse.md'));
-      for (const word of ['`command`', '`inputs_file`', '`body_file`', '`comment_file`', '`{plugin-root}`', '{path, content}']) {
+      for (const word of ['`command`', '`inputs_file`', '`subject_file`', '`files_file`', '`body_file`', '`comment_file`', '`{plugin-root}`', '{path, content}']) {
         assert.ok(synapseText.includes(word), word);
       }
       assert.ok(synapseText.includes('Replace `{plugin-root}` with `${CLAUDE_PLUGIN_ROOT}`, only in the `command` string.'));
       assert.ok(synapseText.includes('- `body_file` and `comment_file`, only for a pull request: `{path, content}`.'));
-      assert.ok(synapseText.includes('1. Write any `inputs_file`, then any `body_file`, then any `comment_file`: its `content` (a string as is, an object as JSON) to its `path`, exactly as given.'));
+      assert.ok(synapseText.includes('- `inputs_file`, only for a commit or pull request, and `subject_file` and `files_file`, only for a commit: `{path, content}`.'));
+      assert.ok(synapseText.includes('1. Write each `*_file` block in prompt order: its `content` string to its `path`, exactly as given.'));
       assert.ok(!synapseText.includes('{token}'));
       assert.ok(!synapseText.includes('wherever they appear'));
       const run = await runWorkflow(LAUNCH, happyResults());
@@ -9038,16 +9113,17 @@ const ROW_TESTS = {
           assert.ok(readDataBlock(prompt, 'command').startsWith('bash "' + pluginRoot + '/skills/'), label);
         }
         assert.equal(hasDataBlock(prompt, 'inputs_file'), label !== 'facts-1' && label !== 'branch-1', label);
+        assert.equal(hasDataBlock(prompt, 'subject_file'), label.includes('commit-'), label);
+        assert.equal(hasDataBlock(prompt, 'files_file'), label === 'commit-1-1', label);
         assert.equal(hasDataBlock(prompt, 'body_file'), label === 'pr-1', label);
         assert.equal(hasDataBlock(prompt, 'comment_file'), label === 'pr-1', label);
       }
       for (const label of ['commit-1-1', 'review-commit-1-1', 'pr-1']) {
         const prompt = callOf(run, label).prompt;
         assert.ok(!prompt.includes('{token}'), label);
-        assert.ok(!readDataBlock(prompt, 'inputs_file').path.includes('{'), label);
+        listFileBlockNames(prompt).forEach((name) => assert.ok(!readDataBlock(prompt, name).path.includes('{'), label + ' ' + name));
+        listFileBlockNames(prompt).forEach((name) => assert.equal(typeof readDataBlock(prompt, name).content, 'string', label + ' ' + name));
       }
-      assert.equal(typeof readDataBlock(callOf(run, 'commit-1-1').prompt, 'inputs_file').content, 'object');
-      assert.equal(typeof readDataBlock(callOf(run, 'pr-1').prompt, 'inputs_file').content, 'string');
       assert.ok(!readDataBlock(callOf(run, 'pr-1').prompt, 'body_file').path.includes('{'));
       assert.ok(!readDataBlock(callOf(run, 'pr-1').prompt, 'comment_file').path.includes('{'));
     });
@@ -9072,7 +9148,7 @@ const ROW_TESTS = {
         assertPassStopEnd(run, MALFORMED_FACTS, 'facts-1', 'report');
       }
     });
-    test('every command the engine builds gets an allow from the real synapse gate hook for hivemind:synapse only, and its inputs and body file Writes an allow from the checkout top and from a subfolder with no .hivemind', async () => {
+    test('every command the engine builds gets an allow from the real synapse gate hook for hivemind:synapse only, and each of its file Writes an allow from the checkout top and from a subfolder with no .hivemind', async () => {
       const scratch = makeScratchRepo();
       mkdirSync(join(scratch.repo, '.hivemind'));
       const subfolder = join(scratch.repo, 'src/deep');
@@ -9093,7 +9169,7 @@ const ROW_TESTS = {
         const command = builtCommand.split('{plugin-root}').join(pluginRoot);
         assert.equal(readGateDecision(scratch, { tool_name: 'Bash', agent_type: 'hivemind:synapse', tool_input: { command: command } }), 'allow', call.opts.label + ': ' + command);
         assert.equal(readGateDecision(scratch, { tool_name: 'Bash', agent_type: 'hivemind:drone', tool_input: { command: command } }), 'none', call.opts.label);
-        for (const name of ['inputs_file', 'body_file'].filter((blockName) => hasDataBlock(call.prompt, blockName))) {
+        for (const name of listFileBlockNames(call.prompt)) {
           const filePath = readDataBlock(call.prompt, name).path;
           for (const cwd of [scratch.repo, subfolder]) {
             assert.equal(readGateDecision(scratch, { tool_name: 'Write', agent_type: 'hivemind:synapse', cwd: cwd, tool_input: { file_path: filePath, content: '{}' } }), 'allow', call.opts.label + ' from ' + cwd + ': ' + filePath);
@@ -9135,7 +9211,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(second), labelsOf(first));
       const firstPaths = pairInputsPaths(first, happyResults()).map((pair) => pair.path);
       const secondPaths = pairInputsPaths(second, otherResults).map((pair) => pair.path);
-      assert.equal(firstPaths.length, 4);
+      assert.equal(firstPaths.length, 7);
       assert.ok(secondPaths.every((path) => !firstPaths.includes(path)), JSON.stringify([firstPaths, secondPaths]));
     });
     test('a paused run sends each commit and PR prompt byte for byte as its resumed run sends it under the same label', async () => {
@@ -9155,15 +9231,20 @@ const ROW_TESTS = {
       }
       const bodyPath = main.buildInputsPath({ factsStem: FACTS_STEM }, 'pr', 'pr-999-999-retry-body');
       assert.equal(lib.describeRunnerWordProblem(['--body-file', bodyPath]), undefined, bodyPath);
+      const commitWords = main.listCommitWords({ trunk: 'main', factsStem: FACTS_STEM }, 'review-commit-999-999-retry', ['src/a.js']);
+      assert.deepEqual([...commitWords.slice(4)], ['--subject-file', '.hivemind/molt-inputs-' + FACTS_STEM + '-review-commit-999-999-retry-subj.json', '--files-file', '.hivemind/molt-inputs-' + FACTS_STEM + '-review-commit-999-999-retry-files.json']);
+      assert.equal(lib.describeRunnerWordProblem(commitWords), undefined, commitWords.join(' '));
       assert.equal(lib.describeRunnerWordProblem(['--body-file', '.hivemind/molt-inputs-' + FACTS_STEM + '-pr-1-body.json']), 'its --body-file value is not one the script takes');
       assert.equal(main.buildInputsPath({ factsStem: undefined }, 'molt', 'commit-1-1'), undefined);
     });
-    test('a call label whose retry label would leave the --inputs class is a terminal stop before any runner call', async () => {
-      const longLabel = 'c'.repeat(64 - FACTS_STEM.length - 1);
-      assert.equal(lib.describeRunnerWordProblem(['--inputs', main.buildInputsPath({ factsStem: FACTS_STEM }, 'molt', longLabel)]), undefined);
-      const stepped = await runStepWithStubAgent((run) => main.runCommitStep({ ...run, factsStem: FACTS_STEM }, makePlan(), { files: [], label: longLabel, stepName: 'wave', subject: 'Step S1 is done.' }, []));
-      assert.deepEqual(stepped.labels, []);
-      assert.equal(stepped.result.result.message.split('\n\n')[0], 'The commit step did not run its script, so the delivery stopped: its --inputs value is not one the script takes.');
+    test('a call label whose retry label would leave the --inputs class, or whose own files path would leave its class, is a terminal stop before any runner call', async () => {
+      const longLabel = 'c'.repeat(64 - FACTS_STEM.length - 1 - '-subj'.length);
+      assert.equal(lib.describeRunnerWordProblem(main.listCommitWords({ trunk: 'main', factsStem: FACTS_STEM }, longLabel, [])), undefined);
+      for (const [files, flag] of [[[], '--inputs'], [['src/a.js'], '--files-file']]) {
+        const stepped = await runStepWithStubAgent((run) => main.runCommitStep({ ...run, factsStem: FACTS_STEM }, makePlan(), { files: files, label: longLabel, stepName: 'wave', subject: 'Step S1 is done.' }, []));
+        assert.deepEqual(stepped.labels, []);
+        assert.equal(stepped.result.result.message.split('\n\n')[0], 'The commit step did not run its script, so the delivery stopped: its ' + flag + ' value is not one the script takes.');
+      }
     });
     test('issue 487: stale inputs files of another run at this run\'s labels do not stop a real run', async () => {
       const scratch = makeScratchRepo();
@@ -9214,11 +9295,11 @@ const ROW_TESTS = {
       });
     }
     test('describeRunnerWordProblem refuses a word outside its value class, naming the flag and never the value', () => {
-      const good = [['--trunk', 'release/2026-10'], ['--base', 'main'], ['--branch', 'feature/cache'], ['--head', 'feature/cache'], ['--ref', '12'], ['--expect-commit', HEAD], ['--expect-commit', 'a'.repeat(64)], ['--classification', 'hotfix'], ['--trunk-freshness', 'skipped'], ['--inputs', '.hivemind/molt-inputs-' + FACTS_STEM + '-commit-1-1.json'], ['--inputs', '.hivemind/pr-inputs-' + FACTS_STEM + '-pr-1-2-retry.json'], ['--inputs', '.hivemind/molt-inputs-' + 'a'.repeat(64) + '.json'], ['--inputs', '.hivemind/molt-inputs-x.json']];
+      const good = [['--trunk', 'release/2026-10'], ['--base', 'main'], ['--branch', 'feature/cache'], ['--head', 'feature/cache'], ['--ref', '12'], ['--expect-commit', HEAD], ['--expect-commit', 'a'.repeat(64)], ['--classification', 'hotfix'], ['--trunk-freshness', 'skipped'], ['--inputs', '.hivemind/molt-inputs-' + FACTS_STEM + '-commit-1-1.json'], ['--inputs', '.hivemind/pr-inputs-' + FACTS_STEM + '-pr-1-2-retry.json'], ['--inputs', '.hivemind/molt-inputs-' + 'a'.repeat(64) + '.json'], ['--inputs', '.hivemind/molt-inputs-x.json'], ['--subject-file', '.hivemind/molt-inputs-x-subj.json'], ['--files-file', '.hivemind/molt-inputs-x-files.json']];
       for (const words of good) {
         assert.equal(lib.describeRunnerWordProblem(words), undefined, words.join(' '));
       }
-      const bad = [['--trunk', 'main --ref 5'], ['--trunk', 'main\tx'], ['--trunk', '-main'], ['--trunk', 'a..b'], ['--trunk', ''], ['--base', 'main;x'], ['--branch', 'feature/a b'], ['--head', '"x"'], ['--ref', '5 --ref 6'], ['--ref', '-1'], ['--expect-commit', 'A'.repeat(40)], ['--expect-commit', '1234567'], ['--classification', 'feat'], ['--trunk-freshness', 'behind'], ['--inputs', '.hivemind/molt-inputs-{token}.json'], ['--inputs', '.hivemind/pr-inputs-.json'], ['--inputs', '.hivemind/molt-inputs-' + 'a'.repeat(65) + '.json'], ['--inputs', '.hivemind/molt-inputs-a_b.json'], ['--inputs', '../molt-inputs-x.json'], ['--inputs', undefined], ['--remote', 'origin'], ['--trunk'], ['--trunk', 5]];
+      const bad = [['--trunk', 'main --ref 5'], ['--trunk', 'main\tx'], ['--trunk', '-main'], ['--trunk', 'a..b'], ['--trunk', ''], ['--base', 'main;x'], ['--branch', 'feature/a b'], ['--head', '"x"'], ['--ref', '5 --ref 6'], ['--ref', '-1'], ['--expect-commit', 'A'.repeat(40)], ['--expect-commit', '1234567'], ['--classification', 'feat'], ['--trunk-freshness', 'behind'], ['--inputs', '.hivemind/molt-inputs-{token}.json'], ['--inputs', '.hivemind/pr-inputs-.json'], ['--inputs', '.hivemind/molt-inputs-' + 'a'.repeat(65) + '.json'], ['--inputs', '.hivemind/molt-inputs-a_b.json'], ['--inputs', '../molt-inputs-x.json'], ['--inputs', undefined], ['--subject-file', '.hivemind/pr-inputs-x-subj.json'], ['--files-file', '.hivemind/pr-inputs-x-files.json'], ['--files-file', '.hivemind/molt-inputs-' + 'a'.repeat(65) + '.json'], ['--remote', 'origin'], ['--trunk'], ['--trunk', 5]];
       for (const words of bad) {
         const problem = lib.describeRunnerWordProblem(words);
         assert.equal(problem, 'its ' + words[0] + ' value is not one the script takes', JSON.stringify(words));
@@ -10486,8 +10567,9 @@ const ROW_TESTS = {
  * the path that block names, the --inputs word of its command, and the
  * expected path: .hivemind/<kind>-inputs-<stem>-<label>.json, stem the
  * facts_file of the latest facts relay in results before the call. A call
- * that carries a body_file block adds a pair of that path, the --body-file
- * word and .hivemind/pr-inputs-<stem>-<label>-body.json.
+ * that carries a subject_file, files_file or body_file block adds a pair of
+ * that path, the --subject-file, --files-file or --body-file word and the
+ * expected path with -subj, -files or -body before .json.
  */
 function pairInputsPaths(run, results) {
   let stem;
@@ -10501,11 +10583,9 @@ function pairInputsPaths(run, results) {
     if (hasDataBlock(call.prompt, 'inputs_file')) {
       const words = readDataBlock(call.prompt, 'command').split(' ');
       const kind = words[1].includes('/molt/') ? 'molt' : 'pr';
-      pairs.push({ label: label, path: readDataBlock(call.prompt, 'inputs_file').path, word: words[words.indexOf('--inputs') + 1], expected: '.hivemind/' + kind + '-inputs-' + stem + '-' + label + '.json' });
-    }
-    if (hasDataBlock(call.prompt, 'body_file')) {
-      const words = readDataBlock(call.prompt, 'command').split(' ');
-      pairs.push({ label: label + ' body', path: readDataBlock(call.prompt, 'body_file').path, word: words[words.indexOf('--body-file') + 1], expected: '.hivemind/pr-inputs-' + stem + '-' + label + '-body.json' });
+      for (const [name, flag, suffix] of [['inputs_file', '--inputs', ''], ['subject_file', '--subject-file', '-subj'], ['files_file', '--files-file', '-files'], ['body_file', '--body-file', '-body']].filter(([blockName]) => hasDataBlock(call.prompt, blockName))) {
+        pairs.push({ label: label + ' ' + name, path: readDataBlock(call.prompt, name).path, word: words[words.indexOf(flag) + 1], expected: '.hivemind/' + kind + '-inputs-' + stem + '-' + label + suffix + '.json' });
+      }
     }
   }
   return pairs;
@@ -10553,12 +10633,12 @@ function heldGates(run) {
  * state, with phase() and agent() stubs that record each agent label, and
  * returns {result, labels}.
  */
-async function runStepWithStubAgent(callStep) {
+async function runStepWithStubAgent(callStep, answer = () => null) {
   const labels = [];
   main.phase = () => undefined;
   main.agent = async (prompt, opts) => {
     labels.push(opts.label);
-    return null;
+    return answer(prompt, opts);
   };
   try {
     const run = main.createRunState(main.readDeliveryLaunch({ request: REQUEST }));

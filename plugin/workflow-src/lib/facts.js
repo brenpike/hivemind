@@ -29,13 +29,16 @@
  *   formatDataBlock(name, text)
  *       '<name>', the JSON of text with each '<' escaped, '</name>', on
  *       three lines.
- *   formatCommandBlock(command), formatInputsFileBlock(path, content),
- *   formatBodyFileBlock(path, text)
+ *   formatCommandBlock(command), formatFileBlock(words, index, content)
  *       the synapse data blocks: command, a JSON string holding one whole
- *       command line, inputs_file, {path, content}, content an object or
- *       its JSON text, body_file, {path, content}, content the raw pull
- *       request body, and comment_file (formatDataBlock, lib/pr.js), the
- *       same for the raw reuse comment. Their names and
+ *       command line, and the file block of the command flag words[index],
+ *       {path, content}, path words[index + 1] and content the string the
+ *       runner writes as is. The block name is the flag less its -- and any
+ *       -file ending, then _file: --inputs gives inputs_file, the JSON text
+ *       of a runner's inputs, --subject-file and --files-file subject_file
+ *       and files_file, the raw commit subject and file list (lib/commit.js),
+ *       and --body-file and --comment-file body_file and comment_file, the
+ *       raw pull request body and reuse comment (lib/pr.js). Their names and
  *       the one placeholder a command can hold, {plugin-root}, are the
  *       words of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md. A command holds
  *       the placeholder only when buildRunnerCommand got no root. An inputs
@@ -48,7 +51,8 @@
  *       digits, --expect-commit 40 or 64 lowercase hex digits,
  *       --classification and --trunk-freshness their enums, and --inputs
  *       .hivemind/molt-inputs-<token>.json or .hivemind/pr-inputs-<token>.json,
- *       <token> 1 to 64 characters of A-Z, a-z, 0-9 and dash, and
+ *       <token> 1 to 64 characters of A-Z, a-z, 0-9 and dash,
+ *       --subject-file and --files-file the molt form alone, and
  *       --body-file and --comment-file the pr form alone.
  *   describeRunnerWordProblem(words)
  *       undefined when words is flag and value pairs, each flag a
@@ -280,17 +284,14 @@ function formatCommandBlock(command) {
   return formatDataBlock('command', command);
 }
 
-function formatInputsFileBlock(path, content) {
-  return formatDataBlock('inputs_file', { path: path, content: content });
-}
-
-function formatBodyFileBlock(path, text) {
-  return formatDataBlock('body_file', { path: path, content: text });
+function formatFileBlock(words, index, content) {
+  return formatDataBlock(words[index].slice(2).replace(/(?:-file)?$/, '_file'), { path: words[index + 1], content: content });
 }
 
 function runnerValuePatterns() {
   const name = gitIdentifierPattern();
   const prFile = /^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/;
+  const moltFile = /^\.hivemind\/molt-inputs-[A-Za-z0-9-]{1,64}\.json$/;
   return {
     '--trunk': name,
     '--base': name,
@@ -301,6 +302,8 @@ function runnerValuePatterns() {
     '--classification': /^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
     '--trunk-freshness': /^(?:fresh|stale|skipped)$/,
     '--inputs': /^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/,
+    '--subject-file': moltFile,
+    '--files-file': moltFile,
     '--body-file': prFile,
     '--comment-file': prFile
   };
@@ -420,18 +423,8 @@ function hasFactsStop(stops, stop) {
 }
 
 function matchesFreshnessCounts(freshness, ahead, behind) {
-  const isAhead = ahead !== '0';
-  const isBehind = behind !== '0';
-  if (freshness === 'ahead') {
-    return isAhead && !isBehind;
-  }
-  if (freshness === 'behind') {
-    return !isAhead && isBehind;
-  }
-  if (freshness === 'diverged') {
-    return isAhead && isBehind;
-  }
-  return !isAhead && !isBehind;
+  const isDiverged = freshness === 'diverged';
+  return (ahead !== '0') === (isDiverged || freshness === 'ahead') && (behind !== '0') === (isDiverged || freshness === 'behind');
 }
 
 function isConsistentFactsRelay(values, trunk) {

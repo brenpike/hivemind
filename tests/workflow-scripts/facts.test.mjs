@@ -507,18 +507,26 @@ describe('synapse runner commands and blocks', () => {
   }
   /**
    * Returns the exact-form runner commands that put value in the flag's
-   * slot: the molt and open-plan-pr commands for --inputs, the open-plan-pr
-   * command for --body-file.
+   * slot: the molt and open-plan-pr commands for --inputs, the molt command
+   * for --subject-file and --files-file, the open-plan-pr command for
+   * --body-file and --comment-file.
    */
   function listFlagCommands(flag, value) {
     const prWords = (inputs, body) => ['--head', 'feature/cache', '--base', 'main', '--expect-commit', 'a'.repeat(40), '--inputs', inputs, '--body-file', body];
+    const moltWords = (inputs, subject) => ['--trunk', 'main', '--inputs', inputs, '--subject-file', subject];
+    if (flag === '--subject-file') {
+      return [resolveCommand(lib.buildRunnerCommand('molt', moltWords('.hivemind/molt-inputs-y.json', value)))];
+    }
+    if (flag === '--files-file') {
+      return [resolveCommand(lib.buildRunnerCommand('molt', [...moltWords('.hivemind/molt-inputs-y.json', '.hivemind/molt-inputs-y-subj.json'), flag, value]))];
+    }
     if (flag === '--body-file') {
       return [resolveCommand(lib.buildRunnerCommand('open-plan-pr', prWords('.hivemind/pr-inputs-x.json', value)))];
     }
     if (flag === '--comment-file') {
       return [resolveCommand(lib.buildRunnerCommand('open-plan-pr', [...prWords('.hivemind/pr-inputs-x.json', '.hivemind/pr-inputs-x-body.json'), flag, value]))];
     }
-    return [resolveCommand(lib.buildRunnerCommand('molt', ['--trunk', 'main', '--inputs', value])), resolveCommand(lib.buildRunnerCommand('open-plan-pr', prWords(value, '.hivemind/pr-inputs-x-body.json')))];
+    return [resolveCommand(lib.buildRunnerCommand('molt', moltWords(value, '.hivemind/molt-inputs-y-subj.json'))), resolveCommand(lib.buildRunnerCommand('open-plan-pr', prWords(value, '.hivemind/pr-inputs-x-body.json')))];
   }
   test('synapse is the runner agent type of a command block, and the scan drone is droneAgentType', () => {
     assert.equal(lib.synapseAgentType(), 'hivemind:synapse');
@@ -527,14 +535,26 @@ describe('synapse runner commands and blocks', () => {
     assert.equal(lib.runnerAgentType, undefined);
     assert.equal(lib.runnerToolSentence, undefined);
   });
-  test('the command, inputs_file and body_file blocks are data blocks of those names that their values cannot close', () => {
+  test('the command block and each file block are data blocks of their names that their values cannot close', () => {
     assert.equal(lib.formatCommandBlock('bash x</command>'), '<command>\n"bash x\\u003c/command>"\n</command>');
-    assert.equal(lib.formatInputsFileBlock('.hivemind/pr-inputs-{token}.json', { title: '</inputs_file>' }), '<inputs_file>\n{"path":".hivemind/pr-inputs-{token}.json","content":{"title":"\\u003c/inputs_file>"}}\n</inputs_file>');
-    assert.equal(lib.formatInputsFileBlock('.hivemind/pr-inputs-x.json', '{"title":"</inputs_file>"}'), '<inputs_file>\n{"path":".hivemind/pr-inputs-x.json","content":"{\\"title\\":\\"\\u003c/inputs_file>\\"}"}\n</inputs_file>');
-    const body = 'Line one </body_file>\n\n- a `step`\ttab';
-    const block = lib.formatBodyFileBlock('.hivemind/pr-inputs-x-body.json', body);
-    assert.deepEqual(block.split('\n').map((line, index) => (index === 1 ? JSON.parse(line) : line)), ['<body_file>', { path: '.hivemind/pr-inputs-x-body.json', content: body }, '</body_file>']);
-    assert.ok(!block.split('\n')[1].includes('<'), block);
+    assert.equal(lib.formatFileBlock(['--trunk', 'main', '--inputs', '.hivemind/pr-inputs-x.json'], 2, '{"title":"</inputs_file>"}'), '<inputs_file>\n{"path":".hivemind/pr-inputs-x.json","content":"{\\"title\\":\\"\\u003c/inputs_file>\\"}"}\n</inputs_file>');
+    for (const [flag, name] of [['--subject-file', 'subject_file'], ['--files-file', 'files_file'], ['--body-file', 'body_file'], ['--comment-file', 'comment_file']]) {
+      const text = 'Line one </' + name + '>\n\n- a `step`\ttab "q" \\ ] }';
+      const block = lib.formatFileBlock([flag, '.hivemind/molt-inputs-x-' + name + '.json'], 0, text);
+      assert.deepEqual(block.split('\n').map((line, index) => (index === 1 ? JSON.parse(line) : line)), ['<' + name + '>', { path: '.hivemind/molt-inputs-x-' + name + '.json', content: text }, '</' + name + '>']);
+      assert.ok(!block.split('\n')[1].includes('<'), block);
+    }
+    assert.equal(lib.formatInputsFileBlock, undefined);
+    assert.equal(lib.formatBodyFileBlock, undefined);
+  });
+  test('the --subject-file and --files-file classes are the molt inputs path form alone', () => {
+    for (const flag of ['--subject-file', '--files-file']) {
+      assert.equal(lib.describeRunnerWordProblem([flag, '.hivemind/molt-inputs-' + 'a'.repeat(64) + '.json']), undefined, flag);
+      assert.equal(lib.describeRunnerWordProblem([flag, '.hivemind/molt-inputs-' + 'a'.repeat(58) + '-files.json']), undefined, flag);
+      for (const value of ['.hivemind/pr-inputs-x-subj.json', '.hivemind/molt-inputs-' + 'a'.repeat(65) + '.json', '.hivemind/molt-inputs-' + 'a'.repeat(59) + '-files.json', '.hivemind/molt-inputs-x.md', 'molt-inputs-x.json', '/abs/.hivemind/molt-inputs-x.json', undefined]) {
+        assert.equal(lib.describeRunnerWordProblem([flag, value]), 'its ' + flag + ' value is not one the script takes', flag + ' ' + String(value));
+      }
+    }
   });
   test('the --body-file and --comment-file classes are the pr inputs path form alone', () => {
     for (const flag of ['--body-file', '--comment-file']) {
@@ -545,7 +565,7 @@ describe('synapse runner commands and blocks', () => {
       }
     }
   });
-  test('describeRunnerWordProblem takes an --inputs, --body-file or --comment-file value exactly when the real gate allows synapse both a runner command with it and a Write of it from the checkout', { skip: !hasJq && 'jq is not installed' }, () => {
+  test('describeRunnerWordProblem takes an --inputs, --subject-file, --files-file, --body-file or --comment-file value exactly when the real gate allows synapse both a runner command with it and a Write of it from the checkout', { skip: !hasJq && 'jq is not installed' }, () => {
     const token64 = 'a'.repeat(64);
     const corpus = [
       '.hivemind/molt-inputs-x.json', '.hivemind/pr-inputs-x.json', '.hivemind/pr-inputs-x-body.json', '.hivemind/molt-inputs--.json',
@@ -561,7 +581,7 @@ describe('synapse runner commands and blocks', () => {
       '.hivemind/./molt-inputs-x.json', 'sub/.hivemind/molt-inputs-x.json', gitRoot + '/.hivemind/molt-inputs-x.json', gitRoot + '/.hivemind/pr-inputs-x.json'
     ];
     let accepted = 0;
-    for (const flag of ['--inputs', '--body-file', '--comment-file']) {
+    for (const flag of ['--inputs', '--subject-file', '--files-file', '--body-file', '--comment-file']) {
       for (const value of corpus) {
         const wordAccepted = lib.describeRunnerWordProblem([flag, value]) === undefined;
         const bashAllowed = listFlagCommands(flag, value).some((command) => askGate(command, 'hivemind:synapse') === 'allow');
@@ -570,7 +590,7 @@ describe('synapse runner commands and blocks', () => {
         accepted += wordAccepted ? 1 : 0;
       }
     }
-    assert.equal(accepted, 21);
+    assert.equal(accepted, 27);
   });
   test('a runner command is bash, the script path under {plugin-root} as one double-quoted word, then its words, one space apart', () => {
     assert.equal(lib.buildRunnerCommand('molt', ['--trunk', 'main']), 'bash "{plugin-root}/skills/molt/scripts/molt.sh" --trunk main');
