@@ -2960,6 +2960,12 @@ The growth was cut inside `pr.js`, where the single-use helpers `renderPullReque
 - **The skill path still writes the title JSON.**
   - **Not covered.** On the JSON state machine the agent writes the inputs file, and its title is not mapped.
   - **Bounded impact.** The file is one short title and a draft flag. An invalid file is refused before any change.
+- **The runner is trusted to name only its own run's PR files.**
+  - **Not covered.** The synapse-gate hook (`plugin/hooks/synapse-gate.sh`) and `runnerValuePatterns()` (`plugin/workflow-src/lib/facts.js`) accept any `.hivemind/pr-inputs-<token>.json`-class path for `--inputs`, `--body-file` and `--comment-file`. Nothing requires the three paths to share one token. A runner that changed the engine-built command could name another live run's PR files in the same checkout, and `open-plan-pr.sh` would read them and then delete them.
+  - **Introduced or inherited.** Inherited. `--inputs` and `--body-file` already had this check on main; this change gives `--comment-file` the same check.
+  - **Bounded impact.** It needs a runner to change the command the engine built and an exact match with a live file of another run in the same checkout. Brood strains run in separate worktrees. The worst case is that the other run's pull request step stops with a visible error and this run posts text the other run wrote. No git change.
+  - **Decision.** Keep the code and add no shared-token check to the hook. The engine already treats the runner's command as trusted within the gate's path classes.
+  - **Decided by.** The user, 2026-11-18, answering local review finding e3e6fa3d45aca51186e8b096e3c34a0763eddc9f8a0534f7ba053c393b00028d ("Comment and body file flags can name and delete another run's state file"). The options were: A, keep the code and record the trust here; B, require one shared token in this PR; C, keep the code and open an issue to fix it later. The user chose A.
 
 **Version.** Patch, 10.0.5. It is a fix: a runner copy mistake can no longer make the inputs file invalid.
 
