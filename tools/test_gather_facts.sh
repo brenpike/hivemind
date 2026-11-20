@@ -37,12 +37,24 @@
 # case runs the engine on a small world and on one 4 times larger: a commit subject of 250,000 and
 # 1,000,000 U+0001 bytes, 10,000 and 40,000 untracked paths, 5,000 and 20,000 history paths. The
 # larger run must take less than SCALE_RATIO_LIMIT times the smaller one (a quadratic cost gives
-# about 16 times), measured in CPU seconds: the user plus system seconds from bash's time keyword,
-# which count the engine and every child it waited for. CPU time, unlike wall clock time, does not
-# grow when other processes load the machine. There is no absolute limit, because a seconds limit
-# measures the machine's speed and load, not how the work grows. The count holds only while the
-# engine starts no background work it does not wait for. Each result prints both runs' CPU
-# seconds, the ratio and the limit, plus both runs' wall clock seconds as information only.
+# about 16 times; cost that does not grow with the input adds to both runs and pulls the ratio
+# toward 1), measured in CPU seconds: the user plus system seconds from bash's time keyword, which
+# count the engine and every child it waited for. CPU time leaves out time spent waiting for a
+# processor, but load still raises it: on 2026-11-20 a full validate.sh run raised the large runs'
+# CPU seconds from 2.6, 4.9 and 3.3 alone to 7.5, 12.2 and 8.6. The check holds under load because
+# it compares two runs made one after the other. The count holds only while the engine starts no
+# background work it does not wait for. Each result prints both runs' CPU seconds, the ratio and
+# the limit, plus both runs' wall clock seconds as information only.
+#
+# No absolute limit (decided 2026-11-20 for issue #598 on review finding 1484c853, by the run per
+# plugin/governance/decision-autonomy.md (Decision Tiers)). Issue #598 sets the failure model: fail
+# only on work that grows faster than its input, never on machine load alone. No seconds limit,
+# wall clock or CPU, is kept. A limit low enough to catch a regression is one that load and runner
+# speed reach: the old 15-second wall limit failed on load alone, and the loaded large dirty run
+# already takes 12.2 CPU seconds. A limit high enough to be safe catches only a cost that every
+# other engine run in this file also pays. Two cases are outside this check. Cost that does not
+# grow with the input lengthens every engine run in the suite. A run that never ends leaves the
+# suite unfinished until the CI job's time limit stops it, as before.
 #
 # Prints PASS/FAIL per assertion. Exits non-zero if ANY assertion FAILs.
 #
@@ -1610,7 +1622,7 @@ timed_engine() {
 # assert_scaled <name> <small CPU seconds> <large CPU seconds> <small wall seconds> <large wall
 # seconds> -> the large run took less than SCALE_RATIO_LIMIT times the small one's CPU seconds,
 # floored at 0.01. Wall clock seconds are printed as information only. A CPU value that is not a
-# number fails.
+# number fails. Why no seconds limit is kept: see the "No absolute limit" record in the header.
 assert_scaled() {
     local wall_text="wall small ${4}s, large ${5}s (information only)"
     if ! [[ "$2" =~ $SCALE_SECONDS_PATTERN && "$3" =~ $SCALE_SECONDS_PATTERN ]]; then
