@@ -449,6 +449,8 @@ Links: https://github.com/brenpike/hivemind/issues/448, `docs/adr/0038-root-caus
 - `molt.sh` accepting a path its rule should refuse;
 - the parity between `isRepositoryPath` and `molt.sh` breaking.
 
+**Updated 2026-11-19 (PR 597).** The line feed join of issue 595 broke the ground that fix round files "reach only `molt.sh`, which applies the same rule": a file holding a line feed became two paths, and an empty file vanished or a trailing line feed was dropped, before `molt.sh` read the list. `commit.js` now refuses only a list its join cannot carry (an empty entry or one holding a line feed), not by the path rule, so files again reach `molt.sh` intact and the decision stands. See Amendment 2026-11-19: the commit subject and file list are sent in their own files (issue 595), "PR 597 review finding r4636550229".
+
 **The key.** This record is matched by the scope above, not by the finding id, since finding ids change from run to run.
 
 The rest of ADR-0037 is unchanged.
@@ -3090,9 +3092,40 @@ The finding: reads of a caller-written file through jq do not keep every byte. j
 
 **The user's decision.** Q2, option A, 2026-11-19 (reply "Take recs"): apply one shared byte-exact read at all seven caller-file reads. The run decisions taken with the planner's recommendation: both inputs files are included, native Windows is not worked around, and no `jq -b`.
 
+### PR 597 review finding r4636550229: a file list the line feed join cannot carry (2026-11-19)
+
+**The finding.** Codex P1 on https://github.com/brenpike/hivemind/pull/597#discussion_r4636550229, `plugin/workflow-src/lib/commit.js`. `buildCommitPrompt` joins the files with `'\n'`, and `molt.sh` reads the list back with `rtrimstr("\n") | split("\n")`. `["a\nb"]` became two paths, an empty entry vanished, and `"src/a.js\n"` silently became `src/a.js`.
+
+**Root cause.** A lossy encoding validated after the round trip. It was introduced on this branch (c8641e87, the join; 78faf0f5, the line-per-path read). Wave files already pass `isRepositoryPath` at plan acceptance, so the live gap was the fix round files: `buildGateEditSchema` has `items {type: 'string'}` and `validateSchema` refuses only a blank string.
+
+**The change.** `listCommitWords` gives `--files-file` no value when any entry is empty or holds a line feed, so `describeCommandStop` makes a terminal stop before any runner call, with the existing text "its --files-file value is not one the script takes". `[]` still sends no flag. The only entries refused are ones `molt.sh` would refuse anyway, so no committable list is lost. Every other control character, CR included, survives the join, and `molt.sh` still refuses it.
+
+**The class eliminated.** `molt.sh` always reads the list the engine built, for every current and future caller, since all go through `runCommitStep`.
+
+**Options ruled out.**
+
+- **NUL separation.** The runner would write U+0000 through the Write tool and a JSON prompt block, the issue 595 class again, and the bash read drops NUL.
+- **A JSON array.** It brings back model-written escapes, ruled out by Q1 of the issue 595 decision.
+- **A per-line escape.** It needs model-made escapes and a decoder.
+- **Length prefixes or one file per path.** Fragile, and they widen the hook's path class.
+- **Raising `MAX_BUILT_SCRIPT_LENGTH` or a budget, or decoupling the seeded-sentence tests of `build.test.mjs`.** Not needed.
+
+**The skill path.** On the `hivemind:molt` skill path the agent writes the lines itself, so there is no earlier list to lose. It cannot name a path holding a line feed, and the real dirty path is then refused as outside the list. This is a format limit, not a root cause.
+
+**Room.** Paid for by folding the command stop of `runCommitStep` into its relay check, with the same behavior. Measured:
+
+- `plugin/workflows/standard-delivery.js`: length 190,864 to 190,836 of 191,000; prose 41,976 of 42,100, unchanged.
+- `plugin/workflows/pr-feedback-remediation.js`: length 176,088 to 176,060; prose 38,053 of 38,200, unchanged.
+- `plugin/workflows/analysis-only.js`: unchanged.
+- The seeded-sentence build tests now have about 45 characters of length room, from 17.
+
+The workflow script tests pass, 3,477 in all.
+
+**Decision.** Accepted by the run (Tier B, `plugin/governance/decision-autonomy.md`): the plan tripped no promotion gate and grew no surface. The ground of the 2026-10-25 amendment (local review finding c2e0ada3) carries a dated note.
+
 **Version.** Patch, 10.0.6. It is a fix: a runner copy mistake in the subject or the file list can no longer make the inputs file invalid. Every built workflow script changed, so a run paused on an older build cannot resume. The local review fix da9b2eac stays in 10.0.6 and `plugin.json` is unchanged.
 
-It updates these places in place, each with a dated note: the residuals "molt's inputs JSON is model-written" and "the runner is trusted to name only its own run's PR files" of Amendment 2026-11-18: the pull request comment is sent in its own file (issue 592), the residual "a first file is left when the second Write fails" and the residual "invalid UTF-8 in the body becomes U+FFFD" of Amendment 2026-11-06: the pull request body is built in code and sent in its own file (issues 506 and 501).
+It updates these places in place, each with a dated note: the residuals "molt's inputs JSON is model-written" and "the runner is trusted to name only its own run's PR files" of Amendment 2026-11-18: the pull request comment is sent in its own file (issue 592), the residual "a first file is left when the second Write fails" and the residual "invalid UTF-8 in the body becomes U+FFFD" of Amendment 2026-11-06: the pull request body is built in code and sent in its own file (issues 506 and 501), and the Scope of Amendment 2026-10-25: fix round files are checked by molt.sh alone (local review finding c2e0ada3).
 
 The rest of ADR-0037 is unchanged.
 
