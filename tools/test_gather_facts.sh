@@ -37,8 +37,24 @@
 # case runs the engine on a small world and on one 4 times larger: a commit subject of 250,000 and
 # 1,000,000 U+0001 bytes, 10,000 and 40,000 untracked paths, 5,000 and 20,000 history paths. The
 # larger run must take less than SCALE_RATIO_LIMIT times the smaller one (a quadratic cost gives
-# about 16 times) and less than SCALE_SECONDS_LIMIT seconds. Times are wall clock seconds from
-# bash's time keyword and are printed with each result.
+# about 16 times; cost that does not grow with the input adds to both runs and pulls the ratio
+# toward 1), measured in CPU seconds: the user plus system seconds from bash's time keyword, which
+# count the engine and every child it waited for. CPU time leaves out time spent waiting for a
+# processor, but load still raises it: on 2026-11-20 a full validate.sh run raised the large runs'
+# CPU seconds from 2.6, 4.9 and 3.3 alone to 7.5, 12.2 and 8.6. The check holds under load because
+# it compares two runs made one after the other. The count holds only while the engine starts no
+# background work it does not wait for. Each result prints both runs' CPU seconds, the ratio and
+# the limit, plus both runs' wall clock seconds as information only.
+#
+# No absolute limit (decided 2026-11-20 for issue #598 on review finding 1484c853, by the run per
+# plugin/governance/decision-autonomy.md (Decision Tiers)). Issue #598 sets the failure model: fail
+# only on work that grows faster than its input, never on machine load alone. No seconds limit,
+# wall clock or CPU, is kept. A limit low enough to catch a regression is one that load and runner
+# speed reach: the old 15-second wall limit failed on load alone, and the loaded large dirty run
+# already takes 12.2 CPU seconds. A limit high enough to be safe catches only a cost that every
+# other engine run in this file also pays. Two cases are outside this check. Cost that does not
+# grow with the input lengthens every engine run in the suite. A run that never ends leaves the
+# suite unfinished until the CI job's time limit stops it, as before.
 #
 # Prints PASS/FAIL per assertion. Exits non-zero if ANY assertion FAILs.
 #
@@ -1577,31 +1593,50 @@ test_concurrency_and_containment() {
 # ── Scale: the engine's work grows in line with its input ───────────────────
 
 SCALE_RATIO_LIMIT=10
-SCALE_SECONDS_LIMIT=15
+SCALE_SECONDS_PATTERN='^(0|[1-9][0-9]*)(\.[0-9]+)?$'
 
 # timed_engine <name> <cwd> <PATH> <engine args...> -> run_engine under bash's time keyword; sets
-# LAST_SECONDS to the wall clock seconds. LC_ALL=C keeps the decimal point a dot, so the value
-# parses as JSON.
-LAST_SECONDS=''
+# LAST_CPU_SECONDS to the user plus system CPU seconds, which count the engine and every child it
+# waited for, and LAST_WALL_SECONDS to the wall clock seconds, printed only. LC_ALL=C keeps the
+# decimal point a dot, so each value parses as JSON. A last line of "$WORKDIR/<name>.seconds"
+# that is not three such numbers leaves both empty, which assert_scaled fails.
+LAST_CPU_SECONDS=''
+LAST_WALL_SECONDS=''
 timed_engine() {
-    local TIMEFORMAT=%R
+    local TIMEFORMAT='%R %U %S'
     local LC_ALL=C
     local timing_file="$WORKDIR/$1.seconds"
+    local real_seconds user_seconds system_seconds
     { time run_engine "$@"; } 2>"$timing_file"
-    LAST_SECONDS="$(tail -n 1 "$timing_file")"
+    read -r real_seconds user_seconds system_seconds <<<"$(tail -n 1 "$timing_file")"
+    LAST_CPU_SECONDS=''
+    LAST_WALL_SECONDS=''
+    if [[ "$real_seconds" =~ $SCALE_SECONDS_PATTERN && "$user_seconds" =~ $SCALE_SECONDS_PATTERN \
+        && "$system_seconds" =~ $SCALE_SECONDS_PATTERN ]]; then
+        LAST_CPU_SECONDS="$(jq -n --argjson user "$user_seconds" --argjson system "$system_seconds" \
+            '($user + $system) * 1000 | round / 1000')"
+        LAST_WALL_SECONDS="$real_seconds"
+    fi
 }
 
-# assert_scaled <name> <small seconds> <large seconds> -> the large run took less than
-# SCALE_RATIO_LIMIT times the small one and less than SCALE_SECONDS_LIMIT seconds.
+# assert_scaled <name> <small CPU seconds> <large CPU seconds> <small wall seconds> <large wall
+# seconds> -> the large run took less than SCALE_RATIO_LIMIT times the small one's CPU seconds,
+# floored at 0.01. Wall clock seconds are printed as information only. A CPU value that is not a
+# number fails. Why no seconds limit is kept: see the "No absolute limit" record in the header.
 assert_scaled() {
+    local wall_text="wall small ${4}s, large ${5}s (information only)"
+    if ! [[ "$2" =~ $SCALE_SECONDS_PATTERN && "$3" =~ $SCALE_SECONDS_PATTERN ]]; then
+        failed "$1" "malformed timing: CPU small '${2}', large '${3}'; $wall_text"
+        return 0
+    fi
     local verdict verdict_word scale_ratio
     verdict="$(jq -n -r --argjson small "$2" --argjson large "$3" \
-        --argjson ratio_limit "$SCALE_RATIO_LIMIT" --argjson seconds_limit "$SCALE_SECONDS_LIMIT" \
+        --argjson ratio_limit "$SCALE_RATIO_LIMIT" \
         '([$small, 0.01] | max) as $floor
-         | (if $large < $ratio_limit * $floor and $large < $seconds_limit then "ok" else "bad" end) as $word
+         | (if $large < $ratio_limit * $floor then "ok" else "bad" end) as $word
          | [$word, ($large / $floor * 100 | floor / 100)] | @tsv')"
     IFS=$'\t' read -r verdict_word scale_ratio <<<"$verdict"
-    local scale_text="small ${2}s, large ${3}s, ratio ${scale_ratio}x (limits ${SCALE_RATIO_LIMIT}x and ${SCALE_SECONDS_LIMIT}s)"
+    local scale_text="CPU small ${2}s, large ${3}s, ratio ${scale_ratio}x (limit ${SCALE_RATIO_LIMIT}x); $wall_text"
     if [[ "$verdict_word" == ok ]]; then
         pass "$1" "$scale_text"
     else
@@ -1631,33 +1666,35 @@ subject_world() {
 }
 
 test_scaling() {
-    local small_seconds
+    local small_cpu_seconds small_wall_seconds
 
     subject_world scale-subject-small 250000
     timed_engine scale-subject-small "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_ok scale-subject-small
     assert_fact scale-subject-small-chunks '.history.commits.items[-1].subject | [.length, (.chunks | length)] | @json' \
         '[250000,1507]'
-    small_seconds="$LAST_SECONDS"
+    small_cpu_seconds="$LAST_CPU_SECONDS"
+    small_wall_seconds="$LAST_WALL_SECONDS"
     subject_world scale-subject-large 1000000
     timed_engine scale-subject-large "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_ok scale-subject-large
     assert_fact scale-subject-large-chunks '.history.commits.items[-1].subject | [.length, (.chunks | length)] | @json' \
         '[1000000,6025]'
-    assert_scaled scale-subject "$small_seconds" "$LAST_SECONDS"
+    assert_scaled scale-subject "$small_cpu_seconds" "$LAST_CPU_SECONDS" "$small_wall_seconds" "$LAST_WALL_SECONDS"
 
     create_world scale-dirty-small
     many_files "$WORK_TREE/many" 10000
     timed_engine scale-dirty-small "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_ok scale-dirty-small
     assert_fact scale-dirty-small-total '.dirty.paths.total' 10000
-    small_seconds="$LAST_SECONDS"
+    small_cpu_seconds="$LAST_CPU_SECONDS"
+    small_wall_seconds="$LAST_WALL_SECONDS"
     create_world scale-dirty-large
     many_files "$WORK_TREE/many" 40000
     timed_engine scale-dirty-large "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_ok scale-dirty-large
     assert_fact scale-dirty-large-total '.dirty.paths.total' 40000
-    assert_scaled scale-dirty "$small_seconds" "$LAST_SECONDS"
+    assert_scaled scale-dirty "$small_cpu_seconds" "$LAST_CPU_SECONDS" "$small_wall_seconds" "$LAST_WALL_SECONDS"
 
     create_world scale-history-small
     many_files "$WORK_TREE/many" 5000
@@ -1666,7 +1703,8 @@ test_scaling() {
     timed_engine scale-history-small "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_ok scale-history-small
     assert_fact scale-history-small-total '.history.paths.total' 5000
-    small_seconds="$LAST_SECONDS"
+    small_cpu_seconds="$LAST_CPU_SECONDS"
+    small_wall_seconds="$LAST_WALL_SECONDS"
     create_world scale-history-large
     many_files "$WORK_TREE/many" 20000
     run_git "$WORK_TREE" add -A
@@ -1674,7 +1712,7 @@ test_scaling() {
     timed_engine scale-history-large "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_ok scale-history-large
     assert_fact scale-history-large-total '.history.paths.total' 20000
-    assert_scaled scale-history "$small_seconds" "$LAST_SECONDS"
+    assert_scaled scale-history "$small_cpu_seconds" "$LAST_CPU_SECONDS" "$small_wall_seconds" "$LAST_WALL_SECONDS"
 }
 
 # ── Schema check of every facts file ────────────────────────────────────────
