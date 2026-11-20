@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [10.0.7] - 2026-11-20
+
+### Fixed
+
+- The review watch's change-detect poll now wakes on an in-place edit of a comment or review. Its snapshot gains one field, `latest_edit`, the latest edit time over the other accounts' comments and the filtered reviews, so an edit fires `CHANGED` in poll and `--check` modes. The seed gains that one field; an older seed without it is `POLL_ERROR`.
+- `react-marker.sh` now checks that a top-level comment or review is still the version the reviewer read. The reviewer passes the edit time it read through the new required `--edited-at <time|never>` flag. When the node changed after the read, the script refuses before any mutation, or removes its fresh mark and refuses, with `edited-since-read`. The reviewer leaves that candidate unmarked, never blocked, and the edit-aware poll wakes the watch on the edit.
+
+No prose budget raised.
+
+Issue: #577, #578.
+
 ## [10.0.6] - 2026-11-19
 
 ### Fixed
