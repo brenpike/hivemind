@@ -186,6 +186,15 @@
 #                                     #   have no single comment node to fetch.
 #     "databaseId":     <int> | null, # null for toplevel/review surfaces
 #     "url":            <string>|null,# null for thread surface
+#     "last_edited_at": <string>|null,# toplevel/review ONLY (absent on thread
+#                                     #   records and the overflow sentinel):
+#                                     #   the node's `lastEditedAt` as fetched,
+#                                     #   i.e. the version the reviewer read,
+#                                     #   which the reviewer passes to
+#                                     #   react-marker.sh --edited-at. null when
+#                                     #   never edited, the key is absent, or the
+#                                     #   value is not a second-precision UTC
+#                                     #   time (`is_utc_second_time`).
 #     "classification": "handled" | "actionable" | "followup-after-fix"
 #   }
 #
@@ -335,6 +344,11 @@ def has_self_eyes_reaction:
 def is_utc_second_time:
   type == "string"
   and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$");
+
+# Read version: the node's `lastEditedAt` as fetched when it is a
+# second-precision UTC time, else null (never edited, absent or malformed).
+def edited_at_as_read:
+  .lastEditedAt | if is_utc_second_time then . else null end;
 
 # Mark time: the latest well-formed `createdAt` among the node's EYES
 # `reactions.nodes[]` authored by self (module `is_self`), or null when none.
@@ -519,6 +533,7 @@ def matches_filter($a; $t): reviewer_matches_filter($a; $t; $login; $filter; $re
       id: ($c.id // null),
       databaseId: null,
       url: $u,
+      last_edited_at: ($c | edited_at_as_read),
       classification: (
         if ($c | has_unchanged_self_eyes_mark) then "handled"
         elif ($addressed_urls | index($u)) != null then "handled"
@@ -544,6 +559,7 @@ def matches_filter($a; $t): reviewer_matches_filter($a; $t; $login; $filter; $re
       id: ($r.id // null),
       databaseId: null,
       url: $u,
+      last_edited_at: ($r | edited_at_as_read),
       classification: (
         if ($r | has_unchanged_self_eyes_mark) then "handled"
         elif ($addressed_urls | index($u)) != null then "handled"

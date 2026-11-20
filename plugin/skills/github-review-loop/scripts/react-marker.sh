@@ -36,13 +36,27 @@
 #
 # 2. INPUT CONTRACT
 # -----------------
-# Per-candidate, supplied as one optional flag then positional args (a single
-# mutation operates on a single candidate; there is no batch stdin payload —
-# mirrors the per-candidate shape of reply-resolve.sh):
+# Per-candidate, supplied as flags then positional args (a single mutation
+# operates on a single candidate; there is no batch stdin payload — mirrors the
+# per-candidate shape of reply-resolve.sh):
 #
+#   --edited-at <time|never>
+#                    REQUIRED on the toplevel and review surfaces, in fix mode and
+#                    noise mode alike; placed before the positionals:
+#                      react-marker.sh --edited-at "$last_edited_at" "$NODE_ID" "$SURFACE" "$CANDIDATE_URL"
+#                    The value is the version of the node the reviewer read: its
+#                    lastEditedAt as read, a time matching
+#                    ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$, or
+#                    the literal never for a node never edited. Checked before any
+#                    git or gh call, and under the capture seam too: no flag is
+#                    missing-edited-at, the flag as the last argument with no value
+#                    after it is missing-value-for-edited-at, and any other value
+#                    shape is invalid-edited-at. The thread surface ignores the flag
+#                    in every form. DATA — passed to jq as a --arg, never
+#                    interpolated into a program or a query.
 #   --noise <reviewer_filter>
 #                    OPTIONAL; selects noise mode. Placed before the positionals:
-#                      react-marker.sh --noise "$reviewer_filter" "$NODE_ID" "$SURFACE" "$CANDIDATE_URL"
+#                      react-marker.sh --noise "$reviewer_filter" --edited-at "$last_edited_at" "$NODE_ID" "$SURFACE" "$CANDIDATE_URL"
 #                    The value is the loop's REVIEWER_FILTER ("automated" | "all" |
 #                    "<login>", per reviewer-identity.jq §5); an empty value means
 #                    "automated". The flag as the last argument, with no value
@@ -70,10 +84,11 @@
 # 3. OUTPUT / BEHAVIOR — SURFACE -> DELIVERY MAP (closed by construction)
 # -----------------------------------------------------------------------
 # The surface selects the delivery; the map is exhaustive and fail-closed:
-#   toplevel -> REACT: addReaction(EYES) over NODE_ID (a mutating surface).
+#   toplevel -> REACT: addReaction(EYES) over NODE_ID (a mutating surface), only
+#               while the node is the version the reviewer read (§4 EDIT GATE).
 #   review   -> REACT: identical to toplevel (PullRequestReview is also Reactable).
 #   thread   -> SILENT NO-OP: no reaction, exit 0, ZERO stdout, NOTHING written to
-#               the capture seam. Threads converge via resolveReviewThread
+#               the capture seam, --edited-at ignored. Threads converge via resolveReviewThread
 #               elsewhere; we NEVER react to a thread comment.
 #   <other>  -> FAIL CLOSED: react_marker_fail "unmapped-surface" (exit 1).
 #               NEVER falls back to the reaction mutation.
@@ -109,10 +124,13 @@
 #     reaction succeeds only when ALL of these hold: gh exits 0; the shared validator
 #     hivemind_graphql_response_check
 #     (${CLAUDE_PLUGIN_ROOT}/skills/_shared/graphql-response.sh) accepts the response
-#     body; and the body's .data.addReaction.reaction.content equals the requested
-#     REACTION_CONTENT. Every other response is react-failed: a non-zero exit, an
-#     envelope the check rejects (gh exits 0 on several GraphQL error envelopes), a
-#     null addReaction payload, or a different reaction content. No response text is
+#     body; the body's .data.addReaction.reaction.content equals the requested
+#     REACTION_CONTENT; and .data.addReaction.subject is an object holding a
+#     lastEditedAt key (the mutation selects subject { ... on IssueComment {
+#     lastEditedAt } ... on PullRequestReview { lastEditedAt } }). Every other
+#     response is react-failed: a non-zero exit, an envelope the check rejects (gh
+#     exits 0 on several GraphQL error envelopes), a null addReaction payload, a
+#     different reaction content, or no lastEditedAt key on the subject. No response text is
 #     ever pattern-matched. Only stdout is captured, so gh's stderr never reaches the
 #     body under check.
 #   - PR BINDING (every live reaction): on the toplevel and review surfaces, after
@@ -131,7 +149,8 @@
 #           latestReviews(first: 100) { nodes { author { login __typename } } }
 #           reactionGroups { content reactors(first: 100) { nodes { __typename
 #           ... on Bot { login } ... on User { login } } } } },
-#           author { login __typename } and reactionGroups { content viewerHasReacted };
+#           author { login __typename }, reactionGroups { content viewerHasReacted }
+#           and lastEditedAt;
 #           it must exit 0 and pass hivemind_graphql_response_check. The
 #           latestReviews and PR reactionGroups selections are the noise author
 #           check's evidence; the binding predicate never reads them.
@@ -160,6 +179,21 @@
 #     reads only authors, reactors and reaction contents; it never reads a
 #     comment or review body or the URL. Fix mode makes no author check. The
 #     capture seam (§5) skips it.
+#   - EDIT GATE (every live reaction): the mark lands only on the version of the
+#     node the reviewer read. A node's version is its lastEditedAt key, a null
+#     value read as never; a missing key or a non-object node matches no version.
+#     (1) After the PR binding and the noise author check, and before the re-mark
+#         removal, a binding node whose version differs from the --edited-at value
+#         is edited-since-read, with no mutation sent.
+#     (2) After addReaction has positive proof, a subject whose version in the
+#         mutation response differs from the --edited-at value had an edit land
+#         between the binding lookup and the mark: the script removes the fresh
+#         mark through the IDEMPOTENCY removal and its proof, then exits
+#         edited-since-read. A removal without positive proof is react-failed.
+#     Versions compare as exact strings. The capture seam (§5) skips both
+#     comparisons. RESIDUAL: GitHub reports lastEditedAt to the second, so a
+#     second edit inside the same second as the read version's edit time keeps
+#     an equal value and is not detected.
 #   - IDENTITY MODULE: noise mode requires reviewer-identity.jq next to this
 #     script; a missing module, or one jq cannot load, is missing-identity-module
 #     before any gh call. Fix mode never loads the module and never checks for it.
@@ -189,25 +223,29 @@
 # All three are INERT in production (unset -> real gh). The seam is checked ONLY
 # through capture_seam_active, used by run_reaction and the PR binding, and
 # requires BOTH TEST_MODE=1 and CAPTURE_FILE to engage. While it is active the
-# script skips the PR binding, the noise author check and the re-mark removal.
+# script skips the PR binding, the noise author check, both EDIT GATE comparisons
+# and the re-mark removal; it still validates --edited-at (§2).
 #
 # Markers / exit posture:
 #   - exit 0 on success (a reaction with positive proof per §4 RESPONSE CHECK, or a
 #     thread silent no-op).
 #   - REACTMARKER_ERROR=<reason> on stderr + exit 1 on a HARD failure (bad input,
 #     unmapped surface, a bootstrap failure, a PR binding failure, a refused noise
-#     author, a re-mark removal lacking positive proof, or any live reaction
-#     lacking positive proof — including an exit-0 response the shared GraphQL
-#     response check rejects).
+#     author, a node edited since the reviewer read it, a re-mark or undo removal
+#     lacking positive proof, or any live reaction lacking positive proof —
+#     including an exit-0 response the shared GraphQL response check rejects).
 #
 # Reason tokens (STABLE — asserted by the test):
 #   missing-node-id | unmapped-surface | react-failed | cannot-self-locate |
 #   missing-graphql-check | unparseable-graphql-check | pr-binding-no-branch |
 #   pr-binding-lookup-failed | pr-binding-refused | missing-value-for-noise |
-#   missing-identity-module | noise-author-refused | retired-filter
+#   missing-identity-module | noise-author-refused | retired-filter |
+#   missing-edited-at | missing-value-for-edited-at | invalid-edited-at |
+#   edited-since-read
 #
-# EXTERNAL-CONTENT BOUNDARY: NODE_ID, CANDIDATE_URL, the --noise value and
-# HIVEMIND_PR_REVIEWERS are external DATA. NODE_ID is passed to gh as a typed `-F id=...` (reaction) or
+# EXTERNAL-CONTENT BOUNDARY: NODE_ID, CANDIDATE_URL, the --noise value, the
+# --edited-at value and HIVEMIND_PR_REVIEWERS are external DATA. The --edited-at
+# value reaches jq only as a --arg. NODE_ID is passed to gh as a typed `-F id=...` (reaction) or
 # `-f id=...` (PR binding, re-mark removal) variable bound to the query's
 # `$id: ID!` parameter; it is NEVER interpolated into the GraphQL query string.
 # The --noise value and HIVEMIND_PR_REVIEWERS reach jq only as --arg values; the
@@ -226,6 +264,8 @@ SURFACE=""
 CANDIDATE_URL=""
 NOISE_MODE=0
 NOISE_FILTER=""
+EDITED_AT_STATE="absent"
+EDITED_AT=""
 
 # EYES is the SINGLE named marker constant — a member of the GraphQL ReactionContent
 # enum, conceptually single-sourced from docs/references/github-pr-review-graphql.md
@@ -237,8 +277,10 @@ react_marker_fail() {
   exit 1
 }
 
-# Parse the one flag (--noise <reviewer_filter>) and collect positionals in order
-# (NODE_ID SURFACE CANDIDATE_URL), matching the sibling scripts' positional contract.
+# Parse the flags (--noise <reviewer_filter>, --edited-at <time|never>) and collect
+# positionals in order (NODE_ID SURFACE CANDIDATE_URL), matching the sibling scripts'
+# positional contract. The --edited-at state is validated only on the mutating
+# surfaces (§2), so the thread surface ignores the flag.
 positionals=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -247,6 +289,15 @@ while [ "$#" -gt 0 ]; do
       NOISE_MODE=1
       NOISE_FILTER="$2"
       shift 2 ;;
+    --edited-at)
+      if [ "$#" -ge 2 ]; then
+        EDITED_AT_STATE="given"
+        EDITED_AT="$2"
+        shift 2
+      else
+        EDITED_AT_STATE="no-value"
+        shift
+      fi ;;
     --)
       shift
       while [ "$#" -gt 0 ]; do positionals+=("$1"); shift; done ;;
@@ -328,6 +379,7 @@ REACT_MUTATION='
 mutation($id: ID!) {
   addReaction(input: { subjectId: $id, content: EYES }) {
     reaction { content }
+    subject { ... on IssueComment { lastEditedAt } ... on PullRequestReview { lastEditedAt } }
   }
 }'
 
@@ -345,6 +397,7 @@ query($id: ID!) {
       }
       author { login __typename }
       reactionGroups { content viewerHasReacted }
+      lastEditedAt
     }
     ... on PullRequestReview {
       pullRequest {
@@ -354,6 +407,7 @@ query($id: ID!) {
       }
       author { login __typename }
       reactionGroups { content viewerHasReacted }
+      lastEditedAt
     }
   }
 }'
@@ -415,11 +469,43 @@ UNREACT_PROOF_PREDICATE='
     and (any(.data.removeReaction.reactionGroups[]; .content == $content and .viewerHasReacted == true) | not)
   ) catch false'
 
+# True when the --edited-at value is a second-precision UTC time or never (§2).
+EDITED_AT_SHAPE_PREDICATE='
+  $edited_at == "never"
+  or ($edited_at | test("\\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\\z"))'
+
+# True when the input node has a lastEditedAt key whose value, null read as never,
+# equals the --edited-at value (§4 EDIT GATE). A non-object input, a missing key or
+# any other value makes it false, never a jq error.
+EDITED_AT_MATCH_PREDICATE='
+  try (
+    (type == "object") and has("lastEditedAt")
+    and ((if .lastEditedAt == null then "never" else .lastEditedAt end) == $edited_at)
+  ) catch false'
+
 # capture_seam_active: succeeds when the offline capture seam (§5) is engaged, i.e.
 # the dedicated test-mode flag is the exact opt-in value AND the capture file is
 # set+non-empty. A stray REACTMARKER_CAPTURE_FILE alone NEVER engages it.
 capture_seam_active() {
   [ "${REACTMARKER_TEST_MODE:-}" = "1" ] && [ -n "${REACTMARKER_CAPTURE_FILE:-}" ]
+}
+
+# require_read_version: the §2 --edited-at check on the mutating surfaces. Exits
+# through react_marker_fail with missing-edited-at, missing-value-for-edited-at or
+# invalid-edited-at. Makes no git or gh call, and runs under the capture seam too.
+require_read_version() {
+  case "$EDITED_AT_STATE" in
+    absent) react_marker_fail "missing-edited-at" ;;
+    no-value) react_marker_fail "missing-value-for-edited-at" ;;
+  esac
+  jq -n -e --arg edited_at "$EDITED_AT" "$EDITED_AT_SHAPE_PREDICATE" >/dev/null 2>&1 \
+    || react_marker_fail "invalid-edited-at"
+}
+
+# node_matches_read_version <jq path> <body>: succeeds when the node at the constant
+# <jq path> of <body> carries the lastEditedAt the caller read (§4 EDIT GATE).
+node_matches_read_version() {
+  printf '%s' "$2" | jq -e --arg edited_at "$EDITED_AT" "$1 | $EDITED_AT_MATCH_PREDICATE" >/dev/null 2>&1
 }
 
 # read_current_branch: set current_branch from `git symbolic-ref --quiet HEAD`
@@ -508,6 +594,15 @@ check_noise_author() {
     "$NOISE_AUTHOR_PREDICATE" >/dev/null 2>&1 || react_marker_fail "noise-author-refused"
 }
 
+# refuse_if_edited_since_read: the §4 EDIT GATE over binding_body. Exits through
+# react_marker_fail with edited-since-read when the node's lastEditedAt (null read as
+# never) differs from the --edited-at value, before any mutation. No check while the
+# capture seam is active.
+refuse_if_edited_since_read() {
+  capture_seam_active && return 0
+  node_matches_read_version '.data.node' "$binding_body" || react_marker_fail "edited-since-read"
+}
+
 # remove_viewer_reaction <node_id>: the §4 IDEMPOTENCY removal of the viewer's EYES
 # reaction. Returns 0 only on positive proof (gh exit 0, the shared GraphQL response
 # check passing, and no viewer EYES group left in the payload); otherwise non-zero.
@@ -537,10 +632,12 @@ refresh_existing_mark() {
 # run_reaction <node_id>: issue the EYES reaction over NODE_ID. The single
 # indirection point for both the live gh call AND the offline CAPTURE seam (§5).
 # On the live path returns 0 ONLY on positive proof (gh exit 0, the shared GraphQL
-# response check passing, AND .data.addReaction.reaction.content equal to the
-# requested content); every other response returns non-zero. No response text is
-# pattern-matched. INVARIANT: when the capture seam is active, NO gh call is made —
-# the script is fully offline.
+# response check passing, .data.addReaction.reaction.content equal to the
+# requested content, AND .data.addReaction.subject holding a lastEditedAt key) and
+# leaves the response in reaction_body; every other response returns non-zero. No
+# response text is pattern-matched. INVARIANT: when the capture seam is active, NO
+# gh call is made — the script is fully offline.
+reaction_body=""
 run_reaction() {
   local node_id="$1"
   # TEST SEAM GATE (§5): capture seam activates ONLY when the dedicated test-mode
@@ -559,19 +656,34 @@ run_reaction() {
   fi
   # LIVE path. Capture the response body from stdout ONLY so gh's own stderr chatter
   # is kept out of the body handed to the shared response check.
-  local gh_output gh_status
-  gh_output="$("${GH_TIMEOUT[@]}" gh api graphql \
+  local gh_status
+  reaction_body="$("${GH_TIMEOUT[@]}" gh api graphql \
     -F id="$node_id" \
     -f query="$REACT_MUTATION" 2>/dev/null)"
   gh_status=$?
   # Positive proof (§4 RESPONSE CHECK), the ONLY definition of success: gh exits 0,
-  # the shared response check accepts the envelope, AND the payload names the
-  # requested reaction content. gh exits 0 on several GraphQL error envelopes, so
-  # neither the exit status nor the envelope alone proves the reaction landed.
+  # the shared response check accepts the envelope, the payload names the requested
+  # reaction content, AND the subject carries its lastEditedAt key. gh exits 0 on
+  # several GraphQL error envelopes, so neither the exit status nor the envelope
+  # alone proves the reaction landed.
   [ "$gh_status" -eq 0 ] || return 1
-  hivemind_graphql_response_check "$gh_output" >/dev/null || return 1
-  printf '%s' "$gh_output" | jq -e --arg content "$REACTION_CONTENT" '.data.addReaction.reaction.content == $content' >/dev/null 2>&1 || return 1
+  hivemind_graphql_response_check "$reaction_body" >/dev/null || return 1
+  printf '%s' "$reaction_body" | jq -e --arg content "$REACTION_CONTENT" \
+    '.data.addReaction.reaction.content == $content
+     and (.data.addReaction.subject | type == "object" and has("lastEditedAt"))' >/dev/null 2>&1 || return 1
   return 0
+}
+
+# undo_mark_if_edited_since_read <node_id>: the §4 EDIT GATE over reaction_body.
+# When the subject's lastEditedAt (null read as never) differs from the --edited-at
+# value, removes the fresh mark through remove_viewer_reaction and exits through
+# react_marker_fail with edited-since-read; a removal lacking positive proof exits
+# with react-failed. No check while the capture seam is active.
+undo_mark_if_edited_since_read() {
+  capture_seam_active && return 0
+  node_matches_read_version '.data.addReaction.subject' "$reaction_body" && return 0
+  remove_viewer_reaction "$1" || react_marker_fail "react-failed"
+  react_marker_fail "edited-since-read"
 }
 
 # --- SURFACE -> DELIVERY DISPATCH (§3, closed by construction) -----------------
@@ -585,12 +697,15 @@ case "$SURFACE" in
     # above). The reaction subject is NODE_ID, so it is REQUIRED here and fails
     # closed with its stable reason token. The no-op surface never reaches this gate.
     [ -n "$NODE_ID" ] || react_marker_fail "missing-node-id"
+    require_read_version
     bind_node_to_current_pr "$NODE_ID" "$SURFACE"
     check_noise_author
+    refuse_if_edited_since_read
     refresh_existing_mark "$NODE_ID"
     if ! run_reaction "$NODE_ID"; then
       react_marker_fail "react-failed"
     fi
+    undo_mark_if_edited_since_read "$NODE_ID"
     ;;
   thread)
     # SILENT NO-OP: thread comments converge via reply-resolve.sh's

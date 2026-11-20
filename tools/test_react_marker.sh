@@ -32,6 +32,14 @@
 # (removeReaction) before addReaction, and that a removal lacking positive proof is react-failed with
 # addReaction never sent. Cases that must not reach gh put a failing gh stub first on PATH.
 #
+# The edit-gate cases (#578) pass --edited-at <time|never>, the version of the node the reviewer read;
+# every toplevel and review call passes it, and the stub binding node and addReaction subject carry
+# lastEditedAt. A binding node whose lastEditedAt (null read as never) differs is edited-since-read
+# with no mutation, in fix and noise mode; a mutation response whose subject shows a different
+# lastEditedAt is undone (removeReaction after addReaction) and edited-since-read; a failed undo, or a
+# subject without lastEditedAt, is react-failed. A missing, valueless or malformed flag fails before
+# any git or gh call, the capture seam included; the thread surface ignores the flag.
+#
 # Mirrors tools/test_reply_resolve.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any
 # -fail convention. Read-only: the only writes are scratch capture files, scratch repos and shim
 # files in a disposable tmpdir removed on EXIT.
@@ -77,12 +85,17 @@ fresh_capture() {
 TOPLEVEL_NODE="IC_kwDOABCDEF4AbCdEf"
 REVIEW_NODE="PRR_kwDOABCDEF4AbCdEf"
 
+# The version of the node the reviewer read: every toplevel and review call passes it as
+# --edited-at, and the bound stub node and the addReaction subject carry it as lastEditedAt.
+FIXTURE_EDITED_AT="2026-11-01T10:00:00Z"
+LATER_EDITED_AT="2026-11-01T10:05:00Z"
+
 # ── toplevel surface reacts with EYES over a real IC_ node ──────────────────────────
 # A toplevel IssueComment is Reactable: exactly ONE capture line `REACT node=IC_... content=EYES`,
 # exit 0.
 cap="$(fresh_capture toplevel)"
 out="$(REACTMARKER_TEST_MODE=1 REACTMARKER_CAPTURE_FILE="$cap" \
-  bash "$REACT_MARKER" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
+  bash "$REACT_MARKER" --edited-at "$FIXTURE_EDITED_AT" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
 status=$?
 line_count="$(grep -c '^REACT ' "$cap")"
 if [ "$status" -eq 0 ] && [ "$line_count" -eq 1 ] \
@@ -97,7 +110,7 @@ fi
 # `REACT node=PRR_... content=EYES`, exit 0.
 cap="$(fresh_capture review)"
 out="$(REACTMARKER_TEST_MODE=1 REACTMARKER_CAPTURE_FILE="$cap" \
-  bash "$REACT_MARKER" "$REVIEW_NODE" review "https://github.com/o/r/pull/5#pullrequestreview-9" 2>&1)"
+  bash "$REACT_MARKER" --edited-at "$FIXTURE_EDITED_AT" "$REVIEW_NODE" review "https://github.com/o/r/pull/5#pullrequestreview-9" 2>&1)"
 status=$?
 line_count="$(grep -c '^REACT ' "$cap")"
 if [ "$status" -eq 0 ] && [ "$line_count" -eq 1 ] \
@@ -140,7 +153,7 @@ fi
 # guard: REACTMARKER_ERROR=missing-node-id, exit non-zero, no reaction captured.
 cap="$(fresh_capture missingnode)"
 out="$(REACTMARKER_TEST_MODE=1 REACTMARKER_CAPTURE_FILE="$cap" \
-  bash "$REACT_MARKER" "" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
+  bash "$REACT_MARKER" --edited-at "$FIXTURE_EDITED_AT" "" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
 status=$?
 if [ "$status" -ne 0 ] && printf '%s\n' "$out" | grep -qx 'REACTMARKER_ERROR=missing-node-id' \
    && [ ! -s "$cap" ]; then
@@ -156,7 +169,7 @@ fi
 # so the failure is on the mutation result, not the dispatch.
 cap="$(fresh_capture reactfail)"
 out="$(REACTMARKER_TEST_MODE=1 REACTMARKER_CAPTURE_FILE="$cap" REACTMARKER_REACT_STATUS=1 \
-  bash "$REACT_MARKER" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
+  bash "$REACT_MARKER" --edited-at "$FIXTURE_EDITED_AT" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
 status=$?
 if [ "$status" -ne 0 ] && printf '%s\n' "$out" | grep -qx 'REACTMARKER_ERROR=react-failed'; then
   pass "reactfail:react-failed" "exit=$status REACTMARKER_ERROR=react-failed"
@@ -297,15 +310,25 @@ pr_reaction_groups_json() {
 }
 
 # bound_node_body <typename> [author json] [reactionGroups json] [latestReviews json]
-# [PR reactionGroups json]: a binding response whose node is <typename> on the OPEN fixture PR,
-# authored by <author json> (default the Codex Bot) and carrying <reactionGroups json> (default []).
-# The PR carries the review evidence <latestReviews json> (default no reviews) and
-# <PR reactionGroups json> (default []).
+# [PR reactionGroups json] [lastEditedAt json]: a binding response whose node is <typename> on the
+# OPEN fixture PR, authored by <author json> (default the Codex Bot), carrying <reactionGroups json>
+# (default []) and <lastEditedAt json> (default the read version FIXTURE_EDITED_AT). The PR carries
+# the review evidence <latestReviews json> (default no reviews) and <PR reactionGroups json>
+# (default []).
 bound_node_body() {
-  printf '{"data":{"node":{"__typename":"%s","pullRequest":{"state":"OPEN","headRefName":"%s","headRepository":{"id":"%s"},"latestReviews":%s,"reactionGroups":%s},"author":%s,"reactionGroups":%s}}}' \
+  printf '{"data":{"node":{"__typename":"%s","pullRequest":{"state":"OPEN","headRefName":"%s","headRepository":{"id":"%s"},"latestReviews":%s,"reactionGroups":%s},"author":%s,"reactionGroups":%s,"lastEditedAt":%s}}}' \
     "$1" "$FIXTURE_BRANCH" "$FIXTURE_REPO_ID" "${4:-$NO_LATEST_REVIEWS}" "${5:-[]}" \
-    "${2:-$CODEX_BOT_AUTHOR}" "${3:-[]}"
+    "${2:-$CODEX_BOT_AUTHOR}" "${3:-[]}" "${6:-\"$FIXTURE_EDITED_AT\"}"
 }
+
+# react_body <lastEditedAt json>: a clean addReaction response naming EYES whose subject carries
+# <lastEditedAt json>.
+react_body() {
+  printf '{"data":{"addReaction":{"reaction":{"content":"EYES"},"subject":{"lastEditedAt":%s}}}}' "$1"
+}
+
+# REACT_OK_BODY: the clean addReaction response whose subject is still the read version.
+REACT_OK_BODY="$(react_body "\"$FIXTURE_EDITED_AT\"")"
 
 # set_gh_part <part> <exit status> <body>: set one shim response (repo | binding | unreact | react)
 # for the current case dir.
@@ -325,7 +348,7 @@ new_gh_case() {
   set_gh_part repo 0 "{\"id\":\"$FIXTURE_REPO_ID\"}"
   set_gh_part binding 0 "$(bound_node_body "$node_type")"
   set_gh_part unreact 0 '{"data":{"removeReaction":{"reactionGroups":[{"content":"EYES","viewerHasReacted":false}]}}}'
-  set_gh_part react 0 '{"data":{"addReaction":{"reaction":{"content":"EYES"}}}}'
+  set_gh_part react 0 "$REACT_OK_BODY"
 }
 
 # reached_flag <part>: print yes when the shim recorded <part>-reached in the current case dir, else no.
@@ -341,9 +364,12 @@ call_order() {
 # MARKER_FLAGS: flags run_bound_case passes before the positionals (empty = fix mode).
 MARKER_FLAGS=()
 
+# READ_VERSION_FLAGS: the --edited-at flag run_bound_case passes before MARKER_FLAGS.
+READ_VERSION_FLAGS=(--edited-at "$FIXTURE_EDITED_AT")
+
 # run_bound_case <repo dir> <node id> <surface> [env assignments...]: run react-marker on the live path
-# from <repo dir> against the gh shim of the current case dir, with MARKER_FLAGS before the
-# positionals. Sets live_status, live_stdout, live_stderr, live_reached (the mutation), repo_reached,
+# from <repo dir> against the gh shim of the current case dir, with READ_VERSION_FLAGS and
+# MARKER_FLAGS before the positionals. Sets live_status, live_stdout, live_stderr, live_reached (the mutation), repo_reached,
 # binding_reached, unreact_reached.
 run_bound_case() {
   local repo_dir="$1" node_id="$2" surface="$3"
@@ -353,7 +379,8 @@ run_bound_case() {
     env -u GIT_DIR -u GIT_WORK_TREE -u REACTMARKER_TEST_MODE -u REACTMARKER_CAPTURE_FILE \
       HOME="$FIXTURE_HOME" XDG_CONFIG_HOME="$FIXTURE_HOME/.config" GIT_CONFIG_NOSYSTEM=1 \
       PATH="$GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" "$@" \
-      bash "$REACT_MARKER" ${MARKER_FLAGS[@]+"${MARKER_FLAGS[@]}"} "$node_id" "$surface" \
+      bash "$REACT_MARKER" ${READ_VERSION_FLAGS[@]+"${READ_VERSION_FLAGS[@]}"} \
+      ${MARKER_FLAGS[@]+"${MARKER_FLAGS[@]}"} "$node_id" "$surface" \
       "https://github.com/fixture-owner/fixture-repo/pull/5"
   ) > "$case_dir/run.stdout" 2> "$case_dir/run.stderr"
   live_status=$?
@@ -404,7 +431,7 @@ bad_cap="$TMPDIR_TEST/nonexistent-parent-dir/cap.log"
 new_gh_case capfail toplevel
 out="$(PATH="$GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" REACTMARKER_TEST_MODE=1 \
   REACTMARKER_CAPTURE_FILE="$bad_cap" \
-  bash "$REACT_MARKER" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
+  bash "$REACT_MARKER" --edited-at "$FIXTURE_EDITED_AT" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
 status=$?
 if [ "$status" -ne 0 ] && printf '%s\n' "$out" | grep -qx 'REACTMARKER_ERROR=react-failed' \
    && [ "$(reached_flag repo)" = no ] && [ "$(reached_flag binding)" = no ] \
@@ -463,7 +490,7 @@ run_live_case live-errors-empty-object 0 '{"data":{"addReaction":null},"errors":
 assert_live_react_failed "live:exit0-errors-empty-object" "exit 0 + errors[{}] -> exit 1 REACTMARKER_ERROR=react-failed"
 
 # exit 0 + a clean success envelope naming the requested content -> success, silent on stdout.
-run_live_case live-clean 0 '{"data":{"addReaction":{"reaction":{"content":"EYES"}}}}'
+run_live_case live-clean 0 "$REACT_OK_BODY"
 assert_live_success "live:exit0-clean" "exit 0 + clean data envelope with reaction.content EYES -> exit 0, empty stdout"
 
 # The binding lookup passes the node id as a variable argument, never inside the query text.
@@ -488,7 +515,7 @@ assert_live_react_failed "live:exit1-already-reacted-fails" "exit 1 + already-re
 # exit 0 + an errors OBJECT whose message names an existing reaction, next to an EYES payload ->
 # react-failed: the envelope check rejects any non-null, non-empty errors value.
 run_live_case live-errors-object-already 0 \
-  '{"data":{"addReaction":{"reaction":{"content":"EYES"}}},"errors":{"message":"Viewer has already reacted with this content"}}'
+  '{"data":{"addReaction":{"reaction":{"content":"EYES"},"subject":{"lastEditedAt":"'"$FIXTURE_EDITED_AT"'"}}},"errors":{"message":"Viewer has already reacted with this content"}}'
 assert_live_react_failed "live:exit0-errors-object-already-reacted" "exit 0 + errors{message} beside EYES payload -> exit 1 REACTMARKER_ERROR=react-failed"
 
 # exit 0 + clean envelope with a null addReaction payload -> react-failed: no positive proof.
@@ -496,11 +523,12 @@ run_live_case live-null-payload 0 '{"data":{"addReaction":null}}'
 assert_live_react_failed "live:exit0-null-payload" "exit 0 + data.addReaction null -> exit 1 REACTMARKER_ERROR=react-failed"
 
 # exit 0 + clean envelope naming a different reaction content -> react-failed.
-run_live_case live-wrong-content 0 '{"data":{"addReaction":{"reaction":{"content":"HEART"}}}}'
+run_live_case live-wrong-content 0 \
+  '{"data":{"addReaction":{"reaction":{"content":"HEART"},"subject":{"lastEditedAt":"'"$FIXTURE_EDITED_AT"'"}}}}'
 assert_live_react_failed "live:exit0-wrong-content" "exit 0 + reaction.content HEART -> exit 1 REACTMARKER_ERROR=react-failed"
 
 # exit 1 + a clean EYES payload on stdout -> react-failed: the gh exit status is checked first.
-run_live_case live-exit1-clean 1 '{"data":{"addReaction":{"reaction":{"content":"EYES"}}}}'
+run_live_case live-exit1-clean 1 "$REACT_OK_BODY"
 assert_live_react_failed "live:exit1-clean-payload" "exit 1 + clean EYES payload -> exit 1 REACTMARKER_ERROR=react-failed"
 
 # A review candidate bound to a PullRequestReview on the fixture PR reacts like a toplevel one.
@@ -717,7 +745,7 @@ cap="$(fresh_capture noise-retired-capture)"
 new_gh_case noise-retired-capture toplevel
 out="$(PATH="$FAIL_GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" REACTMARKER_TEST_MODE=1 \
   REACTMARKER_CAPTURE_FILE="$cap" \
-  bash "$REACT_MARKER" --noise codex-only "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
+  bash "$REACT_MARKER" --noise codex-only --edited-at "$FIXTURE_EDITED_AT" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
 status=$?
 if [ "$status" -eq 1 ] && [ "$out" = "REACTMARKER_ERROR=retired-filter" ] && [ ! -s "$cap" ] \
    && [ "$(reached_flag gh)" = no ]; then
@@ -751,7 +779,7 @@ new_gh_case noise-missing-value toplevel
   cd "$BOUND_REPO" || exit 98
   env -u GIT_DIR -u GIT_WORK_TREE -u REACTMARKER_TEST_MODE -u REACTMARKER_CAPTURE_FILE \
     PATH="$FAIL_GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" \
-    bash "$REACT_MARKER" "$TOPLEVEL_NODE" toplevel "https://github.com/fixture-owner/fixture-repo/pull/5" --noise
+    bash "$REACT_MARKER" --edited-at "$FIXTURE_EDITED_AT" "$TOPLEVEL_NODE" toplevel "https://github.com/fixture-owner/fixture-repo/pull/5" --noise
 ) > "$case_dir/run.stdout" 2> "$case_dir/run.stderr"
 status=$?
 if [ "$status" -eq 1 ] && [ "$(cat "$case_dir/run.stderr")" = "REACTMARKER_ERROR=missing-value-for-noise" ] \
@@ -767,7 +795,7 @@ cap="$(fresh_capture noise-capture)"
 new_gh_case noise-capture toplevel
 out="$(PATH="$FAIL_GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" REACTMARKER_TEST_MODE=1 \
   REACTMARKER_CAPTURE_FILE="$cap" \
-  bash "$REACT_MARKER" --noise automated "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
+  bash "$REACT_MARKER" --noise automated --edited-at "$FIXTURE_EDITED_AT" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
 status=$?
 if [ "$status" -eq 0 ] && [ -z "$out" ] && [ "$(grep -c '^REACT ' "$cap")" -eq 1 ] \
    && grep -qx "REACT node=$TOPLEVEL_NODE content=EYES" "$cap" && [ "$(reached_flag gh)" = no ]; then
@@ -800,7 +828,7 @@ new_gh_case noise-no-identity toplevel
   cd "$BOUND_REPO" || exit 98
   env -u GIT_DIR -u GIT_WORK_TREE -u REACTMARKER_TEST_MODE -u REACTMARKER_CAPTURE_FILE \
     PATH="$FAIL_GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" \
-    bash "$NO_IDENTITY_MARKER" --noise automated "$TOPLEVEL_NODE" toplevel "https://github.com/fixture-owner/fixture-repo/pull/5"
+    bash "$NO_IDENTITY_MARKER" --noise automated --edited-at "$FIXTURE_EDITED_AT" "$TOPLEVEL_NODE" toplevel "https://github.com/fixture-owner/fixture-repo/pull/5"
 ) > "$case_dir/run.stdout" 2> "$case_dir/run.stderr"
 status=$?
 if [ "$status" -eq 1 ] && [ "$(cat "$case_dir/run.stderr")" = "REACTMARKER_ERROR=missing-identity-module" ] \
@@ -813,7 +841,7 @@ fi
 cap="$(fresh_capture fix-no-identity)"
 out="$(PATH="$FAIL_GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" REACTMARKER_TEST_MODE=1 \
   REACTMARKER_CAPTURE_FILE="$cap" \
-  bash "$NO_IDENTITY_MARKER" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
+  bash "$NO_IDENTITY_MARKER" --edited-at "$FIXTURE_EDITED_AT" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
 status=$?
 if [ "$status" -eq 0 ] && grep -qx "REACT node=$TOPLEVEL_NODE content=EYES" "$cap"; then
   pass "fix:no-identity-module-needed" "fix mode without reviewer-identity.jq -> exit 0, reaction captured"
@@ -905,6 +933,243 @@ assert_remark_failed "remark:removal-eyes-still-reacted" "removeReaction payload
 
 run_remark_failure remark-fail-null-groups 0 '{"data":{"removeReaction":{"reactionGroups":null}}}'
 assert_remark_failed "remark:removal-null-reaction-groups" "removeReaction payload with null reactionGroups -> exit 1 react-failed, addReaction not sent"
+
+# ── EDIT GATE (#578): the mark lands only on the version of the node the reviewer read ──
+# Every toplevel and review call passes --edited-at <time|never>. The binding node's lastEditedAt
+# (null read as never) must equal it before any mutation, and the addReaction subject's lastEditedAt
+# must still equal it after the mark; otherwise the fresh mark is removed and the script exits
+# edited-since-read.
+
+# assert_edit_outcome <name> <status> <token> <order> <label>: the live case exited <status>, its
+# stderr is exactly REACTMARKER_ERROR=<token> (empty <token>: no error token), stdout is silent and
+# the shim saw exactly <order>.
+assert_edit_outcome() {
+  local order expected_stderr=""
+  order="$(call_order)"
+  [ -n "$3" ] && expected_stderr="REACTMARKER_ERROR=$3"
+  if [ "$live_status" -eq "$2" ] && [ -z "$live_stdout" ] && [ "$order" = "$4" ] \
+     && [ "$live_stderr" = "$expected_stderr" ]; then
+    pass "$1" "$5"
+  else
+    failed "$1" "status=$live_status order=$order stdout=$live_stdout stderr=$live_stderr"
+  fi
+}
+
+# prepare_edit_case <name> <surface> <binding lastEditedAt json> [react body]: a fresh case dir whose
+# binding node carries <binding lastEditedAt json> and whose addReaction answers [react body] (default
+# the clean read-version body).
+prepare_edit_case() {
+  local node_type="IssueComment"
+  [ "$2" = review ] && node_type="PullRequestReview"
+  new_gh_case "$1" "$2"
+  set_gh_part binding 0 "$(bound_node_body "$node_type" "$COPILOT_BOT_AUTHOR" '[]' "$NO_LATEST_REVIEWS" '[]' "$3")"
+  if [ -n "${4:-}" ]; then set_gh_part react 0 "$4"; fi
+}
+
+# run_read_version_case <surface> <read version>: run the prepared case in fix mode over the
+# surface's node id with --edited-at <read version>.
+run_read_version_case() {
+  local node_id="$TOPLEVEL_NODE"
+  [ "$1" = review ] && node_id="$REVIEW_NODE"
+  READ_VERSION_FLAGS=(--edited-at "$2")
+  run_bound_case "$BOUND_REPO" "$node_id" "$1"
+  READ_VERSION_FLAGS=(--edited-at "$FIXTURE_EDITED_AT")
+}
+
+# run_edit_case <name> <surface> <read version> <binding lastEditedAt json> [react body]: prepare
+# the case, then run it reading <read version>.
+run_edit_case() {
+  prepare_edit_case "$1" "$2" "$4" "${5:-}"
+  run_read_version_case "$2" "$3"
+}
+
+run_edit_case edit-equal-time toplevel "$FIXTURE_EDITED_AT" "\"$FIXTURE_EDITED_AT\""
+assert_edit_outcome "edit:equal-time-marks" 0 "" "repo binding react " "read version equals the node's lastEditedAt -> exit 0, reaction sent"
+
+run_edit_case edit-never-unedited review never null "$(react_body null)"
+assert_edit_outcome "edit:never-read-unedited-node-marks" 0 "" "repo binding react " "read never, node lastEditedAt null -> exit 0, reaction sent"
+
+run_edit_case edit-never-vs-edited toplevel never "\"$FIXTURE_EDITED_AT\""
+assert_edit_outcome "edit:never-read-edited-node-refused" 1 edited-since-read "repo binding " "read never, node since edited -> exit 1 edited-since-read, no mutation"
+
+run_edit_case edit-later-edit review "$FIXTURE_EDITED_AT" "\"$LATER_EDITED_AT\""
+assert_edit_outcome "edit:later-edit-refused" 1 edited-since-read "repo binding " "node edited after the read version -> exit 1 edited-since-read, no mutation"
+
+new_gh_case edit-binding-no-key toplevel
+set_gh_part binding 0 "{\"data\":{\"node\":{\"__typename\":\"IssueComment\",\"pullRequest\":{\"state\":\"OPEN\",\"headRefName\":\"$FIXTURE_BRANCH\",\"headRepository\":{\"id\":\"$FIXTURE_REPO_ID\"}},\"author\":$CODEX_BOT_AUTHOR,\"reactionGroups\":[]}}}"
+run_bound_case "$BOUND_REPO" "$TOPLEVEL_NODE" toplevel
+assert_edit_outcome "edit:binding-without-key-refused" 1 edited-since-read "repo binding " "binding node with no lastEditedAt key -> exit 1 edited-since-read, no mutation"
+
+# Noise mode refuses an edited node the same way, after the author check passes.
+new_gh_case edit-noise-never-vs-edited review
+set_gh_part binding 0 "$(bound_node_body PullRequestReview "$COPILOT_BOT_AUTHOR" '[]' "$NO_LATEST_REVIEWS" '[]' "\"$FIXTURE_EDITED_AT\"")"
+MARKER_FLAGS=(--noise automated)
+READ_VERSION_FLAGS=(--edited-at never)
+run_bound_case "$BOUND_REPO" "$REVIEW_NODE" review
+READ_VERSION_FLAGS=(--edited-at "$FIXTURE_EDITED_AT")
+MARKER_FLAGS=()
+assert_edit_outcome "edit:noise-never-read-edited-node-refused" 1 edited-since-read "repo binding " "noise mode, read never, node since edited -> exit 1 edited-since-read, no mutation"
+
+# The edit gate runs before the re-mark removal: an edited node with our old mark keeps it.
+new_gh_case edit-before-remark toplevel
+set_gh_part binding 0 "$(bound_node_body IssueComment "$CODEX_BOT_AUTHOR" "$VIEWER_EYES_GROUPS" "$NO_LATEST_REVIEWS" '[]' "\"$LATER_EDITED_AT\"")"
+run_bound_case "$BOUND_REPO" "$TOPLEVEL_NODE" toplevel
+assert_edit_outcome "edit:refusal-precedes-remark-removal" 1 edited-since-read "repo binding " "viewer EYES present on an edited node -> exit 1 edited-since-read, no removal, no mutation"
+
+# An edit landing between the binding lookup and the mark: the mutation response shows a different
+# lastEditedAt, so the fresh mark is removed, then the script exits edited-since-read.
+run_edit_case edit-after-mark toplevel "$FIXTURE_EDITED_AT" "\"$FIXTURE_EDITED_AT\"" "$(react_body "\"$LATER_EDITED_AT\"")"
+assert_edit_outcome "edit:post-mark-edit-undone" 1 edited-since-read "repo binding react unreact " "subject edited after the mark -> removeReaction after addReaction, exit 1 edited-since-read"
+
+run_edit_case edit-after-mark-never review never null "$(react_body "\"$FIXTURE_EDITED_AT\"")"
+assert_edit_outcome "edit:post-mark-first-edit-undone" 1 edited-since-read "repo binding react unreact " "read never, subject edited by the mark -> removeReaction after addReaction, exit 1 edited-since-read"
+
+# A failed undo is react-failed: the fresh mark may still stand, so a fixed mark blocks.
+prepare_edit_case edit-undo-fails toplevel "\"$FIXTURE_EDITED_AT\"" "$(react_body "\"$LATER_EDITED_AT\"")"
+set_gh_part unreact 1 ''
+run_read_version_case toplevel "$FIXTURE_EDITED_AT"
+assert_edit_outcome "edit:failed-undo-react-failed" 1 react-failed "repo binding react unreact " "undo removal gh exit 1 -> exit 1 react-failed"
+
+prepare_edit_case edit-undo-still-eyes toplevel "\"$FIXTURE_EDITED_AT\"" "$(react_body "\"$LATER_EDITED_AT\"")"
+set_gh_part unreact 0 '{"data":{"removeReaction":{"reactionGroups":[{"content":"EYES","viewerHasReacted":true}]}}}'
+run_read_version_case toplevel "$FIXTURE_EDITED_AT"
+assert_edit_outcome "edit:undo-without-proof-react-failed" 1 react-failed "repo binding react unreact " "undo payload still shows viewer EYES -> exit 1 react-failed"
+
+# A mutation response whose subject lacks lastEditedAt has no positive proof: react-failed, no undo.
+run_edit_case edit-subject-no-key toplevel "$FIXTURE_EDITED_AT" "\"$FIXTURE_EDITED_AT\"" \
+  '{"data":{"addReaction":{"reaction":{"content":"EYES"},"subject":{}}}}'
+assert_edit_outcome "edit:subject-without-key-react-failed" 1 react-failed "repo binding react " "addReaction subject with no lastEditedAt key -> exit 1 react-failed"
+
+run_edit_case edit-subject-null toplevel "$FIXTURE_EDITED_AT" "\"$FIXTURE_EDITED_AT\"" \
+  '{"data":{"addReaction":{"reaction":{"content":"EYES"},"subject":null}}}'
+assert_edit_outcome "edit:null-subject-react-failed" 1 react-failed "repo binding react " "addReaction with a null subject -> exit 1 react-failed"
+
+# run_flag_case <name> <surface> [args before the positionals...]: run react-marker from the bound repo
+# with failing git and gh stubs first on PATH, the given flag args, then the surface's positionals.
+# Sets flag_status, flag_stderr, flag_git, flag_gh.
+run_flag_case() {
+  local name="$1" surface="$2" node_id="$TOPLEVEL_NODE"
+  shift 2
+  [ "$surface" = review ] && node_id="$REVIEW_NODE"
+  new_gh_case "$name" "$surface"
+  (
+    cd "$BOUND_REPO" || exit 98
+    env -u GIT_DIR -u GIT_WORK_TREE -u REACTMARKER_TEST_MODE -u REACTMARKER_CAPTURE_FILE \
+      PATH="$GIT_SHIM_DIR:$FAIL_GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" \
+      bash "$REACT_MARKER" "$@" "$node_id" "$surface" "https://github.com/fixture-owner/fixture-repo/pull/5"
+  ) > "$case_dir/run.stdout" 2> "$case_dir/run.stderr"
+  flag_status=$?
+  flag_stderr="$(cat "$case_dir/run.stderr")"
+  flag_git="$(reached_flag git)"
+  flag_gh="$(reached_flag gh)"
+}
+
+# assert_flag_token <name> <token> <label>: exit 1, exactly REACTMARKER_ERROR=<token> on stderr, and
+# neither git nor gh reached.
+assert_flag_token() {
+  if [ "$flag_status" -eq 1 ] && [ "$flag_stderr" = "REACTMARKER_ERROR=$2" ] \
+     && [ "$flag_git" = no ] && [ "$flag_gh" = no ]; then
+    pass "$1" "$3"
+  else
+    failed "$1" "status=$flag_status stderr=$flag_stderr git=$flag_git gh=$flag_gh"
+  fi
+}
+
+run_flag_case flag-missing toplevel
+assert_flag_token "edit:flag-missing" missing-edited-at "toplevel without --edited-at -> exit 1 missing-edited-at, git and gh never reached"
+
+run_flag_case flag-missing-noise review --noise automated
+assert_flag_token "edit:flag-missing-noise" missing-edited-at "noise-mode review without --edited-at -> exit 1 missing-edited-at, git and gh never reached"
+
+new_gh_case flag-no-value toplevel
+(
+  cd "$BOUND_REPO" || exit 98
+  env -u GIT_DIR -u GIT_WORK_TREE -u REACTMARKER_TEST_MODE -u REACTMARKER_CAPTURE_FILE \
+    PATH="$GIT_SHIM_DIR:$FAIL_GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" \
+    bash "$REACT_MARKER" "$TOPLEVEL_NODE" toplevel "https://github.com/fixture-owner/fixture-repo/pull/5" --edited-at
+) > "$case_dir/run.stdout" 2> "$case_dir/run.stderr"
+flag_status=$?
+flag_stderr="$(cat "$case_dir/run.stderr")"
+flag_git="$(reached_flag git)"
+flag_gh="$(reached_flag gh)"
+assert_flag_token "edit:flag-no-value" missing-value-for-edited-at "--edited-at as the last argument -> exit 1 missing-value-for-edited-at, git and gh never reached"
+
+# check_malformed_read_version <label> <value>: a malformed --edited-at value is invalid-edited-at.
+check_malformed_read_version() {
+  local quoted_value
+  printf -v quoted_value '%q' "$2"
+  run_flag_case "flag-malformed-$1" toplevel --edited-at "$2"
+  assert_flag_token "edit:flag-malformed-$1" invalid-edited-at "--edited-at $quoted_value -> exit 1 invalid-edited-at, git and gh never reached"
+}
+check_malformed_read_version empty ""
+check_malformed_read_version fractional "2026-11-01T10:00:00.123Z"
+check_malformed_read_version offset "2026-11-01T10:00:00+00:00"
+check_malformed_read_version date-only "2026-11-01"
+check_malformed_read_version upper-never "NEVER"
+check_malformed_read_version trailing-newline "$FIXTURE_EDITED_AT"$'\n'
+check_malformed_read_version null-word "null"
+
+# The thread surface ignores --edited-at in every form and stays a silent no-op.
+for thread_args in "" "--edited-at not-a-time" "--edited-at"; do
+  cap="$(fresh_capture "edit-thread-${thread_args// /_}")"
+  # shellcheck disable=SC2086
+  out="$(REACTMARKER_TEST_MODE=1 REACTMARKER_CAPTURE_FILE="$cap" \
+    bash "$REACT_MARKER" "$TOPLEVEL_NODE" thread "https://github.com/o/r/pull/5#discussion_r1" $thread_args 2>&1)"
+  status=$?
+  if [ "$status" -eq 0 ] && [ ! -s "$cap" ] && [ -z "$out" ]; then
+    pass "edit:thread-ignores-flag[${thread_args:-none}]" "thread surface with '${thread_args:-no flag}' -> exit 0, no reaction, no output"
+  else
+    failed "edit:thread-ignores-flag[${thread_args:-none}]" "status=$status cap=$(cat "$cap") out=$out"
+  fi
+done
+
+# The capture seam still validates the flag but skips both comparisons.
+cap="$(fresh_capture edit-capture-missing)"
+out="$(REACTMARKER_TEST_MODE=1 REACTMARKER_CAPTURE_FILE="$cap" \
+  bash "$REACT_MARKER" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
+status=$?
+if [ "$status" -eq 1 ] && [ "$out" = "REACTMARKER_ERROR=missing-edited-at" ] && [ ! -s "$cap" ]; then
+  pass "edit:capture-seam-requires-flag" "capture seam without --edited-at -> exit 1 missing-edited-at, nothing captured"
+else
+  failed "edit:capture-seam-requires-flag" "status=$status out=$out cap=$(cat "$cap")"
+fi
+
+cap="$(fresh_capture edit-capture-malformed)"
+out="$(REACTMARKER_TEST_MODE=1 REACTMARKER_CAPTURE_FILE="$cap" \
+  bash "$REACT_MARKER" --edited-at yesterday "$REVIEW_NODE" review "https://github.com/o/r/pull/5#pullrequestreview-9" 2>&1)"
+status=$?
+if [ "$status" -eq 1 ] && [ "$out" = "REACTMARKER_ERROR=invalid-edited-at" ] && [ ! -s "$cap" ]; then
+  pass "edit:capture-seam-validates-flag" "capture seam with a malformed --edited-at -> exit 1 invalid-edited-at, nothing captured"
+else
+  failed "edit:capture-seam-validates-flag" "status=$status out=$out cap=$(cat "$cap")"
+fi
+
+cap="$(fresh_capture edit-capture-never)"
+new_gh_case edit-capture-never toplevel
+out="$(PATH="$FAIL_GH_SHIM_DIR:$PATH" FIXTURE_GH_CASE_DIR="$case_dir" REACTMARKER_TEST_MODE=1 \
+  REACTMARKER_CAPTURE_FILE="$cap" \
+  bash "$REACT_MARKER" --edited-at never "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" 2>&1)"
+status=$?
+if [ "$status" -eq 0 ] && [ -z "$out" ] && grep -qx "REACT node=$TOPLEVEL_NODE content=EYES" "$cap" \
+   && [ "$(reached_flag gh)" = no ]; then
+  pass "edit:capture-seam-skips-comparisons" "capture seam with --edited-at never -> one REACT line, exit 0, gh never reached"
+else
+  failed "edit:capture-seam-skips-comparisons" "status=$status out=$out cap=$(cat "$cap") gh=$(reached_flag gh)"
+fi
+
+# The binding query selects lastEditedAt after reactionGroups { content viewerHasReacted } under both
+# fragments, and the addReaction mutation selects the subject's lastEditedAt.
+run_edit_case edit-query-text review "$FIXTURE_EDITED_AT" "\"$FIXTURE_EDITED_AT\""
+binding_query_text="$(tr -s '[:space:]' ' ' < "$case_dir/binding.args")"
+react_query_text="$(tr -s '[:space:]' ' ' < "$case_dir/react.args")"
+binding_selection_count="$(printf '%s' "$binding_query_text" \
+  | grep -oF 'author { login __typename } reactionGroups { content viewerHasReacted } lastEditedAt }' | wc -l)"
+if [ "$binding_selection_count" -eq 2 ] \
+   && printf '%s' "$react_query_text" | grep -qF 'reaction { content } subject { ... on IssueComment { lastEditedAt } ... on PullRequestReview { lastEditedAt } }'; then
+  pass "edit:query-text-selects-last-edited-at" "binding selects lastEditedAt under both fragments; addReaction selects the subject's lastEditedAt"
+else
+  failed "edit:query-text-selects-last-edited-at" "binding_count=$binding_selection_count binding=$binding_query_text react=$react_query_text"
+fi
 
 # ── thread surface from a non-git directory stays a silent no-op ─────────────────────
 # The thread surface never runs the binding: from a directory outside any repository, with shim git

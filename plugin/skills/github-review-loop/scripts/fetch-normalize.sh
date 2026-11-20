@@ -98,6 +98,8 @@
 #                                            #   for the thread-overflow sentinel
 #       "databaseId":      <int>|null,       # null off-thread + for the sentinel
 #       "url":             <string>|null,    # null on thread surface
+#       "last_edited_at":  <string>|null,    # toplevel/review ONLY: the read
+#                                            #   version's lastEditedAt, or null
 #       "classification":  "handled" | "actionable" | "followup-after-fix"
 #     }
 #

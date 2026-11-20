@@ -14,13 +14,40 @@ it serves the post-comment state to every poll and asserts a `CHANGED` event. It
 unfixed script.
 
 The remaining cases pin the behavior the fix must not break: silence on no delta, `CHANGED` on
-each review scalar class (`LATEST_NONSELF_ISSUE_COMMENT_ID`, a `*_TOTAL` tripwire alone),
-`CI_FAILED` on a `FAILED_CHECKS` rise (see CI route below), `REVIEWER_APPROVED` on a first-poll
+each review scalar class (`LATEST_NONSELF_ISSUE_COMMENT_ID`, a `*_TOTAL` tripwire alone, the
+`LATEST_EDIT` edit token), `CI_FAILED` on a `FAILED_CHECKS` rise (see CI route below), `REVIEWER_APPROVED` on a first-poll
 approval, and the fail-closed `POLL_ERROR` paths.
 
 - `delta:failed-checks` — one check run moving SUCCESS to FAILURE (`FAILED_CHECKS` 0 to 1) with no
   review activity prints exactly `CI_FAILED` then `WATCH_TIMEOUT`: no `CHANGED` for that
   iteration, nothing on the steady red poll after it, and the poll keeps running.
+- `delta:review-edit` — see Edit token below.
+
+## Edit token
+
+`LATEST_EDIT` is the greatest non-null `lastEditedAt` over the non-self issue comments and the
+filtered reviews (same states, `reviewer_matches_filter`) of the snapshot's `comments(last: 50)`
+and `reviews(last: 50)` pages, reduced to its 14 digits (`2026-11-20T23:04:00Z` gives
+`20261120230400`) so it fits the seed shape, or `NONE` when no such node was edited. An in-place
+edit moves no id token and no total, so this token is the only scalar it moves. An in-scope
+`lastEditedAt` that does not match `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$` fails
+the capture. Not tracked: edits outside the 50-node pages, and review-thread comment edits. No
+committed fixture carries `lastEditedAt`; a missing key reads as never edited, and every edited
+state is a `derive_fixture` variant.
+
+- `delta:review-edit` — the pre-cycle-0 state's Bot-typed review edited in place prints exactly
+  `CHANGED` then `WATCH_TIMEOUT`.
+- `edit:nonself-comment-fires-changed` — a Bot-typed issue comment edited in place prints exactly
+  `CHANGED` then `WATCH_TIMEOUT`.
+- `edit:self-comment-idles` — a User-typed self comment edited in place idles to `WATCH_TIMEOUT`.
+- `edit:review-outside-filter-idles` — the review edit of `delta:review-edit`, under a `<login>`
+  filter naming another reviewer, idles to `WATCH_TIMEOUT`.
+- `edit:token-is-greatest-edit-digits` — a baseline over an edited comment and a later-edited review
+  carries the later time's 14 digits in its `latest_edit` field, located through the
+  `SNAPSHOT_FIELDS` declaration.
+- `edit:malformed-time-fails-closed` — a fractional, a space-separated and a numeric edit time on
+  the in-scope review each print `SNAPSHOT_ERROR`, `POLL_ERROR` and `CHECK_ERROR`, exit 1.
+- `check:parity-with-poll-first-iteration` — its `edit` row; see Quiet-exit check below.
 
 ## CI route (#400)
 
@@ -332,9 +359,9 @@ fails it fails the case and is left out of the grid, so a missing combination ca
 silently. The case also confirms the check rejects a row missing its injector, a row missing
 its mode list, and, for each fail-closed kind, a row that excludes it. A new number source is one row.
 
-The grid proves only the sources in its table. The other snapshot scalars (`*_TOTAL` and the id
-tokens) are not read through `read_decimal`, are not in the table, and the grid claims nothing
-about them.
+The grid proves only the sources in its table. The other snapshot scalars (`*_TOTAL`, the id
+tokens and the `LATEST_EDIT` edit token) are not read through `read_decimal`, are not in the table,
+and the grid claims nothing about them. The edit token is compared as text only.
 
 ## Quiet-exit check
 
@@ -355,7 +382,8 @@ to pin the number of captures.
   exit 0, in one capture.
 - `check:parity-with-poll-first-iteration` — against a `re-arm` seed captured over the green
   pre-cycle-0 state with no reaction: a `*_TOTAL` tripwire delta (`CHANGED`), a `FAILED_CHECKS`
-  rise (`CI_FAILED`), a merged PR, a closed PR, an approval rise, and no delta; and against a red
+  rise (`CI_FAILED`), a merged PR, a closed PR, an approval rise, an in-place review edit
+  (`CHANGED`), and no delta; and against a red
   `re-arm` seed, the green state, a `FAILED_CHECKS` drop (`CHANGED`). For each row the check's line
   equals the expected marker AND the first line a poll armed with the same seed prints over the
   same state (its `WATCH_TIMEOUT` read as `UNCHANGED`); each check exits 0 in one capture.

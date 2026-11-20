@@ -138,7 +138,7 @@ ENTRY_ROWS=(
 )
 
 POLL_SCRIPT_PATH='plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh'
-POLL_PROBE_SEED='initial|OPEN|NONE|NONE|NONE|0|0|0|0|false'
+POLL_PROBE_SEED='initial|OPEN|NONE|NONE|NONE|0|0|0|NONE|0|false'
 
 # LIB_ROWS: <path>|<var>|<sibling lib in the same dir>   (C3 sourced libraries)
 LIB_ROWS=(

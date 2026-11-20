@@ -258,15 +258,18 @@ gh api graphql \
 mutation($nodeId: ID!) {
   addReaction(input: { subjectId: $nodeId, content: EYES }) {
     reaction { content }
+    subject { ... on IssueComment { lastEditedAt } ... on PullRequestReview { lastEditedAt } }
   }
 }'
 ```
 
 `EYES` is the single named marker constant — a member of the `ReactionContent` enum. It is chosen because it reads semantically as "seen/handled".
 
-`react-marker.sh` sends the mutation. Its success proof is the requested `reaction` object in the response: gh exits 0, the shared GraphQL response check passes, and `.data.addReaction.reaction.content` is `EYES`. Before the mutation it proves the node belongs to the current branch's open PR, in one `node(id:)` lookup that also selects `author { login __typename }` and `reactionGroups { content viewerHasReacted }`.
+`react-marker.sh --edited-at "$last_edited_at" NODE_ID SURFACE CANDIDATE_URL` sends the mutation. Its success proof is the requested `reaction` object in the response: gh exits 0, the shared GraphQL response check passes, `.data.addReaction.reaction.content` is `EYES`, and `.data.addReaction.subject` holds a `lastEditedAt` key. Before the mutation it proves the node belongs to the current branch's open PR, in one `node(id:)` lookup that also selects `author { login __typename }`, `reactionGroups { content viewerHasReacted }` and `lastEditedAt`.
 
-**Re-mark refresh.** A re-mark leaves exactly one fresh mark, so its `createdAt` is later than any edit before it. When the lookup shows our `EYES` already on the node, the script first removes it:
+**Edit gate.** `--edited-at` is required on `toplevel` and `review`, in fix and noise mode. Its value is the version of the node the reviewer read: its `lastEditedAt` as read, a time matching `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$`, or `never`. The script checks it before any git or gh call. The `thread` surface ignores it. After the PR binding and the noise author check, and before the re-mark removal, a node whose `lastEditedAt` (null read as `never`, a missing key matching nothing) differs from the value is refused with `edited-since-read` and no mutation. When the `addReaction` response's `subject.lastEditedAt` differs from the value, an edit landed between the lookup and the mark: the script removes the fresh mark with the removal below and its proof, then exits `edited-since-read`. A removal without proof is `react-failed`. Values compare as exact strings. Residual: GitHub reports `lastEditedAt` to the second, so a second edit in the same second as the read version's edit time keeps an equal value and goes undetected.
+
+**Re-mark refresh.** A re-mark leaves exactly one fresh mark, so its `createdAt` is later than any edit before it. When the lookup shows our `EYES` already on the node, and the edit gate passes, the script first removes it (the edit gate's undo of a fresh mark sends the same removal):
 
 ```bash
 gh api graphql \
@@ -281,9 +284,9 @@ mutation($nodeId: ID!) {
 
 The removal's proof: gh exits 0, the response check passes, and `.data.removeReaction.reactionGroups` is an array with no `EYES` group whose `viewerHasReacted` is true. Without that proof the script fails `react-failed` and sends no `addReaction`. A duplicate `addReaction` is never relied on: it would keep the old reaction and its old `createdAt`.
 
-**Noise mode.** `react-marker.sh --noise "$reviewer_filter" NODE_ID SURFACE CANDIDATE_URL` marks a comment or review skipped as noise. After the PR binding, the node's GitHub-reported author must pass `is_bot` and `reviewer_matches_filter` against the `--noise` value, both from `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq`; the filter is judged against the per-PR Automated Reviewer set (see [Reviewer Approval Detection](#reviewer-approval-detection)). A human, a Bot outside the filter, or a null author is refused with no mutation sent. The check reads only the author, never the body or URL. Fix mode makes no author check, so a human's fixed comment can be marked.
+**Noise mode.** `react-marker.sh --noise "$reviewer_filter" --edited-at "$last_edited_at" NODE_ID SURFACE CANDIDATE_URL` marks a comment or review skipped as noise. After the PR binding, the node's GitHub-reported author must pass `is_bot` and `reviewer_matches_filter` against the `--noise` value, both from `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq`; the filter is judged against the per-PR Automated Reviewer set (see [Reviewer Approval Detection](#reviewer-approval-detection)). A human, a Bot outside the filter, or a null author is refused with no mutation sent. The check reads only the author, never the body or URL. Fix mode makes no author check, so a human's fixed comment can be marked.
 
-New reason tokens: `missing-value-for-noise` (`--noise` with no value), `missing-identity-module` (noise mode without `reviewer-identity.jq`, before any gh call), `noise-author-refused`. A failed fixed or deferred mark blocks the reviewer with `marker-write-failed`. A failed noise mark leaves the candidate unmarked and never blocks.
+New reason tokens: `missing-value-for-noise` (`--noise` with no value), `missing-identity-module` (noise mode without `reviewer-identity.jq`, before any gh call), `noise-author-refused`, `missing-edited-at` (no `--edited-at` on `toplevel` or `review`), `missing-value-for-edited-at` (`--edited-at` with no value), `invalid-edited-at` (any other value shape), `edited-since-read` (the node changed after the read version, before or during the mark). A failed fixed or deferred mark blocks the reviewer with `marker-write-failed`. A failed noise mark leaves the candidate unmarked and never blocks.
 
 ### Harvest (detect handled)
 
