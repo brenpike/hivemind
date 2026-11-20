@@ -53,7 +53,9 @@
  *   the fix commit and the head check, and for the local review commit
  *   those standard-delivery review.js passes. The files_file content is
  *   the files joined by line feeds, so no free text sits in the JSON a
- *   runner copies (issue 595).
+ *   runner copies (issue 595). A file that is empty or holds a line feed
+ *   gets no --files-file value, a command stop before any runner call, so
+ *   the join stays lossless and molt.sh reads back the same list.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -67,7 +69,8 @@
  *   true for a wave: a failed commit adds its cause after them, so a commit
  *   stop never hides the step's cause. A commit script refusal, a branch
  *   other than the plan branch and a runner command value outside its class
- *   (describeCommandStop) are terminal.
+ *   (describeCommandStop), among them the --files-file value of a file list
+ *   its line feed join cannot carry, are terminal.
  *   The commit runner calls agent() through runRunnerRelay (lib/runner.js),
  *   and its prompt follows its runner prompt and relayed reply rules, with
  *   inputs_file, subject_file and, with --files-file, files_file blocks.
@@ -116,11 +119,12 @@ function toCommitSubject(text, fallbackSubject) {
 
 /**
  * Returns the words of the molt command for label, with --files-file only
- * when files is not empty.
+ * when files is not empty, its value undefined when a file is empty or
+ * holds a line feed, which the line feed join would lose.
  */
 function listCommitWords(run, label, files) {
   const buildPath = (suffix) => buildInputsPath(run, 'molt', label + suffix);
-  return ['--trunk', run.trunk, '--inputs', buildPath(''), '--subject-file', buildPath('-subj'), ...(files.length === 0 ? [] : ['--files-file', buildPath('-files')])];
+  return ['--trunk', run.trunk, '--inputs', buildPath(''), '--subject-file', buildPath('-subj'), ...(files.length === 0 ? [] : ['--files-file', files.some((file) => /^$|\n/.test(file)) ? undefined : buildPath('-files')])];
 }
 
 function buildCommitPrompt(words, files, plan, purpose, subject, pluginRoot) {
@@ -184,11 +188,8 @@ async function runCommitStep(run, plan, commit, stepCauses) {
   phase(phaseTitle);
   const listWords = (label) => listCommitWords(run, label, commit.files);
   const commandStop = describeCommandStop('commit', listWords(commit.label), listWords(commit.label + '-retry'));
-  if (commandStop !== undefined) {
-    return stopDelivery(stepCauses.concat([commandStop]), run, [], isReplan);
-  }
-  const relay = await runRunnerRelay((label) => addResumeNote(buildCommitPrompt(listWords(label), commit.files, plan, texts.purpose, subject, run.pluginRoot), run), commit.label, phaseTitle);
-  const checked = checkCommitRelay(relay, plan, texts.noun);
+  const buildPrompt = (label) => addResumeNote(buildCommitPrompt(listWords(label), commit.files, plan, texts.purpose, subject, run.pluginRoot), run);
+  const checked = commandStop ?? checkCommitRelay(await runRunnerRelay(buildPrompt, commit.label, phaseTitle), plan, texts.noun);
   if (checked.problem !== undefined) {
     return stopDelivery(stepCauses.concat([checked]), run, [], isReplan);
   }

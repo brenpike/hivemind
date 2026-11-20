@@ -696,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '92f19aaea0ffdbeb';
+const BUILD_ID = '8cf8595c4d4382d5';
 
 function supportedSchemaKeywords(){
 return[
@@ -3807,7 +3807,7 @@ return subject!==''&&!subject.includes('!:')&&!/breaking[ -]change/i.test(subjec
 }
 function listCommitWords(run,label,files){
 const buildPath=(suffix)=>buildInputsPath(run,'molt',label+suffix);
-return['--trunk',run.trunk,'--inputs',buildPath(''),'--subject-file',buildPath('-subj'),...(files.length===0?[]:['--files-file',buildPath('-files')])];
+return['--trunk',run.trunk,'--inputs',buildPath(''),'--subject-file',buildPath('-subj'),...(files.length===0?[]:['--files-file',files.some((file)=>/^$|\n/.test(file))?undefined:buildPath('-files')])];
 }
 function buildCommitPrompt(words,files,plan,purpose,subject,pluginRoot){
 const inputs=JSON.stringify({type:commitTypeMap()[plan.classification],breaking:plan.breaking});
@@ -3864,11 +3864,8 @@ const phaseTitle='Commit';
 phase(phaseTitle);
 const listWords=(label)=>listCommitWords(run,label,commit.files);
 const commandStop=describeCommandStop('commit',listWords(commit.label),listWords(commit.label+'-retry'));
-if(commandStop!==undefined){
-return stopDelivery(stepCauses.concat([commandStop]),run,[],isReplan);
-}
-const relay=await runRunnerRelay((label)=>addResumeNote(buildCommitPrompt(listWords(label),commit.files,plan,texts.purpose,subject,run.pluginRoot),run),commit.label,phaseTitle);
-const checked=checkCommitRelay(relay,plan,texts.noun);
+const buildPrompt=(label)=>addResumeNote(buildCommitPrompt(listWords(label),commit.files,plan,texts.purpose,subject,run.pluginRoot),run);
+const checked=commandStop??checkCommitRelay(await runRunnerRelay(buildPrompt,commit.label,phaseTitle),plan,texts.noun);
 if(checked.problem!==undefined){
 return stopDelivery(stepCauses.concat([checked]),run,[],isReplan);
 }

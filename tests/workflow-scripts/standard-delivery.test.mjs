@@ -9246,6 +9246,13 @@ const ROW_TESTS = {
         assert.equal(stepped.result.result.message.split('\n\n')[0], 'The commit step did not run its script, so the delivery stopped: its ' + flag + ' value is not one the script takes.');
       }
     });
+    test('a fix round file list the line feed join cannot carry, an empty file or one with a line feed, is a terminal stop before any runner call', async () => {
+      for (const files of [['a\nb'], ['src/a.js', ''], [''], ['\n'], ['src/a.js\n']]) {
+        const stepped = await runStepWithStubAgent((run) => main.runCommitStep({ ...run, factsStem: FACTS_STEM }, makePlan(), { files: files, label: 'commit-1-1', stepName: 'fix' }, []));
+        assert.deepEqual(stepped.labels, [], JSON.stringify(files));
+        assert.equal(stepped.result.result.message.split('\n\n')[0], 'The commit step did not run its script, so the delivery stopped: its --files-file value is not one the script takes.', JSON.stringify(files));
+      }
+    });
     test('issue 487: stale inputs files of another run at this run\'s labels do not stop a real run', async () => {
       const scratch = makeScratchRepo();
       const origin = addBareOrigin(scratch);
