@@ -464,14 +464,15 @@ function makeReuseScratch() {
 }
 
 /**
- * Does what synapse.md says a runner does with a prompt: writes the
- * inputs_file, body_file and comment_file contents to their paths, then
- * runs the command with bash -c and relays it.
+ * Does what synapse.md says a runner does with a prompt: writes each
+ * *_file block in prompt order, its content, which must be a string, as is
+ * to its path, then runs the command with bash -c and relays it.
  */
 function runCommandBlock(scratch, prompt) {
-  for (const name of ['inputs_file', 'body_file', 'comment_file'].filter((blockName) => prompt.split('\n').includes('<' + blockName + '>'))) {
+  for (const name of prompt.split('\n').filter((line) => /^<[a-z]+_file>$/.test(line)).map((line) => line.slice(1, -1))) {
     const file = readDataBlock(prompt, name);
-    writeRepoFile(scratch, file.path, typeof file.content === 'string' ? file.content : JSON.stringify(file.content));
+    assert.equal(typeof file.content, 'string', name);
+    writeRepoFile(scratch, file.path, file.content);
   }
   const command = readDataBlock(prompt, 'command').split('{plugin-root}').join(PLUGIN_ROOT);
   const run = spawnSync('bash', ['-c', command], { cwd: scratch.repo, env: scratch.env, encoding: 'utf8' });
@@ -998,7 +999,10 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, escalationResults());
       const call = callOf(run, 'head-2');
       assert.deepEqual([call.opts.agentType, call.opts.model, call.opts.phase], ['hivemind:synapse', 'haiku', 'Commit']);
-      assert.deepEqual(readDataBlock(call.prompt, 'inputs_file').content.files, []);
+      assert.deepEqual(Object.keys(JSON.parse(readDataBlock(call.prompt, 'inputs_file').content)), ['type', 'breaking']);
+      assert.equal(readDataBlock(call.prompt, 'subject_file').content, 'read the branch head');
+      assert.equal(call.prompt.split('\n').includes('<files_file>'), false);
+      assert.ok(!readDataBlock(call.prompt, 'command').includes('--files-file'), call.prompt);
       assert.equal(readCommandWord(call.prompt, '--trunk'), 'main');
       assert.ok(labelsOf(run).indexOf('head-2') < labelsOf(run).indexOf('work-2-STEP-001'));
     });
@@ -1026,7 +1030,7 @@ const ROW_TESTS = {
       assert.deepEqual(readDataBlock(worker.prompt, 'git'), { branch: 'feature/cache', base: 'develop', trunk: 'develop' });
       const commit = callOf(run, 'commit-2-1');
       assert.equal(readCommandWord(commit.prompt, '--trunk'), 'develop');
-      assert.deepEqual(readDataBlock(commit.prompt, 'inputs_file').content.files, ['src/a.js']);
+      assert.equal(readDataBlock(commit.prompt, 'files_file').content, 'src/a.js');
     });
   },
   'PFR-23': () => {

@@ -696,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'd07f983ec4b263cb';
+const BUILD_ID = '8cf8595c4d4382d5';
 
 function supportedSchemaKeywords(){
 return[
@@ -2180,15 +2180,13 @@ return'<'+name+'>\n'+JSON.stringify(text).replace(/</g,'\\u003c')+'\n</'+name+'>
 function formatCommandBlock(command){
 return formatDataBlock('command',command);
 }
-function formatInputsFileBlock(path,content){
-return formatDataBlock('inputs_file',{path:path,content:content});
-}
-function formatBodyFileBlock(path,text){
-return formatDataBlock('body_file',{path:path,content:text});
+function formatFileBlock(words,index,content){
+return formatDataBlock(words[index].slice(2).replace(/(?:-file)?$/,'_file'),{path:words[index+1],content:content});
 }
 function runnerValuePatterns(){
 const name=gitIdentifierPattern();
 const prFile=/^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/;
+const moltFile=/^\.hivemind\/molt-inputs-[A-Za-z0-9-]{1,64}\.json$/;
 return{
 '--trunk':name,
 '--base':name,
@@ -2199,6 +2197,8 @@ return{
 '--classification':/^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
 '--trunk-freshness':/^(?:fresh|stale|skipped)$/,
 '--inputs':/^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/,
+'--subject-file':moltFile,
+'--files-file':moltFile,
 '--body-file':prFile,
 '--comment-file':prFile
 };
@@ -2295,18 +2295,8 @@ function hasFactsStop(stops,stop){
 return stops.split(',').includes(stop);
 }
 function matchesFreshnessCounts(freshness,ahead,behind){
-const isAhead=ahead!=='0';
-const isBehind=behind!=='0';
-if(freshness==='ahead'){
-return isAhead&&!isBehind;
-}
-if(freshness==='behind'){
-return!isAhead&&isBehind;
-}
-if(freshness==='diverged'){
-return isAhead&&isBehind;
-}
-return!isAhead&&!isBehind;
+const isDiverged=freshness==='diverged';
+return(ahead!=='0')===(isDiverged||freshness==='ahead')&&(behind!=='0')===(isDiverged||freshness==='behind');
 }
 function isConsistentFactsRelay(values,trunk){
 if(!isPlainObject(values)){
@@ -3811,24 +3801,17 @@ return 72;
 function forbiddenSubjectTexts(){
 return['co-authored-by:','authored-by:','generated with','created with claude','\u{1f916} generated'];
 }
-function isUsableSubject(subject){
-const lowered=subject.toLowerCase();
-return subject!==''
-&&!subject.includes('!:')
-&&!/breaking[ -]change/i.test(subject)
-&&!forbiddenSubjectTexts().some((forbidden)=>lowered.includes(forbidden));
-}
 function toCommitSubject(text,fallbackSubject){
-const oneLine=text.replace(/[\s\x00-\x1f\x7f-\x9f]+/g,' ').trim();
-const subject=cutAtBoundary(oneLine,maxSubjectLength());
-return isUsableSubject(subject)?subject:fallbackSubject;
+const subject=cutAtBoundary(text.replace(/[\s\x00-\x1f\x7f-\x9f]+/g,' ').trim(),maxSubjectLength());
+return subject!==''&&!subject.includes('!:')&&!/breaking[ -]change/i.test(subject)&&!forbiddenSubjectTexts().some((forbidden)=>subject.toLowerCase().includes(forbidden))?subject:fallbackSubject;
 }
-function listCommitWords(trunk,inputsPath){
-return['--trunk',trunk,'--inputs',inputsPath];
+function listCommitWords(run,label,files){
+const buildPath=(suffix)=>buildInputsPath(run,'molt',label+suffix);
+return['--trunk',run.trunk,'--inputs',buildPath(''),'--subject-file',buildPath('-subj'),...(files.length===0?[]:['--files-file',files.some((file)=>/^$|\n/.test(file))?undefined:buildPath('-files')])];
 }
-function buildCommitPrompt(files,plan,trunk,inputsPath,purpose,subject,pluginRoot){
-const content={type:commitTypeMap()[plan.classification],breaking:plan.breaking,subject:subject,files:files};
-return['Run the command below to commit '+purpose+'.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',listCommitWords(trunk,inputsPath),pluginRoot)),formatInputsFileBlock(inputsPath,content)].join('\n');
+function buildCommitPrompt(words,files,plan,purpose,subject,pluginRoot){
+const inputs=JSON.stringify({type:commitTypeMap()[plan.classification],breaking:plan.breaking});
+return['Run the command below to commit '+purpose+'.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',words,pluginRoot)),formatFileBlock(words,2,inputs),formatFileBlock(words,4,subject),...(words[6]===undefined?[]:[formatFileBlock(words,6,files.join('\n'))])].join('\n');
 }
 function readOutsidePath(payload){
 try{
@@ -3843,11 +3826,11 @@ return quoteDiagnostic(text,limit)||encodeUntrustedText('');
 }
 function describeCommitBlocker(stderr,stepNoun){
 const lead='The commit step was blocked, so '+RUN_NAME+' stopped: '+describeRelayBlocker(stderr,false);
-const outsideLines=splitStderrLines(stderr).filter((line)=>line.startsWith('outside: '));
+const outsideLines=splitStderrLines(stderr).filter((line)=>/^outside: /.test(line));
 if(outsideLines.length===0){
 return lead;
 }
-const pathLines=outsideLines.map((line)=>'- '+quoteOrEmpty(readOutsidePath(line.slice('outside: '.length))));
+const pathLines=outsideLines.map((line)=>'- '+quoteOrEmpty(readOutsidePath(line.replace(/^outside: /,''))));
 return[lead+' Dirty paths outside the files of '+stepNoun+':',...capItemLines(pathLines)].join('\n');
 }
 function checkCommitRelay(relay,plan,stepNoun){
@@ -3877,14 +3860,12 @@ throw new Error('runCommitStep: stepCauses must be an array');
 const texts=commit.texts??commitStepTexts(commit.stepName);
 const subject=commit.subject??texts.subject;
 const isReplan=commit.stepName==='wave';
-phase('Commit');
-const listWords=(label)=>listCommitWords(run.trunk,buildInputsPath(run,'molt',label));
+const phaseTitle='Commit';
+phase(phaseTitle);
+const listWords=(label)=>listCommitWords(run,label,commit.files);
 const commandStop=describeCommandStop('commit',listWords(commit.label),listWords(commit.label+'-retry'));
-if(commandStop!==undefined){
-return stopDelivery(stepCauses.concat([commandStop]),run,[],isReplan);
-}
-const relay=await runRunnerRelay((label)=>addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,listWords(label)[3],texts.purpose,subject,run.pluginRoot),run),commit.label,'Commit');
-const checked=checkCommitRelay(relay,plan,texts.noun);
+const buildPrompt=(label)=>addResumeNote(buildCommitPrompt(listWords(label),commit.files,plan,texts.purpose,subject,run.pluginRoot),run);
+const checked=commandStop??checkCommitRelay(await runRunnerRelay(buildPrompt,commit.label,phaseTitle),plan,texts.noun);
 if(checked.problem!==undefined){
 return stopDelivery(stepCauses.concat([checked]),run,[],isReplan);
 }
@@ -4456,19 +4437,12 @@ return{problem:describePullRequestCause(attributedNoun+' would hold an attributi
 return texts;
 }
 function listPullRequestWords(plan,run,label,texts){
-const[inputsPath,bodyPath,commentPath]=[label,label+'-body',label+'-comment'].map((name)=>buildInputsPath(run,'pr',name));
-return['--head',plan.branch,'--base',plan.base,'--expect-commit',run.head,'--inputs',inputsPath,'--body-file',bodyPath,...(texts.comment===undefined?[]:['--comment-file',commentPath])];
+const buildPath=(suffix)=>buildInputsPath(run,'pr',label+suffix);
+return['--head',plan.branch,'--base',plan.base,'--expect-commit',run.head,'--inputs',buildPath(''),'--body-file',buildPath('-body'),...(texts.comment===undefined?[]:['--comment-file',buildPath('-comment')])];
 }
 function buildPullRequestPrompt(words,texts,draft,pluginRoot){
-return[
-'Open or reuse the PR with the command below.',
-dataBlocksSentence(),
-'',
-formatCommandBlock(buildRunnerCommand('open-plan-pr',words,pluginRoot)),
-formatInputsFileBlock(words[7],JSON.stringify({title:texts.title,draft:draft})),
-formatBodyFileBlock(words[9],texts.body),
-...(words[11]===undefined?[]:[formatDataBlock('comment_file',{path:words[11],content:texts.comment})])
-].join('\n');
+const inputs=JSON.stringify({title:texts.title,draft:draft});
+return['Open or reuse the PR with the command below.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('open-plan-pr',words,pluginRoot)),formatFileBlock(words,6,inputs),formatFileBlock(words,8,texts.body),...(words[10]===undefined?[]:[formatFileBlock(words,10,texts.comment)])].join('\n');
 }
 function isInputsRefusal(stderr){
 return/^blocker: (?:(?:inputs?|title|body|draft|comment) |cannot read the inputs file$)/m.test(stderr);
@@ -4487,15 +4461,16 @@ return{problem:lead+' '+describeRelayBlocker(stderr,true),nextAction:readRelayAc
 function checkPullRequestRelay(relay,head,hasComment){
 const unseenPush=' stopped and did not see whether this step pushed. Taking it again pushes the same commit and reuses a pull request open on it.';
 const stopped='so '+RUN_NAME+unseenPush;
+const stepNoun='pull request';
 if(!validateSchema(RELAY_SCHEMA,relay).ok){
-return describeUnusableRelay(relay,'pull request',stopped);
+return describeUnusableRelay(relay,stepNoun,stopped);
 }
 if(relay.outcome==='blocked'){
 return describePullRequestBlocker(relay.stderr,head,unseenPush);
 }
 const values=readRelayedLines(relay,openPlanPrRoutingSpec());
 if(values===undefined||(values.commented!==undefined)!==hasComment||values.commented===values.created){
-return describeUnusableRelay(relay,'pull request',stopped,true);
+return describeUnusableRelay(relay,stepNoun,stopped,true);
 }
 if(values.head_ref_oid!==head){
 return{problem:describePullRequestCause('step reported a head commit other than the commit every gate held on',unseenPush),terminal:true};

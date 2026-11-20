@@ -41,10 +41,11 @@
 # residual). Flags come in any order; each appears once except the repeatable --ref and
 # --version-file; required flags must be present; bump-type's positional base comes first. Values
 # pass their class: names hivemind_assert_identifier (skills/_shared/allowlist.sh), refs digits,
-# commit 40 or 64 lowercase hex, the enums the scripts define, inputs and open-plan-pr's body file
-# and optional comment file .hivemind/<leaf> where the leaf passes hivemind_check_inputs_leaf
-# (skills/_shared/containment.sh) for the flag's kind, molt or pr: <kind>-inputs-<token>.json with
-# <token> 1 to 64 of [A-Za-z0-9-]. A tab, newline or other control byte, any other quoting, a
+# commit 40 or 64 lowercase hex, the enums the scripts define, inputs, molt's subject file and
+# optional files and body files, and open-plan-pr's body file and optional comment file
+# .hivemind/<leaf> where the leaf passes hivemind_check_inputs_leaf (skills/_shared/containment.sh)
+# for the flag's kind, molt or pr: <kind>-inputs-<token>.json with <token> 1 to 64 of
+# [A-Za-z0-9-]. A tab, newline or other control byte, any other quoting, a
 # redirection or anything appended is not exact.
 #
 # LOOKALIKE: the command text names <s>.sh (ASCII case ignored) with no [A-Za-z0-9._-] byte
@@ -98,7 +99,7 @@ add_gate_member script open-plan-pr
 #   Prints the argument part of the script's exact form, for a deny reason.
 runner_usage_text() {
   case "$1" in
-    molt) printf '%s' '--trunk <branch> --inputs .hivemind/molt-inputs-<token>.json' ;;
+    molt) printf '%s' '--trunk <branch> --inputs .hivemind/molt-inputs-<token>.json --subject-file .hivemind/molt-inputs-<token>-subj.json [--files-file .hivemind/molt-inputs-<token>-files.json] [--body-file .hivemind/molt-inputs-<token>-body.json]' ;;
     gather-facts) printf '%s' '--trunk <branch> [--remote <remote>] [--ref <number>]...' ;;
     create-working-branch) printf '%s' '--base <branch> --branch <branch> --classification feature|bugfix|hotfix|refactor|chore|docs|test|ci --trunk-freshness fresh|stale|skipped --trunk <branch>' ;;
     bump-type) printf '%s' '<base> --bump-trigger yes|no --no-bump-match yes|no [--version-file <path>]...' ;;
@@ -111,7 +112,7 @@ runner_usage_text() {
 #   Prints the space-separated flags the script requires.
 runner_required_flags() {
   case "$1" in
-    molt) printf '%s' '--trunk --inputs' ;;
+    molt) printf '%s' '--trunk --inputs --subject-file' ;;
     gather-facts) printf '%s' '--trunk' ;;
     create-working-branch) printf '%s' '--base --branch --classification --trunk-freshness --trunk' ;;
     bump-type) printf '%s' '--bump-trigger --no-bump-match' ;;
@@ -126,7 +127,7 @@ set_flag_rule() {
   flag_repeat=no
   case "$1 $2" in
     'molt --trunk') flag_class=identifier ;;
-    'molt --inputs') flag_class=molt_inputs ;;
+    'molt --inputs' | 'molt --subject-file' | 'molt --files-file' | 'molt --body-file') flag_class=molt_inputs ;;
     'gather-facts --trunk' | 'gather-facts --remote') flag_class=identifier ;;
     'gather-facts --ref') flag_class=digits; flag_repeat=yes ;;
     'create-working-branch --base' | 'create-working-branch --branch' | 'create-working-branch --trunk') flag_class=identifier ;;

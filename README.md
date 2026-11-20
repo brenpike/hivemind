@@ -63,7 +63,7 @@ Or run the setup skill once to apply the required keys automatically:
 - `.hivemind/broods/<brood-id>/manifest.json`: one manifest per brood
 - `.hivemind/review-loop/fix-ledger.yaml`: the local reviewer's finding ledger
 - `.hivemind/handoffs/` (and `.hivemind/plans/`): session-resumption handoffs and the plans they point at
-- short-lived inputs files that skills pass to their engine scripts, e.g. `.hivemind/seed-inputs-<token>.json`, `.hivemind/runs/.init-inputs-<token>.json`, and the molt and PR inputs files `.hivemind/molt-inputs-<token>.json` (the commit message and its file list) and `.hivemind/pr-inputs-<token>.json` (the PR title and draft flag) with its body file `.hivemind/pr-inputs-<token>-body.json` (the raw PR body) and, for a reuse comment, its comment file `.hivemind/pr-inputs-<token>-comment.json` (the raw comment)
+- short-lived inputs files that skills pass to their engine scripts, e.g. `.hivemind/seed-inputs-<token>.json`, `.hivemind/runs/.init-inputs-<token>.json`, and the molt and PR inputs files `.hivemind/molt-inputs-<token>.json` (the commit type, scope and breaking flag) with its raw subject file `.hivemind/molt-inputs-<token>-subj.json`, its files file `.hivemind/molt-inputs-<token>-files.json` (one path per line) and, for a commit body, its body file `.hivemind/molt-inputs-<token>-body.json`, and `.hivemind/pr-inputs-<token>.json` (the PR title and draft flag) with its body file `.hivemind/pr-inputs-<token>-body.json` (the raw PR body) and, for a reuse comment, its comment file `.hivemind/pr-inputs-<token>-comment.json` (the raw comment)
 
 If you prefer manual setup, add `.hivemind/` and `.claude/worktrees/` to your project's `.gitignore` directly.
 

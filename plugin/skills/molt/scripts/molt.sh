@@ -1,68 +1,118 @@
 #!/usr/bin/env bash
 #
 # molt: THIN executable entrypoint (ADR-0020) that makes one checkpoint commit of exactly the
-# listed files in ONE process. It reads the inputs file once, reads the branch, trunk's refs and
-# the tree state, refuses before any change, then stages the dirty listed paths, commits them
-# with a message built by jq, and verifies the result with the values it checked. A change is a
-# write to a branch ref, HEAD, the index, the work tree or git config. It never pushes.
+# listed files in ONE process. It reads the inputs file, the subject file and, when given, the
+# files file and the body file once each, reads the branch, trunk's refs and the tree state,
+# refuses before any change, then stages the dirty listed paths, commits them with a message
+# built by jq, and verifies the result with the values it checked. A change is a write to a
+# branch ref, HEAD, the index, the work tree or git config. It never pushes.
 #
-# INPUT (`--flag value` form only; each flag exactly once; unknown, duplicate, or missing flags
+# INPUT (`--flag value` form only; each flag at most once; unknown, duplicate, or missing flags
 # give the fixed usage blocker):
-#   --trunk <branch>    REQUIRED. Resolved trunk branch name. It may be absent locally. Trunk
-#                       also covers the default branch of every remote `git remote` lists,
-#                       whatever --trunk is (see REFUSALS, trunk).
-#   --inputs <path>    REQUIRED. The inputs file, a JSON object the caller wrote with the Write
-#                       tool (`.hivemind/molt-inputs-<token>.json`). A relative path is resolved
-#                       from the folder the script was started in, before the script moves to
-#                       the top of the work tree.
+#   --trunk <branch>        REQUIRED. Resolved trunk branch name. It may be absent locally. Trunk
+#                           also covers the default branch of every remote `git remote` lists,
+#                           whatever --trunk is (see REFUSALS, trunk).
+#   --inputs <path>         REQUIRED. The inputs file, a JSON object the caller wrote with the
+#                           Write tool (`.hivemind/molt-inputs-<token>.json`). A relative path is
+#                           resolved from the folder the script was started in, before the script
+#                           moves to the top of the work tree.
+#   --subject-file <path>   REQUIRED. The subject file, the subject as raw text the caller wrote
+#                           with the Write tool (`.hivemind/molt-inputs-<token>-subj.json`). A
+#                           relative path is resolved like --inputs.
+#   --files-file <path>     OPTIONAL. The files file, the listed paths as raw text, one per line,
+#                           the caller wrote with the Write tool
+#                           (`.hivemind/molt-inputs-<token>-files.json`). A relative path is
+#                           resolved like --inputs. Absent, the list is empty.
+#   --body-file <path>      OPTIONAL. The body file, the body as raw text the caller wrote with
+#                           the Write tool (`.hivemind/molt-inputs-<token>-body.json`). A relative
+#                           path is resolved like --inputs. Absent, there is no body.
 # trunk passes hivemind_assert_identifier (_shared/allowlist.sh: non-empty, no leading `-`, no
 # `..`, charset ^[A-Za-z0-9._/-]+$) before any git command runs (`trunk contains characters
 # outside the safe allowlist`). The script then runs plain git from the top of the work tree
 # (`git rev-parse --show-toplevel`), never `git -C` (ADR-0037 decision 25).
 #
-# INPUTS FILE (read once, with jq, into a private copy; no field enters shell or jq program
-# source, per ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md, Inert Inputs-File Navigator
-# Pattern). Fields, checked in this order, first failure wins:
+# INPUTS FILE (read once, whole, with hivemind_read_input_file into a private raw copy that must
+# be byte for byte the file, then parsed by jq from that copy as exactly one JSON value into a
+# private copy; no field enters shell or jq program source, per
+# ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md, Inert Inputs-File Navigator Pattern). It
+# holds only fixed values. Fields, checked in this order, first failure wins, with
+# the subject, body and files rules (SUBJECT FILE, BODY FILE, FILES FILE) after them:
 #   type      REQUIRED. feat|fix|hotfix|refactor|docs|test|chore|ci.
 #   scope     optional. A string that passes hivemind_assert_identifier.
 #   breaking  optional. true or false. true adds `!` before the colon of the subject line.
-#   subject   REQUIRED. One line of text with a non-space character and no control character,
-#             at most 72 characters (Unicode code points).
-#   body      optional. Text with no control character other than newline and tab. A body of
-#             only spaces, tabs and newlines is the same as no body.
-#   files     REQUIRED. An array of exact paths relative to the top of the work tree. Each entry
-#             is a non-empty string with no control character, no leading `/`, and no empty,
-#             `.`, `..` or `.git` (any case) path component. An entry that names a directory in
-#             the work tree (not a symlink) is refused. The array may be empty.
-# No other field is allowed. When breaking is not true, a subject that contains `!:` or a body
+# No other field is allowed, so a `subject`, `body` or `files` field is refused (`inputs have a
+# field other than type, scope and breaking`). The rules then run in this order: subject, body,
+# the breaking marker, files. When breaking is not true, a subject that contains `!:` or a body
 # line that starts with `BREAKING CHANGE:` or `BREAKING-CHANGE:` is refused, so the marker
 # bump-type reads always agrees with `breaking`. The message is
 #   <type>[(<scope>)][!]: <subject>
 # followed by a blank line and the body when there is one. The rule that the message carries no
 # attribution string is the caller's judgment (the molt SKILL.md), not checked here.
 #
-# INPUTS FILE LIFETIME: the script deletes the inputs file once it has read it, right after the
-# jq read into the private copy, whether or not that read succeeded, and before the `inputs file
-# is not valid JSON` blocker and every later check (hivemind_remove_inputs_file in
+# SUBJECT FILE (read once, whole, with hivemind_read_input_file into the private `subject.txt`,
+# which must be byte for byte the file; its text enters no shell or jq program source): the subject is the whole file less one final line feed. It must be
+# one line of text with a non-space character and no control character, a carriage return
+# included, at most 72 characters (Unicode code points).
+#
+# BODY FILE (only with --body-file; read once, whole, with hivemind_read_input_file into the
+# private `body.txt`, which must be byte for byte the file; its text enters no shell or jq program
+# source): the whole file is the body. It must be text with no
+# control character other than newline and tab. A body of only spaces, tabs and newlines, an
+# empty file included, is the same as no body.
+#
+# FILES FILE (only with --files-file; read once, whole, with hivemind_read_input_file into the
+# private `files.txt`, which must be byte for byte the file; its text enters no shell or jq program
+# source): one exact path relative to the top of the work
+# tree per line, with one final line feed allowed. An empty file or a lone line feed is an empty
+# list, as is an absent --files-file. Each path is non-empty, has no control character, a
+# carriage return included, no leading `/`, and no empty, `.`, `..` or `.git` (any case) path
+# component, so a blank line among the paths is refused. A path that names a directory in the
+# work tree (not a symlink) is refused.
+#
+# DISTINCT FILES: the inputs, subject, files and body file paths must name four different files.
+# A path that names an earlier one, by any spelling or a hard link (`-ef`), is refused before any
+# read.
+#
+# INPUTS, SUBJECT, FILES AND BODY FILE LIFETIME: the script deletes each file once it has read
+# it, right after its own hivemind_read_input_file read into its private copy, whether or not the
+# read or the byte for byte check passed, and all before the `inputs file is not valid JSON`
+# blocker, every `not valid UTF-8` blocker and every later check (hivemind_remove_inputs_file in
 # _shared/containment.sh; ADR-0037). Only a leaf named `molt-inputs-<token>.json`, <token> 1 to 64
 # characters of [A-Za-z0-9-], directly under a real `.hivemind` folder in the folder the script was
 # started in is deleted (hivemind_inputs_path_problem, anchored on that start folder), from inside
 # that folder and never through a symlink. The path is `.hivemind/<leaf>`, or an absolute path whose
-# folder above `.hivemind` resolves to the start folder. Any other inputs path, `../.hivemind/<leaf>`
-# from a subfolder included, is read and kept. A failed delete leaves the file and does not stop the run: its result and output are
-# discarded, so stdout, stderr and the exit contract are unchanged. A refusal before the read
-# (usage, the trunk gate, a missing tool, not a checkout, `inputs file not found`, `inputs file
-# resolves outside the checkout`) leaves the file. A rerun must write the file again. Deleting
-# this caller's scratch file is not a change in the REFUSALS sense, so a refusal after the read
-# still makes no change. Because the delete comes before the status read, a deleted inputs file
-# is never a dirty path outside files, even when `.hivemind/` is not ignored; a kept one still is.
+# folder above `.hivemind` resolves to the start folder. For the subject, files and body files the
+# token is `<token>-subj`, `<token>-files` and `<token>-body`, so the caller's <token> must be at
+# most 58 characters for all three to be deleted. Any other path, `../.hivemind/<leaf>` from a
+# subfolder included, is read and kept. A failed delete leaves the file and does not stop the run:
+# its result and output are discarded, so stdout, stderr and the exit contract are unchanged. A
+# refusal before the reads (usage, the trunk gate, a missing tool, not a checkout, a file not
+# found, a file that resolves outside the checkout, two paths naming one file) leaves every file.
+# A rerun must write every file again. Deleting this caller's scratch files is not a change in the
+# REFUSALS sense, so a refusal after the reads still makes no change. Because the deletes come
+# before the status read, a deleted file is never a dirty path outside files, even when
+# `.hivemind/` is not ignored; a kept one still is.
 #
 # REFUSALS (fixed blockers, checked in this order, before any change; ADR-0037 invariant 1):
-#   inputs       the inputs file is missing (`inputs file not found`), resolves outside the
-#                checkout through a symlinked leaf or folder (`inputs file resolves outside the
-#                checkout`, checked before the first read), is not exactly one valid JSON value
-#                (`inputs file is not valid JSON`), or breaks a field rule above (one fixed
-#                reason per rule).
+#   inputs       the inputs file, then the subject file, then the files file, then the body file,
+#                is missing (`inputs file not found`, `subject file not found`, `files file not
+#                found`, `body file not found`); the same four, in the same order, resolve
+#                outside the checkout through a symlinked leaf or folder (`inputs file resolves
+#                outside the checkout`, `subject file resolves outside the checkout`, `files file
+#                resolves outside the checkout`, `body file resolves outside the checkout`); the
+#                subject file names the inputs file (`subject file is the inputs file`); the files
+#                file names the inputs file or the subject file (`files file is the inputs file or
+#                the subject file`); the body file names any of the other three (`body file is the
+#                inputs file, the subject file or the files file`), all checked before the first
+#                read; after the reads and deletes, the inputs file cannot be read (`inputs file is
+#                not valid JSON`), its copy is not byte for byte the file (`inputs file is not
+#                valid UTF-8`), or it is not exactly one valid JSON value (`inputs file is not
+#                valid JSON`); then the subject, files and body file in turn cannot be read
+#                (`subject file cannot be read`, `files file cannot be read`, `body file cannot be
+#                read`) or its copy is not byte for byte the file (`subject file is not valid
+#                UTF-8`, `files file is not valid UTF-8`, `body file is not valid UTF-8`); or a
+#                field rule, the subject, body or files rule above is broken (one fixed reason per
+#                rule).
 #   in progress  a merge (MERGE_HEAD), rebase (rebase-merge, rebase-apply, REBASE_HEAD),
 #                cherry-pick (CHERRY_PICK_HEAD), revert (REVERT_HEAD), cherry-pick or revert
 #                sequence (sequencer), or bisect (BISECT_START, BISECT_LOG), each looked up with
@@ -202,20 +252,29 @@
 # check against what `git add` left and the write-back has that change undone: a race on the
 # shared live index of the same kind as RECORDED RESIDUAL R1, with the same trusted actors.
 # jq decodes status paths as UTF-8, so a path with bytes that are not UTF-8 shows with
-# replacement characters on its outside line and can never be listed. A listed path that is an
+# replacement characters on its outside line and can never be listed: a files file holding such
+# a path is refused at its read (`files file is not valid UTF-8`). jq puts U+FFFD in place of
+# each invalid UTF-8 sequence with no error, so the byte for byte check after each read is what
+# refuses such a file; it also refuses, with the same blocker, a file that changed between its
+# read and the check. A literal U+FFFD in a file is valid UTF-8 and is kept. Native Windows jq.exe
+# writes CRLF for LF, so there every multi-line file fails the check; native Windows is not
+# supported. A listed path that is an
 # untracked ignored file is not dirty, so it is not committed. A submodule path is a directory,
 # so it cannot be listed, and its changes are dirty paths outside files. The trunk lookup order
 # is mirrored from git, not asked of git, and git 2.25 shows only the end of a symbolic-ref chain,
 # with the same residuals as create-working-branch.sh. A local remote HEAD
 # that went stale after a default branch rename still names the old default, and a remote that
 # `git remote` does not list is not read. The private work
-# folder (mktemp -d under TMPDIR) holds the inputs copy, the status listing, the index entry
+# folder (mktemp -d under TMPDIR) holds the raw and parsed inputs copies, the subject, files and
+# body copies, the
+# checked fields, the status listing, the index entry
 # records from before and after `git add`, the commit's error text and the commit's path listing, and is removed by the EXIT trap.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
 # compatible (no mapfile / associative arrays / ${var,,}). The identifier gate comes from
-# _shared/allowlist.sh, the inputs read-guard and delete from _shared/containment.sh, and the
+# _shared/allowlist.sh, the inputs read-guard, the byte for byte read and the delete from
+# _shared/containment.sh, and the
 # name rule, the in-progress and unmerged checks, the trunk ref walk and the remote default branch
 # read from _shared/git-refusals.sh; this script maps their results to its own blockers.
 
@@ -239,12 +298,18 @@ shared_dir="$(CDPATH= cd -- "$script_dir/../../_shared" 2>/dev/null && pwd -P 2>
 export LC_ALL=C
 export GIT_TERMINAL_PROMPT=0
 
-usage_reason='invalid arguments; usage: molt.sh --trunk <branch> --inputs <path>'
+usage_reason='invalid arguments; usage: molt.sh --trunk <branch> --inputs <path> --subject-file <path> [--files-file <path>] [--body-file <path>]'
 
 trunk_name=''
 trunk_seen=false
 inputs_arg=''
 inputs_seen=false
+subject_file_arg=''
+subject_file_seen=false
+files_file_arg=''
+files_given=false
+body_file_arg=''
+body_given=false
 while [ "$#" -gt 0 ]; do
   [ "$#" -ge 2 ] || blocker "$usage_reason"
   case "$1" in
@@ -258,6 +323,21 @@ while [ "$#" -gt 0 ]; do
       inputs_arg="$2"
       inputs_seen=true
       ;;
+    --subject-file)
+      [ "$subject_file_seen" = false ] || blocker "$usage_reason"
+      subject_file_arg="$2"
+      subject_file_seen=true
+      ;;
+    --files-file)
+      [ "$files_given" = false ] || blocker "$usage_reason"
+      files_file_arg="$2"
+      files_given=true
+      ;;
+    --body-file)
+      [ "$body_given" = false ] || blocker "$usage_reason"
+      body_file_arg="$2"
+      body_given=true
+      ;;
     *)
       blocker "$usage_reason"
       ;;
@@ -265,14 +345,29 @@ while [ "$#" -gt 0 ]; do
   shift 2
 done
 
-[ "$trunk_seen" = true ] && [ "$inputs_seen" = true ] || blocker "$usage_reason"
+[ "$trunk_seen" = true ] && [ "$inputs_seen" = true ] && [ "$subject_file_seen" = true ] || blocker "$usage_reason"
 [ -n "$inputs_arg" ] || blocker "$usage_reason"
+[ -n "$subject_file_arg" ] || blocker "$usage_reason"
+[ "$files_given" = false ] || [ -n "$files_file_arg" ] || blocker "$usage_reason"
+[ "$body_given" = false ] || [ -n "$body_file_arg" ] || blocker "$usage_reason"
 hivemind_assert_identifier "$trunk_name" || blocker "trunk contains characters outside the safe allowlist"
 
 start_dir="$PWD"
 case "$inputs_arg" in
   /*) INPUTS_FILE="$inputs_arg" ;;
   *) INPUTS_FILE="$start_dir/$inputs_arg" ;;
+esac
+case "$subject_file_arg" in
+  /*) SUBJECT_INPUT_FILE="$subject_file_arg" ;;
+  *) SUBJECT_INPUT_FILE="$start_dir/$subject_file_arg" ;;
+esac
+case "$files_file_arg" in
+  /*) FILES_INPUT_FILE="$files_file_arg" ;;
+  *) FILES_INPUT_FILE="$start_dir/$files_file_arg" ;;
+esac
+case "$body_file_arg" in
+  /*) BODY_INPUT_FILE="$body_file_arg" ;;
+  *) BODY_INPUT_FILE="$start_dir/$body_file_arg" ;;
 esac
 
 command -v git >/dev/null 2>&1 || blocker "git not found on PATH"
@@ -291,7 +386,14 @@ remove_work_dir() {
   return 0
 }
 trap 'remove_work_dir; :' EXIT
+inputs_raw_copy="$work_dir/inputs-raw.txt"
 inputs_copy="$work_dir/inputs.json"
+subject_copy="$work_dir/subject.txt"
+files_copy="$work_dir/files.txt"
+body_copy="$work_dir/body.txt"
+fields_file="$work_dir/fields.json"
+: >"$files_copy" 2>/dev/null || blocker "cannot create a private work folder"
+: >"$body_copy" 2>/dev/null || blocker "cannot create a private work folder"
 status_file="$work_dir/status.z"
 commit_paths_file="$work_dir/commit-paths.z"
 index_before_file="$work_dir/index-before.z"
@@ -303,52 +405,126 @@ commit_error_file="$work_dir/commit-error.txt"
 # ── Inputs ──────────────────────────────────────────────────────────────────
 
 [ -f "$INPUTS_FILE" ] || blocker "inputs file not found"
+[ -f "$SUBJECT_INPUT_FILE" ] || blocker "subject file not found"
+[ "$files_given" = false ] || [ -f "$FILES_INPUT_FILE" ] || blocker "files file not found"
+[ "$body_given" = false ] || [ -f "$BODY_INPUT_FILE" ] || blocker "body file not found"
 hivemind_assert_inputs_contained "$work_tree_top" "$INPUTS_FILE" >/dev/null 2>&1 || blocker "inputs file resolves outside the checkout"
-inputs_read_rc=0
-jq -c -s 'if length == 1 then .[0] else error("not one JSON value") end' "$INPUTS_FILE" >"$inputs_copy" 2>/dev/null \
-  || inputs_read_rc=$?
-hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$inputs_arg" molt >/dev/null 2>&1 || :
-[ "$inputs_read_rc" = 0 ] || blocker "inputs file is not valid JSON"
+hivemind_assert_inputs_contained "$work_tree_top" "$SUBJECT_INPUT_FILE" >/dev/null 2>&1 \
+  || blocker "subject file resolves outside the checkout"
+if [ "$files_given" = true ]; then
+  hivemind_assert_inputs_contained "$work_tree_top" "$FILES_INPUT_FILE" >/dev/null 2>&1 \
+    || blocker "files file resolves outside the checkout"
+fi
+if [ "$body_given" = true ]; then
+  hivemind_assert_inputs_contained "$work_tree_top" "$BODY_INPUT_FILE" >/dev/null 2>&1 \
+    || blocker "body file resolves outside the checkout"
+fi
+[ ! "$SUBJECT_INPUT_FILE" -ef "$INPUTS_FILE" ] || blocker "subject file is the inputs file"
+if [ "$files_given" = true ]; then
+  [ ! "$FILES_INPUT_FILE" -ef "$INPUTS_FILE" ] && [ ! "$FILES_INPUT_FILE" -ef "$SUBJECT_INPUT_FILE" ] \
+    || blocker "files file is the inputs file or the subject file"
+fi
+if [ "$body_given" = true ]; then
+  [ ! "$BODY_INPUT_FILE" -ef "$INPUTS_FILE" ] && [ ! "$BODY_INPUT_FILE" -ef "$SUBJECT_INPUT_FILE" ] \
+    && { [ "$files_given" = false ] || [ ! "$BODY_INPUT_FILE" -ef "$FILES_INPUT_FILE" ]; } \
+    || blocker "body file is the inputs file, the subject file or the files file"
+fi
+# refuse_failed_read <kind> <read result>
+#   Blocks when hivemind_read_input_file did not copy the <kind> file byte for byte: 2 (the copy
+#   differs) gives `<kind> file is not valid UTF-8`, any other non-zero result `<kind> file cannot
+#   be read`. Runs in the main shell so blocker exits it.
+refuse_failed_read() {
+  case "$2" in
+    0) ;;
+    2) blocker "$1 file is not valid UTF-8" ;;
+    *) blocker "$1 file cannot be read" ;;
+  esac
+}
 
-# The field rules from the header, in order. Prints the fixed reason of the first rule the
-# inputs break, or an empty line when every rule holds.
+inputs_read_rc=0
+hivemind_read_input_file "$INPUTS_FILE" "$inputs_raw_copy" || inputs_read_rc=$?
+hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$inputs_arg" molt >/dev/null 2>&1 || :
+subject_read_rc=0
+hivemind_read_input_file "$SUBJECT_INPUT_FILE" "$subject_copy" || subject_read_rc=$?
+hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$subject_file_arg" molt >/dev/null 2>&1 || :
+files_read_rc=0
+if [ "$files_given" = true ]; then
+  hivemind_read_input_file "$FILES_INPUT_FILE" "$files_copy" || files_read_rc=$?
+  hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$files_file_arg" molt >/dev/null 2>&1 || :
+fi
+body_read_rc=0
+if [ "$body_given" = true ]; then
+  hivemind_read_input_file "$BODY_INPUT_FILE" "$body_copy" || body_read_rc=$?
+  hivemind_remove_inputs_file "$work_tree_top" "$start_dir" "$body_file_arg" molt >/dev/null 2>&1 || :
+fi
+case "$inputs_read_rc" in
+  0) ;;
+  2) blocker "inputs file is not valid UTF-8" ;;
+  *) blocker "inputs file is not valid JSON" ;;
+esac
+jq -c -s 'if length == 1 then .[0] else error("not one JSON value") end' "$inputs_raw_copy" >"$inputs_copy" 2>/dev/null \
+  || blocker "inputs file is not valid JSON"
+refuse_failed_read subject "$subject_read_rc"
+refuse_failed_read files "$files_read_rc"
+refuse_failed_read body "$body_read_rc"
+
+# The subject, the body and the file list from the private copies of the subject, body and files
+# files ($subject_text, $body_text, $files_text): the subject less one final line feed, the body
+# whole, and one path per line with one final line feed allowed, where an empty text or a lone
+# line feed is an empty list.
+# INVARIANT: the empty and lone line feed texts are matched before split, so jq 1.6 and 1.7 give
+# the same list.
+derived_defs='
+def subject_value: $subject_text | rtrimstr("\n");
+def body_value: $body_text;
+def files_value:
+  if $files_text == "" or $files_text == "\n" then [] else $files_text | rtrimstr("\n") | split("\n") end;
+'
+derived_args=(--rawfile subject_text "$subject_copy" --rawfile body_text "$body_copy" --rawfile files_text "$files_copy")
+
+# The field rules from the header, in order: the inputs fields, then the subject, body, breaking
+# marker and files rules. Prints the fixed reason of the first rule broken, or an empty line when
+# every rule holds.
 validate_program='
 def type_names: ["feat", "fix", "hotfix", "refactor", "docs", "test", "chore", "ci"];
-def known_keys: ["type", "scope", "breaking", "subject", "body", "files"];
+def known_keys: ["type", "scope", "breaking"];
 def is_one_line: explode | all(.[]; . >= 32 and . != 127);
 def is_text_block: explode | all(.[]; . == 9 or . == 10 or (. >= 32 and . != 127));
 def is_exact_path:
   type == "string" and length > 0 and is_one_line and (startswith("/") | not)
   and (split("/") | all(.[]; . != "" and . != "." and . != ".." and ascii_downcase != ".git"));
 def has_breaking_marker:
-  (.subject | contains("!:"))
-  or (("\n" + (.body // "")) | test("\nBREAKING[ -]CHANGE:"));
+  (subject_value | contains("!:"))
+  or (("\n" + body_value) | test("\nBREAKING[ -]CHANGE:"));
 if type != "object" then "inputs must be a JSON object"
-elif (keys - known_keys | length) > 0 then "inputs have a field other than type, scope, breaking, subject, body and files"
+elif (keys - known_keys | length) > 0 then "inputs have a field other than type, scope and breaking"
 elif (.type | type) != "string" then "type must be one of feat fix hotfix refactor docs test chore ci"
 elif (.type as $type_name | any(type_names[]; . == $type_name) | not) then "type must be one of feat fix hotfix refactor docs test chore ci"
 elif has("scope") and ((.scope | type) != "string" or .scope == "" or (.scope | is_one_line | not)) then "scope contains characters outside the safe allowlist"
 elif has("breaking") and (.breaking | type) != "boolean" then "breaking must be true or false"
-elif (.subject | type) != "string" then "subject must be one line of text"
-elif (.subject | is_one_line | not) or (.subject | test("[^ ]") | not) then "subject must be one line of text"
-elif (.subject | length) > 72 then "subject must be 72 characters or fewer"
-elif has("body") and (.body | type) != "string" then "body must be text with no control characters other than newline and tab"
-elif has("body") and (.body | is_text_block | not) then "body must be text with no control characters other than newline and tab"
+elif (subject_value | is_one_line | not) or (subject_value | test("[^ ]") | not) then "subject must be one line of text"
+elif (subject_value | length) > 72 then "subject must be 72 characters or fewer"
+elif (body_value | is_text_block | not) then "body must be text with no control characters other than newline and tab"
 elif .breaking != true and has_breaking_marker then "the subject or body has a breaking change marker but breaking is not true"
-elif (.files | type) != "array" then "files must be an array of exact paths relative to the top of the work tree"
-elif (.files | all(.[]; is_exact_path) | not) then "files must be an array of exact paths relative to the top of the work tree"
+elif (files_value | all(.[]; is_exact_path) | not) then "files must be an array of exact paths relative to the top of the work tree"
 else "" end
 '
-inputs_reason="$(jq -r "$validate_program" "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
+inputs_reason="$(jq -r "${derived_args[@]}" "$derived_defs$validate_program" "$inputs_copy" 2>/dev/null)" \
+  || blocker "cannot read the inputs file"
 [ -z "$inputs_reason" ] || blocker "$inputs_reason"
 
-scope_value="$(jq -r '.scope // ""' "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
+# The checked fields in one private object, {type, scope?, breaking?, subject, body, files}, that
+# every later step reads.
+jq -c "${derived_args[@]}" "$derived_defs"'. + {subject: subject_value, body: body_value, files: files_value}' \
+  "$inputs_copy" >"$fields_file" 2>/dev/null || blocker "cannot read the inputs file"
+
+scope_value="$(jq -r '.scope // ""' "$fields_file" 2>/dev/null)" || blocker "cannot read the inputs file"
 if [ -n "$scope_value" ]; then
   hivemind_assert_identifier "$scope_value" || blocker "scope contains characters outside the safe allowlist"
 fi
 
 # Every listed path is one line (the field rules), so a newline-separated listing is exact.
-listed_paths="$(jq -r '.files[]' "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
+listed_paths="$(jq -r '.files[]' "$fields_file" 2>/dev/null)" || blocker "cannot read the inputs file"
 while IFS= read -r listed_path; do
   [ -n "$listed_path" ] || continue
   if [ -d "./$listed_path" ] && [ ! -L "./$listed_path" ]; then
@@ -473,14 +649,14 @@ refuse_remote_default_branch
 # ── Dirty paths ─────────────────────────────────────────────────────────────
 
 read_status_listing
-outside_lines="$(jq -r --rawfile status_text "$status_file" "$entries_program"' | .[] | select(.listed | not) | "outside: " + (.path | tojson)' "$inputs_copy" 2>/dev/null)" \
+outside_lines="$(jq -r --rawfile status_text "$status_file" "$entries_program"' | .[] | select(.listed | not) | "outside: " + (.path | tojson)' "$fields_file" 2>/dev/null)" \
   || blocker "cannot read the working tree status"
 if [ -n "$outside_lines" ]; then
   printf '%s\n' "$outside_lines" >&2
   blocker "the working tree has dirty paths outside files"
 fi
 
-listed_dirty_count="$(jq -r --rawfile status_text "$status_file" "$entries_program"' | map(select(.listed)) | length' "$inputs_copy" 2>/dev/null)" \
+listed_dirty_count="$(jq -r --rawfile status_text "$status_file" "$entries_program"' | map(select(.listed)) | length' "$fields_file" 2>/dev/null)" \
   || blocker "cannot read the working tree status"
 
 if [ "$listed_dirty_count" = 0 ]; then
@@ -491,7 +667,7 @@ fi
 # ── Stage and commit ────────────────────────────────────────────────────────
 
 # Listed paths are one line each (the field rules), so this newline-separated listing is exact.
-add_listing="$(jq -r --rawfile status_text "$status_file" "$entries_program"' | .[] | select(.listed and (.code == "??" or .code[1:2] != " ")) | .path' "$inputs_copy" 2>/dev/null)" \
+add_listing="$(jq -r --rawfile status_text "$status_file" "$entries_program"' | .[] | select(.listed and (.code == "??" or .code[1:2] != " ")) | .path' "$fields_file" 2>/dev/null)" \
   || blocker "cannot read the working tree status"
 add_paths=()
 while IFS= read -r add_path; do
@@ -581,7 +757,7 @@ block_failed_commit() {
 }
 
 commit_rc=0
-jq -j "$message_program" "$inputs_copy" 2>/dev/null | git commit --quiet --cleanup=whitespace -F - >/dev/null 2>"$commit_error_file" \
+jq -j "$message_program" "$fields_file" 2>/dev/null | git commit --quiet --cleanup=whitespace -F - >/dev/null 2>"$commit_error_file" \
   || commit_rc=$?
 [ "$commit_rc" = 0 ] || block_failed_commit
 
@@ -602,11 +778,11 @@ git diff-tree -r -z --no-renames --name-only "$old_head" "$new_head" >"$commit_p
 unlisted_count="$(jq -r --rawfile commit_text "$commit_paths_file" '
 (.files | map({key: ., value: true}) | from_entries) as $listed_set
 | [$commit_text | split("\u0000")[] | select(length > 0) | select($listed_set[.] != true)] | length
-' "$inputs_copy" 2>/dev/null)" || blocker "cannot read the new commit"
+' "$fields_file" 2>/dev/null)" || blocker "cannot read the new commit"
 [ "$unlisted_count" = 0 ] || blocker "the commit has a path outside files"
 
 read_status_listing
-remaining_count="$(jq -r --rawfile status_text "$status_file" "$entries_program"' | map(select(.listed)) | length' "$inputs_copy" 2>/dev/null)" \
+remaining_count="$(jq -r --rawfile status_text "$status_file" "$entries_program"' | map(select(.listed)) | length' "$fields_file" 2>/dev/null)" \
   || blocker "cannot read the working tree status"
 [ "$remaining_count" = 0 ] || blocker "a listed path is still dirty after the commit"
 

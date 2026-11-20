@@ -449,6 +449,8 @@ Links: https://github.com/brenpike/hivemind/issues/448, `docs/adr/0038-root-caus
 - `molt.sh` accepting a path its rule should refuse;
 - the parity between `isRepositoryPath` and `molt.sh` breaking.
 
+**Updated 2026-11-19 (PR 597).** The line feed join of issue 595 broke the ground that fix round files "reach only `molt.sh`, which applies the same rule": a file holding a line feed became two paths, and an empty file vanished or a trailing line feed was dropped, before `molt.sh` read the list. `commit.js` now refuses only a list its join cannot carry (an empty entry or one holding a line feed), not by the path rule, so files again reach `molt.sh` intact and the decision stands. See Amendment 2026-11-19: the commit subject and file list are sent in their own files (issue 595), "PR 597 review finding r4636550229".
+
 **The key.** This record is matched by the scope above, not by the finding id, since finding ids change from run to run.
 
 The rest of ADR-0037 is unchanged.
@@ -2209,12 +2211,14 @@ This amendment covers https://github.com/brenpike/hivemind/issues/506 and https:
 - **Not covered.** When the second Write fails, the runner or the skill runs no command, so the file written first stays.
 - **Bounded impact.** It sits under `.hivemind/` and holds only text built for the pull request. A retry or rerun writes both files at new paths. A checkout that does not ignore `.hivemind/` sees it as untracked, and the next dirty check refuses until it is removed.
 - **Ground.** Only the script deletes the files, and it must not run after a failed Write. The runner holds Write and the exact runner commands, and no delete.
+- **Extended 2026-11-19 (issue 595).** The molt files have the same residual. The commit runner writes up to three files and the skill up to four, so a failed later Write leaves each file written before it. They sit under `.hivemind/` and hold only the fixed type, scope and breaking values, the commit subject, the file list or the body, and a retry or rerun writes every file at a new path (see Amendment 2026-11-19: the commit subject and file list are sent in their own files (issue 595)).
 
 **Recorded residual: invalid UTF-8 in the body becomes U+FFFD.**
 
 - **Not covered.** `jq -R` replaces each invalid UTF-8 sequence of the body file with U+FFFD, so such a body is changed, not refused.
 - **Bounded impact.** The workflow body is a JavaScript string and the Write tool writes text, so neither path produces invalid UTF-8. A replaced sequence shows as a visible character in editable pull request text and adds no control character.
 - **Ground.** That is how jq reads raw input. A separate byte check would guard a case the Write tool does not produce.
+- **Closed 2026-11-19 (local review finding da9b2eac).** The body, and every other caller-written file of `molt.sh` and `open-plan-pr.sh`, is now read back byte for byte, and a file that is not valid UTF-8 is refused with a fixed blocker (see Amendment 2026-11-19: the commit subject and file list are sent in their own files (issue 595), "Local review finding da9b2eac").
 
 The rest of ADR-0037 is unchanged.
 
@@ -2957,6 +2961,7 @@ The growth was cut inside `pr.js`, where the single-use helpers `renderPullReque
   - **Not covered.** The commit step passes its `inputs_file` content as an object, so the runner writes that JSON itself. The same kind of copy fault can make it invalid.
   - **Bounded impact.** `molt.sh` refuses an invalid inputs file (`inputs file is not valid JSON`) before any commit.
   - **Ground.** Beyond this fix. Tracked as https://github.com/brenpike/hivemind/issues/595.
+  - **Closed 2026-11-19 (issue 595).** The subject and the file list now go in their own raw files, passed with `--subject-file` and `--files-file`, and the inputs JSON holds only the fixed values type, scope and breaking (see Amendment 2026-11-19: the commit subject and file list are sent in their own files (issue 595)).
 - **The skill path still writes the title JSON.**
   - **Not covered.** On the JSON state machine the agent writes the inputs file, and its title is not mapped.
   - **Bounded impact.** The file is one short title and a draft flag. An invalid file is refused before any change.
@@ -2966,6 +2971,7 @@ The growth was cut inside `pr.js`, where the single-use helpers `renderPullReque
   - **Bounded impact.** It needs a runner to change the command the engine built and an exact match with a live file of another run in the same checkout. Brood strains run in separate worktrees. The worst case is that the other run's pull request step stops with a visible error and this run posts text the other run wrote. No git change.
   - **Decision.** Keep the code and add no shared-token check to the hook. The engine already treats the runner's command as trusted within the gate's path classes.
   - **Decided by.** The user, 2026-11-18, answering local review finding e3e6fa3d45aca51186e8b096e3c34a0763eddc9f8a0534f7ba053c393b00028d ("Comment and body file flags can name and delete another run's state file"). The options were: A, keep the code and record the trust here; B, require one shared token in this PR; C, keep the code and open an issue to fix it later. The user chose A.
+  - **Extended 2026-11-19 (issue 595).** The same trust now covers the molt files: `--inputs`, `--subject-file`, `--files-file` and `--body-file` of the exact `molt` form take any `.hivemind/molt-inputs-<token>.json`-class path, with no shared-token check (see Amendment 2026-11-19: the commit subject and file list are sent in their own files (issue 595), "The runner is trusted to name only its own run's molt files").
 
 **Version.** Patch, 10.0.5. It is a fix: a runner copy mistake can no longer make the inputs file invalid.
 
@@ -2974,3 +2980,153 @@ It updates these places in place, each with a dated note: the residuals "the run
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/592, https://github.com/brenpike/hivemind/issues/595, https://github.com/brenpike/hivemind/issues/538.
+
+## Amendment 2026-11-19: the commit subject and file list are sent in their own files (issue 595)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/595. The commit step still sent free text inside a JSON file that a model writes, the class issue 592 closed for the pull request comment.
+
+**Evidence.** The issue 592 amendment recorded the residual "molt's inputs JSON is model-written". `buildCommitPrompt` (`plugin/workflow-src/lib/commit.js`) passed its `inputs_file` content as an object holding the type, the breaking flag, the subject and the file list, and the haiku runner wrote that object as JSON itself. The subject is plan text and the file list holds every path of the wave, so each quote, backslash and bracket in them was an escape the runner had to make. A copy fault of the kind run wf_540092f4-b17 showed makes the file invalid, and `molt.sh` refuses it (`inputs file is not valid JSON`) before any commit, which stops the run.
+
+**Root cause.** The same as issue 592: free text sat inside a JSON file that a model must write byte for byte. The skill path had the same shape, with the agent writing the subject, body and files into the JSON.
+
+**The user's decision.** Q1, option A, answered by the user on 2026-11-19: the subject, the file list and the body go to their own raw files. This changes the molt script interface, its skill, the synapse runner text, and the exact `molt` form of the synapse gate hook, which gains one required and two optional flags. The hook change is destructive category 5. The rewrite of the `tools/test_molt.sh` cases tied to the removed JSON fields is destructive category 3: each case was transformed into its raw-file form, and none was dropped. The user approved both.
+
+**The run's decisions.** Two calls were taken by the run with its recommendation and journaled, under `plugin/governance/decision-autonomy.md` (Tier B — Auto-Decide and Journal):
+
+- **Q2, option A.** Type, scope and breaking stay in a fixed-value `--inputs` JSON. This keeps the `tests/policy/safety-git-identifier-out-of-band.json` pin of the molt SKILL.md command through `--inputs .hivemind/molt-inputs-<token>.json`, and the new flags follow it on the same line.
+- **Q3, option A.** The runner-trust residual the user decided on 2026-11-18 (local review finding e3e6fa3d) is extended to the molt files. See the recorded residuals below.
+
+**The change.**
+
+- **The script.** `molt.sh` takes `--trunk`, `--inputs`, `--subject-file`, an optional `--files-file` and an optional `--body-file`, each at most once. The subject is the whole subject file less one final line feed. The files file is one exact path per line, with one final line feed allowed. An empty file, a lone line feed or an absent flag is an empty list, and a blank line among the paths is an empty path and is refused. A carriage return is a control character and is refused. The body file is raw text. Each path is resolved like `--inputs`. It must exist, sit inside the checkout, and not name another of the four files by any spelling or hard link, all checked before any read. Each file is read once with `jq -R -s` into a private copy and deleted right after its read, whether or not the read succeeded, under the molt leaf rule with the tokens `<token>-subj`, `<token>-files` and `<token>-body`. Every new refusal is a fixed blocker and comes before any change. The message, staging, result checks and exit contract are unchanged.
+- **The inputs file.** It allows only `type`, `scope` and `breaking`. Any other field, `subject`, `body` and `files` included, is refused with `inputs have a field other than type, scope and breaking`. Its values are an enum, an identifier and a boolean, so its JSON needs no escape.
+- **The leaf suffix.** The subject file ends `-subj`, not `-subject`. The longest pinned call label, `review-commit-999-999-retry`, gives a 62-character token with `-subj` and 63 with `-files`, under the limit of 64; `-subject` would pass it. On the skill path the token is at most 58 characters, so all three suffixed tokens fit.
+- **The workflow.** The commit runner command carries `--trunk`, `--inputs`, `--subject-file` and, only when the file list is not empty, `--files-file`. The paths are `buildInputsPath` of the call label, of the label plus `-subj` and of the label plus `-files`. The `-retry` label gets its own paths, and `describeCommandStop` checks both labels before the call. The `inputs_file` content is `JSON.stringify({type, breaking})`; the engine passes no scope. The `subject_file` content is the code-built subject as raw text, and the `files_file` content the files joined by line feeds. The head check sends no `files_file` block and no `--files-file`. One `formatFileBlock` (`plugin/workflow-src/lib/facts.js`) builds every file block of both runners and derives the block name from its flag. `runnerValuePatterns()` gives `--subject-file` and `--files-file` the molt-inputs class alone; `--body-file` stays pr-only for the engine.
+- **The runner.** `plugin/agents/synapse.md` names `subject_file` and `files_file`, and writes each `*_file` block in prompt order, its string content as is, to its path.
+- **The hook.** The exact `molt` form in `plugin/hooks/synapse-gate.sh` requires `--trunk`, `--inputs` and `--subject-file` and allows `--files-file` and `--body-file`, in any order, each at most once, every path in the molt-inputs class. The deny reason gives the new form. The Write rule and every other script form are unchanged.
+- **The skill path.** `plugin/skills/molt/SKILL.md` writes the inputs JSON with only the type, an optional scope and breaking, the raw subject to `.hivemind/molt-inputs-<token>-subj.json`, the files one per line to `.hivemind/molt-inputs-<token>-files.json` and, only with a body, the raw body to `.hivemind/molt-inputs-<token>-body.json`. Its command adds the new flags after `--inputs .hivemind/molt-inputs-<token>.json` on the same line, `--body-file` only with a body. Any failed Write stops blocked. Every path keeps the molt-inputs form, so the skill `allowed-tools` glob and the hook's Write rule cover it.
+- Rows SD-15, SD-66, SD-71 and SD-74 name the new rules.
+
+**Options ruled out.**
+
+- **The status quo.** The script refuses a bad file, but as issue 592 showed for the comment, the refusal still stops the step for a fault the engine did not make.
+- **Object content.** An `inputs_file` object leaves the JSON text to the runner, the model that makes the fault.
+- **Moving type, scope and breaking out as well.** They are fixed values that need no escape, and keeping `--inputs` keeps the pinned skill command (Q2).
+- **A digest check.** The user chose no digest check on 2026-11-05 (Q6 of the issue 506 amendment). A check would also only catch a bad copy, not prevent it.
+- **A retry.** A copy fault is not a transient failure. A retry writes the same text again.
+- **A stronger runner model.** It lowers the odds of a copy fault but leaves the class, and costs more on every call.
+- **A shared-token check in the hook.** Not added, per the user's 2026-11-18 decision on finding e3e6fa3d, extended on Q3.
+
+**Enforcement.** Tests by execution:
+
+- `tools/test_molt.sh` commits a subject, body and listed path holding double quotes, backslashes, `]`, `}`, `[`, `{` and `<` byte for byte. It covers the final line feed, CRLF and the empty list. Each new refusal leaves the files and makes no change, each raw file is gone after its read, the old JSON fields are refused, and a missing or repeated new flag gives the usage blocker. Every earlier case is kept or transformed into its raw-file form. 780 checks pass.
+- `tools/test_synapse_gate.sh` allows the new flags in any position, with either optional flag alone or both, and a 64-character token. It denies the old two-flag form, a missing `--subject-file`, a repeated flag, an unknown flag, a pr-kind path, a 65-character token and an absolute path, and the deny reason states the new form. 555 checks pass.
+- `tests/workflow-scripts/standard-delivery.test.mjs` commits through the real `molt.sh` and the real gate hook: a subject holding `"`, `\`, brackets and braces commits byte for byte, and so does a runner stand-in that copies a fault into the subject file, and no file of the step is left. The head check sends no `files_file` block and no `--files-file`. A retry writes paths of its own. Every command the engine builds, and each of its file Writes, gets an allow from the real hook.
+- `tests/workflow-scripts/pr-feedback-remediation.test.mjs` reads the inputs keys `type` and `breaking`, the raw subject and the raw files, and shows its head check sends no `files_file` block.
+- `tests/workflow-scripts/facts.test.mjs` shows `describeRunnerWordProblem` takes a `--subject-file` or `--files-file` value exactly when the real gate allows it, that both classes are the molt form alone, and that no value can close its file block.
+
+The workflow script tests pass, 3,476 in all.
+
+**Budget.** No prose budget raise and no length cap raise. Measured after the change:
+
+- `plugin/workflows/standard-delivery.js`: prose 41,976 of 42,100, from 41,966; length 190,864 of 191,000, from 190,851.
+- `plugin/workflows/pr-feedback-remediation.js`: prose 38,053 of 38,200, from 38,043; length 176,088, from 176,075.
+- `plugin/workflows/analysis-only.js`: prose 15,552 of 16,050, from 15,522; length 64,417, from 64,296.
+- `plugin/agents/synapse.md`: 1,716 of 1,727 bytes.
+- `plugin/skills/molt/SKILL.md`: 6,272 of 6,287 bytes.
+- `plugin/workflow-src/lib/facts.js`: 589 lines of 600.
+
+The seeded-sentence check of `tests/workflow-scripts/build.test.mjs` still fits, with 17 characters of length and 5 of prose to spare for standard-delivery and 28 of prose for pr-feedback-remediation. The growth was cut inside `commit.js`, `facts.js` and `pr.js`: `formatFileBlock` replaces `formatInputsFileBlock`, `formatBodyFileBlock` and the inline `comment_file` block, `isUsableSubject` is inlined into `toCommitSubject`, and `matchesFreshnessCounts` is one expression.
+
+**Recorded residuals.**
+
+- **The inputs JSON is still model-written, narrowed.**
+  - **Not covered.** On the workflow the runner copies the inputs JSON the engine built, and on the skill path the agent writes it. Nothing compares the copy with what was built.
+  - **Bounded impact.** The file is about 30 bytes of fixed values, an enum, an allowlisted identifier and a boolean, so it never needs an escape. A bad copy is refused (`inputs file is not valid JSON`, or a field rule) before any change.
+- **The runner is trusted to name only its own run's molt files.**
+  - **Not covered.** The synapse-gate hook accepts any `.hivemind/molt-inputs-<token>.json`-class path for `--inputs`, `--subject-file`, `--files-file` and `--body-file` of the `molt` form, and `runnerValuePatterns()` does the same for the flags the engine sends. Nothing requires the paths to share one token. A runner that changed the engine-built command could name another live run's molt files in the same checkout, and `molt.sh` would read them and then delete them.
+  - **Introduced or inherited.** Inherited. `--inputs` already had this check on main; this change gives the new flags the same check.
+  - **Bounded impact.** It needs a runner to change the command the engine built and an exact match with a live file of another run in the same checkout. Brood strains run in separate worktrees. The worst case is that the other run's commit step stops with a visible error and this run's commit carries a subject or file list the other run wrote. `molt.sh` still stages only listed dirty paths and refuses any other dirty path, and the commit step pushes nothing.
+  - **Decision.** Keep the code and add no shared-token check to the hook, as for the PR files.
+  - **Decided by.** The user, 2026-11-18, on local review finding e3e6fa3d for the PR files (see Amendment 2026-11-18: the pull request comment is sent in its own file (issue 592)). Extended to the molt files by the run on Q3, option A, on 2026-11-19.
+- **Failed deletes of read input files are ignored (local review finding 097102a1).**
+  - **Not covered.** A failed delete of a used inputs, subject, files, body or comment file is ignored, and the run can succeed and leave that file behind.
+  - **Bounded impact.** A leftover file is inert. The `molt.sh` dirty check refuses it before any change, and a retry uses paths of its own.
+  - **Ground.** The issue 488 amendment (2026-10-31, "Options ruled out: A new stop on a failed delete") ruled out a new stop on a failed delete. The best-effort delete stays.
+  - **Decision.** Keep the best-effort delete and record this rejection. No code change.
+  - **Decided by.** The user, 2026-11-19, answering Q1 (A: keep best-effort and record; B: stop both scripts; C: issue later). The reply was "Take recs", which is A.
+
+### Local review finding da9b2eac: a raw file must read back byte for byte (2026-11-19)
+
+The finding: reads of a caller-written file through jq do not keep every byte. jq reads the file as UTF-8 and puts U+FFFD in place of each invalid sequence, with no error, so a file that is not valid UTF-8 was changed and then used.
+
+**Root cause.** One read path, `jq -R -s` or `jq --rawfile`, was used at seven sites, and none compared what it read with the file. The 2026-11-06 residual "invalid UTF-8 in the body becomes U+FFFD" had judged the body alone and the Write tool as the only producer. The raw files of this amendment made the class larger, since a runner copy fault can now put a bad byte in a subject, a file list or a title.
+
+**The seven sites.**
+
+- `molt.sh`: the inputs file, the subject file, the files file and the body file.
+- `open-plan-pr.sh`: the inputs file, which holds the title and was inherited from the issue 592 shape, the body file and the comment file.
+
+**The change.**
+
+- **The helper.** `hivemind_read_input_file <file> <copy>` in `plugin/skills/_shared/containment.sh` reads the file once, whole, with `jq -n -j --rawfile text <file> '$text'` into a private copy, then compares the copy with the file with `cmp -s` before the delete. It returns 0 when the copy is byte for byte the file, 2 when they differ and 1 when the read or the compare could not run. It prints nothing, never exits and sets no shell option.
+- **The scripts.** Both read every one of their files through the helper, and each file is still deleted right after its own read, whether or not the read or the check passed, and before any blocker. The inputs file goes to a raw copy that the existing one-JSON-value jq step then parses. After the deletes the blockers run in order: inputs read failed gives `inputs file is not valid JSON`; inputs copy differs gives `inputs file is not valid UTF-8`; inputs parse failed gives `inputs file is not valid JSON`; then, per file in turn, a failed read gives `<kind> file cannot be read` and a differing copy gives `<kind> file is not valid UTF-8`. Any other helper return maps to the cannot-be-read text.
+- **Unchanged.** Field rules, staging, commit, push, PR create and reuse, result checks, output and exit contract.
+
+**The class eliminated.** Every caller-written file read of the two scripts goes through the one helper, so no read can change a byte without a refusal. Both scripts name the helper in their headers, and the seven sites are the whole set, so a new file added to either script has one read to copy.
+
+**Why `cmp`, not a U+FFFD refusal.** A literal U+FFFD is valid UTF-8 and some text holds it on purpose: `pr.js` maps a lone surrogate in a title to U+FFFD (`tests/workflow-scripts/standard-delivery.test.mjs`, the issue 592 title case near line 5704). Refusing the character would refuse that title. The copy comparison refuses only a file that jq changed.
+
+**Why refuse, not preserve.** `jq` 1.6 has no flag that keeps invalid bytes in a string, and `jq -b` is rejected by 1.6. Preserving the bytes would also put them in a commit subject or a pull request title. A fixed blocker before any change is the same contract as every other bad file.
+
+**Surface.** Surface-Growth Escalation was approved by the user for the one shared read at all seven sites. The surface grows by one function, the blockers `inputs file is not valid UTF-8` and `<kind> file is not valid UTF-8` for each non-inputs file of both scripts, and `jq` and `cmp` become named dependencies of the helper. No prose budget raised, no hook, workflow, runner or skill text changed, and `tests/policy` fixture pins are kept.
+
+**Native Windows.** A native Windows `jq.exe` writes CRLF for LF, so every multi-line file fails the comparison there. Native Windows is unsupported (README), so this is noted in both script headers and not worked around. A file changed between the read and the compare is refused by the same blocker.
+
+**Enforcement.** Tests by execution, measured after the change:
+
+- `tools/test_shared_libs.sh`: 1676 passed, 27 of them new assertions in subsection 7g (exact copy and return 0 for an empty file, a lone line feed, multi-byte text, a literal U+FFFD and one line over 9000 bytes of multi-byte characters; return 2 for a lone 0xFF byte, a truncated 3-byte sequence at end of file, `C0 80` and `ED A0 80`; return 1 for a missing file; no output; survives `set -e` in a condition).
+- `tools/test_molt.sh`: 834 passed, 0 failed. Red proof: the 7 new UTF-8 cases fail on the old engine. The cases cover each of the four files holding an invalid byte, a truncated sequence at the end of the subject file, the blocker order, and a literal U+FFFD and a long multi-byte body line committed byte for byte.
+- `tools/test_open_plan_pr.sh`: 1284 passed, 0 failed. A body, a comment and an inputs title each holding an invalid byte get their blocker with no push and no `gh` call; a title holding a literal U+FFFD and a long multi-byte body line reach `gh` byte for byte.
+- Local `jq` is 1.6, which keeps NUL bytes under `--rawfile -j`, so the existing NUL cases still reach the control-character rules. No test pins which rule refuses NUL.
+
+**The user's decision.** Q2, option A, 2026-11-19 (reply "Take recs"): apply one shared byte-exact read at all seven caller-file reads. The run decisions taken with the planner's recommendation: both inputs files are included, native Windows is not worked around, and no `jq -b`.
+
+### PR 597 review finding r4636550229: a file list the line feed join cannot carry (2026-11-19)
+
+**The finding.** Codex P1 on https://github.com/brenpike/hivemind/pull/597#discussion_r4636550229, `plugin/workflow-src/lib/commit.js`. `buildCommitPrompt` joins the files with `'\n'`, and `molt.sh` reads the list back with `rtrimstr("\n") | split("\n")`. `["a\nb"]` became two paths, an empty entry vanished, and `"src/a.js\n"` silently became `src/a.js`.
+
+**Root cause.** A lossy encoding validated after the round trip. It was introduced on this branch (c8641e87, the join; 78faf0f5, the line-per-path read). Wave files already pass `isRepositoryPath` at plan acceptance, so the live gap was the fix round files: `buildGateEditSchema` has `items {type: 'string'}` and `validateSchema` refuses only a blank string.
+
+**The change.** `listCommitWords` gives `--files-file` no value when any entry is empty or holds a line feed, so `describeCommandStop` makes a terminal stop before any runner call, with the existing text "its --files-file value is not one the script takes". `[]` still sends no flag. The only entries refused are ones `molt.sh` would refuse anyway, so no committable list is lost. Every other control character, CR included, survives the join, and `molt.sh` still refuses it.
+
+**The class eliminated.** `molt.sh` always reads the list the engine built, for every current and future caller, since all go through `runCommitStep`.
+
+**Options ruled out.**
+
+- **NUL separation.** The runner would write U+0000 through the Write tool and a JSON prompt block, the issue 595 class again, and the bash read drops NUL.
+- **A JSON array.** It brings back model-written escapes, ruled out by Q1 of the issue 595 decision.
+- **A per-line escape.** It needs model-made escapes and a decoder.
+- **Length prefixes or one file per path.** Fragile, and they widen the hook's path class.
+- **Raising `MAX_BUILT_SCRIPT_LENGTH` or a budget, or decoupling the seeded-sentence tests of `build.test.mjs`.** Not needed.
+
+**The skill path.** On the `hivemind:molt` skill path the agent writes the lines itself, so there is no earlier list to lose. It cannot name a path holding a line feed, and the real dirty path is then refused as outside the list. This is a format limit, not a root cause.
+
+**Room.** Paid for by folding the command stop of `runCommitStep` into its relay check, with the same behavior. Measured:
+
+- `plugin/workflows/standard-delivery.js`: length 190,864 to 190,836 of 191,000; prose 41,976 of 42,100, unchanged.
+- `plugin/workflows/pr-feedback-remediation.js`: length 176,088 to 176,060; prose 38,053 of 38,200, unchanged.
+- `plugin/workflows/analysis-only.js`: unchanged.
+- The seeded-sentence build tests now have about 45 characters of length room, from 17.
+
+The workflow script tests pass, 3,477 in all.
+
+**Decision.** Accepted by the run (Tier B, `plugin/governance/decision-autonomy.md`): the plan tripped no promotion gate and grew no surface. The ground of the 2026-10-25 amendment (local review finding c2e0ada3) carries a dated note.
+
+**Version.** Patch, 10.0.6. It is a fix: a runner copy mistake in the subject or the file list can no longer make the inputs file invalid. Every built workflow script changed, so a run paused on an older build cannot resume. The local review fix da9b2eac stays in 10.0.6 and `plugin.json` is unchanged.
+
+It updates these places in place, each with a dated note: the residuals "molt's inputs JSON is model-written" and "the runner is trusted to name only its own run's PR files" of Amendment 2026-11-18: the pull request comment is sent in its own file (issue 592), the residual "a first file is left when the second Write fails" and the residual "invalid UTF-8 in the body becomes U+FFFD" of Amendment 2026-11-06: the pull request body is built in code and sent in its own file (issues 506 and 501), and the Scope of Amendment 2026-10-25: fix round files are checked by molt.sh alone (local review finding c2e0ada3).
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/595, https://github.com/brenpike/hivemind/issues/592, https://github.com/brenpike/hivemind/issues/538.

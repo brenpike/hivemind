@@ -412,7 +412,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = '09ada98b4d42a4ce';
+const BUILD_ID = '3e496b22e097b0b7';
 
 function supportedSchemaKeywords(){
 return[
@@ -1536,6 +1536,7 @@ return formatDataBlock('command',command);
 function runnerValuePatterns(){
 const name=gitIdentifierPattern();
 const prFile=/^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/;
+const moltFile=/^\.hivemind\/molt-inputs-[A-Za-z0-9-]{1,64}\.json$/;
 return{
 '--trunk':name,
 '--base':name,
@@ -1546,6 +1547,8 @@ return{
 '--classification':/^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
 '--trunk-freshness':/^(?:fresh|stale|skipped)$/,
 '--inputs':/^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/,
+'--subject-file':moltFile,
+'--files-file':moltFile,
 '--body-file':prFile,
 '--comment-file':prFile
 };
