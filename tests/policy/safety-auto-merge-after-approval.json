@@ -1,0 +1,22 @@
+{
+  "rule": "Review-watch opt-in merge carve-out from the Tier-A merge rule",
+  "description": "P3 coupling. Tier A of `plugin/governance/decision-autonomy.md` keeps every merge recommendation with the human, with one carve-out: the review watch's opt-in merge after a reviewer approval, delegated by name to `plugin/skills/github-review-loop/SKILL.md`. The source pin sits on the one Tier-A bullet carrying both halves: the obligation (the human merges) and the exception with its pointer to SKILL.md. Rewriting the obligation away, widening the exception, or dropping the SKILL.md pointer each turns the suite red. The consumers pin the places that bound the carve-out. In SKILL.md, the merge-rule span carries the condition (only an approval return whose QUIET-EXIT CHECK reports `UNCHANGED`), the one command it runs, `merge-approved.sh`, and the bound (once; no other end runs it, `merge-advised` included). The Safety bullet forbids any merge outside that rule. In `plugin/skills/github-review-loop/scripts/merge-approved.sh`, the single merge command in `run_merge`, used by both the plain and the `--admin` merge, carries `--match-head-commit` on the head the gates read, so a commit pushed after the read is never merged. What this fixture honestly guarantees is exactly that these four word sequences exist in these three named files; it claims word-sequence presence only and nothing about meaning. Behaviour is proved by `tools/test_merge_approved.sh`, not by this fixture. Residuals, stated plainly: (1) runtime execution is not covered: a static pin cannot prove the overlord runs the script only on the gated path, only once, or that the script's gates (approval, settled threads, check rollup, admin setting) decide as documented; (2) a meaning inversion or rewrite-around that leaves the pinned bytes intact is invisible; (3) the script pin sees only the `run_merge` call text, so a second `gh pr merge` call added elsewhere in the script without `--match-head-commit` stays green; (4) the pin sees only the three files it names, and no fixture in this directory can detect a NEW skill, agent or script that merges a PR outside the merge rule: that is an absence defect per rule 7 of the pin-authoring contract and needs a structural check, not a presence pin.",
+  "source": {
+    "file": "plugin/governance/decision-autonomy.md",
+    "pattern": "every merge recommendation; the human merges, except the review watch's opt-in merge after a reviewer approval, per `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/SKILL.md`"
+  },
+  "consumers": [
+    {
+      "file": "plugin/skills/github-review-loop/SKILL.md",
+      "pattern": "Merge rule. Only an approval return whose QUIET-EXIT CHECK reports `UNCHANGED` runs `bash \"${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/merge-approved.sh\" <OWNER> <REPO> <PR_NUMBER> <reviewer_filter> <SELF_LOGIN>`, once; no other end runs it, `merge-advised` included."
+    },
+    {
+      "file": "plugin/skills/github-review-loop/SKILL.md",
+      "pattern": "Never close or approve a PR, and never merge except through the merge rule (step 5)."
+    },
+    {
+      "file": "plugin/skills/github-review-loop/scripts/merge-approved.sh",
+      "pattern": "gh pr merge \"$PR_NUMBER\" --repo \"$OWNER/$REPO\" \"--$MERGE_METHOD\" \\ --match-head-commit \"$GATED_HEAD\""
+    }
+  ]
+}

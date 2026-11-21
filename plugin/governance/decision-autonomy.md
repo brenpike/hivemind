@@ -16,7 +16,7 @@ Tier A is the closed Ask Set. The overlord never auto-decides:
 - brood strain approval, the injection gate before parallel strains dispatch
 - a tool call failed after retry exhaustion (`${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `## Tool-Error Recovery`)
 - a genuine fact-needed blocker: a fact only the user holds
-- every merge recommendation; the human merges, never the overlord
+- every merge recommendation; the human merges, except the review watch's opt-in merge after a reviewer approval, per `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/SKILL.md`
 - a question with no recommendation
 - the whole gate-trips column of **The Autonomy 2x2**
 
@@ -106,8 +106,8 @@ The report is gated on `HIVEMIND_ENABLE_DECISION_REPORT`, set in the `env` block
 
 At a later session start, the Resume-On-Start scan (`${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `## Resume On Start`) derives an awaiting-report run when all hold:
 
-- a PR is derivable from `event.outputs.pr` of the `open_pr` event (standard-delivery records there the `url` `hivemind:open-plan-pr` returns) or of the `pr_branch_preflight`/`intake` event (a `pr-feedback-remediation` run has no `open_pr` state, so the overlord records there the PR it resolves and checks out), written with that state through the free-form `event.outputs` write: no schema change, no new required ledger field, no `facts.*` mutation;
-- `event.outputs.decisions[]` holds an entry with `disposition` `did-now`, `deferred` or `recorded`; a run with only `surfaced` entries never warrants a report, so is not awaiting, else it would be reprocessed every session;
+- a PR is derivable from `event.outputs.pr` of the `open_pr` event (standard-delivery records there the `url` `hivemind:open-plan-pr` returns) or of the `pr_branch_preflight`/`intake` event (a `pr-feedback-remediation` run has no `open_pr` state, so the overlord records there the PR it resolves and checks out), written with that state through the free-form `event.outputs` write: no new required ledger field, no `facts.*` mutation;
+- `event.outputs.decisions[]` holds an entry with `disposition` `did-now`, `deferred` or `recorded`; a run with only `surfaced` entries is not awaiting, else it would be reprocessed every session;
 - the run dir lacks the zero-byte `.decision-report-done` marker.
 
 The predicate reads only the local ledger, the same whether the key is set or not. A run with no derivable PR is not awaiting, so never marked.
@@ -116,6 +116,6 @@ Key set and non-empty: per awaiting run, check PR state; on `MERGED` or `CLOSED`
 
 Key unset or empty: the overlord `touch`es the `.decision-report-done` marker of each awaiting-report run without checking PR state, merged or not. A failed `touch`, the only failure surface, is swallowed; the run stays awaiting and nothing else is attempted. Enabling the key later reports only runs that finish after it; suppressed runs stay marked.
 
-The scan is best-effort and fail-open in both modes, never session-blocking; a run left awaiting retries next session.
+The scan is best-effort and fail-open in both modes; a run left awaiting retries next session.
 
-The marker's existence is the sole idempotency token: "this run will produce no further decision report", rendered or suppressed. There is no ledger marker, no `decision-report.md` file, no new `run.status` value and no schema change.
+The marker's existence is the sole idempotency token: "this run will produce no further decision report", rendered or suppressed. There is no ledger marker, no new `run.status` value and no schema change.

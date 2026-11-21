@@ -130,6 +130,7 @@ ENTRY_ROWS=(
     "plugin/skills/adaptation-cycle/scripts/run-review.sh|script_dir|blocker|$RUN_REVIEW_SELF_LOCATE_REASON"
     "plugin/skills/github-review-loop/scripts/ledger-reconstruct.sh|script_dir|ledgerrecon_fail|cannot-self-locate"
     "plugin/skills/github-review-loop/scripts/loop-state.sh|SCRIPT_DIR|die|$SELF_LOCATE_REASON"
+    "plugin/skills/github-review-loop/scripts/merge-approved.sh|SCRIPT_DIR|merge_approved_fail|cannot-self-locate"
     "plugin/skills/github-review-loop/scripts/fetch-normalize.sh|SCRIPT_DIR|fetchnorm_fail|cannot-self-locate"
     "plugin/skills/github-review-loop/scripts/prefilter.sh|SCRIPT_DIR|prefilter_fail|cannot-self-locate"
     "plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh|SCRIPT_DIR|poll_fail|cannot-self-locate"
@@ -229,9 +230,11 @@ SOURCE_ROWS=(
     'plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh|$SCRIPT_DIR/../../_shared/graphql-response.sh|missing-graphql-check|unparseable-graphql-check|graphql-response.sh'
     'plugin/skills/github-review-loop/scripts/react-marker.sh|$SCRIPT_DIR/../../_shared/graphql-response.sh|missing-graphql-check|unparseable-graphql-check|graphql-response.sh'
     'plugin/skills/github-review-loop/scripts/reply-resolve.sh|$SCRIPT_DIR/../../_shared/graphql-response.sh|missing-graphql-check|unparseable-graphql-check|graphql-response.sh'
+    'plugin/skills/github-review-loop/scripts/merge-approved.sh|$SCRIPT_DIR/../../_shared/graphql-response.sh|missing-graphql-check|unparseable-graphql-check|graphql-response.sh'
     'plugin/skills/github-review-loop/scripts/fetch-normalize.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
     'plugin/skills/github-review-loop/scripts/prefilter.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
     'plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
+    'plugin/skills/github-review-loop/scripts/merge-approved.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
 )
 
 # ── Table helpers ───────────────────────────────────────────────────────────
@@ -271,6 +274,7 @@ emitter_contract() {
         poll_fail)        EC_RC=1; EC_CHANNEL=out; EC_PREFIX=''; EC_TOKEN='POLL_ERROR' ;;
         react_marker_fail) EC_RC=1; EC_CHANNEL=err; EC_PREFIX='REACTMARKER_ERROR=' ;;
         replyresolve_fail) EC_RC=1; EC_CHANNEL=out; EC_PREFIX='REPLYRESOLVE_ERROR=' ;;
+        merge_approved_fail) EC_RC=1; EC_CHANNEL=out; EC_PREFIX='MERGE_ERROR=' ;;
         *) return 1 ;;
     esac
 }

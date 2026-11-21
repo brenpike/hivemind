@@ -57,7 +57,8 @@ A rise in `FAILED_CHECKS` against the previous snapshot or the seed therefore pr
 non-terminal marker, `CI_FAILED`, which the skill dispatches without the prefilter. A drop, and
 any other delta, prints `CHANGED`; red CI that stays red at the same count prints nothing, so a
 steady red run never re-dispatches. One marker per iteration, in the order `STATE=MERGED`,
-`STATE=CLOSED`, `REVIEWER_APPROVED`, `CI_FAILED`, `CHANGED`. Red seeds are captured with
+`STATE=CLOSED`, `REVIEWER_APPROVED`, `CI_FAILED`, `CHANGED`, then the poll-only
+`REVIEWER_SETTLED` (see Settled approval below). Red seeds are captured with
 `capture_seed` over `derive_fixture` variants; no committed fixture carries a failed check.
 
 - `ci:drop-fires-changed` — a red `re-arm` seed over the green pre-cycle-0 state prints exactly
@@ -196,8 +197,8 @@ as no activity and idle the poll past real feedback. `nodes: []` passes at every
 ## Process lifetime
 
 `CHANGED` and `CI_FAILED` are the only markers after which the poll keeps running.
-`REVIEWER_APPROVED` and every terminal marker are the last line the process prints, and
-`REVIEWER_APPROVED` exits 0. The skill's confirmation pass is a full fix pass that also picks up
+`REVIEWER_APPROVED`, `REVIEWER_SETTLED` and every terminal marker are the last line the process
+prints, and `REVIEWER_APPROVED` and `REVIEWER_SETTLED` exit 0. The skill's confirmation pass is a full fix pass that also picks up
 failed checks, and any return that keeps watching arms a fresh poll from the pending `re-arm`
 seed, so a poll left running past the approval marker is an orphan that can trail a stale
 `CHANGED` or `CI_FAILED`. A return that would end clean, or keep watching with no poll
@@ -214,6 +215,59 @@ running, first runs `--check` against the pending seed (see Quiet-exit check bel
 - `ci:approval-cofire-wins` — an approval edge co-firing with a `FAILED_CHECKS` rise prints exactly
   `REVIEWER_APPROVED`, exit 0, and the fake `gh` sees exactly two snapshot queries under the same
   long watch window: the approval outranks `CI_FAILED` and ends the process.
+
+## Settled approval (ADR-0044)
+
+`REVIEWER_SETTLED` is a poll-only marker. It prints, and ends the process with exit 0, on an
+iteration that raises no other marker when the capture is settle-ready and at least
+`SETTLE_SECONDS` (600, declared once in the poll) have passed on the loop-top clock since the arm
+or since the last printed `CHANGED` or `CI_FAILED`. Settle-ready is a plain variable, not a `cur_`
+field and not in `SNAPSHOT_FIELDS`, so it is never diffed or serialized and the seed shape is
+unchanged. It holds only when all of these are true:
+
+- `THREADS_TOTAL` is a number within the 50-thread page, so the thread read is complete;
+- every thread passes the module's `is_settled_thread`: its `isResolved` is exactly `true`, or its
+  last comment's author is a User-typed self login (a missing `isResolved` is never resolved);
+- the module's `has_settled_evidence` holds over every `latestReviews` row, any author, null-author
+  rows included, and the 👍 rows: every latest review is `APPROVED`, `COMMENTED` or `DISMISSED`
+  (so `CHANGES_REQUESTED`, `PENDING` or a missing or unknown state from any author blocks), and an
+  Automated Reviewer in scope of the filter (`is_automated_reviewer` and `reviewer_matches_filter`)
+  has an `APPROVED` or `COMMENTED` latest review or a 👍 row. Evidence is keyed on review state,
+  never on who reviewed.
+
+No review text is read. The check reuses the loop-top clock reading and adds no `date` or
+`read_decimal` call, so `numbers:one-clock-read` and the `NUMBER_SOURCES` table stand. `--snapshot`
+and `--check` never print the marker and never read the clock.
+
+Each case serves its clock through `date.seq` as a fixed epoch plus one offset per read (arm, then
+loop top and `sleep_to_next_poll` in turn), then the deadline twice, under a 3600-second window,
+so a run that outlives its offsets ends at `WATCH_TIMEOUT`. Every state is a `derive_fixture`
+variant of the pre-cycle-0 state (its Bot-typed `COMMENTED` `latestReviews` entry is the reviewer
+evidence), and every seed is an `initial` seed captured over the served state, so no other marker
+fires. Each case asserts exit status, snapshot-query count, clock-read count and output.
+
+- `settle:fires-after-quiet-period` — the thread resolved: silent at 599 s, then exactly
+  `REVIEWER_SETTLED` at 600 s, after two captures.
+- `settle:marker-ends-poll-process` — the same run exits 0 with `REVIEWER_SETTLED` as its last
+  line and reads the clock no further.
+- `settle:unresolved-bot-thread-blocks` — the thread unresolved and ending in the bot's comment
+  idles to `WATCH_TIMEOUT`.
+- `settle:self-reply-thread-settles` — an unresolved thread ending in a User-typed self reply
+  settles at 600 s.
+- `settle:thread-page-overflow-blocks` — `THREADS_TOTAL` 50 settles; 51 idles to `WATCH_TIMEOUT`.
+- `settle:no-reviewer-evidence-blocks` — no `latestReviews` row and no 👍 idles to
+  `WATCH_TIMEOUT`.
+- `settle:changes-requested-blocks` — the bot's `latestReviews` entry `CHANGES_REQUESTED`, with
+  every thread resolved, idles to `WATCH_TIMEOUT`.
+- `settle:other-author-changes-requested-blocks` — a human `CHANGES_REQUESTED` beside the bot's
+  `COMMENTED` row idles to `WATCH_TIMEOUT`.
+- `settle:dismissed-review-is-not-evidence` — a lone bot `DISMISSED` row idles to `WATCH_TIMEOUT`.
+- `settle:login-filter-other-bot-blocks` — a `<login>` filter naming another bot idles to
+  `WATCH_TIMEOUT`; naming the reviewing bot settles.
+- `settle:changed-resets-quiet-period` — a `CHANGED` at 700 s restarts the quiet period: silent at
+  1299 s, `REVIEWER_SETTLED` at 1300 s, after four captures.
+- `settle:check-prints-unchanged` — `--check` over the settled state with a `FAIL` `date.seq`
+  prints `UNCHANGED`, exit 0, with zero clock reads.
 
 ## Watch window
 
@@ -367,8 +421,8 @@ and the grid claims nothing about them. The edit token is compared as text only.
 
 `pr-change-detect-poll.sh --check <OWNER> <REPO> <PR> <MAX_WATCH> <INTERVAL> <FILTER> <SELF> <SEED>`
 is the one-shot compare the skill runs against the pending seed before a watch goes quiet. It takes
-ONE capture through the poll's own query path, decides through the poll's own `iteration_marker`,
-and prints exactly one line (`STATE=MERGED`, `STATE=CLOSED`, `REVIEWER_APPROVED`, `CI_FAILED`,
+ONE capture through the poll's own query path, decides through the poll's own `iteration_marker`
+(never the poll-only `REVIEWER_SETTLED`), and prints exactly one line (`STATE=MERGED`, `STATE=CLOSED`, `REVIEWER_APPROVED`, `CI_FAILED`,
 `CHANGED`, or `UNCHANGED`), exit 0. A seed whose `failed_checks` field is not all digits is
 `CHECK_ERROR`, exit 1, before any `gh` call (`ci:seed-non-digit-failed-checks-fails-closed`). A missing or malformed seed is `CHECK_ERROR`, exit 1, before any `gh` call; a
 failed capture is `CHECK_ERROR`, exit 1, never retried. Each case reads the fake `gh` call counters

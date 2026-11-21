@@ -20,7 +20,7 @@ Resolvable pull request review threads are GraphQL objects. Do not try to resolv
 - [Surface-to-Delivery Contract](#surface-to-delivery-contract) — canonical mapping of feedback surface to mutation(s) used
 - [Reaction Marker](#reaction-marker) — self-authored `EYES` reaction that marks a fixed, deferred or noise non-thread surface handled while it is unchanged since marked
 - [Author Filtering](#author-filtering) — `reviewer_filter` modes, the Bot-type + login identity rule for scoping feedback to reviewer identities, and the User-type + login self rule
-- [Reviewer Approval Detection](#reviewer-approval-detection) — the per-PR Automated Reviewer set and the three approval signals (paginated PR 👍 reaction lookup, paginated per-author `latestReviews` lookup for `APPROVED` and comment-free `COMMENTED`)
+- [Reviewer Approval Detection](#reviewer-approval-detection) — the per-PR Automated Reviewer set, the three approval signals (paginated PR 👍 reaction lookup, paginated per-author `latestReviews` lookup for `APPROVED` and comment-free `COMMENTED`), the clock-based settled signal, and the reads of the opt-in merge script
 
 ## Shell and Parsing Rules
 
@@ -353,8 +353,30 @@ Approval counts only from an Automated Reviewer in scope under the active `revie
 | latest review `APPROVED` | the author's `latestReviews` entry has `state` `APPROVED` |
 | latest review `COMMENTED`, no inline comments | the author's `latestReviews` entry has `state` `COMMENTED` and `comments.totalCount == 0` |
 | 👍 on the PR object | a `+1` reaction on the PR from the Bot |
+| settled (`REVIEWER_SETTLED`) | the Bot reviewed or 👍'd, no latest review of any author is a standing request for changes, no poll marker for `SETTLE_SECONDS`, and every review thread settled; see [Settled approval](#settled-approval-reviewer_settled) |
 
 A 👍 from any Bot other than `github-actions[bot]` also makes that Bot an Automated Reviewer, so a clean-PR 👍 ends the watch with no review and no configuration. Review text is never read for approval. Approval never overrides open feedback: while unresolved non-self actionable items remain, the PR is not clean. A reviewer that posts no review and no 👍 leaves the watch to end through its idle window; the loop never requests a review.
+
+### Settled approval (`REVIEWER_SETTLED`)
+
+The first three signals are read from GitHub. The settled signal is clock-based and poll-only: `pr-change-detect-poll.sh` prints `REVIEWER_SETTLED` when all of these hold:
+
+- no marker has printed for `SETTLE_SECONDS` (600) since the arm or the last `CHANGED` or `CI_FAILED`;
+- the latest reviews hold approval by review state, not author presence, through the one shared def `has_settled_evidence` in `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq`: every `latestReviews` entry of any author, null-author entries included, has `state` `APPROVED`, `COMMENTED` or `DISMISSED` (`CHANGES_REQUESTED`, `PENDING`, a missing or an unknown state blocks), and an in-scope Automated Reviewer has a `latestReviews` entry in `APPROVED` or `COMMENTED` or a 👍 on the PR, read as in the two lookups below;
+- every review thread is settled: `isResolved` is true, or its last comment's author is the self account under the User-type + login self rule (see [Author Filtering](#author-filtering)), so it ends in HIVEMIND's own reply. The thread walk and each thread's comment walk must be complete (see [Fetch Review Threads](#fetch-review-threads) and [Fetch Thread Comments (Paginated)](#fetch-thread-comments-paginated)); a failed or partial read is not settled.
+
+It covers a bot that leaves inline threads, sees them fixed and resolved, and never reviews again, which would otherwise idle to `watch-window-elapsed`. No review text is read. The skill handles `REVIEWER_SETTLED` exactly like `REVIEWER_APPROVED`. ADR-0044 records the rule.
+
+### Merge script reads
+
+`merge-approved.sh` (in `plugin/skills/github-review-loop/scripts/`) runs once after an `approval-clean` end (`EXIT_REASON=clean`), and only when `HIVEMIND_AUTO_MERGE` names the method (`merge`, `squash` or `rebase`). It decides from fixed reads, with no AI judgment, and merges only when all of these hold:
+
+- the PR `state` is `OPEN` and `isDraft` is false;
+- the latest reviews hold approval by review state, through the same `has_settled_evidence` def as [Settled approval](#settled-approval-reviewer_settled): its one query reads each `latestReviews` entry's `state` with its author, and a standing request for changes from any author prints `MERGE=skipped:no-approval`;
+- every review thread is settled, as in [Settled approval](#settled-approval-reviewer_settled), with the read complete;
+- the head commit's `statusCheckRollup.state` is `SUCCESS`, read for the `headRefOid` commit.
+
+It merges with `gh pr merge --match-head-commit <headRefOid>`, so a commit pushed after its read is never merged. It reports `MERGE=merged` only when a fresh read shows the PR merged; in a merge-queue repo the merge call only queues the PR, so it prints `MERGE=wait:merge-pending` and the watch keeps running until the poll sees the PR merged. When the plain merge is refused and `HIVEMIND_AUTO_MERGE_ADMIN` is set (checked by presence), it retries once with `--admin`, and only when its own rollup read saw every check pass. A pending or failed rollup merges nothing and keeps the watch running, so a CI failure is still fixed and the merge is tried again at the next settled approval. ADR-0044 records the rule.
 
 ### PR 👍 reaction
 

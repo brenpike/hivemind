@@ -12,11 +12,13 @@
 # It also tests the reviewer identity module the filter includes:
 #   plugin/skills/github-review-loop/scripts/reviewer-identity.jq
 # through truth tables for each of its defs (configured-reviewer parsing, case folding, the
-# github-actions rule, the Bot gate on configured logins, the filter modes, review approval, the
-# retired filter value), and for CLOSURE: no `[bot]` strip literal and no login-only self compare may
+# github-actions rule, the Bot gate on configured logins, the filter modes, review approval, settled
+# threads, the retired filter value), and for CLOSURE: no `[bot]` strip literal and no login-only self compare may
 # be inlined in a consumer script, no known reviewer product login may appear in the module or a
 # consumer, `github-actions` may appear only in the module, and the retired-filter literal may appear
-# only on the module's `is_retired_filter` line.
+# only on the module's `is_retired_filter` line. The consumers these closure checks read are the
+# CLOSURE_TARGETS: fix-history-classify.jq, prefilter.sh, fetch-normalize.sh,
+# _shared/fetch-normalize-core.sh, pr-change-detect-poll.sh, react-marker.sh and merge-approved.sh.
 #
 # Mirrors tools/test_shared_libs.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any-
 # fail convention. Read-only: the only writes are scratch files in a disposable tmpdir removed on EXIT.
@@ -544,6 +546,56 @@ identity_row "approval:changes-requested" 'false' 'is_review_approval("CHANGES_R
 identity_row "approval:dismissed" 'false' 'is_review_approval("DISMISSED"; 0)'
 identity_row "approval:null-state" 'false' 'is_review_approval(null; 0)'
 
+# `is_settled_thread`: resolved exactly true, or the last comment is a User-typed self comment.
+identity_row "settled:resolved" 'true' 'is_settled_thread(true; "review-bot[bot]"; "Bot"; "selfuser")'
+identity_row "settled:unresolved-self-last" 'true' 'is_settled_thread(false; "selfuser"; "User"; "selfuser")'
+identity_row "settled:unresolved-bot-last" 'false' 'is_settled_thread(false; "review-bot[bot]"; "Bot"; "selfuser")'
+identity_row "settled:unresolved-bot-typed-self-login" 'false' 'is_settled_thread(false; "selfuser"; "Bot"; "selfuser")'
+identity_row "settled:unresolved-untyped-last" 'false' 'is_settled_thread(false; "selfuser"; null; "selfuser")'
+identity_row "settled:null-resolved" 'false' 'is_settled_thread(null; "review-bot[bot]"; "Bot"; "selfuser")'
+identity_row "settled:empty-self" 'false' 'is_settled_thread(false; ""; "User"; "")'
+
+# `has_settled_evidence`: every latest review of every author is APPROVED, COMMENTED or DISMISSED,
+# and an in-scope Bot has an APPROVED or COMMENTED latest review or a THUMBS_UP.
+identity_row "evidence:bot-approved" 'true' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:bot-commented" 'true' \
+  'has_settled_evidence([{state:"COMMENTED",login:"review-bot[bot]",type:"User"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:bot-changes-requested" 'false' \
+  'has_settled_evidence([{state:"CHANGES_REQUESTED",login:"review-bot",type:"Bot"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:human-changes-requested-blocks" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"},{state:"CHANGES_REQUESTED",login:"someone",type:"User"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:null-author-changes-requested-blocks" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"},{state:"CHANGES_REQUESTED",login:null,type:null}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:pending-blocks" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"},{state:"PENDING",login:"someone",type:"User"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:null-state-blocks" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"},{state:null,login:"someone",type:"User"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:missing-state-blocks" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"},{login:"someone",type:"User"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:unknown-state-blocks" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"},{state:"SOMETHING_NEW",login:"someone",type:"User"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:non-object-row-blocks" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"},null]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:dismissed-alone" 'false' \
+  'has_settled_evidence([{state:"DISMISSED",login:"review-bot",type:"Bot"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:dismissed-plus-bot-thumbs" 'true' \
+  'has_settled_evidence([{state:"DISMISSED",login:"review-bot",type:"Bot"}]; [{login:"review-bot[bot]",type:"User"}]; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:thumbs-only-bot" 'true' \
+  'has_settled_evidence([]; [{login:"review-bot[bot]",type:"User"}]; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:empty-inputs" 'false' 'has_settled_evidence([]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:null-inputs" 'false' 'has_settled_evidence(null; null; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:human-only-review" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"someone",type:"User"}]; []; "selfuser"; "all"; ["review-bot"])'
+identity_row "evidence:human-only-thumbs" 'false' \
+  'has_settled_evidence([]; [{login:"someone",type:"User"}]; "selfuser"; "all"; ["review-bot"])'
+identity_row "evidence:self-user-review" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"selfuser",type:"User"}]; []; "selfuser"; "all"; ["selfuser"])'
+identity_row "evidence:login-filter-other-bot" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"}]; [{login:"review-bot[bot]",type:"User"}]; "selfuser"; "other-bot"; ["review-bot","other-bot"])'
+identity_row "evidence:login-filter-named-bot" 'true' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot[bot]",type:"Bot"}]; []; "selfuser"; "review-bot"; ["review-bot","other-bot"])'
+
 # `is_retired_filter`: only the exact retired value.
 identity_row "retired:codex-only" 'true' 'is_retired_filter("codex-only")'
 identity_row "retired:case-sensitive" 'false' 'is_retired_filter("Codex-Only")'
@@ -568,6 +620,7 @@ CLOSURE_TARGETS=(
   "$REPO_ROOT/plugin/skills/_shared/fetch-normalize-core.sh"
   "$MODULE_DIR/pr-change-detect-poll.sh"
   "$MODULE_DIR/react-marker.sh"
+  "$MODULE_DIR/merge-approved.sh"
 )
 BOT_STRIP_ERE='\[bot\\*\]'
 
@@ -622,7 +675,9 @@ done
 # word bound after `$login` keeps a longer variable name (`$login_x`) out. `$login` passed as an
 # argument (`--arg login`, `is_self(...; $login)`, the matches_filter wrapper) is not a compare.
 # RESIDUAL: rebinding the --arg to another variable (`$login as $me | ... == $me`) evades this
-# matcher; the behavioural cases (8, 20) are the guard for that shape.
+# matcher; the behavioural cases (8, 20) are the guard for that shape. merge-approved.sh binds self as
+# `--arg self`, not `--arg login`, so this matcher reads no self compare there; its merge cases in
+# tools/test_merge_approved.sh (`threads:unresolved-bot-with-self-login-last`) are the guard there.
 SELF_COMPARE_ERE='(==|!=)[[:space:]]*\$login([^A-Za-z0-9_]|$)|\$login[[:space:]]*(==|!=)'
 
 # print_self_compare_hits <file>

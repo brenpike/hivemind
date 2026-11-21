@@ -78,9 +78,18 @@
 # `nodes` list `[]`) still yields a valid baseline.
 #
 # THE PROCESS-LIFETIME CONTRACT: `CHANGED` and `CI_FAILED` are the only markers after which the
-# poll keeps running. `REVIEWER_APPROVED` and every terminal marker are the last line the process
-# prints, so an approval co-firing with a delta never trails a later `CHANGED` or `CI_FAILED` from
-# an orphaned poll.
+# poll keeps running. `REVIEWER_APPROVED`, `REVIEWER_SETTLED` and every terminal marker are the last
+# line the process prints, so an approval co-firing with a delta never trails a later `CHANGED` or
+# `CI_FAILED` from an orphaned poll.
+#
+# THE SETTLED-APPROVAL CONTRACT (ADR-0044): poll mode alone prints `REVIEWER_SETTLED` on an
+# iteration that raises no other marker, when the capture is settle-ready (every review thread read
+# within the 50-thread page and settled per the module's `is_settled_thread`, and the module's
+# `has_settled_evidence` holding: every `latestReviews` row of any author `APPROVED`, `COMMENTED` or
+# `DISMISSED`, and an in-scope Automated Reviewer's `APPROVED` or `COMMENTED` latest review or 👍
+# row) and SETTLE_SECONDS have passed on the loop-top clock
+# since the arm or the last printed `CHANGED` / `CI_FAILED`. Settle-ready is never serialized, so
+# the seed shape is unchanged, and the check adds no clock read. `--check` never prints it.
 #
 # THE CI ROUTE CONTRACT (#400): a RISE in FAILED_CHECKS against the previous snapshot or the seed
 # prints `CI_FAILED`, never `CHANGED`, so the skill dispatches the reviewer without the prefilter.
@@ -2739,6 +2748,159 @@ else
     edit:review-outside-filter-idles edit:token-is-greatest-edit-digits \
     edit:malformed-time-fails-closed; do
     skipped "$edit_case_id" "$SKIP_REASON"
+  done
+fi
+
+# ── 46. a settled approval ends the poll after the quiet period ──────────────────────
+# REVIEWER_SETTLED (ADR-0044) is poll-only. It prints when an iteration raises no other marker, the
+# capture is settle-ready, and SETTLE_SECONDS (600) have passed on the loop-top clock since the arm
+# or the last printed CHANGED / CI_FAILED. Settle-ready: THREADS_TOTAL within the 50-thread page,
+# every thread resolved or ending in a User-typed self reply (the module's `is_settled_thread`), and
+# the module's `has_settled_evidence`: every `latestReviews` row, any author, is `APPROVED`,
+# `COMMENTED` or `DISMISSED`, and an Automated Reviewer in scope of the filter has an `APPROVED` or
+# `COMMENTED` latest review or a 👍 row. Each case serves its
+# clock through `date.seq` as SETTLE_EPOCH plus an offset per read (arm, then loop top and sleep in
+# turn), then the deadline twice, so a run that outlives its offsets ends at WATCH_TIMEOUT. Every
+# seed is an `initial` seed captured over the served state, so no other marker fires.
+#   (a) a resolved thread and the bot's COMMENTED review: silent at 599 s, REVIEWER_SETTLED at
+#       600 s, after exactly two captures.
+#   (b) that run prints nothing after the marker, exits 0 and reads the clock no further.
+#   (c) the same state with the thread unresolved and ending in the bot's comment idles to
+#       WATCH_TIMEOUT.
+#   (d) an unresolved thread ending in a User-typed self reply settles.
+#   (e) THREADS_TOTAL 50 settles; THREADS_TOTAL 51 idles to WATCH_TIMEOUT.
+#   (f) no `latestReviews` row and no 👍 idles to WATCH_TIMEOUT; so does the bot's latest review
+#       `CHANGES_REQUESTED` with every thread resolved, a human's `CHANGES_REQUESTED` beside the
+#       bot's `COMMENTED` row, and a lone bot `DISMISSED` row.
+#   (g) a `<login>` filter naming another bot idles to WATCH_TIMEOUT; naming the reviewing bot
+#       settles.
+#   (h) a CHANGED at 700 s restarts the quiet period: silent at 1299 s, REVIEWER_SETTLED at
+#       1300 s, after exactly four captures.
+#   (i) --check over the settled state prints UNCHANGED, exit 0, with zero clock reads.
+SETTLE_EPOCH=1800000000
+SETTLE_MAX_WATCH=3600
+
+# settle_outcome <state_name> <graphql_entries> <filter> <offset>...: a poll armed with an `initial`
+# seed captured over the first of the space-separated <graphql_entries> under <filter>, serving
+# those entries in turn, under the SETTLE_MAX_WATCH window, its clock reads serving SETTLE_EPOCH
+# plus each <offset> and then the deadline twice. Prints `<status>:<captures>:<clock_reads>:<out>`.
+settle_outcome() {
+  local name="$1" filter="$3" seed st out status offset
+  local -a graphql_entries=() clock_entries=()
+  read -r -a graphql_entries <<<"$2"
+  shift 3
+  seed="$(capture_seed "$name-seed" initial "${graphql_entries[0]}" "$REACT_NONE" "$filter")"
+  for offset in "$@" "$SETTLE_MAX_WATCH" "$SETTLE_MAX_WATCH"; do
+    clock_entries+=("$((SETTLE_EPOCH + offset))")
+  done
+  st="$(new_state "$name")"
+  set_seq "$st" graphql "${graphql_entries[@]}"
+  set_seq "$st" reactions "$REACT_NONE"
+  set_seq "$st" date "${clock_entries[@]}"
+  out="$(run_poll "$st" "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$SETTLE_MAX_WATCH" "$POLL_INTERVAL" \
+    "$filter" "$SELF_LOGIN" "$seed")"
+  status=$?
+  printf '%s:%s:%s:%s' "$status" "$(cat "$st/graphql.n")" "$(cat "$st/date.n")" \
+    "$(printf '%s' "$out" | tr '\n' ';')"
+}
+
+# judge_settle_case <case_id> <description> <expected_outcome> <actual_outcome>: pass when the
+# outcomes are equal.
+judge_settle_case() {
+  if [ "$4" = "$3" ]; then
+    pass "$1" "$2"
+  else
+    failed "$1" "expected status:captures:clock_reads:out=$3, got=$4"
+  fi
+}
+
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  settle_resolved="$(derive_fixture settle-resolved "$PRE" \
+    '.data.repository.pullRequest.reviewThreads.nodes[0].isResolved = true')"
+  settle_open_bot="$(derive_fixture settle-open-bot "$PRE" \
+    '.data.repository.pullRequest.reviewThreads.nodes[0].isResolved = false')"
+  settle_self_reply="$(derive_fixture settle-self-reply "$settle_open_bot" \
+    ".data.repository.pullRequest.reviewThreads.nodes[0].comments.nodes = [{\"databaseId\":4011002,\"author\":$(identity_author_json User)}]")"
+  settle_page_full="$(derive_fixture settle-page-full "$settle_resolved" \
+    '.data.repository.pullRequest.reviewThreads.totalCount = 50')"
+  settle_page_over="$(derive_fixture settle-page-over "$settle_resolved" \
+    '.data.repository.pullRequest.reviewThreads.totalCount = 51')"
+  settle_no_evidence="$(derive_fixture settle-no-evidence "$settle_resolved" \
+    '.data.repository.pullRequest.latestReviews.nodes = []')"
+  settle_changes_requested="$(derive_fixture settle-changes-requested "$settle_resolved" \
+    '.data.repository.pullRequest.latestReviews.nodes[0].state = "CHANGES_REQUESTED"')"
+  settle_other_changes_requested="$(derive_fixture settle-other-changes-requested "$settle_resolved" \
+    '.data.repository.pullRequest.latestReviews.nodes += [{"state":"CHANGES_REQUESTED","author":{"login":"octo-user-1","__typename":"User"},"comments":{"totalCount":0}}]')"
+  settle_dismissed="$(derive_fixture settle-dismissed "$settle_resolved" \
+    '.data.repository.pullRequest.latestReviews.nodes[0].state = "DISMISSED"')"
+  settle_comment="$(derive_fixture settle-comment "$settle_resolved" \
+    '.data.repository.pullRequest.comments.totalCount = 3
+     | .data.repository.pullRequest.comments.nodes += [{"databaseId":2411003,"author":{"login":"chatgpt-codex-connector","__typename":"Bot"}}]')"
+
+  settle_fired="$(settle_outcome settle-fires "$settle_resolved" "$REVIEWER_FILTER" 0 599 599 600)"
+  judge_settle_case "settle:fires-after-quiet-period" \
+    "silent at 599 s, REVIEWER_SETTLED at 600 s after two captures" \
+    "0:2:4:REVIEWER_SETTLED" "$settle_fired"
+  if [ "${settle_fired%%:*}" = "0" ] && [ "$(cut -d: -f3 <<<"$settle_fired")" = "4" ] \
+    && [ "${settle_fired##*:}" = "REVIEWER_SETTLED" ]; then
+    pass "settle:marker-ends-poll-process" "REVIEWER_SETTLED was the last line, exit 0, no clock read after it"
+  else
+    failed "settle:marker-ends-poll-process" "expected exit 0, 4 clock reads and a last line REVIEWER_SETTLED, got status:captures:clock_reads:out=$settle_fired"
+  fi
+
+  judge_settle_case "settle:unresolved-bot-thread-blocks" \
+    "an unresolved thread ending in the bot's comment idled to WATCH_TIMEOUT" \
+    "0:1:4:WATCH_TIMEOUT" "$(settle_outcome settle-open-bot "$settle_open_bot" "$REVIEWER_FILTER" 0 600 600)"
+  judge_settle_case "settle:self-reply-thread-settles" \
+    "an unresolved thread ending in a User-typed self reply settled at 600 s" \
+    "0:1:2:REVIEWER_SETTLED" "$(settle_outcome settle-self-reply "$settle_self_reply" "$REVIEWER_FILTER" 0 600)"
+
+  settle_page_outcomes="$(settle_outcome settle-page-full "$settle_page_full" "$REVIEWER_FILTER" 0 600) $(settle_outcome settle-page-over "$settle_page_over" "$REVIEWER_FILTER" 0 600 600)"
+  judge_settle_case "settle:thread-page-overflow-blocks" \
+    "THREADS_TOTAL 50 settled; THREADS_TOTAL 51 idled to WATCH_TIMEOUT" \
+    "0:1:2:REVIEWER_SETTLED 0:1:4:WATCH_TIMEOUT" "$settle_page_outcomes"
+
+  judge_settle_case "settle:no-reviewer-evidence-blocks" \
+    "no latestReviews row and no thumbs-up idled to WATCH_TIMEOUT" \
+    "0:1:4:WATCH_TIMEOUT" "$(settle_outcome settle-no-evidence "$settle_no_evidence" "$REVIEWER_FILTER" 0 600 600)"
+  judge_settle_case "settle:changes-requested-blocks" \
+    "the bot's CHANGES_REQUESTED latest review with every thread resolved idled to WATCH_TIMEOUT" \
+    "0:1:4:WATCH_TIMEOUT" "$(settle_outcome settle-changes-requested "$settle_changes_requested" "$REVIEWER_FILTER" 0 600 600)"
+  judge_settle_case "settle:other-author-changes-requested-blocks" \
+    "a human CHANGES_REQUESTED beside the bot's COMMENTED row idled to WATCH_TIMEOUT" \
+    "0:1:4:WATCH_TIMEOUT" "$(settle_outcome settle-other-changes-requested "$settle_other_changes_requested" "$REVIEWER_FILTER" 0 600 600)"
+  judge_settle_case "settle:dismissed-review-is-not-evidence" \
+    "a lone bot DISMISSED row idled to WATCH_TIMEOUT" \
+    "0:1:4:WATCH_TIMEOUT" "$(settle_outcome settle-dismissed "$settle_dismissed" "$REVIEWER_FILTER" 0 600 600)"
+
+  settle_filter_outcomes="$(settle_outcome settle-filter-other "$settle_resolved" "$COPILOT_SHAPED_BOT" 0 600 600) $(settle_outcome settle-filter-own "$settle_resolved" "$CODEX_SHAPED_BOT" 0 600)"
+  judge_settle_case "settle:login-filter-other-bot-blocks" \
+    "a <login> filter naming another bot idled to WATCH_TIMEOUT; naming the reviewing bot settled" \
+    "0:1:4:WATCH_TIMEOUT 0:1:2:REVIEWER_SETTLED" "$settle_filter_outcomes"
+
+  judge_settle_case "settle:changed-resets-quiet-period" \
+    "CHANGED at 700 s, silent at 1299 s, REVIEWER_SETTLED at 1300 s after four captures" \
+    "0:4:8:CHANGED;REVIEWER_SETTLED" \
+    "$(settle_outcome settle-reset "$settle_resolved $settle_comment" "$REVIEWER_FILTER" 0 500 500 700 700 1299 1299 1300)"
+
+  st="$(new_state settle-check)"
+  set_seq "$st" graphql "$settle_resolved"
+  set_seq "$st" reactions "$REACT_NONE"
+  set_seq "$st" date FAIL
+  out="$(run_check "$st" "$SEED")"
+  status=$?
+  judge_settle_case "settle:check-prints-unchanged" \
+    "--check over the settled state printed UNCHANGED, exit 0, zero clock reads" \
+    "0:1:0:UNCHANGED" "$status:$(cat "$st/graphql.n"):$(cat "$st/date.n"):$out"
+else
+  for settle_case_id in settle:fires-after-quiet-period settle:marker-ends-poll-process \
+    settle:unresolved-bot-thread-blocks settle:self-reply-thread-settles \
+    settle:thread-page-overflow-blocks settle:no-reviewer-evidence-blocks \
+    settle:changes-requested-blocks settle:other-author-changes-requested-blocks \
+    settle:dismissed-review-is-not-evidence \
+    settle:login-filter-other-bot-blocks settle:changed-resets-quiet-period \
+    settle:check-prints-unchanged; do
+    skipped "$settle_case_id" "$SKIP_REASON"
   done
 fi
 

@@ -101,7 +101,7 @@ Stop the loop and advise merge only when all of these hold:
 - the tail has a structural home per **Defer-with-Scope**
 - every push spawns only a fresh bounded tail, never a new defect class
 
-Round count is never the stop signal. Agents never merge; humans merge. The loop surfaces this as the `merge_advised` advisory terminal, whose payload shape `hivemind:detect-remediation-signals` owns.
+Round count is never the stop signal. A merge advisory never merges; the human merges it. The loop surfaces this as the `merge_advised` advisory terminal, whose payload shape `hivemind:detect-remediation-signals` owns.
 
 ## Severity as Sensitivity Modifier
 
