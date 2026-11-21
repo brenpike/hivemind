@@ -20,8 +20,12 @@
 #                                  made (exit 0)
 #   MERGE=skipped:not-open         the PR state is not OPEN (exit 0)
 #   MERGE=skipped:draft            the PR is a draft (exit 0)
-#   MERGE=skipped:no-approval      no in-scope Automated Reviewer has a latest
-#                                  review or a 👍 on the PR (exit 0)
+#   MERGE=skipped:no-approval      the latest reviews hold no settled evidence
+#                                  (`has_settled_evidence`): some author's
+#                                  latest review is not APPROVED, COMMENTED or
+#                                  DISMISSED, or no in-scope Automated Reviewer
+#                                  has a latest review in APPROVED or COMMENTED
+#                                  or a 👍 on the PR (exit 0)
 #   MERGE=skipped:open-threads     a review thread fails `is_settled_thread`
 #                                  (exit 0)
 #   MERGE=skipped:no-checks        the head commit has no check rollup (exit 0)
@@ -73,7 +77,8 @@
 # -----------
 # ONE GraphQL query reads: state, isDraft, headRefOid, mergeStateStatus, the
 # last PR commit's oid and statusCheckRollup state, latestReviews (first: 100)
-# with each author's login and `__typename`, the THUMBS_UP reactors (first: 100)
+# with each review's state and its author's login and `__typename`, the
+# THUMBS_UP reactors (first: 100)
 # with login and `__typename`, and reviewThreads (first: 100) with isResolved
 # and each thread's last comment author (login and `__typename`). The comments
 # and reviews connections are read as a one-node skeleton only, so the shared
@@ -82,9 +87,13 @@
 # (${CLAUDE_PLUGIN_ROOT}/skills/_shared/graphql-response.sh) and then
 # hivemind_review_surface_shape_check
 # (${CLAUDE_PLUGIN_ROOT}/skills/_shared/review-surface-shape.sh). The local
-# projection then type-checks every field it reads; a wrong type, an unknown
-# PR state or rollup state, a headRefOid that is not a hex commit id, or a last
-# commit whose oid differs from headRefOid is `MERGE_ERROR=malformed-read`.
+# projection then type-checks every field it reads; a wrong type (a review
+# state that is not a string included), an unknown PR state or rollup state, a
+# headRefOid that is not a hex commit id, or a last commit whose oid differs
+# from headRefOid is `MERGE_ERROR=malformed-read`.
+# The projection builds one {state, login, type} row per latestReviews node, of
+# every author: a review whose author is null is kept as a row with a null
+# login and type, so it still counts toward the state rule of gate 3.
 # A READ PAST ITS PAGE FAILS CLOSED: when latestReviews, the THUMBS_UP
 # reactors or reviewThreads report `hasNextPage: true`, the read is
 # incomplete and the run prints `MERGE_ERROR=read-incomplete`, so no approval
@@ -96,11 +105,15 @@
 # -----------------------------------------------------------
 #   1. state is not OPEN                                   skipped:not-open
 #   2. isDraft                                             skipped:draft
-#   3. no latestReviews author and no 👍 reactor that is
-#      an Automated Reviewer (`is_automated_reviewer`)
-#      and matches the filter (`reviewer_matches_filter`),
-#      over the set `automated_reviewer_set` derives from
-#      those rows plus HIVEMIND_PR_REVIEWERS               skipped:no-approval
+#   3. `has_settled_evidence` over the latestReviews rows
+#      and the 👍 rows is false: some latest review, of
+#      any author, is not APPROVED, COMMENTED or
+#      DISMISSED (a standing block no approval outweighs),
+#      or no in-scope reviewer (`is_automated_reviewer`
+#      and `reviewer_matches_filter`, over the set
+#      `automated_reviewer_set` derives from those rows
+#      plus HIVEMIND_PR_REVIEWERS) has a latest review in
+#      APPROVED or COMMENTED or a 👍                       skipped:no-approval
 #   4. any thread fails `is_settled_thread`                skipped:open-threads
 #   5. rollup null                                         skipped:no-checks
 #   6. rollup PENDING or EXPECTED                          wait:checks-pending
@@ -122,7 +135,9 @@
 #   d. any other mergeStateStatus                          skipped:refused
 # So `--admin` runs only after a refused plain merge, only with the admin
 # setting set to a non-empty value, and only when both reads passed every
-# gate of 1-7 on the same head.
+# gate of 1-7 on the same head. A standing block prints skipped:no-approval
+# on either read, so a review that requests changes between the two reads
+# stops the retry before any `--admin` call.
 # Every merge call carries `--match-head-commit`, so a commit pushed after the
 # read is never merged. The script NEVER passes `--auto` or `--delete-branch`,
 # and never merges a head whose rollup it did not see SUCCESS.
@@ -130,7 +145,9 @@
 # 6. IDENTITY
 # -----------
 # Every identity decision (Bot, self, the Automated Reviewer set, the filter
-# modes, the retired filter value, the settled thread) is delegated to the
+# modes, the retired filter value, the settled thread) and the approval
+# verdict of gate 3 (`has_settled_evidence`, keyed on review state, never on
+# who reviewed) are delegated to the
 # sibling module reviewer-identity.jq, loaded by search path
 # (`jq -L "$SCRIPT_DIR"`, `include "reviewer-identity"`). This script carries no
 # login literal and no login compare of its own.
@@ -223,7 +240,7 @@ query($owner: String!, $repo: String!, $pr: Int!) {
       reviews(last: 1) { nodes { id } }
       latestReviews(first: 100) {
         pageInfo { hasNextPage }
-        nodes { author { login __typename } }
+        nodes { state author { login __typename } }
       }
       reactionGroups {
         content
@@ -277,13 +294,12 @@ PROJECTION_PROGRAM='
   | ([$latest | page_flag] + [$thumbs_groups[] | page_flag] + [$threads | page_flag]
       | any(.[]; . == true) | not) as $complete
   | [ $latest | node_list | .[] | checked(type == "object")
-      | (.author // {}) | {login: .login, type: .__typename} | actor_row ] as $review_rows
+      | (.state | checked(type == "string")) as $review_state
+      | (.author // {}) | {state: $review_state, login: .login, type: .__typename} ] as $review_rows
   | [ $thumbs_groups[] | node_list | .[] | checked(type == "object")
       | {login: .login, type: .__typename} | actor_row ] as $thumb_rows
   | automated_reviewer_set($review_rows + $thumb_rows; $reviewers) as $set
-  | any(($review_rows + $thumb_rows)[];
-        is_automated_reviewer(.login; .type; $set)
-        and reviewer_matches_filter(.login; .type; $self; $filter; $set)) as $approved
+  | has_settled_evidence($review_rows; $thumb_rows; $self; $filter; $set) as $approved
   | all($threads.nodes[];
         (.comments.nodes | last // {}) as $last_comment
         | ($last_comment.author // {}) as $last_author

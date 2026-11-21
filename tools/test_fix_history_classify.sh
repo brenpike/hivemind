@@ -555,6 +555,47 @@ identity_row "settled:unresolved-untyped-last" 'false' 'is_settled_thread(false;
 identity_row "settled:null-resolved" 'false' 'is_settled_thread(null; "review-bot[bot]"; "Bot"; "selfuser")'
 identity_row "settled:empty-self" 'false' 'is_settled_thread(false; ""; "User"; "")'
 
+# `has_settled_evidence`: every latest review of every author is APPROVED, COMMENTED or DISMISSED,
+# and an in-scope Bot has an APPROVED or COMMENTED latest review or a THUMBS_UP.
+identity_row "evidence:bot-approved" 'true' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:bot-commented" 'true' \
+  'has_settled_evidence([{state:"COMMENTED",login:"review-bot[bot]",type:"User"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:bot-changes-requested" 'false' \
+  'has_settled_evidence([{state:"CHANGES_REQUESTED",login:"review-bot",type:"Bot"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:human-changes-requested-blocks" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"},{state:"CHANGES_REQUESTED",login:"someone",type:"User"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:null-author-changes-requested-blocks" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"},{state:"CHANGES_REQUESTED",login:null,type:null}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:pending-blocks" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"},{state:"PENDING",login:"someone",type:"User"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:null-state-blocks" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"},{state:null,login:"someone",type:"User"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:missing-state-blocks" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"},{login:"someone",type:"User"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:unknown-state-blocks" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"},{state:"SOMETHING_NEW",login:"someone",type:"User"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:non-object-row-blocks" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"},null]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:dismissed-alone" 'false' \
+  'has_settled_evidence([{state:"DISMISSED",login:"review-bot",type:"Bot"}]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:dismissed-plus-bot-thumbs" 'true' \
+  'has_settled_evidence([{state:"DISMISSED",login:"review-bot",type:"Bot"}]; [{login:"review-bot[bot]",type:"User"}]; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:thumbs-only-bot" 'true' \
+  'has_settled_evidence([]; [{login:"review-bot[bot]",type:"User"}]; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:empty-inputs" 'false' 'has_settled_evidence([]; []; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:null-inputs" 'false' 'has_settled_evidence(null; null; "selfuser"; "automated"; ["review-bot"])'
+identity_row "evidence:human-only-review" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"someone",type:"User"}]; []; "selfuser"; "all"; ["review-bot"])'
+identity_row "evidence:human-only-thumbs" 'false' \
+  'has_settled_evidence([]; [{login:"someone",type:"User"}]; "selfuser"; "all"; ["review-bot"])'
+identity_row "evidence:self-user-review" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"selfuser",type:"User"}]; []; "selfuser"; "all"; ["selfuser"])'
+identity_row "evidence:login-filter-other-bot" 'false' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot",type:"Bot"}]; [{login:"review-bot[bot]",type:"User"}]; "selfuser"; "other-bot"; ["review-bot","other-bot"])'
+identity_row "evidence:login-filter-named-bot" 'true' \
+  'has_settled_evidence([{state:"APPROVED",login:"review-bot[bot]",type:"Bot"}]; []; "selfuser"; "review-bot"; ["review-bot","other-bot"])'
+
 # `is_retired_filter`: only the exact retired value.
 identity_row "retired:codex-only" 'true' 'is_retired_filter("codex-only")'
 identity_row "retired:case-sensitive" 'false' 'is_retired_filter("Codex-Only")'

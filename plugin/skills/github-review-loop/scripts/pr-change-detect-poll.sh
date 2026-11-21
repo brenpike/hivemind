@@ -51,8 +51,10 @@
 #     capture: a plain `settle_ready` bool, never a SNAPSHOT_FIELDS entry, so it
 #     is never diffed or serialized and the seed shape is unchanged. It holds
 #     when THREADS_TOTAL fits the 50-thread page, every review thread passes the
-#     module's `is_settled_thread` (resolved, or ending in a self reply), and an
-#     in-scope Automated Reviewer has a `latestReviews` row or a 👍. When it
+#     module's `is_settled_thread` (resolved, or ending in a self reply), and
+#     the module's `has_settled_evidence` holds: every author's latest review
+#     is APPROVED, COMMENTED or DISMISSED, and an in-scope Automated Reviewer
+#     has an APPROVED or COMMENTED latest review or a 👍. When it
 #     holds, no other marker fires, and SETTLE_SECONDS have passed on the
 #     loop-top clock since the arm or the last printed `CHANGED` / `CI_FAILED`,
 #     the poll prints `REVIEWER_SETTLED`. No review text is read, and the check
@@ -859,10 +861,13 @@ EOF
   # Settle-ready, the REVIEWER_SETTLED precondition (ADR-0044). The thread read
   # is complete only when THREADS_TOTAL is a number within the 50-thread page;
   # every thread must then pass the module's `is_settled_thread` over its
-  # `isResolved` and its last comment's author. Reviewer evidence is any
-  # `latestReviews` row or 👍 row, in any review state, from an Automated
-  # Reviewer of this capture's set that matches the active filter. No review
-  # text is read. settle_ready is a plain variable, never a SNAPSHOT_FIELDS
+  # `isResolved` and its last comment's author. Reviewer evidence is the
+  # module's `has_settled_evidence` over every `latestReviews` row (any author,
+  # null-author rows included, with its state) and the 👍 rows, passed as two
+  # arrays: every latest review must be APPROVED, COMMENTED or DISMISSED, and an
+  # in-scope Automated Reviewer of this capture's set must have an APPROVED or
+  # COMMENTED latest review or a 👍. A standing CHANGES_REQUESTED from any
+  # author therefore never settles. No review text is read. settle_ready is a plain variable, never a SNAPSHOT_FIELDS
   # entry, so it is never diffed or serialized. A verdict that is not exactly
   # true or false fails the capture.
   threads_settled=$(printf '%s' "$snapshot_body" \
@@ -875,13 +880,11 @@ EOF
                 (.comments.nodes | last) as $tail
                 | is_settled_thread(.isResolved; $tail.author.login; $tail.author.__typename; $login))
     ' 2>/dev/null) || return 1
-  reviewer_evidence=$(printf '%s\n%s\n' "$review_rows" "$reaction_rows" \
+  reviewer_evidence=$(printf '%s' "$review_rows" \
     | jq -s -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" \
-      --argjson set "$reviewer_set" '
+      --argjson set "$reviewer_set" --slurpfile thumbs <(printf '%s' "$reaction_rows") '
       include "reviewer-identity";
-      any(.[];
-          is_automated_reviewer(.login; .type; $set)
-          and reviewer_matches_filter(.login; .type; $login; $filter; $set))
+      has_settled_evidence(.; $thumbs; $login; $filter; $set)
     ' 2>/dev/null) || return 1
   case "$threads_settled" in true|false) ;; *) return 1 ;; esac
   case "$reviewer_evidence" in true|false) ;; *) return 1 ;; esac

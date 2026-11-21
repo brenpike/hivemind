@@ -17,8 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- The settled approval: the review watch's change-detect poll prints a new `REVIEWER_SETTLED` marker after a 600-second quiet period when an in-scope bot has submitted a review or left a 👍 on the PR and every review thread is settled.
-- The opt-in auto-merge through `merge-approved.sh`. It runs only when `HIVEMIND_AUTO_MERGE` is `merge`, `squash` or `rebase`. A non-empty `HIVEMIND_AUTO_MERGE_ADMIN` allows one `--admin` rerun after a refused plain merge on a BLOCKED or BEHIND PR; unset or empty is off. The script merges only on a `SUCCESS` check rollup, and every merge call carries `--match-head-commit`. With `HIVEMIND_AUTO_MERGE` unset, the human merges as before.
+- The settled approval: the review watch's change-detect poll prints a new `REVIEWER_SETTLED` marker after a 600-second quiet period when an in-scope bot has submitted a review or left a 👍 on the PR, every latest review of any author is `APPROVED`, `COMMENTED` or `DISMISSED`, and every review thread is settled. A standing request for changes from any author blocks it; approval is the review state, not author presence.
+- The opt-in auto-merge through `merge-approved.sh`. It runs only when `HIVEMIND_AUTO_MERGE` is `merge`, `squash` or `rebase`. A non-empty `HIVEMIND_AUTO_MERGE_ADMIN` allows one `--admin` rerun after a refused plain merge on a BLOCKED or BEHIND PR; unset or empty is off. The script merges only on a `SUCCESS` check rollup and the same review-state approval as the settled approval, so a standing request for changes from any author prints `MERGE=skipped:no-approval`, and every merge call carries `--match-head-commit`. With `HIVEMIND_AUTO_MERGE` unset, the human merges as before.
 
 ### Changed
 

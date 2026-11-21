@@ -16,7 +16,7 @@ The user asked for two things: an approval that fires in this case, and an opt-i
 
 1. **Settled approval.** The change-detect poll gets a clock-based marker, `REVIEWER_SETTLED`. It fires when all of these hold:
    - No marker has printed for a fixed settle period, `SETTLE_SECONDS` (600, about 10 minutes), since the arm or the last `CHANGED` or `CI_FAILED`.
-   - An in-scope Automated Reviewer has reviewed or 👍'd the PR.
+   - An in-scope Automated Reviewer has reviewed or 👍'd the PR, and no latest review of any author is a standing request for changes (decision 14).
    - Every review thread is resolved or ends in HIVEMIND's own reply, and the thread read is complete.
 
    It reads no review text. The skill handles `REVIEWER_SETTLED` exactly like `REVIEWER_APPROVED`: a confirmation pass, the QUIET-EXIT CHECK, then `approval-clean`. The seed shape and the clock reads are unchanged.
@@ -30,7 +30,7 @@ The user asked for two things: an approval that fires in this case, and an opt-i
 6. **No checks means no merge.** A head commit with no check rollup is not green.
 7. **Any open thread blocks the merge.** A thread that is not resolved and does not end in HIVEMIND's reply stops the script.
 8. **The setting value names the method.** `HIVEMIND_AUTO_MERGE` is `merge`, `squash` or `rebase`. Unset or empty means off. Any other value is refused, and nothing merges.
-9. **The script rechecks approval itself.** It does not trust the skill's end reason. It checks again that the PR is open and not a draft, that an in-scope bot reviewed or 👍'd, that every thread is settled, and that the rollup is `SUCCESS`.
+9. **The script rechecks approval itself.** It does not trust the skill's end reason. It checks again that the PR is open and not a draft, that an in-scope bot reviewed or 👍'd and no latest review of any author is a standing request for changes (decision 14), that every thread is settled, and that the rollup is `SUCCESS`.
 10. **The skill routes the script's one line.** The skill runs the script only after an approval return whose QUIET-EXIT CHECK reports `UNCHANGED`. No other end runs it, `merge-advised` included. `MERGE=off` ends `clean`, as before. `MERGE=merged` or `MERGE=merged-admin` ends `pr-merged`, through `loop-state.sh token-map STATE=MERGED`, with the line under `Issues`. `MERGE=skipped:*`, `MERGE_ERROR=`, a non-zero exit or a refused call ends `clean`, with the line under `Issues` and a `Next action` that tells the human to merge.
 11. **A wait keeps watching in the current window.** `MERGE=wait:*` ends nothing. The skill arms the poll again with the pending seed for the time left in the current idle window. That arm opens no new window and captures no seed, so a PR whose CI never turns green ends at `watch-window-elapsed`.
 12. **An empty `HIVEMIND_AUTO_MERGE_ADMIN` is off.** The setting is checked by presence, like the other `HIVEMIND_*` presence settings, and an empty value counts as unset. Only a non-empty value allows `--admin`.
@@ -38,6 +38,7 @@ The user asked for two things: an approval that fires in this case, and an opt-i
 ### Recorded review decisions
 
 13. **A fresh blocked or behind read is the refusal signal for `--admin`.** Decided by the run under `plugin/governance/decision-autonomy.md` (Review Calls), on a local-review finding, 2026-11-20. After a failed plain merge the script does not read the error output and does not prove why the merge failed: a network, login or CLI error counts the same as a branch-protection refusal. The `--admin` retry runs only when a fresh read shows the same head, GitHub's merge state `BLOCKED` or `BEHIND`, and every gate passing again. GitHub then reports that a plain merge would be refused anyway, so the admin merge happens under the conditions decision 3 allows. Parsing the tool's error text was rejected as fragile text matching. A finding that only says the first failure may not have been a branch-protection refusal contests this decision and is a repeat.
+14. **Approval is the review state, not author presence.** Decided by the run under `plugin/governance/decision-autonomy.md` (Review Calls), on a local-review finding, 2026-11-20. The finding: the merge gate and the poll's settle evidence counted a bot's presence among the latest reviews as approval, so a bot review that requests changes, or a human or null-author one, could merge. One shared module def, `has_settled_evidence` in `reviewer-identity.jq`, is now the only settled-evidence verdict, and the settle check and the merge script's approval gate both call it. Every latest review of any author, null-author rows included, must be in the allowlist `APPROVED`, `COMMENTED` or `DISMISSED`; `CHANGES_REQUESTED`, `PENDING`, a missing state or an unknown state blocks. Approval then needs an in-scope bot whose latest review is `APPROVED` or `COMMENTED`, or an in-scope bot's 👍. A human's `CHANGES_REQUESTED` therefore also blocks the merge, failing closed. A blocked merge prints `MERGE=skipped:no-approval`, as before; no setting, output line or marker is added. `REVIEWER_APPROVED` is unchanged (ADR-0043 decision 5): it can still fire on one bot's approval while another author's latest review requests changes, but that only ends the watch, and the merge script now refuses the merge.
 
 ## Considered options
 
@@ -48,6 +49,7 @@ The user asked for two things: an approval that fires in this case, and an opt-i
 - **`--admin` under the same setting as the merge.** Rejected: bypassing branch protection is a bigger grant than merging, so the user put it behind its own setting.
 - **Merge while CI is pending, or with GitHub's own auto-merge.** Rejected: the user chose to merge only when every check is green, and the watch must stay up to fix a CI failure.
 - **One on/off setting plus a separate method setting.** Rejected: one value that names the method is enough.
+- **Read every latest review as approval evidence, whatever its state.** Rejected: a review that requests changes, or a human or null-author review, would count as approval and could merge. Decision 14 keys approval on the review state instead.
 
 ## Consequences
 
