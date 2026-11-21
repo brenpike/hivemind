@@ -47,8 +47,19 @@
 #     → the model is never woken → zero model tokens during idle.
 #   - It reads each gh command's stdout directly via command substitution. There
 #     is NO functional pipe (`tail -f | grep`, etc.) feeding Monitor.
-#   - No /tmp. No stop-file. Every terminal marker and `REVIEWER_APPROVED` end
-#     the process themselves; `CHANGED` and `CI_FAILED` keep it running (the
+#   - Poll mode alone also judges a SETTLED APPROVAL (ADR-0044) from the same
+#     capture: a plain `settle_ready` bool, never a SNAPSHOT_FIELDS entry, so it
+#     is never diffed or serialized and the seed shape is unchanged. It holds
+#     when THREADS_TOTAL fits the 50-thread page, every review thread passes the
+#     module's `is_settled_thread` (resolved, or ending in a self reply), and an
+#     in-scope Automated Reviewer has a `latestReviews` row or a 👍. When it
+#     holds, no other marker fires, and SETTLE_SECONDS have passed on the
+#     loop-top clock since the arm or the last printed `CHANGED` / `CI_FAILED`,
+#     the poll prints `REVIEWER_SETTLED`. No review text is read, and the check
+#     reuses the loop-top clock reading rather than reading the clock again.
+#   - No /tmp. No stop-file. Every terminal marker, `REVIEWER_APPROVED` and
+#     `REVIEWER_SETTLED` end the process themselves; `CHANGED` and `CI_FAILED`
+#     keep it running (the
 #     CONTINUING_MARKERS declaration); the skill natively stops only an arm that
 #     is still running.
 #
@@ -123,7 +134,8 @@
 #                same $1-$8 as poll mode (seed required), computes ONE snapshot
 #                through the SAME query path, runs the poll's own marker decision
 #                once against the seed, and prints that marker (CI_FAILED
-#                included) or UNCHANGED. No sleep, no deadline, no baseline line.
+#                included) or UNCHANGED. No sleep, no deadline, no baseline line,
+#                no clock read, and never REVIEWER_SETTLED.
 #   (no flag)    POLL. Watches the PR, diffing the first iteration against the
 #                seed token and every later iteration against its predecessor.
 #
@@ -154,7 +166,12 @@
 #                    (see ARM-KIND SEMANTICS below). ENDS THIS PROCESS (exit 0)
 #                    but is NOT a loop terminal: the skill confirms via the
 #                    reviewer before any terminal
-#   WATCH_TIMEOUT    max_watch_duration elapsed (terminal); no sleep passes
+#   REVIEWER_SETTLED poll mode only: the capture is settle-ready (see Contract)
+#                    and SETTLE_SECONDS have passed on the loop-top clock since
+#                    the arm or the last printed CHANGED / CI_FAILED. ENDS THIS
+#                    PROCESS (exit 0); the skill handles it like
+#                    REVIEWER_APPROVED. --snapshot and --check never print it
+#   WATCH_TIMEOUT   max_watch_duration elapsed (terminal); no sleep passes
 #                    the deadline, so it is never late by more than one capture
 #   POLL_ERROR       repeated query failure, a missing/malformed seed, a
 #                    retired reviewer filter value, or an unreadable clock
@@ -170,13 +187,15 @@
 #                    reviewer filter value, or a failed capture (terminal)
 #
 # Marker precedence within one iteration: STATE=MERGED, STATE=CLOSED,
-# REVIEWER_APPROVED, CI_FAILED, then CHANGED; exactly one is printed. The
-# approval goes before CI_FAILED because its confirmation pass is a full fix
-# pass that also picks up failed checks.
+# REVIEWER_APPROVED, CI_FAILED, CHANGED, then REVIEWER_SETTLED; exactly one is
+# printed. The approval goes before CI_FAILED because its confirmation pass is a
+# full fix pass that also picks up failed checks. REVIEWER_SETTLED prints only
+# on an iteration that would print no other marker.
 #
 # Process lifetime: `CHANGED` and `CI_FAILED` are the ONLY markers after which
-# the poll keeps running, declared once in CONTINUING_MARKERS. Every other
-# marker is the last line the process prints. --check prints exactly one line
+# the poll keeps running, declared once in CONTINUING_MARKERS, and each restarts
+# the SETTLE_SECONDS quiet period. Every other marker, REVIEWER_SETTLED
+# included, is the last line the process prints. --check prints exactly one line
 # and exits.
 #
 # Positional arguments supplied by the skill when arming Monitor (all required;
@@ -277,6 +296,9 @@ CONTINUING_MARKERS=(
   CHANGED
   CI_FAILED
 )
+# The REVIEWER_SETTLED quiet period: seconds on the loop-top clock since the arm
+# or the last printed continuing marker.
+SETTLE_SECONDS=600
 
 # An arm declares its KIND, and the kind travels inside the seed token rather
 # than alongside it: carrying a seed forward (arm-expiry re-arm) therefore
@@ -588,7 +610,8 @@ fail_count=0
 # reviewer does the full body-level classification on wake (thin poll, no
 # interpretation). Writes diagnostic stderr to /dev/null (never /tmp).
 compute_snapshot() {
-  local snapshot_body raw line review_pages review_rows reaction_rows snapshot_review_rows reviewer_set review_approved thumbs_approved
+  local snapshot_body raw line review_pages review_rows reaction_rows snapshot_review_rows reviewer_set review_approved thumbs_approved threads_settled reviewer_evidence
+  settle_ready="false"
 
   # gh exits 0 on several GraphQL error envelopes, so its exit status alone never
   # proves a usable response: the body is captured first and must pass the shared
@@ -618,6 +641,7 @@ query($owner: String!, $repo: String!, $pr: Int!) {
       reviewThreads(first: 50) {
         totalCount
         nodes {
+          isResolved
           comments(last: 1) {
             nodes { databaseId author { login __typename } }
           }
@@ -831,10 +855,43 @@ EOF
   else
     cur_approval="false"
   fi
+
+  # Settle-ready, the REVIEWER_SETTLED precondition (ADR-0044). The thread read
+  # is complete only when THREADS_TOTAL is a number within the 50-thread page;
+  # every thread must then pass the module's `is_settled_thread` over its
+  # `isResolved` and its last comment's author. Reviewer evidence is any
+  # `latestReviews` row or 👍 row, in any review state, from an Automated
+  # Reviewer of this capture's set that matches the active filter. No review
+  # text is read. settle_ready is a plain variable, never a SNAPSHOT_FIELDS
+  # entry, so it is never diffed or serialized. A verdict that is not exactly
+  # true or false fails the capture.
+  threads_settled=$(printf '%s' "$snapshot_body" \
+    | jq -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" '
+      include "reviewer-identity";
+      .data.repository.pullRequest.reviewThreads as $threads
+      | ($threads.totalCount | type) == "number"
+        and $threads.totalCount <= 50
+        and all($threads.nodes[];
+                (.comments.nodes | last) as $tail
+                | is_settled_thread(.isResolved; $tail.author.login; $tail.author.__typename; $login))
+    ' 2>/dev/null) || return 1
+  reviewer_evidence=$(printf '%s\n%s\n' "$review_rows" "$reaction_rows" \
+    | jq -s -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" \
+      --argjson set "$reviewer_set" '
+      include "reviewer-identity";
+      any(.[];
+          is_automated_reviewer(.login; .type; $set)
+          and reviewer_matches_filter(.login; .type; $login; $filter; $set))
+    ' 2>/dev/null) || return 1
+  case "$threads_settled" in true|false) ;; *) return 1 ;; esac
+  case "$reviewer_evidence" in true|false) ;; *) return 1 ;; esac
   # A well-formed snapshot always carries a non-empty PR state and a
   # failed-check count read_decimal accepts.
   [ -n "${cur_state:-}" ] || return 1
   read_decimal cur_failed_checks "${cur_failed_checks:-}" || return 1
+  if [ "$threads_settled" = "true" ] && [ "$reviewer_evidence" = "true" ]; then
+    settle_ready="true"
+  fi
   return 0
 }
 
@@ -913,8 +970,19 @@ sleep_to_next_poll() {
   sleep "$nap_seconds"
 }
 
+# reviewer_has_settled: 0 when this iteration's capture is settle-ready and at
+# least SETTLE_SECONDS have passed from quiet_since_seconds (the arm, or the
+# last printed continuing marker) to this iteration's loop-top reading,
+# clock_seconds. It reads no clock of its own: both readings came through
+# read_clock, so the subtraction needs no check of its own.
+reviewer_has_settled() {
+  [ "$settle_ready" = "true" ] || return 1
+  [ "$((clock_seconds - quiet_since_seconds))" -ge "$SETTLE_SECONDS" ]
+}
+
 read_clock arm_seconds
 deadline=$((arm_seconds + MAX_WATCH_SECONDS))
+quiet_since_seconds="$arm_seconds"
 
 while true; do
   read_clock clock_seconds
@@ -949,11 +1017,18 @@ while true; do
   # every exit from the confirmation pass diffs the pending seed before the watch
   # goes quiet. A productive return arms a fresh poll from it; a return that would
   # end clean or keep watching with no poll running runs --check against it first
-  # (SKILL.md step 6, QUIET-EXIT CHECK).
+  # (SKILL.md step 6, QUIET-EXIT CHECK). REVIEWER_SETTLED is poll-only and
+  # lowest: it prints only on an iteration iteration_marker leaves silent, and
+  # ends the process. A continuing marker restarts the quiet period from this
+  # iteration's loop-top reading.
   iteration_marker_line="$(iteration_marker)"
+  if [ -z "$iteration_marker_line" ] && reviewer_has_settled; then
+    iteration_marker_line="REVIEWER_SETTLED"
+  fi
   if [ -n "$iteration_marker_line" ]; then
     echo "$iteration_marker_line"
     marker_continues "$iteration_marker_line" || exit 0
+    quiet_since_seconds="$clock_seconds"
   fi
   # No-change iteration: emit nothing.
 
