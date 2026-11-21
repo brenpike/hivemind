@@ -297,7 +297,7 @@ Taken and listed for veto; set by the PRD. No ADR: fails hard to reverse, becaus
 
 ### D12: Abathur council with two callers
 
-Taken and listed for veto; set by the PRD. One decision service called from the design stages and from standard-delivery; the caller launches the members, then Abathur; at least two members on different models, one through the tool-neutral runner. ADR-0047.
+Taken and listed for veto; set by the PRD. One decision service called from the design stages and from standard-delivery; the caller launches the members, then Abathur; at least two members on at least two models, one of which may run through the tool-neutral runner. ADR-0047.
 
 ### D13: Consult row as data with a per-run cap
 
@@ -342,7 +342,7 @@ Each slice runs `bash tools/validate.sh --changed` at its validate state. Per sl
 - **#615:** contract tests over recorded issue fixtures for each track and each reason code, including a document edited after stamping, an epic, a standalone issue that must be promoted and a slice with open blockers that passes.
 - **#616:** a fixture run on the Lair PRD yields every template section filled; skill authoring checks prove the skill names no sibling.
 - **#617:** `tests/prd-to-issues/` fixtures for the design section and for seed-issue reuse with no duplicate on rerun.
-- **#618:** schema contract tests for the brief in and out, member provenance, and a council of two models with one through the runner; the review runner's existing `tests/run-review/` cases stay green.
+- **#618:** schema contract tests for the brief in and out, member provenance, a council of two Claude members on two models, and a council with one member through the runner; the review runner's existing `tests/run-review/` cases stay green.
 - **#619:** stamping then verifying passes; an open high finding, a missing clean round or a fourth round fails.
 - **#620:** `tests/triage-backlog/` cases: a failing issue never enters the apply set as ready and its reasons show; a passing slice with open blockers is proposed ready.
 - **#621:** recorded fixtures for every stage give the expected stage and next action; handoff mode passes only when every slice passes.
