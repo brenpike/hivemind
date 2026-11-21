@@ -35,6 +35,10 @@ The user asked for two things: an approval that fires in this case, and an opt-i
 11. **A wait keeps watching in the current window.** `MERGE=wait:*` ends nothing. The skill arms the poll again with the pending seed for the time left in the current idle window. That arm opens no new window and captures no seed, so a PR whose CI never turns green ends at `watch-window-elapsed`.
 12. **An empty `HIVEMIND_AUTO_MERGE_ADMIN` is off.** The setting is checked by presence, like the other `HIVEMIND_*` presence settings, and an empty value counts as unset. Only a non-empty value allows `--admin`.
 
+### Recorded review decisions
+
+13. **A fresh blocked or behind read is the refusal signal for `--admin`.** Decided by the run under `plugin/governance/decision-autonomy.md` (Review Calls), on a local-review finding, 2026-11-20. After a failed plain merge the script does not read the error output and does not prove why the merge failed: a network, login or CLI error counts the same as a branch-protection refusal. The `--admin` retry runs only when a fresh read shows the same head, GitHub's merge state `BLOCKED` or `BEHIND`, and every gate passing again. GitHub then reports that a plain merge would be refused anyway, so the admin merge happens under the conditions decision 3 allows. Parsing the tool's error text was rejected as fragile text matching. A finding that only says the first failure may not have been a branch-protection refusal contests this decision and is a repeat.
+
 ## Considered options
 
 - **Read review text for a settled verdict**, such as Copilot's "Approval Recommended". Rejected: product wording in code and text matching on external content, as ADR-0043 rejected.
