@@ -12,8 +12,8 @@
 # It also tests the reviewer identity module the filter includes:
 #   plugin/skills/github-review-loop/scripts/reviewer-identity.jq
 # through truth tables for each of its defs (configured-reviewer parsing, case folding, the
-# github-actions rule, the Bot gate on configured logins, the filter modes, review approval, the
-# retired filter value), and for CLOSURE: no `[bot]` strip literal and no login-only self compare may
+# github-actions rule, the Bot gate on configured logins, the filter modes, review approval, settled
+# threads, the retired filter value), and for CLOSURE: no `[bot]` strip literal and no login-only self compare may
 # be inlined in a consumer script, no known reviewer product login may appear in the module or a
 # consumer, `github-actions` may appear only in the module, and the retired-filter literal may appear
 # only on the module's `is_retired_filter` line.
@@ -543,6 +543,15 @@ identity_row "approval:commented-null-inline" 'false' 'is_review_approval("COMME
 identity_row "approval:changes-requested" 'false' 'is_review_approval("CHANGES_REQUESTED"; 0)'
 identity_row "approval:dismissed" 'false' 'is_review_approval("DISMISSED"; 0)'
 identity_row "approval:null-state" 'false' 'is_review_approval(null; 0)'
+
+# `is_settled_thread`: resolved exactly true, or the last comment is a User-typed self comment.
+identity_row "settled:resolved" 'true' 'is_settled_thread(true; "review-bot[bot]"; "Bot"; "selfuser")'
+identity_row "settled:unresolved-self-last" 'true' 'is_settled_thread(false; "selfuser"; "User"; "selfuser")'
+identity_row "settled:unresolved-bot-last" 'false' 'is_settled_thread(false; "review-bot[bot]"; "Bot"; "selfuser")'
+identity_row "settled:unresolved-bot-typed-self-login" 'false' 'is_settled_thread(false; "selfuser"; "Bot"; "selfuser")'
+identity_row "settled:unresolved-untyped-last" 'false' 'is_settled_thread(false; "selfuser"; null; "selfuser")'
+identity_row "settled:null-resolved" 'false' 'is_settled_thread(null; "review-bot[bot]"; "Bot"; "selfuser")'
+identity_row "settled:empty-self" 'false' 'is_settled_thread(false; ""; "User"; "")'
 
 # `is_retired_filter`: only the exact retired value.
 identity_row "retired:codex-only" 'true' 'is_retired_filter("codex-only")'

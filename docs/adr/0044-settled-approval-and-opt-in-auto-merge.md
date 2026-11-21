@@ -1,0 +1,60 @@
+# Settled approval and opt-in auto-merge in the post-PR watch
+
+**Status:** accepted, 2026-11-20. Amends ADR-0026 (the consequence "the merge action always stays with the human"). Extends ADR-0043 decision 5.
+
+## Context
+
+The post-PR watch (`hivemind:github-review-loop`) ends clean on a Reviewer Approval (ADR-0043 decision 5). An in-scope Automated Reviewer's latest review is `APPROVED`, or is `COMMENTED` with no inline comments, or the bot left a 👍 on the PR. That covers a Copilot review with no inline comments, whatever its text says.
+
+One case is not covered. A bot leaves inline threads. HIVEMIND fixes and resolves them. The bot never reviews again. No approval ever fires, so the watch idles until `watch-window-elapsed`. The user then has to see that the PR is done and merge it by hand.
+
+The user asked for two things: an approval that fires in this case, and an opt-in merge at the end of a clean watch. The decisions below come from a plan-interrogation session with the user on 2026-11-20.
+
+## Decision
+
+### The user's decisions
+
+1. **Settled approval.** The change-detect poll gets a clock-based marker, `REVIEWER_SETTLED`. It fires when all of these hold:
+   - No marker has printed for a fixed settle period, `SETTLE_SECONDS` (600, about 10 minutes), since the arm or the last `CHANGED` or `CI_FAILED`.
+   - An in-scope Automated Reviewer has reviewed or 👍'd the PR.
+   - Every review thread is resolved or ends in HIVEMIND's own reply, and the thread read is complete.
+
+   It reads no review text. The skill handles `REVIEWER_SETTLED` exactly like `REVIEWER_APPROVED`: a confirmation pass, the QUIET-EXIT CHECK, then `approval-clean`. The seed shape and the clock reads are unchanged.
+2. **A fixed script merges, with no AI judgment.** The script is `merge-approved.sh`, inside the watch. The skill runs it once after an `approval-clean` end. The overlord makes no merge decision; the script's checks are the whole rule.
+3. **`--admin` sits behind a second setting.** `HIVEMIND_AUTO_MERGE_ADMIN` allows it. The script uses `--admin` only when the plain merge is refused, the setting is set, and its own check saw every check pass.
+4. **Merge only after approval with every check green.** The PR must be approved and the head commit's check rollup must be `SUCCESS`, CI included. The merge call uses `--match-head-commit`, so a push after the check cannot be merged unchecked.
+
+### The run's own calls
+
+5. **Pending CI keeps the watch running.** Pending or failed checks never merge and never end the watch. A CI failure still gets fixed, and the merge is tried again at the next settled approval.
+6. **No checks means no merge.** A head commit with no check rollup is not green.
+7. **Any open thread blocks the merge.** A thread that is not resolved and does not end in HIVEMIND's reply stops the script.
+8. **The setting value names the method.** `HIVEMIND_AUTO_MERGE` is `merge`, `squash` or `rebase`. Unset or empty means off. Any other value is refused, and nothing merges.
+9. **The script rechecks approval itself.** It does not trust the skill's end reason. It checks again that the PR is open and not a draft, that an in-scope bot reviewed or 👍'd, that every thread is settled, and that the rollup is `SUCCESS`.
+
+## Considered options
+
+- **Read review text for a settled verdict**, such as Copilot's "Approval Recommended". Rejected: product wording in code and text matching on external content, as ADR-0043 rejected.
+- **Ask the reviewer for a new review after the fixes.** Rejected: ADR-0043 decision 7, the loop never requests a review.
+- **A long settle period, or one set per repo.** Rejected: the user chose a short fixed period. A setting adds surface for a value nobody has asked to tune.
+- **The overlord judges whether to merge.** Rejected: the user chose no AI judgment. A fixed script is the same every run and can be tested.
+- **`--admin` under the same setting as the merge.** Rejected: bypassing branch protection is a bigger grant than merging, so the user put it behind its own setting.
+- **Merge while CI is pending, or with GitHub's own auto-merge.** Rejected: the user chose to merge only when every check is green, and the watch must stay up to fix a CI failure.
+- **One on/off setting plus a separate method setting.** Rejected: one value that names the method is enough.
+
+## Consequences
+
+- With `HIVEMIND_AUTO_MERGE` unset, nothing merges. The merge stays with the human, as before.
+- With it set, ADR-0026's consequence "the merge action always stays with the human" no longer holds for that repo. The overlord still never decides a merge, and a merge recommendation outside the watch stays Tier-A. Only the fixed script merges, and only after a clean watch.
+- With `HIVEMIND_SKIP_PR_WATCH` set (ADR-0029), no watch runs, so nothing merges.
+- A watch that ends any way other than `approval-clean` merges nothing.
+
+### Residuals
+
+- **A slow bot re-review can be cut off.** A bot that starts a new review more than 10 minutes after the last fix can find the PR already merged. Its findings then need a new PR.
+- **An unreviewed push by another account can merge.** If another account pushes to the branch, the push can merge once its checks are green and approval fires again. No bot needs to have reviewed that push.
+- **A stray bot 👍 can now lead to a merge.** Under ADR-0043 a bot's 👍 makes it an Automated Reviewer. With the setting on, that 👍 can lead to a merge when no thread is open and every check is green. Before this ADR it could only end the watch.
+- **Auto mode can refuse the merge call.** The permission system may refuse `gh pr merge` in auto mode. The script then reports the refusal and the PR stays open for the human.
+- **Committed settings turn auto-merge on in brood worktrees.** `HIVEMIND_AUTO_MERGE` set in the committed `.claude/settings.json` is inherited by every brood worktree, so every strain's PR can merge. Set it in `.claude/settings.local.json` to keep it to one checkout.
+
+References: `plugin/skills/github-review-loop/SKILL.md`, `plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh`, `plugin/skills/github-review-loop/scripts/merge-approved.sh`, `plugin/governance/decision-autonomy.md`; amends ADR-0026; extends ADR-0043.

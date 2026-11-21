@@ -78,13 +78,21 @@
 #   - Inherited from ADR-0033: an unsuffixed bot reactor that a REST read types
 #     `User` fails `is_bot` and is rejected.
 #
-# 4. REVIEWER APPROVAL (`is_review_approval`)
-# -------------------------------------------
+# 4. REVIEWER APPROVAL (`is_review_approval`, `is_settled_thread`)
+# ----------------------------------------------------------------
 # A review state is an approval when it is `APPROVED`, or `COMMENTED` with zero
 # inline review comments. A THUMBS_UP reaction on the PR object is the third
 # approval form; the caller reads it off the reaction rows. Review text is never
 # read. Approval is counted only from an in-scope Automated Reviewer, and only
 # the caller decides whether it is terminal.
+#
+# SETTLED APPROVAL: after the watch's quiet period, an in-scope Automated
+# Reviewer has reviewed or left a THUMBS_UP, and every review thread is settled.
+# A thread is settled (`is_settled_thread`) when its `isResolved` is exactly
+# true, or when its last comment's author is self per `is_self` (§2). A null or
+# missing `isResolved` is never resolved, and a null or missing last author is
+# never self, so an unreadable thread is never settled. The settled approval
+# reads no review text either; the quiet period is the caller's clock.
 #
 # 5. FILTER MODES (`reviewer_matches_filter` $filter values)
 # ----------------------------------------------------------
@@ -162,6 +170,11 @@ def reviewer_matches_filter($login; $type; $self; $filter; $set):
 # True when a review state is a Reviewer Approval (§4); null or missing is not.
 def is_review_approval($state; $inline):
   $state == "APPROVED" or ($state == "COMMENTED" and $inline == 0);
+
+# True when a review thread is settled (§4): $resolved is exactly true, or the
+# thread's last comment author ($login, $type) is self per is_self (§2).
+def is_settled_thread($resolved; $login; $type; $self):
+  $resolved == true or is_self($login; $type; $self);
 
 # True for the retired filter value (§5); its only literal in code.
 def is_retired_filter($filter): $filter == "codex-only";

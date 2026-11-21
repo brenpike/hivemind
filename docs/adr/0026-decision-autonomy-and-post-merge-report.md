@@ -77,3 +77,7 @@ External review of PR #360 raised FINDING 1 ([thread](https://github.com/brenpik
 **What this amendment is.** It is this PR's own new doctrine dogfooded on a finding raised against that doctrine — the first `recorded` disposition applied in anger, written next to the decision it concerns rather than filed as work. That is worth saying plainly. It is not, on its own, evidence that the doctrine works; one application under the author's own judgment proves only that the destination is reachable.
 
 This amendment is APPEND-ONLY: the Context, Decision, Considered Options, Consequences, and the 2026-09-18 fourth-disposition amendment above are left byte-unchanged. It creates no new ADR, adds no normative rule, and supersedes no clause — the normative homes remain `plugin/governance/remediation-doctrine.md` and `plugin/governance/decision-autonomy.md`. Status remains accepted.
+
+## Amendment 2026-11-20: opt-in auto-merge by a fixed script (ADR-0044)
+
+ADR-0044 amends the consequence "the merge action always stays with the human". When the user sets `HIVEMIND_AUTO_MERGE`, a fixed script in the post-PR watch, `merge-approved.sh`, merges the PR after an `approval-clean` end with every check green. The script makes no AI judgment, and the overlord still never decides a merge. With the setting unset, the merge stays with the human as before, and a merge recommendation outside the watch stays Tier-A. Every other clause above stands. Status remains accepted.
