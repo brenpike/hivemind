@@ -31,20 +31,28 @@
 #   MERGE=skipped:no-checks        the head commit has no check rollup (exit 0)
 #   MERGE=wait:checks-pending      the rollup is PENDING or EXPECTED (exit 0)
 #   MERGE=wait:checks-failed       the rollup is FAILURE or ERROR (exit 0)
-#   MERGE=merged                   the plain merge succeeded (exit 0)
+#   MERGE=merged                   the plain merge exited 0 and the confirm
+#                                  read shows the PR MERGED (exit 0)
 #   MERGE=wait:head-moved          the plain merge was refused and the PR head
 #                                  is no longer the commit that was read (exit 0)
 #   MERGE=skipped:conflicts        refused; mergeStateStatus is DIRTY (exit 0)
-#   MERGE=merged-admin             refused; the `--admin` rerun succeeded (exit 0)
+#   MERGE=merged-admin             refused; the `--admin` rerun exited 0 and
+#                                  the confirm read shows the PR MERGED (exit 0)
 #   MERGE=skipped:blocked          refused; mergeStateStatus is BLOCKED or
 #                                  BEHIND and HIVEMIND_AUTO_MERGE_ADMIN is
 #                                  unset or empty (exit 0)
 #   MERGE=skipped:refused          refused for any other mergeStateStatus, or
 #                                  the `--admin` rerun was refused too (exit 0)
+#   MERGE=wait:merge-pending       a merge call, plain or `--admin`, exited 0
+#                                  but the confirm read shows the PR not MERGED:
+#                                  OPEN (queued in a merge queue, or GitHub
+#                                  lag) or CLOSED (exit 0)
 #   MERGE_ERROR=<reason>           bad arguments, a failed bootstrap, or a
 #                                  failed or incomplete read (exit 1)
 # `wait:*` means the watch keeps running: pending or failed CI is fixed or
 # awaited, and the merge is tried again at the next settled approval.
+# `wait:merge-pending` makes no further merge call: the poll's STATE=MERGED or
+# the idle window ends a pending merge.
 #
 # 2. SETTINGS (environment)
 # -------------------------
@@ -100,6 +108,9 @@
 # or settled verdict is ever drawn from a partial read.
 # Failed reads: gh exits non-zero (`graphql-read-failed`), the envelope check
 # fails (`graphql-<token>`), the shape check fails (`shape-<token>`).
+# The same read, with both checks and the projection, runs again after a
+# refused plain merge (the re-read) and after every merge call that exits 0
+# (the confirm read, §5); either fails as above.
 #
 # 5. GATES, in order (the first that applies prints its line)
 # -----------------------------------------------------------
@@ -120,7 +131,14 @@
 #   7. rollup FAILURE or ERROR                             wait:checks-failed
 #   8. rollup SUCCESS: run
 #        gh pr merge <n> --repo <owner>/<repo> --<method> --match-head-commit <headRefOid>
-#      exit 0                                              merged
+#      exit 0, confirm read MERGED                         merged
+#      exit 0, confirm read not MERGED                     wait:merge-pending
+# A merge call that exits 0, plain or `--admin`, is never taken as the verdict:
+# a merge queue can accept the call and leave the PR OPEN. The script reads
+# the PR again through the same query and checks (§4), the confirm read, and
+# prints merged or merged-admin only when its state is MERGED. No merge call
+# follows the confirm read, so a plain call that exits 0 never reaches
+# `--admin`.
 # A plain merge that exits non-zero is REFUSED; its output is discarded. The
 # script then reads the PR again through the same query and checks (§4):
 #   a. headRefOid differs from the first read              wait:head-moved
@@ -130,7 +148,8 @@
 #      - set, and a gate of 1-7 fails on the re-read       that gate's line
 #      - set, and gates 1-7 all hold on the re-read: rerun the same command
 #        with `--admin` and the same `--match-head-commit`
-#          exit 0                                          merged-admin
+#          exit 0, confirm read MERGED                     merged-admin
+#          exit 0, confirm read not MERGED                 wait:merge-pending
 #          non-zero                                        skipped:refused
 #   d. any other mergeStateStatus                          skipped:refused
 # So `--admin` runs only after a refused plain merge, only with the admin
@@ -347,11 +366,24 @@ rollup_line() {
 }
 
 # run_merge [--admin]: the one merge command, always with --match-head-commit
-# on the head the gates read. Its output is discarded; only the exit status is
-# used.
+# on the head the gates read. Its output is discarded. Its exit status only
+# decides whether --admin may follow; it is never the merge verdict, which
+# confirm_merge reads.
 run_merge() {
   gh pr merge "$PR_NUMBER" --repo "$OWNER/$REPO" "--$MERGE_METHOD" \
     --match-head-commit "$GATED_HEAD" "$@" >/dev/null 2>&1
+}
+
+# confirm_merge <merged_line>: the confirm read after a merge call that exited
+# 0. Prints <merged_line> when the PR state is MERGED, else
+# MERGE=wait:merge-pending. A failed or incomplete read is merge_approved_fail.
+confirm_merge() {
+  read_pr
+  if [ "$READ_STATE" = "MERGED" ]; then
+    echo "$1"
+  else
+    echo "MERGE=wait:merge-pending"
+  fi
 }
 
 # gates_hold: gates 1-7 over the last read_pr. Prints the gate line and fails
@@ -380,7 +412,7 @@ gates_hold || exit 0
 
 GATED_HEAD="$READ_HEAD"
 if run_merge; then
-  echo "MERGE=merged"; exit 0
+  confirm_merge "MERGE=merged"; exit 0
 fi
 
 read_pr
@@ -396,7 +428,7 @@ case "$READ_MERGE_STATE" in
     elif ! gates_hold; then
       :
     elif run_merge --admin; then
-      echo "MERGE=merged-admin"
+      confirm_merge "MERGE=merged-admin"
     else
       echo "MERGE=skipped:refused"
     fi ;;

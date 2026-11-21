@@ -376,7 +376,7 @@ It covers a bot that leaves inline threads, sees them fixed and resolved, and ne
 - every review thread is settled, as in [Settled approval](#settled-approval-reviewer_settled), with the read complete;
 - the head commit's `statusCheckRollup.state` is `SUCCESS`, read for the `headRefOid` commit.
 
-It merges with `gh pr merge --match-head-commit <headRefOid>`, so a commit pushed after its read is never merged. When the plain merge is refused and `HIVEMIND_AUTO_MERGE_ADMIN` is set (checked by presence), it retries once with `--admin`, and only when its own rollup read saw every check pass. A pending or failed rollup merges nothing and keeps the watch running, so a CI failure is still fixed and the merge is tried again at the next settled approval. ADR-0044 records the rule.
+It merges with `gh pr merge --match-head-commit <headRefOid>`, so a commit pushed after its read is never merged. It reports `MERGE=merged` only when a fresh read shows the PR merged; in a merge-queue repo the merge call only queues the PR, so it prints `MERGE=wait:merge-pending` and the watch keeps running until the poll sees the PR merged. When the plain merge is refused and `HIVEMIND_AUTO_MERGE_ADMIN` is set (checked by presence), it retries once with `--admin`, and only when its own rollup read saw every check pass. A pending or failed rollup merges nothing and keeps the watch running, so a CI failure is still fixed and the merge is tried again at the next settled approval. ADR-0044 records the rule.
 
 ### PR 👍 reaction
 
