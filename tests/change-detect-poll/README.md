@@ -228,8 +228,12 @@ unchanged. It holds only when all of these are true:
 - `THREADS_TOTAL` is a number within the 50-thread page, so the thread read is complete;
 - every thread passes the module's `is_settled_thread`: its `isResolved` is exactly `true`, or its
   last comment's author is a User-typed self login (a missing `isResolved` is never resolved);
-- a `latestReviews` row, in any state, or a 👍 row comes from an Automated Reviewer in scope of the
-  filter (`is_automated_reviewer` and `reviewer_matches_filter`).
+- the module's `has_settled_evidence` holds over every `latestReviews` row, any author, null-author
+  rows included, and the 👍 rows: every latest review is `APPROVED`, `COMMENTED` or `DISMISSED`
+  (so `CHANGES_REQUESTED`, `PENDING` or a missing or unknown state from any author blocks), and an
+  Automated Reviewer in scope of the filter (`is_automated_reviewer` and `reviewer_matches_filter`)
+  has an `APPROVED` or `COMMENTED` latest review or a 👍 row. Evidence is keyed on review state,
+  never on who reviewed.
 
 No review text is read. The check reuses the loop-top clock reading and adds no `date` or
 `read_decimal` call, so `numbers:one-clock-read` and the `NUMBER_SOURCES` table stand. `--snapshot`
@@ -253,6 +257,11 @@ fires. Each case asserts exit status, snapshot-query count, clock-read count and
 - `settle:thread-page-overflow-blocks` — `THREADS_TOTAL` 50 settles; 51 idles to `WATCH_TIMEOUT`.
 - `settle:no-reviewer-evidence-blocks` — no `latestReviews` row and no 👍 idles to
   `WATCH_TIMEOUT`.
+- `settle:changes-requested-blocks` — the bot's `latestReviews` entry `CHANGES_REQUESTED`, with
+  every thread resolved, idles to `WATCH_TIMEOUT`.
+- `settle:other-author-changes-requested-blocks` — a human `CHANGES_REQUESTED` beside the bot's
+  `COMMENTED` row idles to `WATCH_TIMEOUT`.
+- `settle:dismissed-review-is-not-evidence` — a lone bot `DISMISSED` row idles to `WATCH_TIMEOUT`.
 - `settle:login-filter-other-bot-blocks` — a `<login>` filter naming another bot idles to
   `WATCH_TIMEOUT`; naming the reviewing bot settles.
 - `settle:changed-resets-quiet-period` — a `CHANGED` at 700 s restarts the quiet period: silent at

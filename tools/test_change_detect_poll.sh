@@ -84,8 +84,10 @@
 #
 # THE SETTLED-APPROVAL CONTRACT (ADR-0044): poll mode alone prints `REVIEWER_SETTLED` on an
 # iteration that raises no other marker, when the capture is settle-ready (every review thread read
-# within the 50-thread page and settled per the module's `is_settled_thread`, and a `latestReviews`
-# or 👍 row from an in-scope Automated Reviewer) and SETTLE_SECONDS have passed on the loop-top clock
+# within the 50-thread page and settled per the module's `is_settled_thread`, and the module's
+# `has_settled_evidence` holding: every `latestReviews` row of any author `APPROVED`, `COMMENTED` or
+# `DISMISSED`, and an in-scope Automated Reviewer's `APPROVED` or `COMMENTED` latest review or 👍
+# row) and SETTLE_SECONDS have passed on the loop-top clock
 # since the arm or the last printed `CHANGED` / `CI_FAILED`. Settle-ready is never serialized, so
 # the seed shape is unchanged, and the check adds no clock read. `--check` never prints it.
 #
@@ -2754,7 +2756,9 @@ fi
 # capture is settle-ready, and SETTLE_SECONDS (600) have passed on the loop-top clock since the arm
 # or the last printed CHANGED / CI_FAILED. Settle-ready: THREADS_TOTAL within the 50-thread page,
 # every thread resolved or ending in a User-typed self reply (the module's `is_settled_thread`), and
-# a `latestReviews` or 👍 row from an Automated Reviewer in scope of the filter. Each case serves its
+# the module's `has_settled_evidence`: every `latestReviews` row, any author, is `APPROVED`,
+# `COMMENTED` or `DISMISSED`, and an Automated Reviewer in scope of the filter has an `APPROVED` or
+# `COMMENTED` latest review or a 👍 row. Each case serves its
 # clock through `date.seq` as SETTLE_EPOCH plus an offset per read (arm, then loop top and sleep in
 # turn), then the deadline twice, so a run that outlives its offsets ends at WATCH_TIMEOUT. Every
 # seed is an `initial` seed captured over the served state, so no other marker fires.
@@ -2765,7 +2769,9 @@ fi
 #       WATCH_TIMEOUT.
 #   (d) an unresolved thread ending in a User-typed self reply settles.
 #   (e) THREADS_TOTAL 50 settles; THREADS_TOTAL 51 idles to WATCH_TIMEOUT.
-#   (f) no `latestReviews` row and no 👍 idles to WATCH_TIMEOUT.
+#   (f) no `latestReviews` row and no 👍 idles to WATCH_TIMEOUT; so does the bot's latest review
+#       `CHANGES_REQUESTED` with every thread resolved, a human's `CHANGES_REQUESTED` beside the
+#       bot's `COMMENTED` row, and a lone bot `DISMISSED` row.
 #   (g) a `<login>` filter naming another bot idles to WATCH_TIMEOUT; naming the reviewing bot
 #       settles.
 #   (h) a CHANGED at 700 s restarts the quiet period: silent at 1299 s, REVIEWER_SETTLED at
@@ -2821,6 +2827,12 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
     '.data.repository.pullRequest.reviewThreads.totalCount = 51')"
   settle_no_evidence="$(derive_fixture settle-no-evidence "$settle_resolved" \
     '.data.repository.pullRequest.latestReviews.nodes = []')"
+  settle_changes_requested="$(derive_fixture settle-changes-requested "$settle_resolved" \
+    '.data.repository.pullRequest.latestReviews.nodes[0].state = "CHANGES_REQUESTED"')"
+  settle_other_changes_requested="$(derive_fixture settle-other-changes-requested "$settle_resolved" \
+    '.data.repository.pullRequest.latestReviews.nodes += [{"state":"CHANGES_REQUESTED","author":{"login":"octo-user-1","__typename":"User"},"comments":{"totalCount":0}}]')"
+  settle_dismissed="$(derive_fixture settle-dismissed "$settle_resolved" \
+    '.data.repository.pullRequest.latestReviews.nodes[0].state = "DISMISSED"')"
   settle_comment="$(derive_fixture settle-comment "$settle_resolved" \
     '.data.repository.pullRequest.comments.totalCount = 3
      | .data.repository.pullRequest.comments.nodes += [{"databaseId":2411003,"author":{"login":"chatgpt-codex-connector","__typename":"Bot"}}]')"
@@ -2851,6 +2863,15 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   judge_settle_case "settle:no-reviewer-evidence-blocks" \
     "no latestReviews row and no thumbs-up idled to WATCH_TIMEOUT" \
     "0:1:4:WATCH_TIMEOUT" "$(settle_outcome settle-no-evidence "$settle_no_evidence" "$REVIEWER_FILTER" 0 600 600)"
+  judge_settle_case "settle:changes-requested-blocks" \
+    "the bot's CHANGES_REQUESTED latest review with every thread resolved idled to WATCH_TIMEOUT" \
+    "0:1:4:WATCH_TIMEOUT" "$(settle_outcome settle-changes-requested "$settle_changes_requested" "$REVIEWER_FILTER" 0 600 600)"
+  judge_settle_case "settle:other-author-changes-requested-blocks" \
+    "a human CHANGES_REQUESTED beside the bot's COMMENTED row idled to WATCH_TIMEOUT" \
+    "0:1:4:WATCH_TIMEOUT" "$(settle_outcome settle-other-changes-requested "$settle_other_changes_requested" "$REVIEWER_FILTER" 0 600 600)"
+  judge_settle_case "settle:dismissed-review-is-not-evidence" \
+    "a lone bot DISMISSED row idled to WATCH_TIMEOUT" \
+    "0:1:4:WATCH_TIMEOUT" "$(settle_outcome settle-dismissed "$settle_dismissed" "$REVIEWER_FILTER" 0 600 600)"
 
   settle_filter_outcomes="$(settle_outcome settle-filter-other "$settle_resolved" "$COPILOT_SHAPED_BOT" 0 600 600) $(settle_outcome settle-filter-own "$settle_resolved" "$CODEX_SHAPED_BOT" 0 600)"
   judge_settle_case "settle:login-filter-other-bot-blocks" \
@@ -2875,6 +2896,8 @@ else
   for settle_case_id in settle:fires-after-quiet-period settle:marker-ends-poll-process \
     settle:unresolved-bot-thread-blocks settle:self-reply-thread-settles \
     settle:thread-page-overflow-blocks settle:no-reviewer-evidence-blocks \
+    settle:changes-requested-blocks settle:other-author-changes-requested-blocks \
+    settle:dismissed-review-is-not-evidence \
     settle:login-filter-other-bot-blocks settle:changed-resets-quiet-period \
     settle:check-prints-unchanged; do
     skipped "$settle_case_id" "$SKIP_REASON"

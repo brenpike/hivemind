@@ -7,19 +7,24 @@
 # one file per read (read-<n>.json, with an optional read-<n>.status exit code), and answers each
 # `gh pr merge` with the exit code in merge-<n>.status (default 0). Every gh call is appended to the
 # case's calls.log:
-#   READ <n> head=<headRefOid> rollup=<state|NONE>      one GraphQL read served
-#   MERGE <n> after_head=<h> after_rollup=<r> argv=<...> one merge call, with the head and rollup of
-#                                                         the most recent read served before it
-#   OTHER argv=<...>                                     any other gh call (always a failure here)
+#   READ <n> head=<headRefOid> rollup=<state|NONE> reviews=<states|NONE>
+#                                  one GraphQL read served; reviews is the comma-joined state of
+#                                  every latestReviews node, in order
+#   MERGE <n> after_head=<h> after_rollup=<r> after_reviews=<s> argv=<...>
+#                                  one merge call, with the head, rollup and review states of the
+#                                  most recent read served before it
+#   OTHER argv=<...>               any other gh call (always a failure here)
 # Each case asserts the script's one stdout line, its exit status, an empty stderr, and the number
 # of reads and merge calls. Fixture bodies are derived inline from one clean base body with one jq
 # edit each, so a case differs from the merge-ready PR in one place.
 #
-# Three properties are checked over EVERY case's calls.log after the cases run:
+# Four properties are checked over EVERY case's calls.log after the cases run:
 #   - no merge call carries --auto or --delete-branch, and every merge call carries
 #     --match-head-commit equal to the head of the read before it;
 #   - no merge call follows a read whose rollup was not SUCCESS (no path merges on a non-SUCCESS
 #     rollup);
+#   - no merge call follows a read holding a review state outside APPROVED, COMMENTED or
+#     DISMISSED (no path merges over a standing block);
 #   - --admin appears only as the second merge call of a case, after a refused plain merge, with
 #     HIVEMIND_AUTO_MERGE_ADMIN set to a non-empty value, on the same head as the plain merge.
 #
@@ -73,16 +78,17 @@ if [ "${1:-}" = "api" ] && [ "${2:-}" = "graphql" ]; then
   [ -f "$case_dir/read-$read_number.status" ] && read_status="$(cat "$case_dir/read-$read_number.status")"
   read_head="$(jq -r 'try .data.repository.pullRequest.headRefOid catch "none"' "$body_file" 2>/dev/null)"
   read_rollup="$(jq -r 'try (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state // "NONE") catch "none"' "$body_file" 2>/dev/null)"
-  printf 'READ %s head=%s rollup=%s\n' "$read_number" "$read_head" "$read_rollup" >>"$calls_log"
-  printf '%s %s\n' "$read_head" "$read_rollup" >"$case_dir/last-read"
+  read_reviews="$(jq -r 'try ([.data.repository.pullRequest.latestReviews.nodes[]? | .state | tostring] | if length == 0 then "NONE" else join(",") end) catch "none"' "$body_file" 2>/dev/null)"
+  printf 'READ %s head=%s rollup=%s reviews=%s\n' "$read_number" "$read_head" "$read_rollup" "$read_reviews" >>"$calls_log"
+  printf '%s %s %s\n' "$read_head" "$read_rollup" "$read_reviews" >"$case_dir/last-read"
   cat "$body_file"
   echo "gh: stub stderr line" >&2
   exit "$read_status"
 fi
 if [ "${1:-}" = "pr" ] && [ "${2:-}" = "merge" ]; then
   merge_number="$(next_count merge)"
-  read -r after_head after_rollup <"$case_dir/last-read"
-  printf 'MERGE %s after_head=%s after_rollup=%s argv=%s\n' "$merge_number" "$after_head" "$after_rollup" "$*" >>"$calls_log"
+  read -r after_head after_rollup after_reviews <"$case_dir/last-read"
+  printf 'MERGE %s after_head=%s after_rollup=%s after_reviews=%s argv=%s\n' "$merge_number" "$after_head" "$after_rollup" "$after_reviews" "$*" >>"$calls_log"
   merge_status=0
   [ -f "$case_dir/merge-$merge_number.status" ] && merge_status="$(cat "$case_dir/merge-$merge_number.status")"
   echo "stub merge output"
@@ -99,14 +105,14 @@ HEAD_B="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 BOT_LOGIN="review-helper[bot]"
 SELF="operator"
 
-# The merge-ready PR: open, not a draft, head HEAD_A, CLEAN, rollup SUCCESS, one latest review from
-# a Bot, an empty THUMBS_UP group, and one resolved thread whose last comment is the Bot's.
+# The merge-ready PR: open, not a draft, head HEAD_A, CLEAN, rollup SUCCESS, one COMMENTED latest
+# review from a Bot, an empty THUMBS_UP group, and one resolved thread whose last comment is the Bot's.
 BASE_BODY="$(jq -n -c --arg head "$HEAD_A" --arg bot "$BOT_LOGIN" '{data: {repository: {pullRequest: {
   state: "OPEN", isDraft: false, headRefOid: $head, mergeStateStatus: "CLEAN",
   commits: {nodes: [{commit: {oid: $head, statusCheckRollup: {state: "SUCCESS"}}}]},
   comments: {nodes: [{id: "IC_1"}]},
   reviews: {nodes: [{id: "PRR_1"}]},
-  latestReviews: {pageInfo: {hasNextPage: false}, nodes: [{author: {login: $bot, __typename: "Bot"}}]},
+  latestReviews: {pageInfo: {hasNextPage: false}, nodes: [{state: "COMMENTED", author: {login: $bot, __typename: "Bot"}}]},
   reactionGroups: [
     {content: "THUMBS_UP", reactors: {pageInfo: {hasNextPage: false}, nodes: []}},
     {content: "HEART", reactors: {pageInfo: {hasNextPage: false}, nodes: []}}
@@ -236,19 +242,19 @@ gate_case "gate:draft"            "$PR.isDraft = true"       "MERGE=skipped:draf
 gate_case "gate:draft-before-approval" "$PR.isDraft = true | $PR.latestReviews.nodes = []" "MERGE=skipped:draft" 0
 
 gate_case "approval:none"         "$PR.latestReviews.nodes = []"   "MERGE=skipped:no-approval" 0
-gate_case "approval:human-review" "$PR.latestReviews.nodes = [{author: {login: \"alice\", __typename: \"User\"}}]" \
+gate_case "approval:human-review" "$PR.latestReviews.nodes = [{state: \"COMMENTED\", author: {login: \"alice\", __typename: \"User\"}}]" \
   "MERGE=skipped:no-approval" 0
 gate_case "approval:human-review-bot-suffix-typed-user" \
-  "$PR.latestReviews.nodes = [{author: {login: \"helper[bot]\", __typename: \"User\"}}]" "MERGE=merged" 1
-gate_case "approval:null-author"  "$PR.latestReviews.nodes = [{author: null}]" "MERGE=skipped:no-approval" 0
+  "$PR.latestReviews.nodes = [{state: \"COMMENTED\", author: {login: \"helper[bot]\", __typename: \"User\"}}]" "MERGE=merged" 1
+gate_case "approval:null-author"  "$PR.latestReviews.nodes = [{state: \"COMMENTED\", author: null}]" "MERGE=skipped:no-approval" 0
 gate_case "approval:bot-self-login-is-reviewer" \
-  "$PR.latestReviews.nodes = [{author: {login: \$self, __typename: \"Bot\"}}]" "MERGE=merged" 1
+  "$PR.latestReviews.nodes = [{state: \"COMMENTED\", author: {login: \$self, __typename: \"Bot\"}}]" "MERGE=merged" 1
 gate_case "approval:self-user-review" \
-  "$PR.latestReviews.nodes = [{author: {login: \$self, __typename: \"User\"}}]" "MERGE=skipped:no-approval" 0
+  "$PR.latestReviews.nodes = [{state: \"COMMENTED\", author: {login: \$self, __typename: \"User\"}}]" "MERGE=skipped:no-approval" 0
 gate_case "approval:github-actions-unconfigured" \
-  "$PR.latestReviews.nodes = [{author: {login: \"github-actions[bot]\", __typename: \"Bot\"}}]" "MERGE=skipped:no-approval" 0
+  "$PR.latestReviews.nodes = [{state: \"COMMENTED\", author: {login: \"github-actions[bot]\", __typename: \"Bot\"}}]" "MERGE=skipped:no-approval" 0
 gate_case "approval:github-actions-configured" \
-  "$PR.latestReviews.nodes = [{author: {login: \"github-actions[bot]\", __typename: \"Bot\"}}]" "MERGE=merged" 1 \
+  "$PR.latestReviews.nodes = [{state: \"COMMENTED\", author: {login: \"github-actions[bot]\", __typename: \"Bot\"}}]" "MERGE=merged" 1 \
   HIVEMIND_PR_REVIEWERS=github-actions
 gate_case "approval:thumbs-up-bot" \
   "$PR.latestReviews.nodes = [] | $PR.reactionGroups[0].reactors.nodes = [{__typename: \"Bot\", login: \$bot}]" "MERGE=merged" 1
@@ -258,6 +264,37 @@ gate_case "approval:thumbs-up-human" \
 gate_case "approval:heart-bot-not-approval" \
   "$PR.latestReviews.nodes = [] | $PR.reactionGroups[1].reactors.nodes = [{__typename: \"Bot\", login: \$bot}]" \
   "MERGE=skipped:no-approval" 0
+
+# Approval is keyed on review state: every latest review, of any author, must be APPROVED, COMMENTED
+# or DISMISSED, and a Bot APPROVED or COMMENTED review or a Bot thumbs-up must be present.
+BOT_THUMBS_UP="$PR.reactionGroups[0].reactors.nodes = [{__typename: \"Bot\", login: \$bot}]"
+gate_case "approval:bot-approved"  "$PR.latestReviews.nodes[0].state = \"APPROVED\""  "MERGE=merged" 1
+gate_case "approval:bot-commented" "$PR.latestReviews.nodes[0].state = \"COMMENTED\"" "MERGE=merged" 1
+gate_case "approval:bot-changes-requested" \
+  "$PR.latestReviews.nodes[0].state = \"CHANGES_REQUESTED\"" "MERGE=skipped:no-approval" 0
+gate_case "approval:bot-changes-requested-admin" \
+  "$PR.latestReviews.nodes[0].state = \"CHANGES_REQUESTED\"" "MERGE=skipped:no-approval" 0 HIVEMIND_AUTO_MERGE_ADMIN=1
+gate_case "approval:bot-changes-requested-bot-thumbs-up" \
+  "$PR.latestReviews.nodes[0].state = \"CHANGES_REQUESTED\" | $BOT_THUMBS_UP" "MERGE=skipped:no-approval" 0
+gate_case "approval:bot-changes-requested-bot-thumbs-up-admin" \
+  "$PR.latestReviews.nodes[0].state = \"CHANGES_REQUESTED\" | $BOT_THUMBS_UP" "MERGE=skipped:no-approval" 0 \
+  HIVEMIND_AUTO_MERGE_ADMIN=1
+gate_case "approval:human-changes-requested-blocks-bot-approval" \
+  "$PR.latestReviews.nodes[0].state = \"APPROVED\" | $PR.latestReviews.nodes += [{state: \"CHANGES_REQUESTED\", author: {login: \"alice\", __typename: \"User\"}}]" \
+  "MERGE=skipped:no-approval" 0
+gate_case "approval:null-author-changes-requested-blocks-bot-approval" \
+  "$PR.latestReviews.nodes[0].state = \"APPROVED\" | $PR.latestReviews.nodes += [{state: \"CHANGES_REQUESTED\", author: null}]" \
+  "MERGE=skipped:no-approval" 0
+gate_case "approval:pending-blocks-bot-approval" \
+  "$PR.latestReviews.nodes[0].state = \"APPROVED\" | $PR.latestReviews.nodes += [{state: \"PENDING\", author: {login: \"alice\", __typename: \"User\"}}]" \
+  "MERGE=skipped:no-approval" 0
+gate_case "approval:unknown-state-blocks-bot-approval" \
+  "$PR.latestReviews.nodes[0].state = \"APPROVED\" | $PR.latestReviews.nodes += [{state: \"REVIEW_STATE_FROM_THE_FUTURE\", author: {login: \"alice\", __typename: \"User\"}}]" \
+  "MERGE=skipped:no-approval" 0
+gate_case "approval:bot-dismissed-alone" \
+  "$PR.latestReviews.nodes[0].state = \"DISMISSED\"" "MERGE=skipped:no-approval" 0
+gate_case "approval:bot-dismissed-bot-thumbs-up" \
+  "$PR.latestReviews.nodes[0].state = \"DISMISSED\" | $BOT_THUMBS_UP" "MERGE=merged" 1
 
 case_dir="$(new_case approval-login-filter-other)"
 write_read "$case_dir" 1 '.'
@@ -270,7 +307,7 @@ run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash bash "$MERGE_APPROVED" o r 5 rev
 expect_case "approval:login-filter-match" "$case_dir" "MERGE=merged" 0 1 1
 
 case_dir="$(new_case approval-filter-all-human)"
-write_read "$case_dir" 1 "$PR.latestReviews.nodes = [{author: {login: \"alice\", __typename: \"User\"}}]"
+write_read "$case_dir" 1 "$PR.latestReviews.nodes = [{state: \"COMMENTED\", author: {login: \"alice\", __typename: \"User\"}}]"
 run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash bash "$MERGE_APPROVED" o r 5 all "$SELF"
 expect_case "approval:filter-all-still-needs-automated" "$case_dir" "MERGE=skipped:no-approval" 0 1 0
 
@@ -309,7 +346,7 @@ for merge_method in merge squash rebase; do
   run_case "$case_dir" HIVEMIND_AUTO_MERGE="$merge_method" bash "$MERGE_APPROVED" o r 5 automated "$SELF"
   expect_case "merge:$merge_method" "$case_dir" "MERGE=merged" 0 1 1
   want_argv="pr merge 5 --repo o/r --$merge_method --match-head-commit $HEAD_A"
-  if grep -qxF "MERGE 1 after_head=$HEAD_A after_rollup=SUCCESS argv=$want_argv" "$case_dir/calls.log"; then
+  if grep -qxF "MERGE 1 after_head=$HEAD_A after_rollup=SUCCESS after_reviews=COMMENTED argv=$want_argv" "$case_dir/calls.log"; then
     pass "merge:$merge_method-argv" "$want_argv"
   else
     failed "merge:$merge_method-argv" "calls: $(tr '\n' '|' <"$case_dir/calls.log")"
@@ -347,6 +384,9 @@ read_error_case "read:unknown-rollup"      "$PR.commits.nodes[0].commit.statusCh
 read_error_case "read:merge-state-null"    "$PR.mergeStateStatus = null"                                 malformed-read
 read_error_case "read:page-flag-null"      "$PR.reviewThreads.pageInfo = null"                           malformed-read
 read_error_case "read:reaction-groups-null" "$PR.reactionGroups = null"                                  malformed-read
+read_error_case "read:review-state-missing" "del($PR.latestReviews.nodes[0].state)"                      malformed-read
+read_error_case "read:review-state-null"   "$PR.latestReviews.nodes[0].state = null"                     malformed-read
+read_error_case "read:review-state-number" "$PR.latestReviews.nodes[0].state = 1"                        malformed-read
 
 gate_case "read:other-group-next-page-ignored" "$PR.reactionGroups[1].reactors.pageInfo.hasNextPage = true" "MERGE=merged" 1
 
@@ -402,6 +442,12 @@ refused_case "refused:blocked-admin-draft" \
 refused_case "refused:blocked-admin-approval-withdrawn" \
   "$PR.mergeStateStatus = \"BLOCKED\" | $PR.latestReviews.nodes = []" \
   "MERGE=skipped:no-approval" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
+refused_case "refused:blocked-admin-bot-changes-requested" \
+  "$PR.mergeStateStatus = \"BLOCKED\" | $PR.latestReviews.nodes[0].state = \"CHANGES_REQUESTED\"" \
+  "MERGE=skipped:no-approval" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
+refused_case "refused:blocked-admin-human-changes-requested" \
+  "$PR.mergeStateStatus = \"BLOCKED\" | $PR.latestReviews.nodes += [{state: \"CHANGES_REQUESTED\", author: {login: \"alice\", __typename: \"User\"}}]" \
+  "MERGE=skipped:no-approval" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
 refused_case "refused:blocked-admin-thread-reopened" \
   "$PR.mergeStateStatus = \"BLOCKED\" | $PR.reviewThreads.nodes[0].isResolved = false" \
   "MERGE=skipped:open-threads" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
@@ -433,7 +479,7 @@ expect_case "refused:reread-incomplete" "$case_dir" "MERGE_ERROR=read-incomplete
 
 for admin_case in refused:blocked-admin refused:behind-admin; do
   case_dir="$CASES_DIR/$admin_case"
-  want_admin="MERGE 2 after_head=$HEAD_A after_rollup=SUCCESS argv=pr merge 5 --repo o/r --squash --match-head-commit $HEAD_A --admin"
+  want_admin="MERGE 2 after_head=$HEAD_A after_rollup=SUCCESS after_reviews=COMMENTED argv=pr merge 5 --repo o/r --squash --match-head-commit $HEAD_A --admin"
   if grep -qxF "$want_admin" "$case_dir/calls.log"; then
     pass "$admin_case-argv" "admin rerun keeps --match-head-commit $HEAD_A"
   else
@@ -442,6 +488,20 @@ for admin_case in refused:blocked-admin refused:behind-admin; do
 done
 
 # ── Properties over every case ───────────────────────────────────────────────
+# check_merge_review_states <case> <call_line> <after_reviews>: fail the merge call when the read
+# before it held a review state outside APPROVED, COMMENTED or DISMISSED.
+check_merge_review_states() {
+  local review_state review_states
+  [ "$3" = "NONE" ] && return 0
+  IFS=',' read -r -a review_states <<<"$3"
+  for review_state in "${review_states[@]}"; do
+    case "$review_state" in
+      APPROVED|COMMENTED|DISMISSED) ;;
+      *) failed "property:merge-only-on-allowed-review-states" "$1: $2" ;;
+    esac
+  done
+}
+
 merge_call_count=0
 for calls_log in "$CASES_DIR"/*/calls.log; do
   case_name="$(basename "$(dirname "$calls_log")")"
@@ -458,6 +518,8 @@ for calls_log in "$CASES_DIR"/*/calls.log; do
     after_head="${after_head%% *}"
     after_rollup="${call_line#*after_rollup=}"
     after_rollup="${after_rollup%% *}"
+    after_reviews="${call_line#*after_reviews=}"
+    after_reviews="${after_reviews%% *}"
     merge_argv="${call_line#*argv=}"
     case " $merge_argv " in
       *" --auto "*|*" --delete-branch "*) failed "property:no-auto-delete" "$case_name: $call_line" ;;
@@ -467,17 +529,18 @@ for calls_log in "$CASES_DIR"/*/calls.log; do
       *) failed "property:match-head-commit" "$case_name: $call_line" ;;
     esac
     [ "$after_rollup" = "SUCCESS" ] || failed "property:merge-only-on-success" "$case_name: $call_line"
+    check_merge_review_states "$case_name" "$call_line" "$after_reviews"
     case " $merge_argv " in
       *" --admin "*)
         if [ "$merge_number" != "2" ] || [ "$case_env_admin" != "yes" ] \
-           || ! grep -q "^MERGE 1 after_head=$after_head after_rollup=SUCCESS argv=.* --match-head-commit $after_head$" "$calls_log"; then
+           || ! grep -q "^MERGE 1 after_head=$after_head after_rollup=SUCCESS after_reviews=[^ ]* argv=.* --match-head-commit $after_head$" "$calls_log"; then
           failed "property:admin-only-after-refusal" "$case_name: $call_line"
         fi ;;
     esac
   done <"$calls_log"
 done
 if [ "$merge_call_count" -gt 0 ]; then
-  pass "property:scan-non-vacuous" "$merge_call_count merge calls scanned for --auto, --delete-branch, --match-head-commit, SUCCESS-only and --admin placement"
+  pass "property:scan-non-vacuous" "$merge_call_count merge calls scanned for --auto, --delete-branch, --match-head-commit, SUCCESS-only, allowed review states and --admin placement"
 else
   failed "property:scan-non-vacuous" "no merge call recorded in any case"
 fi
