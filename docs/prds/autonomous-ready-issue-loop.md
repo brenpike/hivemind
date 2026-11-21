@@ -43,9 +43,11 @@ GitHub is the Lair's state and dashboard. The user steers through labels, park a
   - it is open and labeled `readiness:ready`, and the latest such labeled event comes from a user with write permission;
   - its title and body are unedited since that event;
   - no blocked-by dependency is open;
-  - it carries no `triage:locked` and no `lair:` handoff, failed or review label.
+  - it carries no `triage:locked` and no `lair:` handoff, failed or review label;
+  - it is not an epic (no `type:epic` label);
+  - the readiness check passes at claim time.
 
-  The Lair never applies `readiness:ready` itself.
+  An issue that fails the readiness check stays unclaimed and is named in the tick's queue report, with no new label. The Lair never applies `readiness:ready` itself.
 - **Injection.** An issue the injection scan flags is handed off before any strain starts and never runs.
 - **Labels.** On claim the issue moves to `readiness:implementation` with a marker comment naming the run. It moves to `readiness:done` only when GitHub shows the pull request merged, and to `readiness:needs-decision` on an answerable park. It gets a handoff, failed or review marker in the Lair's own label family. The Lair never uses `readiness:blocked` or `readiness:parked`.
 - **Unattended runs.**
@@ -97,7 +99,7 @@ GitHub is the Lair's state and dashboard. The user steers through labels, park a
 
 - **Contract tests for unattended mode:** each stop kind resolves to take, park or handoff as the ask policy states; no unattended path waits for input; the marker absent means today's behavior.
 - **Contract tests for the controller tick** against recorded GitHub states, with no live GitHub:
-  - admission (label actor, permission, edit time, blocked-by, locked);
+  - admission (label actor, permission, edit time, blocked-by, locked; an epic or an issue failing the readiness check is not claimed and is named in the queue report with no new label);
   - claim, label and marker transitions;
   - the merge lane and auto tier;
   - the halt switch and circuit breaker;

@@ -111,3 +111,13 @@ Two adversarial reviews of the first draft found that the Lair could not see a r
 - **Unverified until the strain contract is built:** whether the `Stop` hook fires while a workflow runs in the background, and whether `/exit` sent through tmux reliably ends an idle session.
 
 References: `docs/adr/0007-fleet-children-unaware-coordinator-dashboard.md`, `docs/adr/0026-decision-autonomy-and-post-merge-report.md`, `docs/adr/0036-analysis-only-first-workflow-on-script-engine.md`, `docs/adr/0044-settled-approval-and-opt-in-auto-merge.md`, `docs/prds/autonomous-ready-issue-loop.md`.
+
+## Amendment 2026-11-21: Lair admission excludes epics and requires a passing readiness check
+
+This amends decision 10 (Admission) with three rules the user settled:
+
+- The Lair never claims an issue of type epic, that is, an issue labeled `type:epic`.
+- The Lair claims an issue only when the readiness check passes at claim time, in addition to decision 10's existing conditions.
+- An issue that fails stays unclaimed and is named in the tick's queue report. The Lair applies no new label to it.
+
+The readiness check is the one defined by the "Readiness check" acceptance criteria of [docs/prds/idea-to-ready.md](../prds/idea-to-ready.md), built under #615. It judges structure, existence, document versions and labels, never quality. Without these rules, a ready label on an epic, or on an issue whose design changed after review, would start an unattended run against an unreviewed design. Decision 10's other conditions, the claim-time capture of the issue text, the injection scan and decision 16's labels stand unchanged. Status remains accepted.
