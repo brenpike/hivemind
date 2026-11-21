@@ -24,14 +24,14 @@ This record covers the design review of the Lair: the [PRD](../../prds/autonomou
 
 ## Dispositions
 
-Every finding has exactly one disposition:
+Every finding is open until it gets exactly one disposition:
 
 - **fixed**: the record says where.
 - **deferred**: the record names a tracked issue.
 - **recorded**: the record says where.
 - **rejected**: the record says why.
 
-A finding with no disposition yet is **open** and is counted in `open_counts`. The disposition column then reads `open`.
+**Open** is a state, not a disposition. An open finding is counted in `open_counts`, and its disposition column reads `open`.
 
 ## Round 1, 2026-11-21
 
