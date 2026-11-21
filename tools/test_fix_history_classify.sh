@@ -16,7 +16,9 @@
 # threads, the retired filter value), and for CLOSURE: no `[bot]` strip literal and no login-only self compare may
 # be inlined in a consumer script, no known reviewer product login may appear in the module or a
 # consumer, `github-actions` may appear only in the module, and the retired-filter literal may appear
-# only on the module's `is_retired_filter` line.
+# only on the module's `is_retired_filter` line. The consumers these closure checks read are the
+# CLOSURE_TARGETS: fix-history-classify.jq, prefilter.sh, fetch-normalize.sh,
+# _shared/fetch-normalize-core.sh, pr-change-detect-poll.sh, react-marker.sh and merge-approved.sh.
 #
 # Mirrors tools/test_shared_libs.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any-
 # fail convention. Read-only: the only writes are scratch files in a disposable tmpdir removed on EXIT.
@@ -577,6 +579,7 @@ CLOSURE_TARGETS=(
   "$REPO_ROOT/plugin/skills/_shared/fetch-normalize-core.sh"
   "$MODULE_DIR/pr-change-detect-poll.sh"
   "$MODULE_DIR/react-marker.sh"
+  "$MODULE_DIR/merge-approved.sh"
 )
 BOT_STRIP_ERE='\[bot\\*\]'
 
@@ -631,7 +634,9 @@ done
 # word bound after `$login` keeps a longer variable name (`$login_x`) out. `$login` passed as an
 # argument (`--arg login`, `is_self(...; $login)`, the matches_filter wrapper) is not a compare.
 # RESIDUAL: rebinding the --arg to another variable (`$login as $me | ... == $me`) evades this
-# matcher; the behavioural cases (8, 20) are the guard for that shape.
+# matcher; the behavioural cases (8, 20) are the guard for that shape. merge-approved.sh binds self as
+# `--arg self`, not `--arg login`, so this matcher reads no self compare there; its merge cases in
+# tools/test_merge_approved.sh (`threads:unresolved-bot-with-self-login-last`) are the guard there.
 SELF_COMPARE_ERE='(==|!=)[[:space:]]*\$login([^A-Za-z0-9_]|$)|\$login[[:space:]]*(==|!=)'
 
 # print_self_compare_hits <file>
