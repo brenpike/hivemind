@@ -23,8 +23,8 @@ has its own folder:
   back to `read-1.json`.
 - `merge-<n>.status` is the exit code of the n-th `gh pr merge` (default 0).
 - `calls.log` gets one line per call:
-  `READ <n> head=<h> rollup=<r> reviews=<states>` (the comma-joined state of
-  every latestReviews node, or `NONE`),
+  `READ <n> state=<s> head=<h> rollup=<r> reviews=<states>` (the PR state, and
+  the comma-joined state of every latestReviews node, or `NONE`),
   `MERGE <n> after_head=<h> after_rollup=<r> after_reviews=<states> argv=<argv>`
   (with the head, rollup and review states of the last read before it), or
   `OTHER argv=<argv>` for any other call.
@@ -32,7 +32,12 @@ has its own folder:
 The fake writes a line to stderr on each call, and the merge call also prints to
 stdout. A case asserts the script's one stdout line, its exit code, an empty
 stderr, and its counts of reads and merge calls. So no `gh` output can leak
-through.
+through. The stdout line is also kept in the case folder for the property scan.
+
+A merge call that exits 0 is followed by the confirm read. A case that expects
+`merged` or `merged-admin` serves it as one more read, the base body with state
+`MERGED`, and counts it: a plain merge makes 2 reads and 1 merge call, an
+`--admin` merge 3 reads and 2 merge calls.
 
 ## Cases
 
@@ -66,6 +71,12 @@ through.
 - **Merge.** For each method, the exact command is
   `pr merge 5 --repo o/r --<method> --match-head-commit <head>`. With the admin
   setting set, the plain merge still goes first.
+- **Confirm read.** The plain merge exits 0 and the confirm read decides. A
+  confirm read showing `OPEN` or `CLOSED` prints `wait:merge-pending` with no
+  further merge call, with the admin setting set too. A failed confirm read
+  prints `MERGE_ERROR=graphql-read-failed`, an incomplete one `read-incomplete`
+  and a malformed one `malformed-read`, each exit 1, even when it shows
+  `MERGED`.
 - **Reads.** `hasNextPage: true` on latestReviews, a THUMBS_UP group or
   reviewThreads prints `read-incomplete`. A HEART group's next page is ignored.
   A gh exit code that is not 0 prints `graphql-read-failed`. The envelope and
@@ -78,8 +89,9 @@ through.
   - `DIRTY` prints `skipped:conflicts`;
   - `BLOCKED` or `BEHIND` with the admin setting unset or empty prints
     `skipped:blocked`, since an empty value is off;
-  - with the setting set to a non-empty value, the `--admin` rerun prints
-    `merged-admin`;
+  - with the setting set to a non-empty value, the `--admin` rerun that exits
+    0 prints `merged-admin` when its confirm read shows `MERGED`, and
+    `wait:merge-pending` when it shows `OPEN`;
   - with the setting and a re-read that fails any gate (closed, draft, no
     approval, an open thread, or a rollup that is not `SUCCESS`), that gate's
     line prints and no `--admin` call is made. A re-read showing a new
@@ -99,6 +111,9 @@ After the cases run, the suite scans every `calls.log`:
 - no merge call follows a read holding a review state outside `APPROVED`,
   `COMMENTED` or `DISMISSED`;
 - `--admin` appears only as the second merge call of a case that set the admin
-  setting, after a refused plain merge on the same head with a `SUCCESS` rollup.
+  setting, after a refused plain merge on the same head with a `SUCCESS` rollup;
+- a `merged` or `merged-admin` line requires the case's last call to be a read
+  showing `state=MERGED`, after its last merge call.
 
-The scan fails if it finds no merge call at all, so it can never pass empty.
+The scan fails if it finds no merge call at all, or no `merged` or
+`merged-admin` case, so it can never pass empty.

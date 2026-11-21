@@ -7,18 +7,20 @@
 # one file per read (read-<n>.json, with an optional read-<n>.status exit code), and answers each
 # `gh pr merge` with the exit code in merge-<n>.status (default 0). Every gh call is appended to the
 # case's calls.log:
-#   READ <n> head=<headRefOid> rollup=<state|NONE> reviews=<states|NONE>
-#                                  one GraphQL read served; reviews is the comma-joined state of
-#                                  every latestReviews node, in order
+#   READ <n> state=<state> head=<headRefOid> rollup=<state|NONE> reviews=<states|NONE>
+#                                  one GraphQL read served; state is the PR state, reviews is the
+#                                  comma-joined state of every latestReviews node, in order
 #   MERGE <n> after_head=<h> after_rollup=<r> after_reviews=<s> argv=<...>
 #                                  one merge call, with the head, rollup and review states of the
 #                                  most recent read served before it
 #   OTHER argv=<...>               any other gh call (always a failure here)
 # Each case asserts the script's one stdout line, its exit status, an empty stderr, and the number
-# of reads and merge calls. Fixture bodies are derived inline from one clean base body with one jq
-# edit each, so a case differs from the merge-ready PR in one place.
+# of reads and merge calls; its stdout line is also kept in the case's stdout file. Fixture bodies
+# are derived inline from one clean base body with one jq edit each, so a case differs from the
+# merge-ready PR in one place. A merge call that exits 0 is followed by the confirm read, so a case
+# that expects merged or merged-admin serves one more read, the base body with state MERGED.
 #
-# Four properties are checked over EVERY case's calls.log after the cases run:
+# Five properties are checked over EVERY case after the cases run:
 #   - no merge call carries --auto or --delete-branch, and every merge call carries
 #     --match-head-commit equal to the head of the read before it;
 #   - no merge call follows a read whose rollup was not SUCCESS (no path merges on a non-SUCCESS
@@ -26,7 +28,9 @@
 #   - no merge call follows a read holding a review state outside APPROVED, COMMENTED or
 #     DISMISSED (no path merges over a standing block);
 #   - --admin appears only as the second merge call of a case, after a refused plain merge, with
-#     HIVEMIND_AUTO_MERGE_ADMIN set to a non-empty value, on the same head as the plain merge.
+#     HIVEMIND_AUTO_MERGE_ADMIN set to a non-empty value, on the same head as the plain merge;
+#   - a merged or merged-admin line requires the case's last call to be a READ showing
+#     state=MERGED, after its last merge call.
 #
 # Scratch space comes from tools/lib/scratch.sh (make_scratch_dir), removed on EXIT.
 #
@@ -79,7 +83,8 @@ if [ "${1:-}" = "api" ] && [ "${2:-}" = "graphql" ]; then
   read_head="$(jq -r 'try .data.repository.pullRequest.headRefOid catch "none"' "$body_file" 2>/dev/null)"
   read_rollup="$(jq -r 'try (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state // "NONE") catch "none"' "$body_file" 2>/dev/null)"
   read_reviews="$(jq -r 'try ([.data.repository.pullRequest.latestReviews.nodes[]? | .state | tostring] | if length == 0 then "NONE" else join(",") end) catch "none"' "$body_file" 2>/dev/null)"
-  printf 'READ %s head=%s rollup=%s reviews=%s\n' "$read_number" "$read_head" "$read_rollup" "$read_reviews" >>"$calls_log"
+  read_state="$(jq -r 'try (.data.repository.pullRequest.state // "NONE" | tostring) catch "none"' "$body_file" 2>/dev/null)"
+  printf 'READ %s state=%s head=%s rollup=%s reviews=%s\n' "$read_number" "$read_state" "$read_head" "$read_rollup" "$read_reviews" >>"$calls_log"
   printf '%s %s %s\n' "$read_head" "$read_rollup" "$read_reviews" >"$case_dir/last-read"
   cat "$body_file"
   echo "gh: stub stderr line" >&2
@@ -122,6 +127,8 @@ BASE_BODY="$(jq -n -c --arg head "$HEAD_A" --arg bot "$BOT_LOGIN" '{data: {repos
   ]}
 }}}}')"
 PR='.data.repository.pullRequest'
+# The confirm-read edit: the base body with the PR merged.
+MERGED_EDIT="$PR.state = \"MERGED\""
 
 # new_case <name>: create and print a fresh case directory.
 new_case() {
@@ -142,13 +149,15 @@ write_read() {
 }
 
 # run_case <case_dir> <env-assignment|command word>...: run the given command through `env` with
-# the shim first on PATH and the case dir as cwd; sets CASE_OUT, CASE_STATUS and CASE_ERR.
+# the shim first on PATH and the case dir as cwd; sets CASE_OUT, CASE_STATUS and CASE_ERR, and
+# keeps CASE_OUT in the case's stdout file for the property scan.
 run_case() {
   local case_dir="$1"
   shift
   CASE_OUT="$(cd "$case_dir" && env PATH="$SHIM_DIR:$PATH" FIXTURE_CASE_DIR="$case_dir" "$@" 2>"$case_dir/stderr")"
   CASE_STATUS=$?
   CASE_ERR="$(cat "$case_dir/stderr")"
+  printf '%s\n' "$CASE_OUT" >"$case_dir/stdout"
 }
 
 # count_calls <case_dir> <READ|MERGE|OTHER>: print how many calls of that kind the case made.
@@ -172,14 +181,19 @@ expect_case() {
 }
 
 # gate_case <name> <jq-edit> <line> <merges> [env...]: one read of the edited base body with
-# HIVEMIND_AUTO_MERGE=squash plus any extra env, default arguments.
+# HIVEMIND_AUTO_MERGE=squash plus any extra env, default arguments. A case that expects merged
+# also serves the confirm read, read-2 with state MERGED, and expects two reads.
 gate_case() {
-  local case_name="$1" fixture_edit="$2" want_line="$3" want_merges="$4" case_dir
+  local case_name="$1" fixture_edit="$2" want_line="$3" want_merges="$4" want_reads=1 case_dir
   shift 4
   case_dir="$(new_case "$case_name")"
   write_read "$case_dir" 1 "$fixture_edit"
+  if [ "$want_line" = "MERGE=merged" ]; then
+    write_read "$case_dir" 2 "$MERGED_EDIT"
+    want_reads=2
+  fi
   run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash "$@" bash "$MERGE_APPROVED" o r 5 automated "$SELF"
-  expect_case "$case_name" "$case_dir" "$want_line" 0 1 "$want_merges"
+  expect_case "$case_name" "$case_dir" "$want_line" 0 "$want_reads" "$want_merges"
 }
 
 # ── Setting gate: no gh call ─────────────────────────────────────────────────
@@ -231,8 +245,9 @@ expect_case "args:checked-before-setting" "$case_dir" "MERGE_ERROR=bad-pr-number
 
 case_dir="$(new_case args-empty-filter-defaults)"
 write_read "$case_dir" 1 '.'
+write_read "$case_dir" 2 "$MERGED_EDIT"
 run_case "$case_dir" HIVEMIND_AUTO_MERGE=merge bash "$MERGE_APPROVED" o r 5 "" "$SELF"
-expect_case "args:empty-filter-is-automated" "$case_dir" "MERGE=merged" 0 1 1
+expect_case "args:empty-filter-is-automated" "$case_dir" "MERGE=merged" 0 2 1
 
 # ── Gates in order ───────────────────────────────────────────────────────────
 gate_case "gate:not-open-closed"  "$PR.state = \"CLOSED\""   "MERGE=skipped:not-open" 0
@@ -303,8 +318,9 @@ expect_case "approval:login-filter-other-bot" "$case_dir" "MERGE=skipped:no-appr
 
 case_dir="$(new_case approval-login-filter-match)"
 write_read "$case_dir" 1 '.'
+write_read "$case_dir" 2 "$MERGED_EDIT"
 run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash bash "$MERGE_APPROVED" o r 5 review-helper "$SELF"
-expect_case "approval:login-filter-match" "$case_dir" "MERGE=merged" 0 1 1
+expect_case "approval:login-filter-match" "$case_dir" "MERGE=merged" 0 2 1
 
 case_dir="$(new_case approval-filter-all-human)"
 write_read "$case_dir" 1 "$PR.latestReviews.nodes = [{state: \"COMMENTED\", author: {login: \"alice\", __typename: \"User\"}}]"
@@ -343,8 +359,9 @@ gate_case "checks:error"    "$PR.commits.nodes[0].commit.statusCheckRollup.state
 for merge_method in merge squash rebase; do
   case_dir="$(new_case "merge-$merge_method")"
   write_read "$case_dir" 1 '.'
+  write_read "$case_dir" 2 "$MERGED_EDIT"
   run_case "$case_dir" HIVEMIND_AUTO_MERGE="$merge_method" bash "$MERGE_APPROVED" o r 5 automated "$SELF"
-  expect_case "merge:$merge_method" "$case_dir" "MERGE=merged" 0 1 1
+  expect_case "merge:$merge_method" "$case_dir" "MERGE=merged" 0 2 1
   want_argv="pr merge 5 --repo o/r --$merge_method --match-head-commit $HEAD_A"
   if grep -qxF "MERGE 1 after_head=$HEAD_A after_rollup=SUCCESS after_reviews=COMMENTED argv=$want_argv" "$case_dir/calls.log"; then
     pass "merge:$merge_method-argv" "$want_argv"
@@ -355,8 +372,36 @@ done
 
 case_dir="$(new_case merge-admin-set-plain-succeeds)"
 write_read "$case_dir" 1 '.'
+write_read "$case_dir" 2 "$MERGED_EDIT"
 run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 5 automated "$SELF"
-expect_case "merge:admin-set-plain-first" "$case_dir" "MERGE=merged" 0 1 1
+expect_case "merge:admin-set-plain-first" "$case_dir" "MERGE=merged" 0 2 1
+
+# ── Confirm read: a merge call that exits 0 is not the verdict ───────────────
+# confirm_case <name> <confirm-read-edit> <line> <status> [env...]: the plain merge exits 0 and the
+# confirm read, read-2, is the base body after the edit; two reads, one merge call.
+confirm_case() {
+  local case_name="$1" fixture_edit="$2" want_line="$3" want_status="$4" case_dir
+  shift 4
+  case_dir="$(new_case "$case_name")"
+  write_read "$case_dir" 1 '.'
+  write_read "$case_dir" 2 "$fixture_edit"
+  run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash "$@" bash "$MERGE_APPROVED" o r 5 automated "$SELF"
+  expect_case "$case_name" "$case_dir" "$want_line" "$want_status" 2 1
+}
+confirm_case "confirm:open-pending"           '.' "MERGE=wait:merge-pending" 0
+confirm_case "confirm:open-pending-admin-set" '.' "MERGE=wait:merge-pending" 0 HIVEMIND_AUTO_MERGE_ADMIN=1
+confirm_case "confirm:closed-pending"         "$PR.state = \"CLOSED\"" "MERGE=wait:merge-pending" 0
+confirm_case "confirm:incomplete" \
+  "$MERGED_EDIT | $PR.reviewThreads.pageInfo.hasNextPage = true" "MERGE_ERROR=read-incomplete" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
+confirm_case "confirm:malformed" \
+  "$MERGED_EDIT | $PR.isDraft = null" "MERGE_ERROR=malformed-read" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
+
+case_dir="$(new_case confirm-read-fails)"
+write_read "$case_dir" 1 '.'
+write_read "$case_dir" 2 "$MERGED_EDIT"
+printf '1' >"$case_dir/read-2.status"
+run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 5 automated "$SELF"
+expect_case "confirm:read-fails" "$case_dir" "MERGE_ERROR=graphql-read-failed" 1 2 1
 
 # ── Failed and incomplete reads ──────────────────────────────────────────────
 # read_error_case <name> <jq-edit> <reason>: one read, MERGE_ERROR=<reason>, exit 1, no merge.
@@ -403,16 +448,22 @@ expect_case "read:empty-body" "$case_dir" "MERGE_ERROR=graphql-empty-body" 1 1 0
 
 # ── Refused plain merge: second read decides ─────────────────────────────────
 # refused_case <name> <second-read-edit> <line> <merges> [env...]: the plain merge exits 1, the
-# second read is the base body after the edit; an admin rerun, when reached, exits 0.
+# second read is the base body after the edit; an admin rerun, when reached, exits 0. A case that
+# expects merged-admin also serves the confirm read, read-3 with state MERGED, and expects three
+# reads.
 refused_case() {
-  local case_name="$1" fixture_edit="$2" want_line="$3" want_merges="$4" case_dir
+  local case_name="$1" fixture_edit="$2" want_line="$3" want_merges="$4" want_reads=2 case_dir
   shift 4
   case_dir="$(new_case "$case_name")"
   write_read "$case_dir" 1 '.'
   write_read "$case_dir" 2 "$fixture_edit"
+  if [ "$want_line" = "MERGE=merged-admin" ]; then
+    write_read "$case_dir" 3 "$MERGED_EDIT"
+    want_reads=3
+  fi
   printf '1' >"$case_dir/merge-1.status"
   run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash "$@" bash "$MERGE_APPROVED" o r 5 automated "$SELF"
-  expect_case "$case_name" "$case_dir" "$want_line" 0 2 "$want_merges"
+  expect_case "$case_name" "$case_dir" "$want_line" 0 "$want_reads" "$want_merges"
 }
 refused_case "refused:head-moved" \
   "$PR.headRefOid = \$head_b | $PR.commits.nodes[0].commit.oid = \$head_b | $PR.mergeStateStatus = \"BLOCKED\"" \
@@ -463,6 +514,14 @@ printf '1' >"$case_dir/merge-2.status"
 run_case "$case_dir" HIVEMIND_AUTO_MERGE=rebase HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 5 automated "$SELF"
 expect_case "refused:admin-refused" "$case_dir" "MERGE=skipped:refused" 0 2 2
 
+case_dir="$(new_case "refused:blocked-admin-confirm-open")"
+write_read "$case_dir" 1 '.'
+write_read "$case_dir" 2 "$PR.mergeStateStatus = \"BLOCKED\""
+write_read "$case_dir" 3 '.'
+printf '1' >"$case_dir/merge-1.status"
+run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 5 automated "$SELF"
+expect_case "refused:blocked-admin-confirm-open" "$case_dir" "MERGE=wait:merge-pending" 0 3 2
+
 case_dir="$(new_case refused-reread-fails)"
 write_read "$case_dir" 1 '.'
 write_read "$case_dir" 2 '. + {errors: [{message: "boom"}]}'
@@ -477,7 +536,7 @@ printf '1' >"$case_dir/merge-1.status"
 run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 5 automated "$SELF"
 expect_case "refused:reread-incomplete" "$case_dir" "MERGE_ERROR=read-incomplete" 1 2 1
 
-for admin_case in refused:blocked-admin refused:behind-admin; do
+for admin_case in refused:blocked-admin refused:behind-admin refused:blocked-admin-confirm-open; do
   case_dir="$CASES_DIR/$admin_case"
   want_admin="MERGE 2 after_head=$HEAD_A after_rollup=SUCCESS after_reviews=COMMENTED argv=pr merge 5 --repo o/r --squash --match-head-commit $HEAD_A --admin"
   if grep -qxF "$want_admin" "$case_dir/calls.log"; then
@@ -502,12 +561,36 @@ check_merge_review_states() {
   done
 }
 
+# check_merged_confirm_read <case> <case_dir> <stdout-line>: for a case that printed merged or
+# merged-admin, fail unless it made a merge call and its last call is a READ showing state=MERGED,
+# so the confirm read came after its last merge call.
+check_merged_confirm_read() {
+  local last_call
+  last_call="$(tail -n 1 "$2/calls.log")"
+  if ! grep -q '^MERGE ' "$2/calls.log" || ! [[ "$last_call" =~ ^READ\ [0-9]+\ state=MERGED\  ]]; then
+    failed "property:merged-only-after-merged-confirm-read" "$1: $3, calls: $(tr '\n' '|' <"$2/calls.log")"
+  fi
+}
+
 merge_call_count=0
+merged_case_count=0
 for calls_log in "$CASES_DIR"/*/calls.log; do
   case_name="$(basename "$(dirname "$calls_log")")"
+  case_dir="$(dirname "$calls_log")"
+  if [ -f "$case_dir/stdout" ]; then
+    case_out="$(cat "$case_dir/stdout")"
+  else
+    case_out=""
+    failed "property:merged-only-after-merged-confirm-read" "$case_name: no stdout recorded"
+  fi
+  case "$case_out" in
+    MERGE=merged|MERGE=merged-admin)
+      merged_case_count=$((merged_case_count + 1))
+      check_merged_confirm_read "$case_name" "$case_dir" "$case_out" ;;
+  esac
   case_env_admin="no"
   case "$case_name" in
-    refused:blocked-admin|refused:behind-admin|refused-admin-refused) case_env_admin="yes" ;;
+    refused:blocked-admin|refused:behind-admin|refused-admin-refused|refused:blocked-admin-confirm-open) case_env_admin="yes" ;;
   esac
   while IFS= read -r call_line; do
     case "$call_line" in MERGE\ *) ;; *) continue ;; esac
@@ -543,6 +626,11 @@ if [ "$merge_call_count" -gt 0 ]; then
   pass "property:scan-non-vacuous" "$merge_call_count merge calls scanned for --auto, --delete-branch, --match-head-commit, SUCCESS-only, allowed review states and --admin placement"
 else
   failed "property:scan-non-vacuous" "no merge call recorded in any case"
+fi
+if [ "$merged_case_count" -gt 0 ]; then
+  pass "property:merged-scan-non-vacuous" "$merged_case_count merged or merged-admin cases scanned for a last READ showing state=MERGED after the last merge call"
+else
+  failed "property:merged-scan-non-vacuous" "no case printed merged or merged-admin"
 fi
 
 echo ''
