@@ -146,6 +146,10 @@ _Avoid_: sync check, remote check
 The set of checks (classification, base branch, trunk freshness, branch name, commit policy, PR target) that must all be defined before implementation begins.
 _Avoid_: pre-check, setup
 
+**Ready Issue**:
+An open issue labeled `readiness:ready` (the `hivemind:triage-backlog` readiness ladder: plan clear, no open questions) whose latest ready label came from a user with write access, whose title and body are unedited since, and that has no open blocked-by dependency. It is the only kind of issue the **Lair** claims. The Lair never applies the ready label itself.
+_Avoid_: groomed issue, actionable issue, loop-eligible issue
+
 ### Review
 
 **Adaptation Cycle**:
@@ -346,6 +350,15 @@ _Avoid_: stream, task (too generic), work item, lane
 **Brood Manifest**:
 The per-brood JSON file at `.hivemind/broods/<brood-id>/manifest.json` (schema `manifest_version: 4`) in the spawning checkout (the current worktree; the main checkout for the top-level hatchery), tracking one brood's strains — their display worktree paths, tmux sessions, and status. New manifests carry no per-strain branch. Each brood owns a disjoint manifest under its brood-id directory; the hatchery enumerates them by globbing `.hivemind/broods/brood-*/manifest.json`.
 _Avoid_: brood config, brood state, registry
+
+**Lair**:
+The Software Factory: a deterministic controller, with no model in it, that runs in a long-lived tmux window and reconciles GitHub each tick. It claims **Ready Issues**, starts one strain per claimed issue (an interactive session in its own worktree running standard-delivery in unattended mode), reads each strain's result, owns the issue's labels, and is the only merger of its pull requests. GitHub holds its state; its local files are a rebuildable cache. For its strains it owns lifecycle, merge order and version coordination (ADR-0045).
+_Alias_: Software Factory
+_Avoid_: loop, autopilot, scheduler, daemon, Overmind
+
+**Park**:
+The unattended-mode outcome for a stop a run may not take itself: the run ends without asking, pushes its branch, and reports a typed park. An answerable park (a decision or a fact) puts its question on the issue and moves it to `readiness:needs-decision`; a user with write access answers on the issue, and the answer re-enters as a settled decision when the issue is re-admitted. An approval park (a destructive fix, an external effect, injection-suspect content) hands the issue off for an interactive run. Distinct from the triage label `readiness:parked`, which means shelved.
+_Avoid_: pause, block, hold, escalate
 
 ### Pipeline & Artifacts
 
