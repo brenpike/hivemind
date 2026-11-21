@@ -70,15 +70,23 @@ At claim time the Lair controller (#608) runs the readiness check against the tr
 
 ### Abathur council
 
-Two read-only agents: `abathur` and the council member `overseer`. The caller launches two or more Overseer members, each with an angle and a model, then Abathur. Abathur weighs their opinions into one brief and keeps the dissent. Abathur never picks the members it judges. One member may be a non-Claude reviewer run through the tool-neutral runner's reviewer setting and argv run, in a brief mode. Per [docs/engineering-principles.md](../../engineering-principles.md) P9 that mode shares only the runner's kernel, and the review mode's behavior and output do not change. In the main session the conductor launches the members. In standard-delivery the workflow script launches the Claude members, and the synapse agent runs the non-Claude member's committed runner command.
+Two read-only agents: `abathur` and the council member `overseer` (#618). The caller launches two to four Overseer members, each with an angle and a model, then Abathur. Each member returns one opinion. Abathur weighs the opinions and returns only a recommendation. The caller composes the council's brief, per the council brief contract. Abathur never picks the members it judges.
+
+In the main session the conductor launches them. #622 adds `hivemind:abathur` and `hivemind:overseer` to the overlord's Agent allowlist; its Write grant is unchanged (D23). In standard-delivery the workflow script launches the Claude members, and synapse runs the runner member's committed script (D22). Every member and Abathur delegation carries `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Delegation Data-Boundary Constraint).
 
 ### Mid-delivery consult
 
-Inside standard-delivery, `decide()` returns a third action, `consult`, per the consult row. The script then convenes the council and calls `decide()` again with the council's brief. A strong council result with a clean gate is taken, journaled and listed for veto. A split is asked in an interactive run and parks with the brief and dissent in an unattended run (#607).
+Inside standard-delivery, the consult step runs before the script acts on a `decide()` result. `decide()` is unchanged. It gains no third action and no `consults_used` input. There is no `council_split` ask reason and no `council` list reason. A strong council result with a clean gate is taken, journaled and shown in the pull request decisions. A split comes back with strength `none`, so it asks `no_recommendation`. In an interactive run the ask carries the dissent. In an unattended run it parks (#607).
 
 ### Design-decision rule
 
-An extension of Review Calls in `plugin/governance/decision-autonomy.md`. In the design stages, a decision with a strong recommendation inside the PRD's scope and a clean gate is taken and listed in the review record for veto. These are always asked: a change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible. A decision with a weak recommendation or none goes to the council first.
+An extension of Review Calls in `plugin/governance/decision-autonomy.md` for the design stages. A decision is taken when its recommendation is strong, it is inside the PRD's scope and its gate is clean.
+
+A design decision's gate reads Promotion Gate clause 1, irreversible, and clause 3, safety-relevant. The always-ask list replaces clause 2. So a decision inside the PRD's scope that amends no accepted ADR does not trip it.
+
+These are always asked: a change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible. A weak or absent recommendation goes to the council first, and a split is asked.
+
+The design stages run no `decide()`. Take or ask is the conductor's judgment, checked by review. The review record lists each taken decision with its always-ask screen: an answer to each of the four always-ask items. The confirming pass checks every screen. A taken decision that should have been asked is a finding (#619).
 
 ## State and ownership
 
@@ -161,13 +169,59 @@ The record body, read by people only: reviewed documents, each round's passes wi
 
 ### Council brief contract
 
-Input: a decision brief valid against `plugin/references/decision-brief-schema.json`. Output: a brief valid against the same schema, extended with an optional `council` object: `members` (each with `id`, `angle`, `model`, `option_id`, `strength`, `why`) and `dissent` (each with `member_id`, `option_id`, `why`). `recommendation.strength` is the council's strength. Abathur may recommend only one of the input brief's option ids; `decide()` already asks `recommendation_not_an_option` otherwise. A result is used only with at least two members, on at least two models.
+Input: a decision brief valid against `plugin/references/decision-brief-schema.json`. #618 adds an optional per-option `gate` object with `irreversible`, `architectural` and `safety`. It is the producer's read of that option. Existing briefs stay valid.
 
-### Consult row
+Member output: each member returns `{option_id, strength, why}`, with strength `strong`, `weak` or `none`.
 
-One new row in `decision-autonomy-table.json` `rows`: kind `council_consult`, a cell per level of `consult` or `skip`, and an integer `per_run_cap`. A call site never passes `council_consult` as its kind; if one does, the cell is neither `auto` nor `surface`, so `decide()` asks `bad_cell` and fails closed.
+Abathur output: Abathur gets the input brief and the opinions as data. It returns only `{option_id, strength, why}`, with strength `strong` or `none`. A split is `none`. A `weak` strength, an `option_id` not among the input's option ids, or any other shape means no council result.
 
-`decide()` gains an optional `consults_used` input. With it absent, nothing changes. With it present, after every existing check through `gate_safety` passes, `decide()` returns `{action: 'consult'}` when all hold: the strength is `weak` or `none`, the brief has no `council` object, the consult cell at the run's level is `consult`, and `consults_used` is below `per_run_cap`. A brief with a `council` object below `strong` asks the new reason `council_split`. A take of a council brief is listed under the new list reason `council`. Hard stops, `table_surface` and gate trips ask before the consult check, so they are never consulted.
+Composed output: the caller composes the output brief. It is the input brief unchanged except `recommendation`, which is Abathur's, plus the optional `council` object:
+
+- `members` has one entry per member that returned a valid opinion. `id`, `angle` and `model` come from the caller's own launch record. `option_id`, `strength` and `why` come from that member's own output.
+- `dissent` has one entry per member whose `option_id` differs from the council's: `member_id`, `option_id`, `why`.
+
+No text a member or Abathur writes reaches the gate, options, problem or criticality. A claimed model is ignored. When the council's `option_id` differs from the input's recommended option, the caller sets the composed `gate` from that option's own `gate`. When that option carries none, the caller sets strength `none`, so the call asks.
+
+Schema bounds: `members` holds 2 to 4 items and `dissent` at most 3. Each `why` has maxLength 200 and is described "Written for the user". `id`, `angle` and `model` have maxLength 64. The engine shows only bounded fields written for the user; #618 extends `tests/workflow-scripts/data.test.mjs` for them. A result counts only with at least two members whose `model` values differ.
+
+### Runner member brief mode
+
+The runner member runs only when `HIVEMIND_LOCAL_REVIEWER` is a JSON argv list. Unset or the `codex-plugin` preset means no runner member. The council then needs two Claude members on two Claude models. The runner member's `model` value is `runner:` plus the basename of argv[0]. That names the tool, never a model (ADR-0042 decision 7).
+
+It is a sixth script of the Synapse Runner Gate. #618 edits `plugin/hooks/synapse-gate.sh`, `plugin/governance/security-policy.md` (Synapse Runner Gate), `tests/policy/safety-synapse-gate.json` and `tools/test_synapse_gate.sh`. Synapse's Write allow gains one fixed inputs file, `.hivemind/council-inputs-<token>.json`. It is the only way the brief reaches the script, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern). The engine reaches the script through synapse. The main-session guide reaches it through its own skill grant.
+
+Per [docs/engineering-principles.md](../../engineering-principles.md) P9 it shares only the runner's kernel with `run-review.sh`. The kernel is:
+
+- the reviewer-setting read and argv check;
+- the no-shell argv run under `timeout -k 5 <deadline>`;
+- the before/after work-tree check, where any change blocks and discards the opinion;
+- the reply JSON extraction.
+
+The kernel moves to `plugin/skills/_shared/`. Review mode's behavior and output do not change, and `tools/test_run_review.sh` stays green. `run-review.sh` still runs every local review (ADR-0042 decision 9).
+
+### Consult setting
+
+A top-level object `council_consult` in `plugin/references/decision-autonomy-table.json`, beside `rows` and never a row. It holds one value per level, `consult` or `skip`, and an integer `per_run_cap`. `rows` and `hard_stops` are unchanged, so no call site can pass it as a kind.
+
+#624 extends `projectAutonomyTable` in `tools/build_workflows.mjs` to project it, and updates `tests/workflow-scripts/build.test.mjs` and `tests/workflow-scripts/data.test.mjs`. #624 sets the `unattended` value and lands after #607 adds that level (ADR-0045 decision 6). In the design stages the conductor reads the value at the table's `default_level`. It allows at most `per_run_cap` consults per guide invocation (#622).
+
+### Consult step
+
+Only standard-delivery runs the step. analysis-only and pr-feedback-remediation carry no council settings, so their call sites resolve through `decide()` alone. The `decide()` call sites in `plugin/workflow-src/lib/` run the step only when the run carries council settings (#624).
+
+1. Call `decide()` on the input brief with the call site's kind, level and listed.
+2. Convene the council only when all of these hold:
+   - the result is a take of a `weak` recommendation or an ask with reason `no_recommendation`;
+   - the kind is not `plan_acceptance`, `remediation_plan_acceptance` or `gate_rerun`, the routine kinds the record shows only when listed;
+   - `council_consult` at the run's level is `consult`;
+   - the run's consult count is below `per_run_cap`.
+
+   Otherwise the first result stands. So a hard stop, a malformed brief, `table_surface`, `bad_cell` and every gate trip never reach the council.
+3. The count rises by one per convened council, whether or not it returns a result.
+4. With no council result, the first result stands.
+5. With a council result, call `decide()` on the composed brief with the same kind, level and listed. That result stands.
+6. `askReasons()`, `listReasons()`, the check order and `pauseDelivery`'s guard are unchanged. So ADR-0037's closed Ask Set is not amended.
+7. The count is a script-local counter. It starts at 0 on each launch and is rebuilt as a replay passes the same steps. `resume_args` stays `{answers, build}` (`plugin/workflow-src/lib/args.js`).
 
 ## Trust boundaries
 
@@ -175,9 +229,9 @@ One new row in `decision-autonomy-table.json` `rows`: kind `council_consult`, a 
 - **The ready label stays the maintainer's.** Only the maintainer applies `readiness:ready`, through triage's confirm gate. The guide and the Lair never apply it. The Lair keeps its write-permission and unedited-since checks of ADR-0045 decision 10, as amended by #625.
 - **Reviewers are fresh and read-only.** Review passes run on cerebrate, whose tool list holds no Bash, Write or Edit. `Memory context: none` keeps the writing session's memory from steering a reviewer.
 - **Stamps bind the reviewed content.** The record ships in the same pull request as the design, so it passes the same local review and bot review. Trunk never holds an unreviewed design, and any later edit is detected by blob id.
-- **The council cannot widen authority.** Its brief re-enters `decide()`, which re-checks hard stops and every gate on the council's recommended option. Members and Abathur are read-only. The non-Claude member runs through the runner's no-shell argv run.
-- **Unattended runs never decide a split.** A split or an always-ask call parks with the brief and dissent, and that text is shown encoded as untrusted data.
-- **No new credential and no merge-path change.** Everything runs under the executing user's credentials, and `merge-approved.sh` is untouched.
+- **The council cannot widen authority.** `decide()` resolves a caller-composed brief. Abathur writes only a recommendation. Member provenance comes from the caller's launch records. A switched option is gated by its own producer-written gate, or the call asks. The `abathur` and `overseer` tools lists hold no Bash, Write, Edit or agent-launch tool, pinned by a safety fixture under `tests/policy/` (#618). The runner member runs under the kernel's no-shell argv run and before/after check. Member opinions and Abathur's output are injection-scanned. A suspect one ends the consult with no council result and stops at the `injection_suspect` hard stop. That stop is asked in an interactive run and is an approval park in an unattended run (ADR-0045 decision 7) (#618, #624).
+- **Unattended runs never decide a split.** A split or always-ask call parks with the brief and dissent. Its text is encoded as untrusted data in the park record (#624, with #607).
+- **No new credential and no merge-path change.** Everything runs under the executing user's credentials, and `merge-approved.sh` is untouched. The two trust-boundary changes, a sixth runner-gate script and the overlord's two new agents, were asked (D22, D23).
 
 ## Lifecycle
 
@@ -369,7 +423,7 @@ Slices start in this order; a slice waits on its blockers.
 | #621 Stage derivation and handoff check | #615, #619 | Stage derivation and handoff check; Initiative stages; D2: Stage derived only from GitHub and git |
 | #622 Guided initiative command | #616, #617, #619, #620, #621 | Guide skill; Close-out; D1: Guide is a user-only conductor skill; D10: Delivered design frozen as history |
 | #623 Lair admission | #615, #608 | Lair admission |
-| #624 Mid-delivery consult | #618, #607 | Mid-delivery consult; Consult row; D13: Consult row as data with a per-run cap; D18: Initial consult row values; D20: Prose budget with no pre-approved raise; D21: Accepted-ADR amendments recorded in ADR-0047 |
+| #624 Mid-delivery consult | #618, #607 | Mid-delivery consult; Consult setting; D13: Consult row as data with a per-run cap; D18: Initial consult row values; D20: Prose budget with no pre-approved raise; D21: Accepted-ADR amendments recorded in ADR-0047 |
 
 ## Open questions
 
