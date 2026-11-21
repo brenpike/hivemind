@@ -181,4 +181,4 @@ Round 3 did not converge under the 3-round cap. The user was asked to choose: sp
   - #630 Lair design: strain launch and containment (A3-1, A3-4, A3-5, A3-6, A3-7, B3-2, B3-9, B3-17).
   - #631 Lair design: merge lane (A3-2, A3-3, A3-10, B3-4, B3-5, B3-6, B3-7, B3-8).
   - #632 Lair design: claim integrity (B3-1, B3-3).
-- PR #628 stays a draft. It merges once a design for one of these parts passes review.
+- PR #628 stays a draft and is not merged while this record's verdict is `fail`.
