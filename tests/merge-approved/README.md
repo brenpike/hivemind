@@ -64,9 +64,10 @@ through.
 - **Refused merge.** The plain merge exits 1 and a second read decides:
   - a moved head prints `wait:head-moved`;
   - `DIRTY` prints `skipped:conflicts`;
-  - `BLOCKED` or `BEHIND` without the admin setting prints `skipped:blocked`;
-  - with the setting, the `--admin` rerun prints `merged-admin`. This includes
-    the empty-value form, since the setting is checked by presence;
+  - `BLOCKED` or `BEHIND` with the admin setting unset or empty prints
+    `skipped:blocked`, since an empty value is off;
+  - with the setting set to a non-empty value, the `--admin` rerun prints
+    `merged-admin`;
   - with the setting and a re-read rollup that is not `SUCCESS`, the rollup's
     gate line prints and no `--admin` call is made;
   - an `--admin` refusal, or any other state, prints `skipped:refused`;

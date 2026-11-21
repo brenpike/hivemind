@@ -31,6 +31,9 @@ The user asked for two things: an approval that fires in this case, and an opt-i
 7. **Any open thread blocks the merge.** A thread that is not resolved and does not end in HIVEMIND's reply stops the script.
 8. **The setting value names the method.** `HIVEMIND_AUTO_MERGE` is `merge`, `squash` or `rebase`. Unset or empty means off. Any other value is refused, and nothing merges.
 9. **The script rechecks approval itself.** It does not trust the skill's end reason. It checks again that the PR is open and not a draft, that an in-scope bot reviewed or 👍'd, that every thread is settled, and that the rollup is `SUCCESS`.
+10. **The skill routes the script's one line.** The skill runs the script only after an approval return whose QUIET-EXIT CHECK reports `UNCHANGED`. No other end runs it, `merge-advised` included. `MERGE=off` ends `clean`, as before. `MERGE=merged` or `MERGE=merged-admin` ends `pr-merged`, through `loop-state.sh token-map STATE=MERGED`, with the line under `Issues`. `MERGE=skipped:*`, `MERGE_ERROR=`, a non-zero exit or a refused call ends `clean`, with the line under `Issues` and a `Next action` that tells the human to merge.
+11. **A wait keeps watching in the current window.** `MERGE=wait:*` ends nothing. The skill arms the poll again with the pending seed for the time left in the current idle window. That arm opens no new window and captures no seed, so a PR whose CI never turns green ends at `watch-window-elapsed`.
+12. **An empty `HIVEMIND_AUTO_MERGE_ADMIN` is off.** The setting is checked by presence, like the other `HIVEMIND_*` presence settings, and an empty value counts as unset. Only a non-empty value allows `--admin`.
 
 ## Considered options
 

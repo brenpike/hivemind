@@ -55,6 +55,7 @@ SUITE_TEST_EXIT_PRECEDENCE='test_exit_precedence.sh'
 SUITE_TEST_LOOP_STATE='test_loop_state.sh'
 SUITE_TEST_REPLY_RESOLVE='test_reply_resolve.sh'
 SUITE_TEST_REACT_MARKER='test_react_marker.sh'
+SUITE_TEST_MERGE_APPROVED='test_merge_approved.sh'
 SUITE_TEST_LEDGER_RECONSTRUCT='test_ledger_reconstruct.sh'
 SUITE_TEST_TRIAGE_OPS='test_triage_ops.sh'
 SUITE_TEST_SUBISSUE_OPS='test_subissue_ops.sh'
@@ -92,6 +93,7 @@ ALL_SUITES=(
   "$SUITE_TEST_LOOP_STATE"
   "$SUITE_TEST_REPLY_RESOLVE"
   "$SUITE_TEST_REACT_MARKER"
+  "$SUITE_TEST_MERGE_APPROVED"
   "$SUITE_TEST_LEDGER_RECONSTRUCT"
   "$SUITE_TEST_TRIAGE_OPS"
   "$SUITE_TEST_SUBISSUE_OPS"
@@ -130,6 +132,7 @@ KNOWN_SUITES=(
   test_loop_state.sh
   test_reply_resolve.sh
   test_react_marker.sh
+  test_merge_approved.sh
   test_ledger_reconstruct.sh
   test_triage_ops.sh
   test_subissue_ops.sh
@@ -339,18 +342,22 @@ run_suites() {
 #   plugin/skills/_shared/*.sh, tests/brood/**          -> test_shared_libs
 #   plugin/skills/github-review-loop/scripts/*.jq      -> test_fix_history_classify, test_fetch_normalize,
 #                                                         test_shared_libs, test_change_detect_poll,
-#                                                         test_prefilter, test_react_marker
+#                                                         test_prefilter, test_react_marker,
+#                                                         test_merge_approved
+#   plugin/skills/github-review-loop/scripts/merge-approved.sh, tests/merge-approved/*
+#                                      -> test_merge_approved
 #   plugin/skills/github-review-loop/scripts/prefilter.sh, tests/fix-history/*
 #                                      -> test_prefilter
 #   plugin/skills/github-review-loop/scripts/*.sh       -> test_shared_libs (glob-closure test)
 #   plugin/skills/_shared/graphql-response.sh
 #                                      -> test_fetch_normalize, test_change_detect_poll, test_prefilter,
-#                                         test_react_marker, test_reply_resolve (+ test_shared_libs,
-#                                         test_script_bootstrap, policy_check via the generic globs)
+#                                         test_react_marker, test_reply_resolve, test_merge_approved
+#                                         (+ test_shared_libs, test_script_bootstrap, policy_check via
+#                                         the generic globs)
 #   plugin/skills/_shared/review-surface-shape.sh
-#                                      -> test_fetch_normalize, test_prefilter, test_change_detect_poll
-#                                         (+ test_shared_libs, test_script_bootstrap, policy_check via the
-#                                         generic globs)
+#                                      -> test_fetch_normalize, test_prefilter, test_change_detect_poll,
+#                                         test_merge_approved (+ test_shared_libs, test_script_bootstrap,
+#                                         policy_check via the generic globs)
 #   plugin/skills/bump-type/**, plugin/skills/_shared/bump-type-derive.sh
 #                                      -> test_bump_type (derive core ALSO -> test_shared_libs)
 #   plugin/skills/push-branch/**, plugin/skills/_shared/{allowlist,git-refusals}.sh
@@ -821,14 +828,16 @@ map_path() {
 
   # The github-review-loop scripts/*.jq modules (fix-history-classify.jq, reviewer-identity.jq) are
   # executed by more than the fix-history suite: the fetch-normalize builder, the shared fetch core
-  # (_shared), and the change-detect poll all include them via `jq -L`. policy_check NEVER EXECUTES
-  # jq, so a module edit must route to EVERY suite that runs it, not just test_fix_history_classify.
+  # (_shared), the change-detect poll, the prefilter, react-marker and merge-approved all include them
+  # via `jq -L`. policy_check NEVER EXECUTES jq, so a module edit must route to EVERY suite that runs
+  # it, not just test_fix_history_classify.
   if [[ "$p" == plugin/skills/github-review-loop/scripts/*.jq ]]; then
     add_selected "$SUITE_TEST_FETCH_NORMALIZE" "$p (jq module executed by fetch-normalize)"
     add_selected "$SUITE_TEST_SHARED" "$p (jq module executed by shared fetch core)"
     add_selected "$SUITE_TEST_CHANGE_DETECT_POLL" "$p (jq module executed by change-detect poll)"
     add_selected "$SUITE_TEST_PREFILTER" "$p (jq module executed by prefilter)"
     add_selected "$SUITE_TEST_REACT_MARKER" "$p (jq module included by react-marker)"
+    add_selected "$SUITE_TEST_MERGE_APPROVED" "$p (jq module included by merge-approved)"
     matched=1
   fi
 
@@ -847,26 +856,29 @@ map_path() {
 
   # _shared/graphql-response.sh: the shared GraphQL errors validator sourced by the review-loop
   # scripts. Its regressions surface in every consumer, so route to each consumer's behavior oracle:
-  # fetch-normalize, change-detect-poll, prefilter, react-marker, reply-resolve. (test_shared_libs,
-  # test_script_bootstrap and policy_check already match via the generic _shared/*.sh, plugin/**/*.sh
-  # and plugin/* rules.)
+  # fetch-normalize, change-detect-poll, prefilter, react-marker, reply-resolve, merge-approved.
+  # (test_shared_libs, test_script_bootstrap and policy_check already match via the generic
+  # _shared/*.sh, plugin/**/*.sh and plugin/* rules.)
   if [[ "$p" == plugin/skills/_shared/graphql-response.sh ]]; then
     add_selected "$SUITE_TEST_FETCH_NORMALIZE" "$p (graphql-response lib sourced by fetch-normalize)"
     add_selected "$SUITE_TEST_CHANGE_DETECT_POLL" "$p (graphql-response lib sourced by change-detect poll)"
     add_selected "$SUITE_TEST_PREFILTER" "$p (graphql-response lib sourced by prefilter)"
     add_selected "$SUITE_TEST_REACT_MARKER" "$p (graphql-response lib sourced by react-marker)"
     add_selected "$SUITE_TEST_REPLY_RESOLVE" "$p (graphql-response lib sourced by reply-resolve)"
+    add_selected "$SUITE_TEST_MERGE_APPROVED" "$p (graphql-response lib sourced by merge-approved)"
     matched=1
   fi
 
   # _shared/review-surface-shape.sh: the shared review-surface shape library sourced by the review-loop
-  # scripts. Route to the behavior oracles of its consumers: fetch-normalize, prefilter, change-detect-poll.
+  # scripts. Route to the behavior oracles of its consumers: fetch-normalize, prefilter, change-detect-poll,
+  # merge-approved.
   # (test_shared_libs, test_script_bootstrap and policy_check already match via the generic
   # _shared/*.sh, plugin/**/*.sh and plugin/* rules.)
   if [[ "$p" == plugin/skills/_shared/review-surface-shape.sh ]]; then
     add_selected "$SUITE_TEST_FETCH_NORMALIZE" "$p (review-surface-shape lib sourced by fetch-normalize)"
     add_selected "$SUITE_TEST_PREFILTER" "$p (review-surface-shape lib sourced by prefilter)"
     add_selected "$SUITE_TEST_CHANGE_DETECT_POLL" "$p (review-surface-shape lib sourced by change-detect poll)"
+    add_selected "$SUITE_TEST_MERGE_APPROVED" "$p (review-surface-shape lib sourced by merge-approved)"
     matched=1
   fi
 
@@ -936,6 +948,18 @@ map_path() {
      || "$p" == tools/test_react_marker.sh \
      || "$p" == tests/react-marker/* ]]; then
     add_selected "$SUITE_TEST_REACT_MARKER" "$p (react-marker script/fixture)"
+    matched=1
+  fi
+
+  # test_merge_approved: the opt-in merge script (.sh) + its fixture dir. The script is ALSO a
+  # plugin/* file (policy_check prose-lints it via the wholesale rule below), but policy_check NEVER
+  # EXECUTES bash — so without this rule a merge-approved edit would only be prose-linted, never
+  # behaviorally exercised. Route both the script and its fixture dir to the behavioral suite.
+  # (tools/test_merge_approved.sh itself is covered by the tools/** full-suite leg.)
+  if [[ "$p" == plugin/skills/github-review-loop/scripts/merge-approved.sh \
+     || "$p" == tools/test_merge_approved.sh \
+     || "$p" == tests/merge-approved/* ]]; then
+    add_selected "$SUITE_TEST_MERGE_APPROVED" "$p (merge-approved script/fixture)"
     matched=1
   fi
 
@@ -1305,6 +1329,7 @@ self_test() {
     ["test_loop_state.sh"]="plugin/skills/github-review-loop/scripts/loop-state.sh"
     ["test_reply_resolve.sh"]="tests/reply-resolve/README.md"
     ["test_react_marker.sh"]="tests/react-marker/README.md"
+    ["test_merge_approved.sh"]="tests/merge-approved/README.md"
     ["test_ledger_reconstruct.sh"]="tests/ledger-reconstruct/README.md"
     ["test_triage_ops.sh"]="tests/triage-backlog/case-x.json"
     ["test_subissue_ops.sh"]="tests/prd-to-issues/case-x.json"

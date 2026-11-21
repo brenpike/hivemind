@@ -21,7 +21,7 @@
 #   - no merge call follows a read whose rollup was not SUCCESS (no path merges on a non-SUCCESS
 #     rollup);
 #   - --admin appears only as the second merge call of a case, after a refused plain merge, with
-#     HIVEMIND_AUTO_MERGE_ADMIN set, on the same head as the plain merge.
+#     HIVEMIND_AUTO_MERGE_ADMIN set to a non-empty value, on the same head as the plain merge.
 #
 # Scratch space comes from tools/lib/scratch.sh (make_scratch_dir), removed on EXIT.
 #
@@ -381,7 +381,9 @@ refused_case "refused:dirty"            "$PR.mergeStateStatus = \"DIRTY\""   "ME
 refused_case "refused:blocked-no-admin" "$PR.mergeStateStatus = \"BLOCKED\"" "MERGE=skipped:blocked" 1
 refused_case "refused:behind-no-admin"  "$PR.mergeStateStatus = \"BEHIND\""  "MERGE=skipped:blocked" 1
 refused_case "refused:blocked-admin"    "$PR.mergeStateStatus = \"BLOCKED\"" "MERGE=merged-admin" 2 HIVEMIND_AUTO_MERGE_ADMIN=1
-refused_case "refused:behind-admin"     "$PR.mergeStateStatus = \"BEHIND\""  "MERGE=merged-admin" 2 HIVEMIND_AUTO_MERGE_ADMIN=
+refused_case "refused:behind-admin"     "$PR.mergeStateStatus = \"BEHIND\""  "MERGE=merged-admin" 2 HIVEMIND_AUTO_MERGE_ADMIN=1
+refused_case "refused:blocked-admin-empty" "$PR.mergeStateStatus = \"BLOCKED\"" "MERGE=skipped:blocked" 1 HIVEMIND_AUTO_MERGE_ADMIN=
+refused_case "refused:behind-admin-empty"  "$PR.mergeStateStatus = \"BEHIND\""  "MERGE=skipped:blocked" 1 HIVEMIND_AUTO_MERGE_ADMIN=
 refused_case "refused:blocked-admin-checks-failed" \
   "$PR.mergeStateStatus = \"BLOCKED\" | $PR.commits.nodes[0].commit.statusCheckRollup.state = \"FAILURE\"" \
   "MERGE=wait:checks-failed" 1 HIVEMIND_AUTO_MERGE_ADMIN=1

@@ -33,8 +33,8 @@
 #   MERGE=skipped:conflicts        refused; mergeStateStatus is DIRTY (exit 0)
 #   MERGE=merged-admin             refused; the `--admin` rerun succeeded (exit 0)
 #   MERGE=skipped:blocked          refused; mergeStateStatus is BLOCKED or
-#                                  BEHIND and HIVEMIND_AUTO_MERGE_ADMIN is not
-#                                  set (exit 0)
+#                                  BEHIND and HIVEMIND_AUTO_MERGE_ADMIN is
+#                                  unset or empty (exit 0)
 #   MERGE=skipped:refused          refused for any other mergeStateStatus, or
 #                                  the `--admin` rerun was refused too (exit 0)
 #   MERGE_ERROR=<reason>           bad arguments, a failed bootstrap, or a
@@ -46,9 +46,9 @@
 # -------------------------
 #   HIVEMIND_AUTO_MERGE        the merge method: `merge`, `squash` or `rebase`.
 #                              Unset or empty is off. Read before any gh call.
-#   HIVEMIND_AUTO_MERGE_ADMIN  checked by PRESENCE (any value, empty included).
-#                              Allows ONE `--admin` rerun after a refused plain
-#                              merge, under the conditions in §5.
+#   HIVEMIND_AUTO_MERGE_ADMIN  checked by PRESENCE (any non-empty value). Unset
+#                              or empty is off. Allows ONE `--admin` rerun after
+#                              a refused plain merge, under the conditions in §5.
 #   HIVEMIND_PR_REVIEWERS      optional; more Bot logins for the Automated
 #                              Reviewer set. Passed to jq as `--arg` data, never
 #                              as program text. It only adds to the set.
@@ -113,7 +113,7 @@
 #   a. headRefOid differs from the first read              wait:head-moved
 #   b. mergeStateStatus is DIRTY                           skipped:conflicts
 #   c. mergeStateStatus is BLOCKED or BEHIND:
-#      - HIVEMIND_AUTO_MERGE_ADMIN not set                 skipped:blocked
+#      - HIVEMIND_AUTO_MERGE_ADMIN unset or empty          skipped:blocked
 #      - set, and the re-read rollup is not SUCCESS        the rollup line of
 #                                                          gates 5-7
 #      - set, and the re-read rollup is SUCCESS: rerun the same command with
@@ -122,7 +122,8 @@
 #          non-zero                                        skipped:refused
 #   d. any other mergeStateStatus                          skipped:refused
 # So `--admin` runs only after a refused plain merge, only with the admin
-# setting set, and only when both reads saw a SUCCESS rollup on the same head.
+# setting set to a non-empty value, and only when both reads saw a SUCCESS
+# rollup on the same head.
 # Every merge call carries `--match-head-commit`, so a commit pushed after the
 # read is never merged. The script NEVER passes `--auto` or `--delete-branch`,
 # and never merges a head whose rollup it did not see SUCCESS.
@@ -368,7 +369,7 @@ case "$READ_MERGE_STATE" in
   DIRTY)
     echo "MERGE=skipped:conflicts" ;;
   BLOCKED|BEHIND)
-    if [ -z "${HIVEMIND_AUTO_MERGE_ADMIN+set}" ]; then
+    if [ -z "${HIVEMIND_AUTO_MERGE_ADMIN:-}" ]; then
       echo "MERGE=skipped:blocked"
     elif [ "$READ_ROLLUP" != "SUCCESS" ]; then
       rollup_line
