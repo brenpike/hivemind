@@ -5,7 +5,9 @@
 # Single source of truth for GitHub review IDENTITY predicates: which PR-review
 # author is the authenticated viewer (`is_self`), which authors count as an
 # Automated Reviewer, which one a REVIEWER_FILTER value selects, which review
-# state counts as a Reviewer Approval, and which filter value is retired. Every
+# state counts as a Reviewer Approval, whether the latest reviews hold settled
+# evidence (`has_settled_evidence`, the only verdict for settled approval and
+# for the merge approval gate), and which filter value is retired. Every
 # github-review-loop script that filters review authors or detects an approval
 # MUST call these defs instead of inlining its own login compare, so the
 # identity semantics never drift between consumers.
@@ -86,8 +88,16 @@
 # read. Approval is counted only from an in-scope Automated Reviewer, and only
 # the caller decides whether it is terminal.
 #
-# SETTLED APPROVAL: after the watch's quiet period, an in-scope Automated
-# Reviewer has reviewed or left a THUMBS_UP, and every review thread is settled.
+# SETTLED APPROVAL: after the watch's quiet period, the latest reviews hold
+# settled evidence (`has_settled_evidence`) and every review thread is settled.
+# Settled evidence is keyed on review STATE, never on who reviewed. The caller
+# passes one `{state, login, type}` row per latest review of EVERY author,
+# null-author rows included. Every row must be `APPROVED`, `COMMENTED` or
+# `DISMISSED`: a positive allowlist, so `CHANGES_REQUESTED`, `PENDING` and any
+# missing or unknown state is a standing block that no approval outweighs. And
+# some in-scope Automated Reviewer must have a latest review in `APPROVED` or
+# `COMMENTED`, or a THUMBS_UP row. Empty inputs are no evidence. The merge
+# approval gate calls the same def, so the merge and the settle never disagree.
 # A thread is settled (`is_settled_thread`) when its `isResolved` is exactly
 # true, or when its last comment's author is self per `is_self` (§2). A null or
 # missing `isResolved` is never resolved, and a null or missing last author is
@@ -175,6 +185,26 @@ def is_review_approval($state; $inline):
 # thread's last comment author ($login, $type) is self per is_self (§2).
 def is_settled_thread($resolved; $login; $type; $self):
   $resolved == true or is_self($login; $type; $self);
+
+# The only settled-evidence verdict (§4), for settled approval and the merge
+# approval gate. $reviews: one {state, login, type} row per latest review of
+# every author, null-author rows included. $thumbs: {login, type} THUMBS_UP rows.
+# A non-object row is never settled and never in scope.
+def has_settled_evidence($reviews; $thumbs; $self; $filter; $set):
+  def is_in_scope_reviewer:
+    type == "object"
+    and is_automated_reviewer(.login; .type; $set)
+    and reviewer_matches_filter(.login; .type; $self; $filter; $set);
+  all(($reviews // [])[];
+      type == "object"
+      and (.state == "APPROVED" or .state == "COMMENTED"
+           or .state == "DISMISSED"))
+  and (
+    any(($reviews // [])[];
+        (.state == "APPROVED" or .state == "COMMENTED")
+        and is_in_scope_reviewer)
+    or any(($thumbs // [])[]; is_in_scope_reviewer)
+  );
 
 # True for the retired filter value (§5); its only literal in code.
 def is_retired_filter($filter): $filter == "codex-only";
