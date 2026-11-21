@@ -147,7 +147,7 @@ The set of checks (classification, base branch, trunk freshness, branch name, co
 _Avoid_: pre-check, setup
 
 **Ready Issue**:
-An open issue labeled `readiness:ready` (the `hivemind:triage-backlog` readiness ladder: plan clear, no open questions) whose latest ready label came from a user with write access, whose title and body are unedited since, and that has no open blocked-by dependency. It is the only kind of issue the **Lair** claims. The Lair never applies the ready label itself.
+An open issue labeled `readiness:ready` (the `hivemind:triage-backlog` readiness ladder, gated on the **Readiness Check**) whose latest ready label came from a user with write access and whose title and body are unedited since. It is never an epic, it passes the **Readiness Check** at claim time, and it has no open blocked-by dependency. It is the only kind of issue the **Lair** claims. The Lair never applies the ready label itself. An issue that fails the check stays unclaimed, gets no new label, and is named in the tick's queue report. An issue may carry the ready label while blocked-by links are open, but the Lair claims it only when none is open. Lair admission is ADR-0045 decision 10, as amended by #625.
 _Avoid_: groomed issue, actionable issue, loop-eligible issue
 
 ### Review
@@ -258,6 +258,15 @@ _Avoid_: summary, changelog
 The outcome of a Tier-B decision — `did-now` (auto-executed), `deferred` (tracked follow-up), `recorded` (accepted residual — the reasoning is recorded in the repository next to the code; no tracker entry), or `surfaced` (returned to the Overmind).
 _Avoid_: status, resolution
 
+**Council**:
+The decision service for a choice with no strong recommendation, called from the design stages and, as a consult, from standard-delivery. The caller launches two or more **Overseer** members, each with an angle and a model, then Abathur, the read-only agent that weighs their opinions into one brief and keeps the dissent. Abathur never picks the members it judges. The brief re-enters the decision step, which re-checks hard stops and every gate. A split is asked, or parks in an unattended run. Hard stops and **Promotion Gate** trips are never sent to the council (ADR-0047).
+_Alias_: Abathur council
+_Avoid_: panel, jury, second opinion, consensus
+
+**Overseer**:
+A read-only **Council** member: one opinion on one call, from its assigned angle and model, which Abathur weighs. A council result counts only with at least two members on at least two models. One member may be a non-Claude reviewer run through the **Local Reviewer** setting. Named Overseer because **Synapse** is the runner agent (ADR-0047).
+_Avoid_: Synapse (the runner agent), voter, juror
+
 ### Plugin Structure
 
 **Skill**:
@@ -363,21 +372,54 @@ _Avoid_: pause, block, hold, escalate
 ### Pipeline & Artifacts
 
 **Initiative**:
-The unit of work correlated by a single slug across its plan, Handoff, PRD, and issue set. One slug per initiative; the slug names `.hivemind/plans/<slug>.md`, `.hivemind/handoffs/<slug>.md`, `docs/prds/<slug>.md`, and corresponds to the PRD-level parent (epic) issue whose native sub-issues are the sliced work items.
+The unit of work correlated by a single slug across its plan, Handoff, PRD, and issue set. One slug per initiative; the slug names `.hivemind/plans/<slug>.md`, `.hivemind/handoffs/<slug>.md`, `docs/prds/<slug>.md` and the folder `docs/initiatives/<slug>/`, which holds `solution-design.md` and `review-record.md`, and corresponds to the PRD-level parent (epic) issue whose native sub-issues are the sliced work items.
 _Avoid_: project, epic, feature
 
 **PRD**:
-The committed, durable specification of WHAT an Initiative delivers, at `docs/prds/<slug>.md`. Contains problem statement, solution, user stories, acceptance criteria, implementation decisions (architectural/contract level), testing decisions, success metrics, and out-of-scope. Never carries file scope or step sequencing — that is the Directive. Produced by `hivemind:plan-to-prd` (planned skill — not yet implemented).
+The committed, durable specification of WHAT an Initiative delivers, at `docs/prds/<slug>.md`. Contains problem statement, solution, user stories, acceptance criteria, implementation decisions (architectural/contract level), testing decisions, success metrics, and out-of-scope. Never carries file scope or step sequencing — that is the Directive. Produced by `hivemind:plan-to-prd`.
 _Avoid_: spec, design doc, directive
 
 **Vertical Slice**:
-A thin, end-to-end unit of behavior cutting every layer, small enough to be independently grabbable; one slice = one GitHub issue = one Strain candidate. Produced by `hivemind:prd-to-issues` (planned skill — not yet implemented).
+A thin, end-to-end unit of behavior cutting every layer, small enough to be independently grabbable; one slice = one GitHub issue = one Strain candidate. Produced by `hivemind:prd-to-issues`.
 _Alias_: tracer bullet
 _Avoid_: module, horizontal slice, layer
 
 **Handoff**:
-The optional, ephemeral session-resumption artifact at `.hivemind/handoffs/<slug>.md`, produced by `hivemind:create-handoff` (planned skill — not yet implemented). Carries volatile session state (locked decisions, first actions, open questions, pointers) to bridge into a fresh session; points to the plan/PRD rather than duplicating them. Gitignored, disposable once loaded.
+The optional, ephemeral session-resumption artifact at `.hivemind/handoffs/<slug>.md`, produced by `hivemind:create-handoff`. Carries volatile session state (locked decisions, first actions, open questions, pointers) to bridge into a fresh session; points to the plan/PRD rather than duplicating them. Gitignored, disposable once loaded.
 _Avoid_: essence (which is the worker report), spawn
+
+**Solution Design**:
+The committed HOW of an **Initiative**, at `docs/initiatives/<slug>/solution-design.md`, written after the **PRD** and before slicing. It names the components, state and ownership, contracts, trust boundaries, failure modes and decisions, each decision with its ADR or the ADR condition it fails, and its Open questions read exactly `None`. Each slice names the exact headings it implements. Once every slice is done it is marked delivered and never maintained again (ADR-0046).
+_Avoid_: design doc, directive (which is one run's plan), architecture doc
+
+**Design Review**:
+The review of an **Initiative**'s **PRD**, **Solution Design** and ADRs before the docs merge, by fresh read-only **Cerebrate** passes that carry no session memory. Round 1 is two angles in parallel; each later round is one confirming pass. It exits only at zero open critical or high findings and one round with no new findings. A review not converged by round 3 reaches the maintainer as a signal to split the **Initiative**. Every finding gets exactly one disposition: fixed, rejected, deferred or recorded (ADR-0046).
+_Avoid_: plan interrogation (which interviews the user), **Adaptation Cycle** (which reviews a code diff), design pass
+
+**Review Record**:
+The committed outcome of a **Design Review**, at `docs/initiatives/<slug>/review-record.md`, shipped in the same pull request as the **Solution Design**. It stamps each reviewed document by its git blob id and records the verdict, the open findings by severity, the rounds, every finding's disposition, the decisions taken (listed for veto) and the decisions asked (with the user's answer). Any later edit to a stamped document makes it stale until a review of the change re-stamps it (ADR-0046).
+_Avoid_: review log, **Fix Ledger** (which tracks a pull request's review findings), **Decision Journal**
+
+**Readiness Check**:
+The one deterministic check, shared by triage, the **Guide**'s handoff check and **Lair** admission, that decides whether an issue may be a **Ready Issue** on its track. It checks structure, existence, versions and labels, never quality, and writes nothing. Each issue gets its track, pass or fail, and reason codes. A failed read is never a pass (ADR-0046).
+_Avoid_: readiness rating, quality gate, triage (which applies the labels)
+
+**Initiative Track**:
+The track of an issue with a native parent epic: an initiative slice. Features, epics and any change to a public contract or governance semantics take it: **PRD**, **Solution Design** and ADRs, **Design Review**, merged docs, slicing, triage, then the handoff check. A slice passes the **Readiness Check** only when its design section names a **Solution Design** whose **Review Record** passes and is not stale.
+_Avoid_: feature track, full path, heavy track
+
+**Standalone Track**:
+The track of any issue with no native parent: bugs, chores, docs and small refactors, which carry a **Spec Block** in place of design documents and then go to triage. An issue whose type label is not bug, chore, documentation, refactor or enhancement, or whose effort label is large or extra-large, fails the **Readiness Check** with a promote reason: it belongs on the **Initiative Track**.
+_Avoid_: light track, quick path, small-issue path
+
+**Spec Block**:
+The sections a **Standalone Track** issue body carries in place of design documents: Problem, Evidence, Acceptance Criteria, Scope boundary and Open questions. Each is non-empty, Acceptance Criteria holds at least one checklist item, and Open questions reads exactly `None`.
+_Avoid_: issue template, mini-PRD, spec
+
+**Guide**:
+The user-only conductor skill, run in the main session, that takes the maintainer from an idea to **Ready Issues** with one command. Given nothing, it lists in-flight **Initiatives** with their stage. Given an idea, it starts one. Given an **Initiative**, it reports the stage, the evidence found and the next action, then starts that stage. It stores no progress: the stage is derived from GitHub and git. It invokes the leaf skills by intent and never applies `readiness:ready`; at the triage stage it sends the maintainer to triage (ADR-0046).
+_Alias_: conductor
+_Avoid_: wizard, pipeline runner, workflow (which takes no input mid-run)
 
 ### Workflow State Machine
 
@@ -454,8 +496,14 @@ _Avoid_: degraded mode, manual mode, safe mode
 
 - An **Initiative** correlates exactly one plan, at most one **Handoff**, at most one **PRD**, and zero or more slice issues, all under one slug
 - A **PRD** (WHAT) is distinct from a **Directive** (HOW): the PRD carries stories/acceptance/metrics; the Directive carries steps/file-scope/sequence — no duplication
-- `hivemind:plan-to-prd`, `hivemind:prd-to-issues`, and `hivemind:create-handoff` (planned skills — not yet implemented) are designed as decoupled leaf transforms — none invokes another (ADR-0013); their output is path-agnostic (ADR-0012)
+- `hivemind:plan-to-prd`, `hivemind:prd-to-issues`, and `hivemind:create-handoff` are designed as decoupled leaf transforms — none invokes another (ADR-0013); their output is path-agnostic (ADR-0012)
 - A **Vertical Slice** becomes one GitHub issue and one **Strain** candidate; the **Cerebrate** re-derives file overlap at brood-time and remains the sole independence authority (issues never self-declare scope)
+- An **Initiative** on the **Initiative Track** has exactly one **PRD**, one **Solution Design** and one **Review Record**, all under its slug; ADRs stay global and numbered in `docs/adr/`
+- A **Design Review** produces exactly one **Review Record**, which stamps the **PRD** and the **Solution Design** and may stamp ADRs; an edit to any stamped document makes the record stale
+- The **Readiness Check** reads an issue's track, never judges it: a native parent epic puts it on the **Initiative Track**, else it is on the **Standalone Track** and must carry a **Spec Block**
+- Triage proposes `readiness:ready` only for an issue that passes the **Readiness Check**; the **Lair** re-runs the check at claim time and claims only a **Ready Issue**
+- The **Guide** (conductor) orchestrates `hivemind:plan-interrogation`, `hivemind:plan-to-prd`, the **Design Review** and `hivemind:prd-to-issues` by intent, and leaves `readiness:ready` to the maintainer through triage
+- A **Council** (Abathur council) has two or more **Overseer** members and one Abathur; its brief re-enters the decision step, so hard stops and **Promotion Gate** trips still ask, and a split is asked or parks
 
 - A **Workflow Router** selects exactly one **Workflow Definition** for a request, or routes to the **Exploratory Intent Session** when no concrete workflow matches; outside **Instinct**, the **Overlord** then executes that definition's states, advancing only via the **Transition Engine** and recording progress in the **Run Ledger**
 - A **Reflex** (trivial fast path) bypasses the **Workflow Router** and the **Run Ledger** entirely — the **Overlord** drives the short delivery tail by intent, just as it skips the **Cerebrate**
