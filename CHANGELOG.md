@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [10.1.0] - 2026-11-20
+
+### Added
+
+- The settled approval: the review watch's change-detect poll prints a new `REVIEWER_SETTLED` marker after a 600-second quiet period when an in-scope bot has submitted a review or left a 👍 on the PR and every review thread is settled.
+- The opt-in auto-merge through `merge-approved.sh`. It runs only when `HIVEMIND_AUTO_MERGE` is `merge`, `squash` or `rebase`. A non-empty `HIVEMIND_AUTO_MERGE_ADMIN` allows one `--admin` rerun after a refused plain merge on a BLOCKED or BEHIND PR; unset or empty is off. The script merges only on a `SUCCESS` check rollup, and every merge call carries `--match-head-commit`. With `HIVEMIND_AUTO_MERGE` unset, the human merges as before.
+
+### Changed
+
+- decision-autonomy: Tier A keeps every merge recommendation for the human, with one carve-out, the review watch's opt-in merge after a reviewer approval.
+- ADR-0026 is amended by ADR-0044.
+
+No prose budget raised.
+
 ## [10.0.7] - 2026-11-20
 
 ### Fixed
