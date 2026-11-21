@@ -114,16 +114,15 @@
 #   b. mergeStateStatus is DIRTY                           skipped:conflicts
 #   c. mergeStateStatus is BLOCKED or BEHIND:
 #      - HIVEMIND_AUTO_MERGE_ADMIN unset or empty          skipped:blocked
-#      - set, and the re-read rollup is not SUCCESS        the rollup line of
-#                                                          gates 5-7
-#      - set, and the re-read rollup is SUCCESS: rerun the same command with
-#        `--admin` and the same `--match-head-commit`
+#      - set, and a gate of 1-7 fails on the re-read       that gate's line
+#      - set, and gates 1-7 all hold on the re-read: rerun the same command
+#        with `--admin` and the same `--match-head-commit`
 #          exit 0                                          merged-admin
 #          non-zero                                        skipped:refused
 #   d. any other mergeStateStatus                          skipped:refused
 # So `--admin` runs only after a refused plain merge, only with the admin
-# setting set to a non-empty value, and only when both reads saw a SUCCESS
-# rollup on the same head.
+# setting set to a non-empty value, and only when both reads passed every
+# gate of 1-7 on the same head.
 # Every merge call carries `--match-head-commit`, so a commit pushed after the
 # read is never merged. The script NEVER passes `--auto` or `--delete-branch`,
 # and never merges a head whose rollup it did not see SUCCESS.
@@ -339,22 +338,29 @@ run_merge() {
     --match-head-commit "$GATED_HEAD" "$@" >/dev/null 2>&1
 }
 
+# gates_hold: gates 1-7 over the last read_pr. Prints the gate line and fails
+# when one does not hold; prints nothing when all hold. Every merge call, the
+# --admin retry included, runs only after it passes on a fresh read.
+gates_hold() {
+  if [ "$READ_STATE" != "OPEN" ]; then
+    echo "MERGE=skipped:not-open"; return 1
+  fi
+  if [ "$READ_IS_DRAFT" = "true" ]; then
+    echo "MERGE=skipped:draft"; return 1
+  fi
+  if [ "$READ_APPROVED" != "true" ]; then
+    echo "MERGE=skipped:no-approval"; return 1
+  fi
+  if [ "$READ_SETTLED" != "true" ]; then
+    echo "MERGE=skipped:open-threads"; return 1
+  fi
+  if [ "$READ_ROLLUP" != "SUCCESS" ]; then
+    rollup_line; return 1
+  fi
+}
+
 read_pr
-if [ "$READ_STATE" != "OPEN" ]; then
-  echo "MERGE=skipped:not-open"; exit 0
-fi
-if [ "$READ_IS_DRAFT" = "true" ]; then
-  echo "MERGE=skipped:draft"; exit 0
-fi
-if [ "$READ_APPROVED" != "true" ]; then
-  echo "MERGE=skipped:no-approval"; exit 0
-fi
-if [ "$READ_SETTLED" != "true" ]; then
-  echo "MERGE=skipped:open-threads"; exit 0
-fi
-if [ "$READ_ROLLUP" != "SUCCESS" ]; then
-  rollup_line; exit 0
-fi
+gates_hold || exit 0
 
 GATED_HEAD="$READ_HEAD"
 if run_merge; then
@@ -371,8 +377,8 @@ case "$READ_MERGE_STATE" in
   BLOCKED|BEHIND)
     if [ -z "${HIVEMIND_AUTO_MERGE_ADMIN:-}" ]; then
       echo "MERGE=skipped:blocked"
-    elif [ "$READ_ROLLUP" != "SUCCESS" ]; then
-      rollup_line
+    elif ! gates_hold; then
+      :
     elif run_merge --admin; then
       echo "MERGE=merged-admin"
     else

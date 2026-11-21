@@ -68,8 +68,9 @@ through.
     `skipped:blocked`, since an empty value is off;
   - with the setting set to a non-empty value, the `--admin` rerun prints
     `merged-admin`;
-  - with the setting and a re-read rollup that is not `SUCCESS`, the rollup's
-    gate line prints and no `--admin` call is made;
+  - with the setting and a re-read that fails any gate (closed, draft, no
+    approval, an open thread, or a rollup that is not `SUCCESS`), that gate's
+    line prints and no `--admin` call is made;
   - an `--admin` refusal, or any other state, prints `skipped:refused`;
   - a failed or incomplete re-read prints `MERGE_ERROR`.
 

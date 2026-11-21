@@ -393,6 +393,18 @@ refused_case "refused:blocked-admin-checks-pending" \
 refused_case "refused:blocked-admin-no-checks" \
   "$PR.mergeStateStatus = \"BLOCKED\" | $PR.commits.nodes[0].commit.statusCheckRollup = null" \
   "MERGE=skipped:no-checks" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
+refused_case "refused:blocked-admin-closed" \
+  "$PR.mergeStateStatus = \"BLOCKED\" | $PR.state = \"CLOSED\"" \
+  "MERGE=skipped:not-open" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
+refused_case "refused:blocked-admin-draft" \
+  "$PR.mergeStateStatus = \"BLOCKED\" | $PR.isDraft = true" \
+  "MERGE=skipped:draft" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
+refused_case "refused:blocked-admin-approval-withdrawn" \
+  "$PR.mergeStateStatus = \"BLOCKED\" | $PR.latestReviews.nodes = []" \
+  "MERGE=skipped:no-approval" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
+refused_case "refused:blocked-admin-thread-reopened" \
+  "$PR.mergeStateStatus = \"BLOCKED\" | $PR.reviewThreads.nodes[0].isResolved = false" \
+  "MERGE=skipped:open-threads" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
 refused_case "refused:clean-admin-set"  "$PR.mergeStateStatus = \"CLEAN\""   "MERGE=skipped:refused" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
 refused_case "refused:unstable"         "$PR.mergeStateStatus = \"UNSTABLE\"" "MERGE=skipped:refused" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
 refused_case "refused:unknown"          "$PR.mergeStateStatus = \"UNKNOWN\"" "MERGE=skipped:refused" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
