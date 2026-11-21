@@ -15,7 +15,7 @@ Checked against main at commit `49787cc9`. Each fact below names what exists tod
 - **decision-autonomy.md, Review Calls** says who decides a reviewer's question. A call is taken when the recommended option is reversible and not architectural (Promotion Gate clauses 1 and 2). It is asked when irreversible, architectural, at strength none, or when the table cell is `surface`. There is no rule for design decisions.
 - **Prose budgets.** Measured as CHECK 18 measures (bytes with CR stripped): `plugin/governance/decision-autonomy.md` is 12165 bytes of a 12173 budget (8 bytes free); `plugin/governance/remediation-doctrine.md` is 19901 of 19906 (5 bytes free); `plugin/governance/security-policy.md` is 24143 of 24145 (2 bytes free); `plugin/agents/synapse.md` is 1716 of 1727 (11 bytes free). `plugin/agents/overlord.md` (39038), `plugin/skills/triage-backlog/SKILL.md` (11952), `plugin/skills/prd-to-issues/SKILL.md` (14566) and `plugin/skills/adaptation-cycle/SKILL.md` (5421) are each exactly at their budget. The budgets live in `tests/policy/prose-byte-budget.json`.
 - **Built-script budgets.** `plugin/workflows/standard-delivery.js` holds 41976 characters of string and template literals against its 42100 budget in the same file (124 free). It is 190836 characters long against `MAX_BUILT_SCRIPT_LENGTH`, 191000 (164 free). `tools/build_workflows.mjs` enforces both.
-- **decision-autonomy-table.json** is version 1, levels `high`, `balanced`, `low` (default `high`), 17 row kinds with cells `auto` or `surface`, and 6 hard stops, `injection_suspect` among them. It has no consult row.
+- **decision-autonomy-table.json** is version 1, levels `high`, `balanced`, `low` (default `high`), 17 row kinds with cells `auto` or `surface`, and 6 hard stops, `injection_suspect` among them. It has no consult setting.
 - **The table projection.** `projectAutonomyTable` in `tools/build_workflows.mjs` keeps only `levels`, `default_level`, `hard_stops` and each row's `kind`, `high`, `balanced` and `low`. `tests/workflow-scripts/build.test.mjs` pins those keys, and `tests/workflow-scripts/data.test.mjs` requires an `auto` or `surface` cell per row per level.
 - **decide.js** returns only `ask` or `take`. Its check order is hard_stop, malformed_brief, recommendation_not_an_option, unknown_kind, table_surface, bad_cell, gate_irreversible, gate_architectural, gate_safety, no_recommendation. A weak recommendation is taken ([ADR-0036](../../adr/0036-analysis-only-first-workflow-on-script-engine.md) decision 6). There is no park.
 - **Levels.** `resolveLevel` maps an unknown level to `low`, and each workflow resolves the table's default level. The `unattended` level and the park arrive with Lair unattended mode (#607, ADR-0045 decision 6).
@@ -315,7 +315,7 @@ A top-level object `council_consult` in `plugin/references/decision-autonomy-tab
 
 ### Consult step
 
-Only standard-delivery runs the step. analysis-only and pr-feedback-remediation carry no council settings, so their call sites resolve through `decide()` alone. The `decide()` call sites in `plugin/workflow-src/lib/` run the step only when the run carries council settings (#624).
+Only standard-delivery runs the step. analysis-only and pr-feedback-remediation carry no council settings, so their call sites resolve through `decide()` alone. `resolveDecision` in `plugin/workflow-src/lib/plan.js` runs the step only when the run carries council settings (#624). `hasDefectQuestion` in `plugin/workflow-src/lib/retry.js` keeps `decide()` alone.
 
 1. Call `decide()` on the input brief with the call site's kind, level and listed.
 2. Convene the council only when all of these hold:
@@ -495,15 +495,15 @@ Taken and listed for veto; set by the PRD. Close-out adds the delivered status a
 
 ### D11: No dedicated different-model design pass in v1
 
-Taken and listed for veto; set by the PRD. No ADR: fails hard to reverse, because the record already names each pass's reviewer, so a pass can be added later with no schema change.
+Taken and listed for veto; set by the PRD. ADR-0046 records it as a deferred option. It fails hard to reverse, because the record already names each pass's reviewer, so a pass can be added later with no schema change.
 
 ### D12: Abathur council with two callers
 
-Taken and listed for veto; set by the PRD. One decision service called from the design stages and from standard-delivery; the caller launches the members, then Abathur; at least two members on at least two models, one of which may run through the tool-neutral runner. ADR-0047.
+Taken and listed for veto; set by the PRD. One decision service called from the design stages and from standard-delivery. The caller launches two to four Overseer members, then Abathur. A council result needs at least two members with different `model` values from the caller's launch record. A runner member joins only when `HIVEMIND_LOCAL_REVIEWER` is a JSON argv list. ADR-0047.
 
-### D13: Consult row as data with a per-run cap
+### D13: Consult setting as data with a per-run cap
 
-Taken and listed for veto; set by the PRD. The convening rule is the `council_consult` row; hard stops and promotion-gate trips are never consulted. ADR-0047.
+Taken and listed for veto; set by the PRD. The convening rule is the top-level `council_consult` object in the autonomy table, beside `rows` and never a row, per Consult setting: one value per level and an integer `per_run_cap`. Hard stops, `table_surface` asks and promotion-gate trips are never consulted. ADR-0047.
 
 ### D14: Council member named Overseer
 
@@ -511,50 +511,107 @@ Taken and listed for veto. Synapse is now the runner agent, so the member takes 
 
 ### D15: Drone with exact file scope writes designs and records
 
-Taken and listed for veto. Solution designs, review records and design-stage ADRs are written by a drone with exact file scope; `hivemind:plan-interrogation`'s writer exception is not extended. No ADR: fails hard to reverse, because changing the writer is one prose edit.
+Taken and listed for veto. Solution designs, review records and design-stage ADRs are written by a drone with exact file scope; `hivemind:plan-interrogation`'s writer exception is not extended. ADR-0046 (decision 11).
 
 ### D16: Process and council get separate ADRs
 
-Taken and listed for veto. ADR-0046 records the process and ADR-0047 the council, so the council can be amended alone. No ADR: fails hard to reverse.
+Taken and listed for veto. ADR-0046 records the process and ADR-0047 the council, so the council can be amended alone. ADR-0047 records it among its considered options.
 
 ### D17: Readiness check is a shared library
 
-Taken and listed for veto. `plugin/skills/_shared/readiness-check.sh` is sourced by each caller's own script, so no skill calls another's script. No ADR: fails hard to reverse.
+Taken and listed for veto. `plugin/skills/_shared/readiness-check.sh` is sourced by each caller's own script, so no skill calls another's script. ADR-0046 (decision 3).
 
-### D18: Initial consult row values
+### D18: Initial consult setting values
 
-Taken and listed for veto. `consult` at `high` and `balanced`, `skip` at `low`, `per_run_cap` 2. A run at `low` asked to be asked; each consult costs at least three agent runs. No ADR: fails hard to reverse, because the values are table data.
+Taken and listed for veto. `consult` at `high`, `balanced` and `unattended`, `skip` at `low`, `per_run_cap` 2. #624 sets the `unattended` value after #607 adds that level. A run at `low` asked to be asked; each consult costs at least three agent runs. No ADR: fails hard to reverse, because the values are table data.
 
 ### D19: Native blocked-by edges written at triage
 
-Taken and listed for veto. Triage writes the edge for each Dependencies ref through `deps-add`, behind its confirm gate; `hivemind:prd-to-issues` keeps body refs. No ADR: fails hard to reverse.
+Taken and listed for veto. Triage writes the edge for each Dependencies ref through `deps-add`, behind its confirm gate; `hivemind:prd-to-issues` keeps body refs. ADR-0046 (decision 4).
 
 ### D20: Prose budget with no pre-approved raise
 
-Asked. The user's answer: no raise is pre-approved. Each later slice that edits `decision-autonomy.md` or `remediation-doctrine.md` fits its byte budget by cutting. If it cannot, it asks the user with measured bytes. This pull request edits nothing under `tests/policy/`. No ADR: fails hard to reverse.
+Asked, answer Q1 B: no budget raise is pre-approved. A slice fits every budgeted file it edits by cutting, measured as that file's check measures. If it cannot, it stops and asks the user with the measured size, the budget and the size needed. The budgets the slices meet:
+
+- `plugin/governance/decision-autonomy.md`, 12173 bytes (#616, #624).
+- `plugin/governance/security-policy.md`, 24145 bytes (#618).
+- `plugin/agents/overlord.md`, 39038 bytes (#622).
+- `plugin/skills/triage-backlog/SKILL.md`, 11952 bytes (#620).
+- `plugin/skills/prd-to-issues/SKILL.md`, 14566 bytes (#617).
+- `plugin/governance/remediation-doctrine.md`, 19906 bytes (any slice that edits it).
+- `plugin/workflows/standard-delivery.js`, 42100 characters of string and template literals and the 191000-character `MAX_BUILT_SCRIPT_LENGTH` (#624), both enforced by `tools/build_workflows.mjs`.
+
+A new file takes a new budget entry, which needs no raise. This pull request edits nothing under `tests/policy/`. No ADR: fails hard to reverse, because a raise is one user-approved entry in `tests/policy/prose-budget-raises.json`.
 
 ### D21: Accepted-ADR amendments recorded in ADR-0047
 
-Asked. The user's answer: approved. ADR-0047's status line and decisions record the amendments of ADR-0026 decision 2 (a weak or absent recommendation with a clean gate goes to the council before defer-or-record), ADR-0036 decision 6 (`decide()` gains the consult action, so a weak recommendation is consulted before it is taken) and ADR-0045 decision 7 (a choice with no recommendation goes to the council before it parks). None of those three ADR files is edited. ADR-0047.
+Asked, answer Q2 A. ADR-0047's status line and decisions record three amendments of accepted ADRs:
+
+- ADR-0026 decision 2: in the design stages and standard-delivery, a weak or absent recommendation with a clean gate goes to the council before defer-or-record.
+- ADR-0036 decision 6: a weak recommendation is consulted before it is taken. The consult step runs ahead of an unchanged `decide()`, which stays the only place a decision is resolved.
+- ADR-0045 decision 7, worded as first approved: a choice with no recommendation goes to the council before it parks.
+
+None of those three ADR files is edited. Taken and listed for veto, with a strong recommendation: ADR-0037's closed Ask Set and ADR-0042 decision 9 are not amended, because `decide()` and `run-review.sh` keep their contracts (D22, D25). ADR-0047.
+
+### D22: Runner member through a sixth runner-gate script
+
+Asked, answer Q3 A. The runner member runs only when `HIVEMIND_LOCAL_REVIEWER` is a JSON argv list, as a sixth script of the Synapse Runner Gate, per Runner member brief mode. Synapse's Write allow gains one fixed inputs file, `.hivemind/council-inputs-<token>.json`, the only way the brief reaches the script. The script shares only the runner's kernel with `run-review.sh`. ADR-0042 decision 9 is not amended, because `run-review.sh` still runs every local review. ADR-0047.
+
+### D23: Overlord may launch the council agents
+
+Asked, answer Q4 A. #622 adds `hivemind:abathur` and `hivemind:overseer` to the overlord's Agent allowlist, and its Write grant is unchanged. A safety fixture under `tests/policy/` pins both agents' tools lists with no Bash, Write, Edit or agent-launch tool (#618). ADR-0047.
+
+### D24: Review record authority is a human-reviewed merge
+
+Asked, answer Q5 A. A review record is authoritative only through a human-reviewed merge, and only the design review's drone step writes or re-stamps it. #623, with the #625 amendment, adds `docs/prds/`, `docs/initiatives/` and `docs/adr/` to the Lair's protected-path list, so a docs pull request never takes the auto tier. Recorded residual: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval with no human review of the design. ADR-0046 (decision 7 and Residuals).
+
+### D25: Consult step with decide unchanged
+
+Taken and listed for veto. The consult step calls `decide()` first and convenes the council only on a weak take or a `no_recommendation` ask. With a council result, a second `decide()` on the composed brief stands, per Consult step. `decide()`, the Ask Set, the list reasons, the check order and `resume_args` are unchanged. ADR-0047.
+
+### D26: Caller composes the council brief
+
+Taken and listed for veto. Abathur writes only the recommendation, member provenance comes from the caller's launch records, and a switched option takes its own producer-written gate or asks, per Council brief contract. Its always-ask screen: it narrows the council's authority within this unmerged design, so it widens no trust boundary and amends no accepted ADR. ADR-0047.
+
+### D27: Design-stage resolution is judgment checked by review
+
+Taken and listed for veto. The design stages run no `decide()`. Take or ask is the conductor's judgment under the design-decision rule. The review record lists each taken decision with its always-ask screen, and the confirming pass checks every screen (#619). ADR-0046.
+
+### D28: Record verified before ready and on every push
+
+Taken and listed for veto. The design review skill's verify checks the front matter, the stamps and the Findings table, per Review record body. The guide runs it before `gh pr ready`, and `tools/validate.sh` runs it in CI on every push for each passing record whose design is not delivered. ADR-0046.
+
+### D29: Write permission is the ready label's authority
+
+Taken and listed for veto. The authorization for `readiness:ready` is write permission on its latest labeled event, with the title and body unedited since. The handoff check verifies it (#621), and the Lair keeps its check (#623). "Maintainer" names a role, and triage's confirm gate is not an authorization boundary. ADR-0046 and ADR-0045 decision 10, as amended by #625.
 
 ## Verification strategy
 
 Each slice runs `bash tools/validate.sh --changed` at its validate state. Per slice:
 
-- **#615:** contract tests over recorded issue fixtures for each track and each reason code, including a document edited after stamping, an epic, a standalone issue that must be promoted and a slice with open blockers that passes.
+- **#615:** contract tests over recorded issue fixtures for each track and each reason code. Cases include a document edited after stamping, an epic, a standalone issue that must be promoted, a slice with open blockers that passes, hostile link and heading text, a design link and record of different slugs, an unstamped PRD, a missing blocked-by edge, a truncated read, a missing document versus a `git` failure, a malformed commit id, and template order, duplicate heading and missing-section cases.
 - **#616:** a fixture run on the Lair PRD yields every template section filled; skill authoring checks prove the skill names no sibling.
-- **#617:** `tests/prd-to-issues/` fixtures for the design section and for seed-issue reuse with no duplicate on rerun.
-- **#618:** schema contract tests for the brief in and out, member provenance, a council of two Claude members on two models, and a council with one member through the runner; the review runner's existing `tests/run-review/` cases stay green.
-- **#619:** stamping then verifying passes; an open high finding, a missing clean round or a fourth round fails.
-- **#620:** `tests/triage-backlog/` cases: a failing issue never enters the apply set as ready and its reasons show; a passing slice with open blockers is proposed ready.
-- **#621:** recorded fixtures for every stage give the expected stage and next action; handoff mode passes only when every slice passes.
-- **#622:** the skill is user-only; a live smoke takes a throwaway idea to ready slices, and a fresh session resumes at the derived stage.
-- **#623:** a tick contract test where an epic and a stale design are not claimed and are named in the queue report.
-- **#624:** `tests/workflow-scripts/` engine tests where consult turns into take, ask or park by session type; the per-run cap holds; hard stops and gate trips are never consulted; existing `decide()` cases stay unchanged; one live delivery run resolves a weak-recommendation question through the council.
+- **#617:** `tools/test_subissue_ops.sh` with `tests/prd-to-issues/` fixtures: the Design section, seed reuse with the marker line kept, and no duplicate on rerun. A policy fixture under `tests/policy/` pins the Design section and the Design-link carve-out of the "No file paths or code snippets" rule in `plugin/skills/prd-to-issues/SKILL.md`.
+- **#618:** `tests/workflow-scripts/data.test.mjs` checks the schema bounds. Composed-brief tests: a switch to an architectural option asks, a switch to an option with no gate asks, a claimed model is ignored, fewer than two distinct `model` values give no result, and an injection-suspect opinion stops at the `injection_suspect` hard stop. A safety fixture pins both agents' tools lists. `tools/test_synapse_gate.sh` with `tests/policy/safety-synapse-gate.json` covers the sixth script and its inputs file. `tools/test_run_review.sh` stays green.
+- **#619:** stamping then verify passes. Each of these fails: an open high, a deferred high, a missing clean round, `rounds` of 1 or 4, an errored pass counted as a round, an unstamped added ADR, and a Findings table that disagrees with the open counts. A resume continues from the record's rounds, a confirming pass flags a taken decision that amends an accepted ADR, and the CI suite fails a stale passing record.
+- **#620:** `tools/test_triage_ops.sh` with `tests/triage-backlog/`: the overlay, a post-apply re-check that drops a now-failing issue, edges written before readiness, a failing issue that never enters the apply set as ready with its reasons shown, a passing slice with open blockers proposed ready, and the existing cases.
+- **#621:** recorded fixtures for every stage give the expected stage and next action. Cases: `**Status:** delivered` read before staleness, seed identity, fork and non-write evidence ignored and named, the latest-label check, and two open docs pull requests reported as ambiguous. Handoff mode passes only when every slice passes.
+- **#622:** the skill is user-only. A live smoke takes a throwaway idea to ready slices: it creates the docs branch, commits the stage-2 and stage-3 outputs so the tree is clean, and runs verify before `gh pr ready`. A fresh session resumes at the derived stage.
+- **#623:** a tick contract test where an epic and a stale design are not claimed and are named in the queue report with encoded reason codes, and a docs pull request never takes the auto tier.
+- **#624:** `tests/workflow-scripts/` engine tests:
+  - consult turns into take, ask or park by session type, and an unattended split parks;
+  - the per-run cap holds;
+  - hard stops, `table_surface` and gate trips are never consulted;
+  - a weak take is confirmed by a strong council, and a split asks `no_recommendation`;
+  - analysis-only and pr-feedback-remediation never consult;
+  - replay rebuilds the count with `resume_args` `{answers, build}`, and the table projection includes `council_consult`;
+  - `tests/workflow-scripts/decide.test.mjs`, `tests/workflow-scripts/ask-set.test.mjs`, `tests/policy/safety-ask-set.json` and case SD-82 in `tests/workflow-scripts/standard-delivery.test.mjs` are unchanged and green.
+
+  One live delivery run resolves a weak-recommendation question through the council.
 
 ### Prose budget check
 
-Every slice that edits a governance doc (#616 and #624 edit `decision-autonomy.md`; any slice that edits `remediation-doctrine.md`) measures the file as CHECK 18 does, bytes with CR stripped, and passes CHECK 18 of `tools/policy_check.sh` within the budget in `tests/policy/prose-byte-budget.json`. It fits by cutting per P25. If it cannot, it stops and asks the user, showing the measured bytes, the budget and the bytes needed. A raise lands only with a user-approved entry in `tests/policy/prose-budget-raises.json`. Governance citations pass `tests/workflow-scripts/governance-section-refs.test.mjs`.
+Every slice that edits a file in D20's list measures it as its check measures: bytes with CR stripped for CHECK 18 of `tools/policy_check.sh` against `tests/policy/prose-byte-budget.json`, and literal and script length for `tools/build_workflows.mjs`. It fits by cutting per P25. If it cannot, it stops and asks the user, showing the measured size, the budget and the size needed. A prose budget raise lands only with a user-approved entry in `tests/policy/prose-budget-raises.json`. Governance citations pass `tests/workflow-scripts/governance-section-refs.test.mjs`.
 
 ## Seam order
 
@@ -562,16 +619,16 @@ Slices start in this order; a slice waits on its blockers.
 
 | Slice | Blocked by | Headings it implements |
 |---|---|---|
-| #615 Readiness check | none | Readiness check; Track fact; Readiness check output contract; Standalone spec block format; Slice design section format; Review record front matter; D3: One deterministic readiness check shared by three callers; D4: Track read from the native parent and labels; D17: Readiness check is a shared library |
-| #616 Solution design skill and template | none | Solution design skill; Initiative folder; Design-decision rule; Solution design template; D5: Per-initiative docs folder; D9: Design-decision always-ask rule; D15: Drone with exact file scope writes designs and records; D20: Prose budget with no pre-approved raise |
-| #617 Slice design links and seed epic | none | Slice design section; Slice design section format |
-| #618 Abathur council | none | Abathur council; Council brief contract; D12: Abathur council with two callers; D14: Council member named Overseer |
-| #619 Design review and record | #615 | Design review; Design review rounds; Review record front matter; D6: Design review by fresh read-only planner passes; D7: Review record front matter with blob stamps; D11: No dedicated different-model design pass in v1 |
-| #620 Triage readiness gate | #615 | Triage readiness gate; D8: Ready label allowed with open blockers; D19: Native blocked-by edges written at triage |
-| #621 Stage derivation and handoff check | #615, #619 | Stage derivation and handoff check; Initiative stages; D2: Stage derived only from GitHub and git |
-| #622 Guided initiative command | #616, #617, #619, #620, #621 | Guide skill; Close-out; D1: Guide is a user-only conductor skill; D10: Delivered design frozen as history |
-| #623 Lair admission | #615, #608 | Lair admission |
-| #624 Mid-delivery consult | #618, #607 | Mid-delivery consult; Consult setting; D13: Consult row as data with a per-run cap; D18: Initial consult row values; D20: Prose budget with no pre-approved raise; D21: Accepted-ADR amendments recorded in ADR-0047 |
+| #615 Readiness check | none | Readiness check; Track fact; Readiness check output contract; Document parsing rules; Standalone spec block format; Slice design section format; Review record front matter; D3: One deterministic readiness check shared by three callers; D4: Track read from the native parent and labels; D17: Readiness check is a shared library |
+| #618 Abathur council | none | Abathur council; Council brief contract; Runner member brief mode; Trust boundaries; Failure modes; D12: Abathur council with two callers; D14: Council member named Overseer; D22: Runner member through a sixth runner-gate script; D26: Caller composes the council brief |
+| #616 Solution design skill and template | #618 | Solution design skill; Initiative folder; Design-decision rule; Solution design template; D5: Per-initiative docs folder; D9: Design-decision always-ask rule; D15: Drone with exact file scope writes designs and records; D20: Prose budget with no pre-approved raise; D27: Design-stage resolution is judgment checked by review |
+| #617 Slice design links and seed epic | none | Slice design section; Slice design section format; Seed issue marker |
+| #619 Design review and record | #615 | Design review; Design review rounds; Re-review and re-stamp; Review record front matter; Review record body; D6: Design review by fresh read-only planner passes; D7: Review record front matter with blob stamps; D11: No dedicated different-model design pass in v1; D24: Review record authority is a human-reviewed merge; D27: Design-stage resolution is judgment checked by review; D28: Record verified before ready and on every push |
+| #620 Triage readiness gate | #615 | Triage readiness gate; Readiness check output contract; D8: Ready label allowed with open blockers; D19: Native blocked-by edges written at triage; D29: Write permission is the ready label's authority |
+| #621 Stage derivation and handoff check | #615, #619 | Stage derivation and handoff check; Initiative stages; Readiness check output contract; Seed issue marker; D2: Stage derived only from GitHub and git; D29: Write permission is the ready label's authority |
+| #622 Guided initiative command | #616, #617, #618, #619, #620, #621 | Guide skill; Initiative stages; Close-out; Standalone spec block format; Abathur council; Consult setting; D1: Guide is a user-only conductor skill; D10: Delivered design frozen as history; D23: Overlord may launch the council agents; D27: Design-stage resolution is judgment checked by review |
+| #623 Lair admission | #615, #608 | Lair admission; Readiness check output contract; D24: Review record authority is a human-reviewed merge; D29: Write permission is the ready label's authority |
+| #624 Mid-delivery consult | #618, #607 | Mid-delivery consult; Consult setting; Consult step; Trust boundaries; Failure modes; D13: Consult setting as data with a per-run cap; D18: Initial consult setting values; D20: Prose budget with no pre-approved raise; D21: Accepted-ADR amendments recorded in ADR-0047; D25: Consult step with decide unchanged |
 
 ## Open questions
 
