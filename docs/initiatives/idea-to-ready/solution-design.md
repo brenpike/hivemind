@@ -30,11 +30,20 @@ Checked against main at commit `49787cc9`. Each fact below names what exists tod
 
 ### Guide skill
 
-A user-only conductor skill (`disable-model-invocation: true`) that runs in the main session. Given nothing, it lists in-flight initiatives with their derived stage. Given an idea, it starts one. Given an initiative, it reports the stage, the evidence found and the next action, then starts that stage without asking to continue. It is written as stage must-haves with judgment, not a numbered state machine. It invokes the leaf skills by intent, and they stay uncoupled. It never applies `readiness:ready`: at the triage stage it tells the maintainer to run `/hivemind:triage-backlog`, which is user-only. Docs writing happens in a standard-delivery run on the docs branch, whose steps give a drone exact file scope. The design review runs from the main session between those runs. A standalone idea ends with an issue carrying the spec block, ready for triage.
+A user-only conductor skill (`disable-model-invocation: true`) that runs in the main session. Given nothing, it lists in-flight initiatives with their derived stage. Given an idea, it starts one. Given an initiative, it reports the stage, the evidence found and the next action, then starts that stage without asking to continue. It is written as stage must-haves with judgment, not a numbered state machine. It invokes the leaf skills by intent, and they stay uncoupled. It never applies `readiness:ready`: at the triage stage it tells the maintainer to run `/hivemind:triage-backlog`, which is user-only.
+
+The guide owns the docs branch (#622):
+
+- Before stage 2 writes any tracked file, it creates `docs/<slug>` from the fetched trunk.
+- It commits the stage-2 and stage-3 outputs on that branch through `hivemind:molt` with exact paths: the glossary and ADR edits from `hivemind:plan-interrogation` and the PRD from `hivemind:plan-to-prd`. The tree is then clean before stage 4's standard-delivery run, whose `dirty_paths` stop would otherwise refuse it.
+- It opens the docs pull request as a draft with no closing keyword.
+- It runs the record verify against the pull request head before `gh pr ready`. When it later pushes a change to a stamped path, it returns the pull request to draft.
+
+Docs writing happens in a standard-delivery run on the docs branch, whose steps give a drone exact file scope. The design review runs from the main session between those runs. A standalone idea ends with an issue carrying the spec block, per Standalone spec block format, ready for triage.
 
 ### Readiness check
 
-One deterministic shell library, `plugin/skills/_shared/readiness-check.sh`, sourced by each caller's own script entry: a `readiness` subcommand of `triage-ops.sh`, the guide's script and the Lair controller. It reads issues through `gh` and documents through `git show <trunk-ref>:<path>` and `git rev-parse <trunk-ref>:<path>`, where the caller passes the trunk ref. The Lair passes the fetched trunk commit it spawns the strain from. It checks structure, existence, versions and labels, never quality. It writes nothing.
+One deterministic shell library, `plugin/skills/_shared/readiness-check.sh`, sourced by each caller's own script entry: a `readiness` subcommand of `triage-ops.sh`, the guide's script and the Lair controller. It reads issues through `gh`. Each caller fetches and passes the remote trunk commit id, never a branch name or local ref. The library rejects a value not matching `^[0-9a-f]{40}$` or `^[0-9a-f]{64}$` before any git call. At that commit it tests existence with `git cat-file -e <commit>:<path>`, reads contents with `git show` and reads blob ids with `git rev-parse`. The Lair passes the commit it spawns the strain from. It checks structure, existence, versions and labels, never quality. It writes nothing.
 
 ### Track fact
 
@@ -50,7 +59,7 @@ A leaf skill that turns a merged-or-branch PRD into `docs/initiatives/<slug>/sol
 
 ### Design review
 
-A main-session skill that runs fresh read-only cerebrate analysis passes with `Memory context: none`. Round 1 is angles A and B in parallel; a confirming round follows. It records every finding with exactly one disposition and writes, through a drone, the review record. It exits per the design review rounds lifecycle.
+A main-session skill that runs fresh read-only cerebrate analysis passes with `Memory context: none`. Round 1 is angles A and B in parallel; a confirming round follows. It records every finding with exactly one disposition. Only the design review's drone step writes or re-stamps a record, and it rewrites the record after every round. It exits per the design review rounds lifecycle.
 
 ### Slice design section
 
@@ -58,15 +67,25 @@ A main-session skill that runs fresh read-only cerebrate analysis passes with `M
 
 ### Triage readiness gate
 
-Triage runs the readiness check on every issue it would propose as `readiness:ready`. A failing issue never enters the apply set as ready, and its reason codes show in the Notes column. A slice that passes is proposed ready even with open blocked-by links. `readiness:blocked` is kept only for a block with no issue link. Triage writes the native blocked-by edge for each `#123` ref in a slice's Dependencies section through `deps-add`.
+Triage runs the readiness check on every issue it would propose as `readiness:ready`. The `readiness` subcommand of `triage-ops.sh` takes an overlay, in an inputs file, of the labels and blocked-by edges the pending apply would write, and checks as if they were present. A failing issue never enters the apply set as ready, and its reason codes show in the Notes column. A slice that passes is proposed ready even with open blocked-by links. `readiness:blocked` is kept only for a block with no issue link.
+
+At apply, triage first writes the ratings and, through `deps-add`, the native blocked-by edge for each `#123` ref in a slice's Dependencies section. It then re-runs the check on the live state and applies `readiness:ready` only to issues that still pass. An issue that now fails is dropped from the ready set and named with its reasons.
 
 ### Stage derivation and handoff check
 
-A pure function from GitHub and git to a stage and next action, run by the guide's script. Its evidence: the seed issue or epic, the docs branch and its pull request, then trunk, the review record, sub-issues, labels and readiness results. Handoff mode passes only when every condition of the PRD's handoff check holds, and reports each slice as claimable now or blocked, with the reason.
+A pure function from GitHub and git to a stage and next action, run by the guide's script. Its evidence: the seed issue or epic, the docs branch and its pull request, then trunk, the review record, sub-issues, labels and readiness results. It reads the design's `**Status:** delivered` before record staleness.
+
+- The seed is the one open issue carrying the seed issue marker whose author has write permission.
+- Only same-repository pull request heads named `docs/<slug>` or `docs/<slug>-<suffix>` count.
+- Fork pull requests, and issues or pull requests by users without write permission, are ignored and named in the report.
+
+Handoff mode passes only when every condition of the PRD's handoff check holds, and reports each slice as claimable now or blocked, with the reason. Per slice it verifies that the latest `readiness:ready` labeled event comes from a user with write permission and that the title and body are unedited since. That is the test of ADR-0045 decision 10, as amended by #625.
 
 ### Lair admission
 
-At claim time the Lair controller (#608) runs the readiness check against the trunk commit it will spawn from. It never claims an epic or a failing issue. A failing issue stays unclaimed, with no new label, and is named in the tick's queue report with its reason codes. This is ADR-0045 decision 10, as amended by #625; slice #623 implements it.
+At claim time the Lair controller (#608) runs the readiness check against the trunk commit it will spawn from. It never claims an epic or a failing issue. A failing issue stays unclaimed, with no new label, and is named in the tick's queue report with its reason codes. The queue report shows reason codes encoded as untrusted text. This is ADR-0045 decision 10, as amended by #625; slice #623 implements it.
+
+#623, with the #625 amendment, adds `docs/prds/`, `docs/initiatives/` and `docs/adr/` to the Lair's protected-path list (ADR-0045 decision 12). So a pull request touching them never takes the auto tier.
 
 ### Abathur council
 
@@ -110,15 +129,38 @@ No progress state is stored anywhere. Every row below is ground truth in GitHub 
 
 ### Readiness check output contract
 
-One JSON line per issue: `{"issue": <number>, "track": "standalone" | "slice", "result": "pass" | "fail", "reasons": [<code>, ...]}`. `reasons` is empty only on a pass. Exit 0 means every issue was evaluated. A `gh` or `git` failure, or a truncated read, exits non-zero with a diagnostic, and no caller treats it as a pass.
+Output: one JSON line per issue, `{"issue": <number>, "commit": "<evaluated trunk commit id>", "track": "standalone" | "slice", "result": "pass" | "fail", "reasons": [<code>, ...]}`, built with `jq --arg` and `--argjson`, never by splicing text. `reasons` is empty only on a pass.
+
+Exit and failure rules:
+
+- Exit 0 means every issue was evaluated. A missing document is a reason code, never a failure.
+- Only an unresolvable commit id or a failed `gh` or `git` process exits non-zero.
+- A read is truncated when any `pageInfo.hasNextPage` is true on labels, sub-issues or blockedBy, the rule `triage-ops.sh` already applies. A truncated read exits non-zero.
+- Callers discard every line of a run that exits non-zero, and none treats it as a pass.
 
 Reason codes, a closed set:
 
 - Every issue: `issue_closed`, `rating_missing:<family>`, `is_epic`, `is_idea`, `has_subissues`, `no_acceptance_criteria`.
 - Standalone: `spec_problem_missing`, `spec_evidence_missing`, `spec_scope_missing`, `open_questions_not_none`, `promote_type`, `promote_effort`.
-- Slice: `epic_closed`, `parent_not_epic`, `design_section_missing`, `prd_missing`, `design_missing`, `record_missing`, `design_section_unfilled:<heading>`, `design_open_questions`, `adr_missing:<path>`, `adr_not_accepted:<path>`, `record_malformed`, `record_not_passed`, `record_open_blocking`, `record_rounds_exceeded`, `record_stale:<path>`, `heading_unmatched:<text>`, `heading_ambiguous:<text>`.
+- Slice: `epic_closed`, `parent_not_epic`, `design_block_missing`, `design_link_invalid`, `prd_missing`, `design_missing`, `record_missing`, `template_section_missing:<name>`, `template_order`, `heading_duplicate`, `design_section_unfilled:<n>`, `design_open_questions`, `adr_missing:<path>`, `adr_not_accepted:<path>`, `record_malformed`, `record_not_passed`, `record_open_blocking`, `record_rounds_exceeded`, `record_stale:<path>`, `record_unstamped:<path>`, `heading_unmatched:<n>`, `heading_ambiguous:<n>`, `dependency_edge_missing:<n>`. `design_block_missing` replaces the earlier `design_section_missing`.
 
-An ADR is accepted when its `**Status:**` line's value starts with `accepted`. A design section is filled when its body has non-blank text other than a heading.
+Placeholders:
+
+- In `design_section_unfilled`, `heading_unmatched` and `heading_ambiguous`, `<n>` is the 1-based index of the `- Heading:` line in the issue's Design block, never its text.
+- In `dependency_edge_missing`, `<n>` is the number of a Dependencies `#<n>` ref with no native blocked-by edge.
+- `<path>` appears only for a path that passed the path allowlist in Slice design section format.
+- `<family>` and `<name>` come from closed lists.
+
+An ADR is accepted when its `**Status:**` line's value starts with `accepted`.
+
+### Document parsing rules
+
+These rules serve issue bodies, the solution design and the record body (#615; #619's verify uses them).
+
+- Headings are ATX lines, `#` to `######` then a space, outside fenced code blocks, which open with three backticks or `~~~`.
+- Heading text is trimmed, and any trailing run of `#` is stripped.
+- A section's body runs to the next heading of the same or a higher level, so subsections are inside it.
+- A section is filled when its body holds a non-blank line that is not a heading.
 
 ### Standalone spec block format
 
@@ -133,11 +175,33 @@ A slice body's `## Design` section holds one item per line:
 - `- ADR: [<path>](<link>)`, one line per ADR
 - `- Review record: [<path>](<link>)`
 
-The check reads the repository path from each link, either a bare path or the part after `/blob/<trunk>/`. Each heading must match exactly one heading of the solution design, at any level, as literal text without `#` marks.
+Link rules, the path allowlist:
+
+- A link is a bare path or `https://github.com/<owner>/<repo>/blob/<trunk>/<path>`.
+- The slug matches `^[a-z0-9]+(-[a-z0-9]+)*$`. The Solution design link must resolve to `docs/initiatives/<slug>/solution-design.md`, and the Review record link to `docs/initiatives/<slug>/review-record.md` with the same slug.
+- Each ADR link must resolve to a path matching `^docs/adr/[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*\.md$`.
+- The PRD is derived as `docs/prds/<slug>.md`, never read from the issue.
+- A link failing any rule yields `design_link_invalid`, and no git call is made for it.
+- The record must stamp the PRD and the solution design, else `record_unstamped:<path>`.
+
+Each heading must match exactly one heading of the solution design, at any level, as literal text without `#` marks, per Document parsing rules.
+
+### Seed issue marker
+
+The guide writes `<!-- hivemind-initiative: <slug> -->` as the first line of the seed issue body at capture (#622). #617 keeps the line when it reuses the seed as the epic. Stage derivation (#621) takes as seed only an open issue with that line whose author has write permission. Any other issue carrying it is ignored and named. Two qualifying issues for one slug are ambiguous.
 
 ### Solution design template
 
-These `## ` sections, in this order: Context and code truth; Components; State and ownership; Contracts and seams; Trust boundaries; Lifecycle; Existing-path coverage; Failure modes; Decisions; Verification strategy; Seam order; Open questions; Amendments. Every heading in the file is unique. Open questions reads exactly `None`. Amendments may read `None yet.`. After close-out the file gains `**Status:** delivered` under its title and an `## As-built deltas` section.
+These `## ` sections, in this order: Context and code truth; Components; State and ownership; Contracts and seams; Trust boundaries; Lifecycle; Existing-path coverage; Failure modes; Decisions; Verification strategy; Seam order; Open questions; Amendments. Every heading in the file is unique. Open questions reads exactly `None`. Amendments may read `None yet.`.
+
+The check parses the file per Document parsing rules:
+
+- A missing `## ` section gives `template_section_missing:<name>`.
+- Sections out of order give `template_order`.
+- A heading text appearing twice gives `heading_duplicate`.
+- An Open questions body other than exactly `None` gives `design_open_questions`.
+
+After close-out the file gains `**Status:** delivered` under its title and an `## As-built deltas` section.
 
 ### Review record front matter
 
@@ -147,9 +211,9 @@ The record starts with this front matter, keys in this order, and the check pars
 ---
 stamps:
   - path: docs/prds/<slug>.md
-    blob: <40-hex blob id>
+    blob: <40 or 64 hex blob id>
   - path: docs/initiatives/<slug>/solution-design.md
-    blob: <40-hex blob id>
+    blob: <40 or 64 hex blob id>
 verdict: pass | fail
 open:
   critical: <n>
@@ -161,11 +225,45 @@ clean_round: true | false
 ---
 ```
 
-Each `blob` is the output of `git rev-parse HEAD:<path>` on the docs branch when the record is written. Stamps must include the PRD and the solution design and may add ADRs. The record passes when `verdict` is `pass`, `critical` and `high` are 0, `clean_round` is `true` and `rounds` is 1 to 3.
+Each `blob` is the output of `git rev-parse HEAD:<path>` on the docs branch when the record is written.
 
-Staleness rule: the record is stale when any stamped path's `git rev-parse <trunk-ref>:<path>` differs from its blob, or the path is missing. A blob id is a content hash, so the merge method does not matter, and any edit to a stamped file makes the record stale until a review of the change re-stamps it.
+- Each blob matches `^[0-9a-f]{40}$` or `^[0-9a-f]{64}$`.
+- Each stamp path passes the path allowlist in Slice design section format, else `record_malformed`.
+- Stamps must include the PRD, the solution design and every ADR the docs pull request adds or edits, never an ADR it only cites.
+- The record passes when `verdict` is `pass`, `open.critical` and `open.high` are 0, `clean_round` is `true` and `rounds` is 2 to 3. Round 1 is always followed by a confirming round.
+- `open.<severity>` counts that severity's findings whose disposition is `open`. Any critical or high whose disposition is not `fixed` or `rejected` counts as open.
+- A record is authoritative only through a human-reviewed merge (D24). Only the design review's drone step writes or re-stamps it.
 
-The record body, read by people only: reviewed documents, each round's passes with reviewer agent, angle and model, every finding with its severity, angle, summary and one disposition, the decisions taken (listed for veto) and the decisions asked with the user's answer.
+Staleness rule: the record is stale when any stamped path's `git rev-parse <commit>:<path>` differs from its blob, or the path is missing. A blob id is a content hash, so the merge method does not matter, and any edit to a stamped file makes the record stale until a review of the change re-stamps it.
+
+### Review record body
+
+The body has these sections:
+
+- `## Reviewed documents`.
+- `## Rounds`, with one `### Round <n>` per round naming each pass's reviewer agent, model and angle.
+- `## Findings`.
+- `## Decisions taken, listed for veto`, each with its always-ask screen.
+- `## Decisions asked`, each with the user's answer.
+
+Findings is one Markdown table with the header `| ID | Round | Angle | Severity | Disposition | Note |` and one row per finding:
+
+- ID is unique. Round is the round that disposed the finding.
+- Angle is one of `A`, `B`, `confirm` or `review`. `review` marks a finding raised by local review or the post-PR review of the docs pull request.
+- Severity is `critical`, `high`, `medium` or `low`.
+- Disposition is exactly one of `fixed`, `rejected`, `deferred`, `recorded` or `open`.
+- Note holds the summary and, for `rejected`, `deferred` or `recorded`, the reason and destination.
+
+The readiness check never reads the body. The design review skill's `verify` (#619, D28) checks:
+
+- the front matter shape;
+- that each stamp equals the blob at the pull request head;
+- that the stamps include every ADR the pull request adds or edits, read from its diff against the merge-base with trunk; on trunk, only stamp equality is checked;
+- that the Findings table parses, IDs are unique and every row has exactly one disposition from the set;
+- that the open counts equal the table under the open rule;
+- that `verdict` is `pass` only under the pass rule.
+
+The guide runs verify before `gh pr ready`. `tools/validate.sh` runs it in CI for every record whose verdict is `pass` and whose design is not delivered; #619 maps `docs/initiatives/` to that suite.
 
 ### Council brief contract
 
@@ -225,10 +323,10 @@ Only standard-delivery runs the step. analysis-only and pr-feedback-remediation 
 
 ## Trust boundaries
 
-- **External content stays data.** Issue bodies, PRD and design text, review findings, member opinions and Abathur's brief are data per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (External Content Boundary). The readiness check parses fixed shapes and literal heading text and never runs or evaluates content.
-- **The ready label stays the maintainer's.** Only the maintainer applies `readiness:ready`, through triage's confirm gate. The guide and the Lair never apply it. The Lair keeps its write-permission and unedited-since checks of ADR-0045 decision 10, as amended by #625.
-- **Reviewers are fresh and read-only.** Review passes run on cerebrate, whose tool list holds no Bash, Write or Edit. `Memory context: none` keeps the writing session's memory from steering a reviewer.
-- **Stamps bind the reviewed content.** The record ships in the same pull request as the design, so it passes the same local review and bot review. Trunk never holds an unreviewed design, and any later edit is detected by blob id.
+- **External content stays data.** Issue bodies, PRD and design text, review findings, member opinions and Abathur's brief are data per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (External Content Boundary). The readiness check parses fixed shapes and literal heading text and never runs or evaluates content. Links pass the path allowlist before any git call. Reason codes carry line indexes, never issue text. JSON is built with `jq --arg`. The Lair queue report and parks show reason codes encoded as untrusted data, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Trust-Boundary Discipline).
+- **Write permission authorizes the ready label.** The authorization is write permission on the latest `readiness:ready` labeled event, with the title and body unedited since (ADR-0045 decision 10, as amended by #625; D29). The handoff check verifies the same (#621), and the Lair keeps its check (#623). "Maintainer" names a role, and triage's confirm gate is a workflow step, not an authorization boundary. The guide and the Lair never apply the label.
+- **Reviewers are fresh and read-only.** Review passes run on cerebrate, whose tool list holds no Bash, Write or Edit. `Memory context: none` keeps the writing session's memory from steering a reviewer. A pass that errors, times out or returns unparseable output yields no round.
+- **Stamps bind the reviewed content.** The record ships in the same pull request as the design, so it passes the same local review and bot review. Trunk never holds an unreviewed design, and any later edit is detected by blob id. Authority is a human-reviewed merge (D24). Only the design review's drone step writes or re-stamps a record. Verify runs before the pull request leaves draft and in CI (D28). #623 keeps docs paths out of the Lair's auto tier. Recorded residual: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval with no human review of the design. It is recorded per the user's decision, on the ground that it is outside the threat model as the maintainer's own opt-in (ADR-0044). It is bounded because verify keeps a merged record consistent and current (ADR-0046, Residuals).
 - **The council cannot widen authority.** `decide()` resolves a caller-composed brief. Abathur writes only a recommendation. Member provenance comes from the caller's launch records. A switched option is gated by its own producer-written gate, or the call asks. The `abathur` and `overseer` tools lists hold no Bash, Write, Edit or agent-launch tool, pinned by a safety fixture under `tests/policy/` (#618). The runner member runs under the kernel's no-shell argv run and before/after check. Member opinions and Abathur's output are injection-scanned. A suspect one ends the consult with no council result and stops at the `injection_suspect` hard stop. That stop is asked in an interactive run and is an approval park in an unattended run (ADR-0045 decision 7) (#618, #624).
 - **Unattended runs never decide a split.** A split or always-ask call parks with the brief and dissent. Its text is encoded as untrusted data in the park record (#624, with #607).
 - **No new credential and no merge-path change.** Everything runs under the executing user's credentials, and `merge-approved.sh` is untouched. The two trust-boundary changes, a sixth runner-gate script and the overlord's two new agents, were asked (D22, D23).
@@ -238,11 +336,11 @@ Only standard-delivery runs the step. analysis-only and pr-feedback-remediation 
 ### Initiative stages
 
 1. **Capture.** The guide creates the seed issue. Its body links `docs/prds/<slug>.md`, which may not resolve until the docs merge.
-2. **Interrogation.** `hivemind:plan-interrogation` in one session. This is the one single-machine window: its plan lives in the session or `.hivemind/`, so another machine sees only the seed issue.
-3. **PRD.** `hivemind:plan-to-prd` writes the PRD on the docs branch `docs/<slug>` or `docs/<slug>-<suffix>`.
+2. **Interrogation.** The guide has created the docs branch before interrogation writes tracked files. `hivemind:plan-interrogation` runs in one session. This is the one single-machine window: its plan lives in the session or `.hivemind/`, so another machine sees only the seed issue.
+3. **PRD.** `hivemind:plan-to-prd` writes the PRD on the docs branch `docs/<slug>` or `docs/<slug>-<suffix>`. The guide commits the PRD and the interrogation outputs on that branch.
 4. **Solution design and ADRs.** Written on the docs branch by drones with exact file scope.
 5. **Design review.** Per the design review rounds below; the record is written on the docs branch.
-6. **Docs pull request.** It opens as a draft with no closing keyword, leaves draft only when the record passes and its stamps equal the documents at the pull request head, and merges to trunk.
+6. **Docs pull request.** The guide opens it as a draft with no closing keyword. It leaves draft only after verify passes at its head, and merges to trunk. A later push by the guide that changes a stamped path returns it to draft.
 7. **Slicing.** `hivemind:prd-to-issues` reuses the seed issue as the epic and adds each slice's design section.
 8. **Triage.** The maintainer runs triage; it gates `readiness:ready` on the readiness check and writes native blocked-by edges.
 9. **Handoff check.** It passes only when every slice passes, and names each slice as claimable now or blocked.
@@ -251,11 +349,20 @@ Stage derivation picks the latest stage whose evidence exists. Evidence it canno
 
 ### Design review rounds
 
-Round 1 is two parallel fresh passes: angle A (code truth, governance and ADR conflicts, existing-path coverage) and angle B (failure modes, trust and injection, testability). Findings are fixed on the docs branch. Each later round is one fresh confirming pass over both angles. The review exits only with zero open critical or high findings and one round with no new findings. A review that has not converged after round 3 stops and reaches the maintainer as a signal to split the initiative. Every finding gets exactly one disposition: `fixed`, `rejected` with its reason, `deferred` or `recorded`. Critical and high findings are only `fixed` or `rejected`. Mediums follow `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Defer-with-Scope, Recorded Residual).
+Round 1 is two parallel fresh passes: angle A (code truth, governance and ADR conflicts, existing-path coverage) and angle B (failure modes, trust and injection, testability). Findings are fixed on the docs branch. Each later round is one fresh confirming pass over both angles. A pass that errors, times out or returns output the skill cannot parse yields no round and is re-run. Only a completed pass whose parsed list of new findings is empty makes a clean round. The review exits only with zero open critical or high findings and one clean round, so a passing review has 2 or 3 rounds. A review that has not converged after round 3 stops and reaches the maintainer as a signal to split the initiative. Every finding gets exactly one disposition: `fixed`, `rejected` with its reason, `deferred` or `recorded`. Critical and high findings are only `fixed` or `rejected`. Mediums follow `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Defer-with-Scope, Recorded Residual).
+
+The drone rewrites the record after every round: `verdict` stays `fail` until exit, and `rounds`, the open counts and the Findings table stay current. A lost session resumes from the record's rounds.
+
+### Re-review and re-stamp
+
+- Review fix: when local review or the post-PR review changes a stamped document after the review exited, the design review runs one fresh confirming pass over the diff since the stamped blobs. With no new finding the drone re-stamps, and the pass is appended under Rounds as a confirming pass that does not change `rounds` and does not count toward the cap. With a new finding it becomes a re-review.
+- Re-review after an amendment: fresh passes run over the diff since the stamped blobs, with rounds counted from 1 for that review. The front matter is replaced, and the body history is appended under a dated heading.
 
 ### Close-out
 
 When every slice is done, the solution design gains `**Status:** delivered` and an `## As-built deltas` section in one docs pull request, and is never maintained afterward. The truth then lives in code, ADRs, the glossary and governance.
+
+Close-out edits the stamped design, so its record goes stale by design. Stage derivation reads `**Status:** delivered` first, and a delivered design's record is never re-stamped.
 
 ## Existing-path coverage
 
