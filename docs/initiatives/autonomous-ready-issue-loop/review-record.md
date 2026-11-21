@@ -177,8 +177,8 @@ The idea-to-ready work is referred to as #614 and #615; the readiness check come
 Round 3 did not converge under the 3-round cap. The user was asked to choose: split the initiative, fix and run a fourth round, record and merge, or other. The user chose to split.
 
 - The record stays at verdict `fail`.
-- PR #628 stays a draft and is not merged until a re-reviewed design passes.
-- A proposed split, for the user to decide, groups the open highs into three parts:
-  - Strain launch and containment: A3-1, A3-4, A3-5, A3-6, A3-7, B3-2, B3-9, B3-17.
-  - Merge lane: A3-2, A3-3, A3-10, B3-4, B3-5, B3-6, B3-7, B3-8.
-  - Claim integrity: B3-1, B3-3.
+- The user accepted a three-way split on 2026-11-21. Each part was filed as a native sub-issue of #603, to get its own solution design and design review:
+  - #630 Lair design: strain launch and containment (A3-1, A3-4, A3-5, A3-6, A3-7, B3-2, B3-9, B3-17).
+  - #631 Lair design: merge lane (A3-2, A3-3, A3-10, B3-4, B3-5, B3-6, B3-7, B3-8).
+  - #632 Lair design: claim integrity (B3-1, B3-3).
+- PR #628 stays a draft. It merges once a design for one of these parts passes review.
