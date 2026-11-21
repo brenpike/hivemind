@@ -259,12 +259,12 @@ The outcome of a Tier-B decision — `did-now` (auto-executed), `deferred` (trac
 _Avoid_: status, resolution
 
 **Council**:
-The decision service for a choice with no strong recommendation, called from the design stages and, as a consult, from standard-delivery. The caller launches two or more **Overseer** members, each with an angle and a model, then Abathur, the read-only agent that weighs their opinions into one brief and keeps the dissent. Abathur never picks the members it judges. The brief re-enters the decision step, which re-checks hard stops and every gate. A split is asked, or parks in an unattended run. Hard stops and **Promotion Gate** trips are never sent to the council (ADR-0047).
+The decision service for a choice with no strong recommendation, called from the design stages and, as a consult, from standard-delivery. The caller launches two or more **Overseer** members, each with an angle and a model, then Abathur, the read-only agent that weighs their opinions into one brief and keeps the dissent. Abathur never picks the members it judges. The caller composes the result brief from the input brief and Abathur's recommendation, so no member or Abathur can change a gate, and the decision step resolves it. A split comes back with no recommendation, so it is asked, or parks in an unattended run. Hard stops and **Promotion Gate** trips are never sent to the council (ADR-0047).
 _Alias_: Abathur council
 _Avoid_: panel, jury, second opinion, consensus
 
 **Overseer**:
-A read-only **Council** member: one opinion on one call, from its assigned angle and model, which Abathur weighs. A council result counts only with at least two members on at least two models. One member may be a non-Claude reviewer run through the **Local Reviewer** setting. Named Overseer because **Synapse** is the runner agent (ADR-0047).
+A read-only **Council** member: one opinion on one call, from its assigned angle and model, which Abathur weighs. A council result counts only with at least two members on at least two models. One member may be a non-Claude reviewer run through the **Local Reviewer** setting, only when that setting is a JSON argv list; its identity names the tool, never a model. Named Overseer because **Synapse** is the runner agent (ADR-0047).
 _Avoid_: Synapse (the runner agent), voter, juror
 
 ### Plugin Structure
@@ -393,11 +393,11 @@ The committed HOW of an **Initiative**, at `docs/initiatives/<slug>/solution-des
 _Avoid_: design doc, directive (which is one run's plan), architecture doc
 
 **Design Review**:
-The review of an **Initiative**'s **PRD**, **Solution Design** and ADRs before the docs merge, by fresh read-only **Cerebrate** passes that carry no session memory. Round 1 is two angles in parallel; each later round is one confirming pass. It exits only at zero open critical or high findings and one round with no new findings. A review not converged by round 3 reaches the maintainer as a signal to split the **Initiative**. Every finding gets exactly one disposition: fixed, rejected, deferred or recorded (ADR-0046).
+The review of an **Initiative**'s **PRD**, **Solution Design** and ADRs before the docs merge, by fresh read-only **Cerebrate** passes that carry no session memory. Round 1 is two angles in parallel; each later round is one confirming pass. It exits only at zero open critical or high findings and one round with no new findings. A pass that errors yields no round, and a passing review has two or three rounds. A review not converged by round 3 reaches the maintainer as a signal to split the **Initiative**. Every finding gets exactly one disposition: fixed, rejected, deferred or recorded (ADR-0046).
 _Avoid_: plan interrogation (which interviews the user), **Adaptation Cycle** (which reviews a code diff), design pass
 
 **Review Record**:
-The committed outcome of a **Design Review**, at `docs/initiatives/<slug>/review-record.md`, shipped in the same pull request as the **Solution Design**. It stamps each reviewed document by its git blob id and records the verdict, the open findings by severity, the rounds, every finding's disposition, the decisions taken (listed for veto) and the decisions asked (with the user's answer). Any later edit to a stamped document makes it stale until a review of the change re-stamps it (ADR-0046).
+The committed outcome of a **Design Review**, at `docs/initiatives/<slug>/review-record.md`, shipped in the same pull request as the **Solution Design**. It stamps the **PRD**, the **Solution Design** and every ADR its docs pull request adds or edits, each by its git blob id, and records the verdict, the open findings by severity, the rounds, every finding's disposition, the decisions taken (listed for veto) and the decisions asked (with the user's answer). Any later edit to a stamped document makes it stale until a review of the change re-stamps it. Its authority is a human-reviewed merge (ADR-0046).
 _Avoid_: review log, **Fix Ledger** (which tracks a pull request's review findings), **Decision Journal**
 
 **Readiness Check**:
@@ -405,7 +405,7 @@ The one deterministic check, shared by triage, the **Guide**'s handoff check and
 _Avoid_: readiness rating, quality gate, triage (which applies the labels)
 
 **Initiative Track**:
-The track of an issue with a native parent epic: an initiative slice. Features, epics and any change to a public contract or governance semantics take it: **PRD**, **Solution Design** and ADRs, **Design Review**, merged docs, slicing, triage, then the handoff check. A slice passes the **Readiness Check** only when its design section names a **Solution Design** whose **Review Record** passes and is not stale.
+The track of an issue with a native parent epic: an initiative slice. Features and any change to a public contract or governance semantics take it; their epic is the slices' native parent and never a slice itself: **PRD**, **Solution Design** and ADRs, **Design Review**, merged docs, slicing, triage, then the handoff check. A slice passes the **Readiness Check** only when its design section names a **Solution Design** whose **Review Record** passes and is not stale.
 _Avoid_: feature track, full path, heavy track
 
 **Standalone Track**:
@@ -494,16 +494,16 @@ _Avoid_: degraded mode, manual mode, safe mode
 - A **Reflex** bypasses the **Cerebrate** entirely — **Overlord** spawns directly
 - An **Adaptation Cycle** may trigger **Mutation Decay**, forcing a **Flare**
 
-- An **Initiative** correlates exactly one plan, at most one **Handoff**, at most one **PRD**, and zero or more slice issues, all under one slug
+- An **Initiative** correlates exactly one plan, at most one **Handoff**, at most one **PRD** (exactly one on the **Initiative Track**), and zero or more slice issues, all under one slug
 - A **PRD** (WHAT) is distinct from a **Directive** (HOW): the PRD carries stories/acceptance/metrics; the Directive carries steps/file-scope/sequence — no duplication
 - `hivemind:plan-to-prd`, `hivemind:prd-to-issues`, and `hivemind:create-handoff` are designed as decoupled leaf transforms — none invokes another (ADR-0013); their output is path-agnostic (ADR-0012)
 - A **Vertical Slice** becomes one GitHub issue and one **Strain** candidate; the **Cerebrate** re-derives file overlap at brood-time and remains the sole independence authority (issues never self-declare scope)
 - An **Initiative** on the **Initiative Track** has exactly one **PRD**, one **Solution Design** and one **Review Record**, all under its slug; ADRs stay global and numbered in `docs/adr/`
-- A **Design Review** produces exactly one **Review Record**, which stamps the **PRD** and the **Solution Design** and may stamp ADRs; an edit to any stamped document makes the record stale
+- A **Design Review** produces exactly one **Review Record**, which stamps the **PRD** and the **Solution Design** and every ADR its docs pull request adds or edits; an edit to any stamped document makes the record stale
 - The **Readiness Check** reads an issue's track, never judges it: a native parent epic puts it on the **Initiative Track**, else it is on the **Standalone Track** and must carry a **Spec Block**
 - Triage proposes `readiness:ready` only for an issue that passes the **Readiness Check**; the **Lair** re-runs the check at claim time and claims only a **Ready Issue**
 - The **Guide** (conductor) orchestrates `hivemind:plan-interrogation`, `hivemind:plan-to-prd`, the **Design Review** and `hivemind:prd-to-issues` by intent, and leaves `readiness:ready` to the maintainer through triage
-- A **Council** (Abathur council) has two or more **Overseer** members and one Abathur; its brief re-enters the decision step, so hard stops and **Promotion Gate** trips still ask, and a split is asked or parks
+- A **Council** (Abathur council) has two or more **Overseer** members and one Abathur; the caller composes its brief and the decision step resolves it, so hard stops and **Promotion Gate** trips still ask, and a split is asked or parks
 
 - A **Workflow Router** selects exactly one **Workflow Definition** for a request, or routes to the **Exploratory Intent Session** when no concrete workflow matches; outside **Instinct**, the **Overlord** then executes that definition's states, advancing only via the **Transition Engine** and recording progress in the **Run Ledger**
 - A **Reflex** (trivial fast path) bypasses the **Workflow Router** and the **Run Ledger** entirely — the **Overlord** drives the short delivery tail by intent, just as it skips the **Cerebrate**
