@@ -11,7 +11,9 @@ simulated live mutation exit status is supplied via `REACTMARKER_REACT_STATUS` f
 the failure-path case. Reason tokens asserted on the hard-failure paths are
 `missing-node-id`, `unmapped-surface`, and `react-failed`; the noise-mode cases
 below add `noise-author-refused`, `missing-value-for-noise`,
-`missing-identity-module`, and `retired-filter`.
+`missing-identity-module`, and `retired-filter`; the edit-gate cases add
+`missing-edited-at`, `missing-value-for-edited-at`, `invalid-edited-at`, and
+`edited-since-read`.
 
 The live-path cases (issue #393) leave `REACTMARKER_TEST_MODE` and
 `REACTMARKER_CAPTURE_FILE` unset and put a stub `gh` first on `PATH`. The stub
@@ -113,6 +115,41 @@ group the viewer did not add causes no removal. A removal fails with
 is an errors envelope, the payload still shows the viewer's `EYES`, or its
 `reactionGroups` is null.
 
+The edit-gate cases (issue #578) cover `--edited-at <time|never>`, the version
+of the node the reviewer read: a time matching
+`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$` or the literal
+`never`. Every toplevel and review call passes it; the binding stub node and the
+`addReaction` stub `subject` carry `lastEditedAt`, by default the read version.
+
+- Marked, exit 0 with `addReaction` sent: a read version equal to the node's
+  `lastEditedAt`; `never` read against a node whose `lastEditedAt` is null.
+- `edited-since-read`, exit 1 with no mutation sent and the logged order repo
+  view, binding: `never` read against an edited node, in fix mode and in noise
+  mode after the author check passes; a node edited later than the read version;
+  a binding node with no `lastEditedAt` key; an edited node that already carries
+  our `EYES`, so the refusal precedes the re-mark removal.
+- `edited-since-read` after the mark: the `addReaction` response's
+  `subject.lastEditedAt` differs from the read version (a later time, or a time
+  where `never` was read), so the logged order is repo view, binding, `react`,
+  `unreact`.
+- `react-failed`: that undo removal exits non-zero or its payload still shows
+  the viewer's `EYES`; an `addReaction` response whose `subject` has no
+  `lastEditedAt` key or is null, with no undo sent.
+- `missing-edited-at` (no flag, in fix mode and noise mode),
+  `missing-value-for-edited-at` (the flag as the last argument) and
+  `invalid-edited-at` (empty, fractional seconds, an offset, a date alone,
+  `NEVER`, a trailing newline, `null`), each with stub `git` and a failing stub
+  `gh` first on `PATH`, neither reached.
+- The thread surface without the flag, with a malformed value and with a
+  valueless flag stays a silent no-op.
+- Under the capture seam the flag is still required (`missing-edited-at`) and
+  validated (`invalid-edited-at`), with nothing captured; a valid flag captures
+  the reaction with both comparisons skipped and `gh` never reached.
+- The whitespace-normalized binding query selects `lastEditedAt` after
+  `reactionGroups { content viewerHasReacted }` under both fragments, and the
+  mutation selects `subject { ... on IssueComment { lastEditedAt } ... on
+  PullRequestReview { lastEditedAt } }`.
+
 The bootstrap tokens `cannot-self-locate`,
 `missing-graphql-check`, and `unparseable-graphql-check` are documented in the
 script header; the shared self-location suite covers them.
@@ -120,8 +157,8 @@ script header; the shared self-location suite covers them.
 The suite uses REAL production-shaped reviewer node ids — `IC_...` for a toplevel
 IssueComment and `PRR_...` for a review PullRequestReview — not fake placeholder
 ids, so validation-order bugs cannot hide behind a non-production node shape. The
-inputs are short args (an optional `--noise` flag, then `NODE_ID`, `surface`,
-`candidate_url`) and the
+inputs are short args (an optional `--noise` flag and the `--edited-at` flag,
+then `NODE_ID`, `surface`, `candidate_url`) and the
 assertions are over the captured reaction log, so the suite needs no on-disk
 input/expected JSON fixtures — the capture files, scratch repos and stubs live in
 a disposable `mktemp -d` tmpdir removed on `EXIT`.

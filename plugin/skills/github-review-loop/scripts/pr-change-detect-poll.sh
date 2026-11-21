@@ -11,9 +11,11 @@
 #   - Each iteration computes a CHEAP SCALAR snapshot via ONE non-paginated
 #     GraphQL query (PR state; author-aware latest-id tokens for issue comments,
 #     filtered reviews, and review-thread comments (filtered by reviewer-filter
-#     and self identity); totalCount tripwires for the three connections capped at
-#     50; a CI `FAILED_CHECKS` scalar that counts only checks in a failed/
-#     errored state; a RISE in it against the previous snapshot or seed raises
+#     and self identity); an edit-time token `LATEST_EDIT`, the greatest
+#     `lastEditedAt` over the non-self issue comments and filtered reviews of
+#     those pages, so an in-place edit of either fires `CHANGED`; totalCount
+#     tripwires for the three connections capped at 50; a CI `FAILED_CHECKS`
+#     scalar that counts only checks in a failed/errored state; a RISE in it against the previous snapshot or seed raises
 #     its own `CI_FAILED` marker, so a CI regression wakes the reviewer directly
 #     even when no new review comment was posted) plus ONE Reviewer Approval
 #     bool (an Automated
@@ -69,6 +71,12 @@
 #     That noise is absorbed downstream by `prefilter.sh` returning
 #     `PREFILTER_SKIP` for the self-handled-only case. Net effect: huge-PR
 #     coverage without losing the self-echo suppression.
+#   - The edit token `LATEST_EDIT` covers only the non-self issue comments and
+#     filtered reviews inside the `comments(last: 50)` and `reviews(last: 50)`
+#     pages. An edit of an older comment or review, outside those pages, bumps
+#     no token and surfaces on the next wake, like the page residual above. A
+#     review-thread comment edit is not tracked at all: threads are tokened by
+#     databaseId order only, and the reviewer re-fetches every thread on wake.
 #   - A silent thread resolve→reopen with no new comment does not bump a token
 #     and so does not fire on that exact poll. Such a cycle surfaces on the
 #     NEXT activity or the next reviewer wake — the reviewer re-fetches ALL
@@ -130,7 +138,9 @@
 #
 # Markers emitted (one token-cheap line each):
 #   CHANGED          a non-terminal delta in the scalar snapshot (wake reviewer
-#                    through the prefilter), a FAILED_CHECKS drop included
+#                    through the prefilter), a FAILED_CHECKS drop and an
+#                    in-place edit of an in-scope comment or review (a
+#                    LATEST_EDIT move) included
 #   CI_FAILED        FAILED_CHECKS rose against the previous snapshot or seed
 #                    (non-terminal; the skill dispatches the reviewer directly,
 #                    without the prefilter)
@@ -252,6 +262,7 @@ SNAPSHOT_FIELDS=(
   comments_total
   reviews_total
   threads_total
+  latest_edit
   failed_checks
   approval
 )
@@ -535,10 +546,10 @@ fi
 fail_count=0
 
 # compute_snapshot: fills the global scalar variables from ONE non-paginated
-# GraphQL query (PR state + last 50 issue-comment databaseIds + last 50 review
-# databaseIds with state and author + last 50 reviewThreads with their last
-# comment databaseId and author + the totalCount of the comments, reviews, and
-# reviewThreads connections + the `statusCheckRollup` contexts so a
+# GraphQL query (PR state + last 50 issue-comment databaseIds and edit times +
+# last 50 review databaseIds with state, author and edit time + last 50
+# reviewThreads with their last comment databaseId and author + the totalCount
+# of the comments, reviews, and reviewThreads connections + the `statusCheckRollup` contexts so a
 # `FAILED_CHECKS` scalar can be derived) plus two exhaustive paginated approval
 # reads — every per-author latest review (`latestReviews`, its own paginated
 # GraphQL query) and every REST reaction — folded into ONE in-scope approval
@@ -555,7 +566,13 @@ fail_count=0
 # connection or per-thread `comments` would otherwise project as no activity).
 # Each id token is a single max-databaseId across the author-filtered stream —
 # self-only flurries (own replies, own pushes) do not bump any token,
-# eliminating self-echo CHANGED storms. "Self" is the module's `is_self` over
+# eliminating self-echo CHANGED storms. The edit token `LATEST_EDIT` is the
+# greatest non-null `lastEditedAt` over the same non-self issue comments and
+# filtered reviews the two id tokens read, reduced to its 14 digits
+# (2026-11-20T23:04:00Z gives 20261120230400) so it fits the seed shape, or
+# NONE when no such node was edited. A `lastEditedAt` that is not a
+# second-precision UTC time fails the capture. The token is compared as text
+# only, never read through read_decimal nor used in arithmetic. "Self" is the module's `is_self` over
 # each node's login AND `__typename` (both selected for that reason): only a
 # User-typed SELF_LOGIN author is self, so a Bot sharing the login, or a node
 # with no type, still bumps its token (fail toward wake). The totalCount scalars
@@ -592,11 +609,11 @@ query($owner: String!, $repo: String!, $pr: Int!) {
       state
       comments(last: 50) {
         totalCount
-        nodes { databaseId author { login __typename } }
+        nodes { databaseId author { login __typename } lastEditedAt }
       }
       reviews(last: 50) {
         totalCount
-        nodes { databaseId state author { login __typename } }
+        nodes { databaseId state author { login __typename } lastEditedAt }
       }
       reviewThreads(first: 50) {
         totalCount
@@ -693,14 +710,23 @@ query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
     include "reviewer-identity";
     .data.repository.pullRequest as $pr |
     ($pr.comments.nodes
-      | map(select(is_self(.author.login; .author.__typename; $login) | not))
-      | map(.databaseId)
-      | (if length == 0 then "NONE" else max | tostring end)) as $nonself_comment |
+      | map(select(is_self(.author.login; .author.__typename; $login) | not))) as $nonself_comments |
     ($pr.reviews.nodes
       | map(select(.state as $s | ["CHANGES_REQUESTED","COMMENTED","APPROVED","DISMISSED"] | index($s)))
-      | map(select(reviewer_matches_filter(.author.login; .author.__typename; $login; $filter; $set)))
+      | map(select(reviewer_matches_filter(.author.login; .author.__typename; $login; $filter; $set)))) as $filtered_reviews |
+    ($nonself_comments
+      | map(.databaseId)
+      | (if length == 0 then "NONE" else max | tostring end)) as $nonself_comment |
+    ($filtered_reviews
       | map(.databaseId)
       | (if length == 0 then "NONE" else max | tostring end)) as $filtered_review |
+    ($nonself_comments + $filtered_reviews
+      | map(.lastEditedAt | select(. != null)
+          | if type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+            then gsub("[^0-9]"; "")
+            else error("malformed lastEditedAt")
+            end)
+      | (if length == 0 then "NONE" else max end)) as $latest_edit |
     ($pr.reviewThreads.nodes
       | map(.comments.nodes[]?)
       | map(select(is_self(.author.login; .author.__typename; $login) | not))
@@ -753,6 +779,7 @@ query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
     "COMMENTS_TOTAL=" + ($pr.comments.totalCount | tostring),
     "REVIEWS_TOTAL=" + ($pr.reviews.totalCount | tostring),
     "THREADS_TOTAL=" + ($pr.reviewThreads.totalCount | tostring),
+    "LATEST_EDIT=" + $latest_edit,
     "FAILED_CHECKS=" + ($failed_checks | tostring)
   ' \
   ) ) || return 1
@@ -768,6 +795,7 @@ query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
       COMMENTS_TOTAL=*) cur_comments_total="${line#COMMENTS_TOTAL=}" ;;
       REVIEWS_TOTAL=*) cur_reviews_total="${line#REVIEWS_TOTAL=}" ;;
       THREADS_TOTAL=*) cur_threads_total="${line#THREADS_TOTAL=}" ;;
+      LATEST_EDIT=*) cur_latest_edit="${line#LATEST_EDIT=}" ;;
       FAILED_CHECKS=*) cur_failed_checks="${line#FAILED_CHECKS=}" ;;
     esac
   done <<EOF

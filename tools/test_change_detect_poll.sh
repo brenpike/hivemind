@@ -719,6 +719,24 @@ else
   failed "delta:failed-checks" "expected exactly CI_FAILED;WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';')"
 fi
 
+# ── 3d. scalar delta: an in-place review edit ────────────────────────────────────────
+# The Bot-typed review already in the pre-cycle-0 state is edited in place: its `lastEditedAt`
+# goes null -> a time while every id token and total stays put, so only LATEST_EDIT moves
+# (NONE -> 20261120230400). The edit prints exactly CHANGED, the steady edited poll after it prints
+# nothing, and CHANGED keeps the poll running to WATCH_TIMEOUT.
+EDIT_TIME="2026-11-20T23:04:00Z"
+delta_review_edit="$(derive_fixture delta-review-edit "$PRE" \
+  ".data.repository.pullRequest.reviews.nodes[0].lastEditedAt = \"$EDIT_TIME\"")"
+st="$(new_state deltareviewedit)"
+set_seq "$st" graphql "$PRE" "$delta_review_edit"
+set_seq "$st" reactions "$REACT_NONE"
+out="$(arm_poll "$st" "$SEED")"
+if [ "$out" = "$(printf 'CHANGED\nWATCH_TIMEOUT')" ]; then
+  pass "delta:review-edit" "in-place Bot review edit fired CHANGED, polled on to WATCH_TIMEOUT"
+else
+  failed "delta:review-edit" "expected exactly CHANGED;WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';')"
+fi
+
 # ── 4. Codex 👍 present at the first poll emits REVIEWER_APPROVED ────────────────────
 # The reaction (a `chatgpt-codex-connector[bot]` +1 in a raw REST page, typed `User` as the REST
 # endpoint reports a bot reactor) is
@@ -1575,8 +1593,8 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
       | .reviewThreads = {"totalCount":0,"nodes":[]})')"
   empty_thread="$(derive_fixture surface-empty-thread "$empty_all" \
     '.data.repository.pullRequest.reviewThreads = {"totalCount":1,"nodes":[{"comments":{"nodes":[]}}]}')"
-  for empty_case in "all|$empty_all|initial|OPEN|NONE|NONE|NONE|0|0|0|0|false" \
-    "thread|$empty_thread|initial|OPEN|NONE|NONE|NONE|0|0|1|0|false"; do
+  for empty_case in "all|$empty_all|initial|OPEN|NONE|NONE|NONE|0|0|0|NONE|0|false" \
+    "thread|$empty_thread|initial|OPEN|NONE|NONE|NONE|0|0|1|NONE|0|false"; do
     empty_name="${empty_case%%|*}"
     empty_rest="${empty_case#*|}"
     empty_fixture="${empty_rest%%|*}"
@@ -1675,7 +1693,8 @@ fi
 #   (c) parity: over each delta class, a derived MERGED and CLOSED state, an approval rise, and no
 #       delta, the check's line equals the expected marker AND the first line of a poll armed with
 #       the same seed over the same state (its WATCH_TIMEOUT read as UNCHANGED); exit 0, one capture.
-#       A failed-check rise is CI_FAILED, and a drop against a red re-arm seed is CHANGED.
+#       A failed-check rise is CI_FAILED, a drop against a red re-arm seed is CHANGED, and an
+#       in-place review edit is CHANGED.
 #   (d) fail-closed: a failed snapshot query (no retry), a missing seed, and a malformed seed (no gh
 #       call) each print exactly CHECK_ERROR, exit 1.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
@@ -1719,6 +1738,7 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
     "merged|$state_merged|$REACT_NONE|STATE=MERGED|$parity_seed" \
     "closed|$state_closed|$REACT_NONE|STATE=CLOSED|$parity_seed" \
     "approval|$PRE|$REACT_CODEX|REVIEWER_APPROVED|$parity_seed" \
+    "edit|$delta_review_edit|$REACT_NONE|CHANGED|$parity_seed" \
     "nodelta|$PRE|$REACT_NONE|UNCHANGED|$parity_seed"; do
     IFS='|' read -r parity_name parity_graphql parity_reactions parity_expected parity_row_seed <<EOF
 $parity_row
@@ -1743,7 +1763,7 @@ EOF
     fi
   done
   if [ "$parity_ok" -eq 1 ]; then
-    pass "check:parity-with-poll-first-iteration" "totals, checks rise (CI_FAILED), checks drop (CHANGED), merged, closed, approval rise, no delta: check line == poll first line == expected, exit 0, one capture"
+    pass "check:parity-with-poll-first-iteration" "totals, checks rise (CI_FAILED), checks drop (CHANGED), merged, closed, approval rise, review edit (CHANGED), no delta: check line == poll first line == expected, exit 0, one capture"
   else
     failed "check:parity-with-poll-first-iteration" "$parity_detail"
   fi
@@ -2624,6 +2644,102 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   done
 else
   skipped "numbers:source-table" "$SKIP_REASON"
+fi
+
+# ── 45. the edit token: scope, value and capture ─────────────────────────────────────
+# LATEST_EDIT is the greatest non-null `lastEditedAt` over the non-self issue comments and the
+# filtered reviews of the snapshot pages, reduced to its 14 digits, or NONE. Case 3d and the
+# `edit` parity row cover an in-scope review edit; these cover the rest of the scope and the
+# capture.
+#   (a) a Bot-typed issue comment edited in place fires CHANGED, then polls on to WATCH_TIMEOUT.
+#   (b) a User-typed self comment edited in place is self-echo and idles to WATCH_TIMEOUT.
+#   (c) under a `<login>` filter naming another reviewer, the review edit that fires in case 3d
+#       idles to WATCH_TIMEOUT.
+#   (d) a baseline over an edited comment and a later-edited review carries the later time's
+#       digits in its latest_edit field, located through the SNAPSHOT_FIELDS declaration.
+#   (e) an in-scope edit time that is not a second-precision UTC time fails the capture:
+#       SNAPSHOT_ERROR, POLL_ERROR and CHECK_ERROR, each exit 1.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  edit_comment="$(derive_fixture edit-comment "$delta_comment" \
+    ".data.repository.pullRequest.comments.nodes[2].lastEditedAt = \"$EDIT_TIME\"")"
+  edit_comment_seed="$(capture_seed editcommentseed initial "$delta_comment" "$REACT_NONE")"
+  st="$(new_state edit-comment)"
+  set_seq "$st" graphql "$delta_comment" "$edit_comment"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(arm_poll "$st" "$edit_comment_seed")"
+  if [ "$out" = "$(printf 'CHANGED\nWATCH_TIMEOUT')" ]; then
+    pass "edit:nonself-comment-fires-changed" "in-place Bot issue comment edit fired CHANGED, polled on to WATCH_TIMEOUT"
+  else
+    failed "edit:nonself-comment-fires-changed" "expected exactly CHANGED;WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';') seed=$edit_comment_seed"
+  fi
+
+  edit_self="$(derive_fixture edit-self-comment "$PRE" \
+    ".data.repository.pullRequest.comments.nodes[1].lastEditedAt = \"$EDIT_TIME\"")"
+  st="$(new_state edit-self-comment)"
+  set_seq "$st" graphql "$PRE" "$edit_self"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(arm_poll "$st" "$SEED")"
+  if [ "$out" = "WATCH_TIMEOUT" ]; then
+    pass "edit:self-comment-idles" "in-place User-typed self comment edit stayed silent to WATCH_TIMEOUT"
+  else
+    failed "edit:self-comment-idles" "expected only WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  edit_filter_seed="$(capture_seed editfilterseed initial "$PRE" "$REACT_NONE" "$COPILOT_SHAPED_BOT")"
+  st="$(new_state edit-review-outside-filter)"
+  set_seq "$st" graphql "$PRE" "$delta_review_edit"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(arm_poll "$st" "$edit_filter_seed" "$COPILOT_SHAPED_BOT")"
+  if [ "$out" = "WATCH_TIMEOUT" ]; then
+    pass "edit:review-outside-filter-idles" "review edit by a reviewer the <login> filter excludes stayed silent to WATCH_TIMEOUT"
+  else
+    failed "edit:review-outside-filter-idles" "expected only WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';') seed=$edit_filter_seed"
+  fi
+
+  edit_both="$(derive_fixture edit-both "$edit_comment" \
+    '.data.repository.pullRequest.reviews.nodes[0].lastEditedAt = "2026-11-21T01:02:03Z"')"
+  edit_field_pos=$(($(declared_fields | grep -nx 'latest_edit' | cut -d: -f1) + 1))
+  edit_both_seed="$(capture_seed editbothseed initial "$edit_both" "$REACT_NONE")"
+  edit_token="$(printf '%s' "$edit_both_seed" | cut -d'|' -f"$edit_field_pos")"
+  if [ "$edit_token" = "20261121010203" ]; then
+    pass "edit:token-is-greatest-edit-digits" "comment edited $EDIT_TIME, review edited 2026-11-21T01:02:03Z -> latest_edit 20261121010203"
+  else
+    failed "edit:token-is-greatest-edit-digits" "expected latest_edit 20261121010203, got=$edit_token seed=$edit_both_seed"
+  fi
+
+  edit_bad_ok=1
+  edit_bad_detail=""
+  edit_bad_index=0
+  for edit_bad_value in '"2026-11-20T23:04:00.5Z"' '"2026-11-20 23:04:00"' '20261120230400'; do
+    edit_bad_index=$((edit_bad_index + 1))
+    edit_bad_fixture="$(derive_fixture "edit-bad-$edit_bad_index" "$PRE" \
+      ".data.repository.pullRequest.reviews.nodes[0].lastEditedAt = $edit_bad_value")"
+    if ! edit_bad_outcome="$(capture_fails_closed "edit-bad-$edit_bad_index" "$edit_bad_fixture" "" \
+      "$SEED" "$REVIEWER_FILTER")"; then
+      edit_bad_ok=0
+      edit_bad_detail="$edit_bad_detail value=$edit_bad_value $edit_bad_outcome"
+    fi
+    st="$(new_state "edit-bad-$edit_bad_index-check")"
+    set_seq "$st" graphql "$edit_bad_fixture"
+    set_seq "$st" reactions "$REACT_NONE"
+    out="$(run_check "$st" "$SEED")"
+    status=$?
+    if [ "$status" -ne 1 ] || [ "$out" != "CHECK_ERROR" ]; then
+      edit_bad_ok=0
+      edit_bad_detail="$edit_bad_detail value=$edit_bad_value check status=$status out=$(printf '%s' "$out" | tr '\n' ';')"
+    fi
+  done
+  if [ "$edit_bad_ok" -eq 1 ]; then
+    pass "edit:malformed-time-fails-closed" "fractional, space-separated and numeric edit times -> SNAPSHOT_ERROR / POLL_ERROR / CHECK_ERROR, exit 1"
+  else
+    failed "edit:malformed-time-fails-closed" "$edit_bad_detail"
+  fi
+else
+  for edit_case_id in edit:nonself-comment-fires-changed edit:self-comment-idles \
+    edit:review-outside-filter-idles edit:token-is-greatest-edit-digits \
+    edit:malformed-time-fails-closed; do
+    skipped "$edit_case_id" "$SKIP_REASON"
+  done
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
