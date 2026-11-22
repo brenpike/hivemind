@@ -6,7 +6,7 @@ open_counts:
   high: 0
   medium: 0
   low: 0
-rounds: 1
+rounds: 2
 clean_round: null
 ---
 
@@ -88,7 +88,7 @@ The passes found the same root in five places: L1-A1 = L1-B2, L1-A2 = L1-B8, L1-
 
 Pass A judged 11 owned round 3 findings closed by the design text and reopened 5 (see the round 3 table above): A3-9, A3-15, B3-12, B3-21 and A3-11.
 
-**Remediation after round 1.** Each finding was checked against trunk code, and each round 1 finding and each reopened finding now has a disposition in its table. Every one is fixed in the design; none is deferred, recorded or rejected. The State column holds the disposition and the design section that closes it. Round 2 has not run, so these fixes are unreviewed until it does. The design's Amendments section has the matching entry.
+**Remediation after round 1.** Each finding was checked against trunk code, and each round 1 finding and each reopened finding now has a disposition in its table. Every one is fixed in the design; none is deferred, recorded or rejected. The State column holds the disposition and the design section that closes it. Round 2 reviewed these fixes (see Round 2). The design's Amendments section has the matching entry.
 
 ### Pass A
 
@@ -135,6 +135,43 @@ Pass A judged 11 owned round 3 findings closed by the design text and reopened 5
 | L1-B17 | low | Registration; governance edits | The marker-check library and `lair-*.sh` have no named `validate.sh` paths. The library is routed only to the push-branch and open-plan-pr suites, though `gather-facts`, `fetch-normalize` and the lair scripts source it. Overlord-prose pins are missing for the `user_gate` edits and the decision-autonomy brood-approval bullet. | `validate.sh:641-675` | Name the paths, route to every consumer and list the pins. | fixed: Verification strategy ("Registration in `tools/validate.sh`" names the paths and every consumer route; "Overlord prose tests" lists the user_gate and brood-approval pins) |
 | L1-B18 | low | Existing-path coverage; push | If the settings env does not reach workflow-agent Bash, the scripts print `none` and fall back to the lease-retry overwrite and no author filter. Nothing cross-checks this. | `push-branch.sh:441-445` | Add a headless check. Fail closed when the worktree holds `.hivemind/lair/launch.json`. | fixed: Contracts and seams > Marker check (`unverified` when the worktree holds `.hivemind/lair/launch.json` with no marker), Failure modes and Verification strategy (headless check) |
 
+## Round 2
+
+- **Date:** 2026-11-21 (review run).
+- **Design reviewed:** blob `cb1aec324d0178c1552678706f5ba68322c2e3f0` at commit `bde2ddf24715b8a853f511225a102fe323c543c3`.
+- **Cerebrate pass:** one fresh read-only `hivemind:cerebrate` pass, model opus, effort high, "Memory context: none", covering both angles of the Procedure change.
+- **Tool pass:** one pass through `plugin/skills/adaptation-cycle/scripts/run-review.sh` with the `codex-plugin` preset. Verdict `needs-attention`, two high findings. The raw output was read from the run's scratch file and is not committed.
+
+**Fix check.** The cerebrate pass judged all 35 round 1 findings (L1-A1 to L1-A17 and L1-B1 to L1-B18) closed by the design text. It also judged the five reopened round 3 findings closed: A3-9, A3-15, B3-12, B3-21 and A3-11.
+
+**Citation offsets.** The cerebrate pass noted two off citations. The brood id is generated at `spawn-brood.sh:341-343`, with its comment block at `:301-308`. The settings copy is at `:821`. The design's Context and code truth now cites both.
+
+**Remediation after round 2.** Each finding was checked against trunk code. Every cerebrate finding is fixed in the design. Both tool findings are rejected as repeats of recorded user decisions. The State column holds the disposition and its reason, and the closing section. The design's Amendments section has the matching entry.
+
+### Cerebrate pass
+
+Line numbers marked "design" refer to the reviewed blob `cb1aec32`.
+
+| ID | Severity | Section | Finding | Evidence | Proposed fix | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L2-C1 | high | Strain result and liveness; governance edits "Synapse runner gate" and "Strain runs" | The gate denies any call that names a member script outside its exact form. With `lair-result.sh` a member whose exact form requires `--inputs`, the overlord's no-argument call is denied. Every strain then reads as a crash, and the breaker halts after 3. | `synapse-gate.sh:11`; `security-policy.md:159` | State the exact form with `--inputs` optional, or split an engine-only record script as the gate member and keep `lair-result.sh` out of the gate. Add a `tools/test_synapse_gate.sh` case for a non-synapse agent's no-argument call. | fixed: split, so the overlord's call never meets the gate. Components > Strain result and liveness ("The engine writes its own record, through a separate script", "Two scripts, one gate member"), Unattended governance edits ("Synapse runner gate", "Strain runs"), State and ownership, Contracts and seams > Marker check, Decisions and Verification strategy (`tools/test_synapse_gate.sh`) |
+| L2-C2 | medium | Start points; Failure modes | The row "Moved head before a remediation launch" adds a comparison of the dispatch head with the last result's head that Start points never defines, and it decides an outcome, against "removing it would change no outcome". | design `:103`, `:108`, `:111`, `:342` | Pick one spec. | fixed: the row follows Start points, with no last-result comparison, and Start points no longer claims the check decides no outcome; the push is the authority. Components > Start points ("Moved-head check", "Closed by construction"), Failure modes and Decisions |
+| L2-C3 | medium | Start points "Handling by start kind"; Failure modes | The repeat guard "at most one per pull request head" never dispatches later findings on a head whose remediation ended `complete` without a push. The pull request stalls silently. | design `:127`, `:343`, `:259` | Route to `lair:review` when findings appear on a head with a complete dispatch marker, or key the guard on head and finding-ID set. Add a `tools/test_lair_tick.sh` case. | fixed: keyed on the head and the finding keys, which keeps ADR-0045 decision 13's dispatch for review findings. Components > Start points ("Handling by start kind"), Remediation strain launch ("Its claim"), Context and code truth (record keys), Failure modes, Decisions and Verification strategy (`tools/test_lair_tick.sh`) |
+| L2-C4 | medium | Strain launch and settings; Contracts and seams > Strain environment | The `NAME="$NAME"` form passes an unset name as empty, against "only when set". The list is proven only on #604's machine and misses the keyring, `XDG_CONFIG_HOME`, proxy and CA names, and the local review tool's credentials. Local review would skip `tool-failed` in every strain, which keeps every pull request out of the auto tier. | `run-review.sh:75`, `:498-506`; ADR-0045 `:69` | Use the `${NAME+NAME="$NAME"}` form or build the env argv in `spawn-brood.sh`. Add a Lair preflight under the same env (`gh auth status`, `git ls-remote origin`, a local review dry run) that halts with a named cause. Add local review to the headless check and the amendment rule. | fixed: the `${NAME+NAME="$NAME"}` form as fixed literals, the wider list, and an environment preflight with cause `strain_env_preflight`. Components > Strain launch and settings ("Environment preflight"), Contracts and seams > Strain environment, Context and code truth, Failure modes, Decisions, Verification strategy (pin, headless check, `tools/test_lair_tick.sh`) and Seam order (#608) |
+| L2-C5 | low | Contracts and seams > Marker check | The check anchors on the "main checkout", but `spawn-brood.sh` anchors on the spawning checkout's top, which may be a linked worktree. Every check would then print `unverified`. | `spawn-brood.sh:427`, `:485` | Define the Lair checkout as the top four levels up, or require the Lair to run in the main checkout. | fixed: the Lair checkout is the strain's top four path levels up, with the same git common dir. Contracts and seams > Marker check ("The Lair checkout"), Context and code truth, Decisions and Verification strategy (`tools/test_lair_strain.sh` linked-worktree case) |
+| L2-C6 | low | Strain result and liveness; Contracts and seams > Strain result | A result with no engine record (`no_engine_record`, `lair_marker_unverified`) leaves `level`, `pr`, `branch` and `head` unspecified. | design `:148-149`, `:245` | Specify nulls or git-read values; the schema allows them only with those causes. | fixed: nulls, allowed only with those two causes and outcome `failed`. Components > Strain result and liveness, Contracts and seams > Strain result, Decisions and Verification strategy |
+| L2-C7 | low | Launch inputs "Agent-call cap" | The cap keeps back only the record call, but a park at the cap also needs the pull request step's calls. | `pr.js:63-64` | Keep back the park's push calls, or end a park past the cap `failed` with cause `agent_budget` and the worktree kept. Add an engine test. | fixed: the cap keeps back the park's pull request step and its one transient retry, beside the record call. Components > Launch inputs ("Agent-call cap"), Decisions, Seam order (#607) and Verification strategy (engine test) |
+| L2-C8 | low | Start points "Start configuration check" | The two-tree diff also flags trunk-side `.claude/` changes, so a trunk settings edit refuses every parked issue. | design `:107`, `:339` | Diff against the merge base, branch side only, with a reason, or record the over-refusal as accepted. | fixed: the branch side is diffed from `git merge-base`, and no single merge base refuses. Components > Start points, Trust boundaries > Strain containment, Failure modes, Decisions and Verification strategy (`tools/test_lair_tick.sh`) |
+| L2-C9 | low | Contracts and seams > Marker check | Failing closed when a launch file is present and the marker absent conflicts with PRD line 100, "the marker absent means today's behavior". | PRD `:100` | Ask the user. | fixed: from the user's answer A (see Decisions asked). Decisions > Changes to shared documents (change 10), Decisions, Lifecycle step 5 and Failure modes ("Unpushed work at session end", the rescue step) |
+| L2-C10 | low | Verification strategy "Registration in `tools/validate.sh`" | The routes omit `plugin/skills/spawn-brood/**` and `plugin/skills/push-branch/**` to `tools/test_lair_strain.sh`. | `validate.sh:572-580`, `:649` | Add the routes. | fixed: both paths also route to `tools/test_lair_strain.sh`. Verification strategy ("Registration in `tools/validate.sh`") |
+
+### Tool pass
+
+| ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L2-T1 | high | `6d238bbd8cfb229f496c0c27fc1e59eac7c2211470c000c2ece91f5d7b6a9ae5` | A compromised strain can forge the result that authorizes downstream merge handling, since it holds the user's credentials and can rewrite same-user files. | design `:289` | Keep result authority outside the strain identity, with an authenticated engine output or a MAC, and re-evaluate every merge gate. | rejected: a repeat of recorded user decisions. On 2026-11-21 the user answered A to reword ADR-0045 decision 4 and PRD line 64, so a prompt-injected strain is a named residual and a separate restricted identity is declined for now (Decisions asked, first two bullets; design changes 1, 2 and 9). Re-evaluating merge gates belongs to #631 (design Contracts and seams > Assumptions about #631) |
+| L2-T2 | high | `2b0d92463ef1010f8e0f4e8ee05ad2f1d422257fcf8a4374ca13ba45d04ea4dd` | Admin installation does not make Bot-authored review text trustworthy; a Bot can relay attacker-controlled text. | design `:181-184` | Treat Bot and CI bodies as untrusted regardless of installation, or admit only structured fields. | rejected: a repeat of a recorded user decision. On 2026-11-21 the user answered A to keep the in-scope Bot exception, with admin-installed apps trusted (Decisions asked, fourth bullet, local review finding f26808d3; design changes 4 and 5). Every text is still scanned (design Components > Remediation strain launch, "Scanning") |
+
 ## Sources
 
 - The parent [review record](review-record.md): the round 3 findings, their severities and the three-way split.
@@ -171,6 +208,20 @@ Taken from the reviewers' proposed fixes, where a choice remained:
 - L1-B5: an existing local branch on a first claim is refused outright, with no separate ancestry check against trunk.
 - L1-A11: a remediation's claim is a dispatch marker on the pull request, whose form #632 owns.
 
+Taken at the round 2 remediation, each listed in the design's Decisions:
+
+- L2-C1: the engine record gets its own runner script, `lair-record.sh`, as the gate member with `--inputs` required; `lair-result.sh` stays out of the gate. Not chosen: an exact form with `--inputs` optional, which would let synapse write the result early.
+- L2-C2: the remediation moved-head row follows Start points, with no comparison against the last result's head; Start points names the push, not this check, as the authority.
+- L2-C3: the repeat guard is keyed on the head and the finding keys (a review record's node `id`, a failed check's `name`). Not chosen: routing new findings after a `complete` dispatch to `lair:review`, which would skip ADR-0045 decision 13's dispatch.
+- L2-C4: each name is a `${NAME+NAME="$NAME"}` word, a fixed literal in the command string; the list adds keyring, XDG, proxy, CA and local review names; the Lair runs an environment preflight that stops with cause `strain_env_preflight`. Not chosen: building the argv in `spawn-brood.sh`, which would put caller values in the tmux command string.
+- L2-C5: the Lair checkout is the strain's top four path levels up, with the same git common dir. Not chosen: requiring the Lair to run in the main checkout.
+- L2-C6: a result with no engine record holds nulls. Not chosen: git-read values.
+- L2-C7: the cap keeps back the park's pull request step and its one transient retry. Not chosen: ending a park past the cap as `failed` with cause `agent_budget`.
+- L2-C8: the start configuration check diffs the branch side from `git merge-base`, and no single merge base refuses. Not chosen: accepting the over-refusal.
+- L2-C10: `plugin/skills/spawn-brood/**` and `plugin/skills/push-branch/**` also route to `tools/test_lair_strain.sh`.
+- L2-T1 rejected: a repeat of the user's 2026-11-21 answers A on ADR-0045 decision 4 and PRD line 64 (a prompt-injected strain is a named residual; a separate restricted identity is declined). Merge-gate re-evaluation belongs to #631.
+- L2-T2 rejected: a repeat of the user's 2026-11-21 answer A on local review finding f26808d3 (keep the in-scope Bot exception; admin-installed apps are trusted).
+
 ## Decisions asked
 
 The user was asked four always-ask (Tier A) questions and answered each with option A on 2026-11-21:
@@ -185,5 +236,7 @@ On 2026-11-21 the user chose "change approach" when local review reported the ro
 At design review round 1 (L1-A8), the user was asked one more always-ask (Tier A) question and answered option A on 2026-11-21: "Your earlier answers changed ADR-0045 decisions 3 and 4 and PRD line 64. Four more lines still say the old thing and now contradict the design ... Should these four lines get the matching rewording, recorded under 'Changes to shared documents' for a later issue to apply?" Changes 6 to 9 of the design hold the proposed text: PRD line 84 (the three start points), PRD lines 86 and 107 ("merge keys set empty"), and ADR-0045 line 109 (the settings are a barrier, not full containment, and a prompt-injected strain stays a named residual).
 
 On 2026-11-21 the user directed a change to the review procedure: "each review round runs ONE hivemind:cerebrate pass covering both angles, delegated with effort: high ... The confirming round reviews only the diff since the previous round and the fixes to open findings, with effort: medium." See "Procedure change" at the top of this record.
+
+At design review round 2 (L2-C9), the user was asked one more always-ask (Tier A) question on 2026-11-21 and answered option A on 2026-11-22: "PRD line 100 says 'the marker absent means today's behavior'. The round-1 fix makes the scripts fail closed instead ... Record a PRD change for this?" Change 10 of the design holds the proposed text: PRD line 100 gains "unless the worktree holds a Lair launch file". The `unpushed_work` queue report text gains the rescue step: delete the worktree's `.hivemind/lair/launch.json`, or push by hand.
 
 The design's section Decisions > Changes to shared documents holds each rewording as exact proposed text. A later integration issue applies them. None is applied in this pull request.
