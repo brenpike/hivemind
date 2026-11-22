@@ -18,7 +18,7 @@ clean_round: false
 
 This is a re-review. The PRD [`docs/prds/retire-json-state-machine.md`](../../prds/retire-json-state-machine.md) was written after the first review, so the review runs again over the PRD, the solution design and ADR-0048 (ADR-0046 decision 6, Re-review after an amendment). Rounds count from 1. No record of this initiative has passed, so round 1 covers the whole documents. The first review, its rounds, findings, advisories and one-time exceptions are kept unchanged under History: 2026-11-22 (first review).
 
-Round 1 raised 11 cerebrate findings, every one fixed, and 4 local review tool findings, three fixed and one rejected. Round 2, a confirming round, raised 4 findings, every one fixed. Round 3, a confirming round, raised 2 findings, both fixed. The verdict is `fail`, `rounds` is 3 and `clean_round` is `false`. Round 3 is the cap round; one round 4 over its fixes follows, as a one-time exception (Round 3).
+Round 1 raised 11 cerebrate findings, every one fixed, and 4 local review tool findings, three fixed and one rejected. Round 2, a confirming round, raised 4 findings, every one fixed. Round 3, a confirming round, raised 2 findings, both fixed. Round 3 was the cap round; the user answered A to the cap question, so round 4, a confirming round over round 3's fixes, ran as a one-time exception and raised 2 findings on this record, both fixed (Round 3, Round 4). Round 4 does not change `rounds`. The verdict is `fail`, `rounds` is 3 and `clean_round` is `false`. The local review tool pass for rounds 3 and 4 and one last confirming pass over the changed record lines follow.
 
 The stamps are unchanged: the blobs at commit `aa9342a244b13150eb141b42ac566611b6b5f268`, the commit the first review's round 1 reviewed. A record with `verdict` `fail` keeps its stamps (ADR-0046 decision 7). Only the passing record re-stamps, to the commit its clean pass reviewed, and it stamps the PRD, the solution design and ADR-0048.
 
@@ -53,13 +53,22 @@ The cerebrate pass raised R2-01 (medium) and R2-02 to R2-04 (low). Each was chec
 A confirming round over the change `710ee9fe..f8715ece` and round 2's fixes. Neither reviewer wrote the documents.
 
 - Reviewer `hivemind:cerebrate`, model `opus`, `Memory context: none`. One fresh, read-only pass. It reviewed commit `f8715ece8e0ad3fd3dca903669231f10cb861a78`, confirmed R2-02, R2-03 and R2-04's finding, and raised R3-01 and R3-02.
-- Local review tool pass for round 3: pending. It runs after the commit that lands round 3's fixes.
+- Local review tool pass for round 3: pending. It runs with round 4's, after the commit that lands round 4's fixes (Round 4).
 
 The cerebrate pass raised R3-01 (medium), which shows R2-01 not closed, and R3-02 (low), a new defect in the sentence that replaced R2-04's. Each was checked against the repository before its fix, and none was rejected. After the fixes, none is open. Round 3 is not clean, so `clean_round` is `false`: its cerebrate pass raised findings. The solution design records the fixes in one dated line under Amendments.
 
-Round 3 was the last round under the three-round cap (ADR-0046 decision 6). Taken by the overlord with a strong recommendation, listed for veto under ADR-0046 decision 8 as amended 2026-11-22: fix R3-01 and R3-02, then run one round 4 over that change only, a one-time exception for this initiative, recorded like the earlier round-4 exceptions. Splitting was not recommended: the solution design's decisions drew no finding after round 1; every later finding is acceptance-criterion wording.
+Round 3 was the last round under the three-round cap (ADR-0046 decision 6), so the cap question was asked of the user. The options were A, approve round 4 and pass after one last confirming pass over the record lines; B, approve and merge with `verdict` `fail`; C, split. The recommendation was A, strong. Answered: A (user). R3-01 and R3-02 are fixed, then one round 4 runs over that change only, a one-time exception for this initiative, recorded like the earlier round-4 exceptions, and one last confirming pass over the changed record lines follows it. Splitting was not recommended: the solution design's decisions drew no finding after round 1; every later finding is wording in an acceptance criterion, a coverage row or proposed shared-document text, and none changed a decision.
 
-Diminishing-returns advisory: signals: recurrence on the Removal and remediation acceptance-criterion wording (R1-02, then R2-01, then R3-01; R2-04, then R3-02); severity medium and low only.
+Diminishing-returns advisory: signals: recurrence on the Removal and remediation acceptance-criterion wording (R1-02, then R2-01, then R3-01; R2-04, then R3-02); severity medium and low only; answer A (user), given to the round-3 cap question: one round 4 over round 3's fixes, then one last confirming pass over the changed record lines (ADR-0046 decision 6).
+
+### Round 4
+
+A confirming round over the change `f8715ece..01585e4a` and round 3's fixes: the one-time exception the user approved with answer A to the cap question (Round 3). It does not change `rounds`, which stays 3, as the first review's round 4, kept under History, did not. Neither reviewer wrote the documents.
+
+- Reviewer `hivemind:cerebrate`, model `opus`, `Memory context: none`. One fresh, read-only pass. It reviewed commit `01585e4a731aa7810692b05a354c6290a5fb07c3`, confirmed R3-01 and R3-02 closed and the PRD and design changes true against the code, and raised R4-01 and R4-02.
+- Local review tool pass for rounds 3 and 4: pending. It runs after the commit that lands round 4's fixes.
+
+The cerebrate pass raised R4-01 (medium) and R4-02 (low), both on this record. Each was checked against the repository before its fix, and none was rejected. After the fixes, none is open. Round 4 is not clean, so `clean_round` is `false`: its cerebrate pass raised findings. Under the user's answer A, a final confirming pass over the changed record lines follows.
 
 ## Findings
 
@@ -86,6 +95,8 @@ Diminishing-returns advisory: signals: recurrence on the Removal and remediation
 | R2-04 | 2 | confirm | low | fixed | "It opens no new pull request" was false: `hivemind:open-plan-pr` creates one when the pull request was closed or merged mid-run (`plugin/workflow-src/pr-feedback-remediation/main.js:76-79`). The PRD's Instinct paths criterion and the design's post-PR remediation path now say such a pull request gets a new one, as the script's residual says. |
 | R3-01 | 3 | confirm | medium | fixed | R2-01 not closed: the deleted-heading sentence lacked "live", so history text in a changed file, such as `CHANGELOG.md:366` and `:536` and a slice's own changelog entry recording the deletion, counted, and S4 could not meet it. The PRD's Removal criterion and the design's S4 and S5 checks now say "live" and share one exception list that names history text: earlier changelog sections and a slice's own entry recording the deletion. |
 | R3-02 | 3 | confirm | low | fixed | R2-04's replacement sentence said any post-PR remediation's pull request closed or merged mid-run gets a new one, but the watch and the `hivemind:github-reviewer` fix pass push with `push-branch.sh` and open no pull request (`plugin/agents/github-reviewer.md:60`). The PRD's Instinct paths criterion and the design's post-PR remediation path now limit it to an escalation, which opens a new one through `hivemind:open-plan-pr`, as the `pr-feedback-remediation` script's residual says. |
+| R4-01 | 4 | confirm | medium | fixed | The record listed the re-review's round-3 cap as a decision taken by the overlord under ADR-0046 decision 8, but the cap and its diminishing-returns advisory are the maintainer's decision under decision 6. Round 3 now records the cap question as asked of the user, with its options and the strong recommendation, and the answer A; the advisory carries the answer; the entry moves from Decisions taken to Decisions asked. |
+| R4-02 | 4 | confirm | low | fixed | Round 3's reason for not splitting said every later finding is acceptance-criterion wording, but R2-02 hit a coverage row and R2-03 proposed shared-document text. It now says every later finding is wording in an acceptance criterion, a coverage row or proposed shared-document text, and none changed a decision. |
 
 ## Decisions taken, listed for veto
 
@@ -117,7 +128,6 @@ Each decision carries its recommendation strength and what it touches, per ADR-0
 | Each rule stated once at its owner; other sites point to it (overlord). | Strong | none |
 | The round-3 narrowing's wording, and each design decision's screen conformed to ADR-0046 decision 8 as amended (overlord). | Strong | none |
 | PRD written from the design with no new decision; the `hivemind:plan-to-prd` story-completeness and scope-boundary confirm gates taken, not asked (overlord). | Strong | PRD scope |
-| The re-review's round-3 cap: fix R3-01 and R3-02, then one round 4 over that change only, a one-time exception for this initiative; no split (overlord). | Strong | none |
 
 D11 is answered (Q7 A), D12 is answered (Q8 A), and D14 is answered (Q1 A); none is a taken decision.
 
@@ -133,6 +143,7 @@ Withdrawn at re-review round 1: "Passing record stamps the design and ADR-0048 o
 - The round count, after round 2's local review tool pass. Answered: A. The cerebrate pass at `63ff83f2` yields no round, since its trust-boundary tool pass did not run with it; its findings R2-01 to R2-05 keep their IDs and are attributed to round 2.
 - The round-3 cap. Answered: A (user, strong recommendation). Narrow the design's Verification strategy to what each slice must prove, with no check file, name list, scan path or test mechanism; then run one round 4 over that change only, a one-time exception to the three-round cap for this initiative, recorded like the Idea to Ready design's D31 (Q9). Asked because the three-round cap of ADR-0046 decision 6 stops the review after round 3 and reaches the maintainer; the diminishing-returns check of the same decision fired after round 3 (Round 3).
 - The close of round 4. Answered: A (user), strong recommendation: stop reviewing; the record stays `fail` with every finding fixed, and the pull request merges on the user's approval as an exception to the failed-verdict rule. Asked because the diminishing-returns check of ADR-0046 decision 6 fired after round 4 (Round 4).
+- The re-review's round-3 cap. Answered: A (user, strong recommendation). Fix R3-01 and R3-02, then run one round 4 over that change only, a one-time exception to the three-round cap for this initiative, and pass after one last confirming pass over the changed record lines. The other options were B, approve and merge with `verdict` `fail`, and C, split. Asked because the three-round cap of ADR-0046 decision 6 stops the review after round 3 and reaches the maintainer; the diminishing-returns check of the same decision fired after round 3 (Round 3).
 
 ## History: 2026-11-22 (first review)
 
