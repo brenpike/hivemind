@@ -1090,7 +1090,7 @@ describe('build_workflows BUILD_ID', () => {
 describe('build_workflows length budget', () => {
   test('the limits are pinned', () => {
     assert.equal(WORKFLOW_APPROVAL_LIMIT, 200000);
-    assert.equal(MAX_BUILT_SCRIPT_LENGTH, 191000);
+    assert.equal(MAX_BUILT_SCRIPT_LENGTH, 193000);
     assert.equal(WORKFLOW_PREVIEW_LINE_LIMIT, 4096);
     assert.equal(WORKFLOW_PREVIEW_SQUARES_LIMIT, 67108864);
     assert.equal(WORKFLOW_PREVIEW_COMBINING_RUN_LIMIT, 8);
@@ -1104,7 +1104,7 @@ describe('build_workflows length budget', () => {
     const mainAfter = mainBefore + '\nlog(\'' + 'x'.repeat(MAX_BUILT_SCRIPT_LENGTH) + '\');\n';
     writeFileSync(mainPath, mainAfter);
     const length = readBuilt('analysis-only').length + compactCode(stripComments(mainAfter).trim()).length - compactCode(stripComments(mainBefore).trim()).length;
-    const pattern = new RegExp('analysis-only: the built script is ' + length + ' characters, over the budget of 191000');
+    const pattern = new RegExp('analysis-only: the built script is ' + length + ' characters, over the budget of 193000');
     assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), pattern);
     assert.throws(() => runCliIn(scratchRoot, ['--check']), pattern);
   });

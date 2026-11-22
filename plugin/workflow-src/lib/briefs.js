@@ -8,6 +8,8 @@
  * Inputs
  *   plan     the plan of the plan result the pass checked, from
  *            runPlanningPass (lib/plan.js).
+ *   resolution, run and replan  the asks of a pause, the run state and the
+ *            replan data of runPlanningPass, read by buildRepeatPinned.
  *   facts    the checked facts of the pass, from runFactsStep
  *            (lib/runner.js).
  *   scope    the checked scope of the pass, from runScopeStep (lib/scope.js).
@@ -16,7 +18,8 @@
  *   values   the routing values of a version check whose version_check is
  *            undetermined or unreadable (standard-delivery gates.js).
  *   unshownBriefText and describeCount (lib/plan.js), optionLabel
- *   (lib/brief.js), isRepositoryPath and
+ *   and readReplyChoices (lib/brief.js), encodeUntrustedText (lib/result.js),
+ *   isRepositoryPath and
  *   listPlanPaths (lib/paths.js), and the workflow functions gateNames
  *   (standard-delivery gates.js), maxFixRounds (standard-delivery main.js)
  *   and buildUndecidedAsk (standard-delivery tails.js).
@@ -31,7 +34,34 @@
  *   buildApproachChoice()  the options and recommendation of an approach
  *            question: A keeps patching the class, B changes approach, C
  *            stops and ships what closes, all reversible and in the request;
- *            strength strong for B. Read by buildRemediationPlanBrief.
+ *            strength strong for B. B reads Change approach: remove or narrow
+ *            the decision that creates these findings, rather than changing
+ *            how the findings are answered. Read by buildRemediationPlanBrief.
+ *   describeApproachChange(reply, brief)  ' The user chose: ', the summary
+ *            of option B and ' The plan must remove or narrow that decision.',
+ *            when the reply, read by readReplyChoices
+ *            (lib/brief.js) against the one question of brief, picks the
+ *            recommended option of buildApproachChoice, never from free
+ *            text; '' otherwise.
+ *   buildFindingsData(root, findings)  the pinned text of an approach
+ *            question: a Root line for the reviewer's suspected shared root,
+ *            when given, then one Finding line per open finding title, each
+ *            value encoded by encodeUntrustedText and shown whole. Every line,
+ *            Root included, is held to maxFindingsDataLength() code units:
+ *            the Root line first, left out whole when it alone does not
+ *            fit, then each Finding line while all the encoded lines stay
+ *            within it; a title that does not fit and every one after it are
+ *            left out, with a line of three dots. undefined when nothing is
+ *            shown. It is never a brief field, so no BRIEF_SCHEMA bound
+ *            applies to it. Its callers pass it as optional pinned text
+ *            (fitPinned, lib/record.js).
+ *   buildRepeatPinned(resolution, plan, run, replan)  the pinned text of the
+ *            pause of runPlanningPass (lib/plan.js) that asks the remediation
+ *            plan acceptance of a plan whose repeats_surface is true:
+ *            buildFindingsData of the replan review's hypothesized_root and
+ *            of run.open, shown after the lead and kept in the question text
+ *            of the answers block when the pause shows it (fitPinned,
+ *            lib/record.js); undefined for any other pause.
  *   buildPlanAcceptanceBrief(plan), buildRemediationPlanBrief(plan),
  *   buildTrunkStaleBrief(facts) and buildExternalEffectBrief(summary)
  *            the briefs lib/plan.js resolves through decide(). The effect brief
@@ -94,6 +124,9 @@
  *   the default level (decision-autonomy.md, Promotion Gate). When
  *   repeats_surface holds, its options and recommendation are
  *   buildApproachChoice() (issue 587).
+ *   Reviewer text of an approach question (the root and finding titles)
+ *   reaches the user only through buildFindingsData, as the pinned text of
+ *   a pause (lib/record.js pauseDelivery), encoded, whole or not shown.
  *   Every brief here puts unshownBriefText() in each field no message
  *   shows and fits BRIEF_SCHEMA with worst-case inputs (the workflow's
  *   main.js, bounded fields).
@@ -132,11 +165,54 @@ function buildPlanAcceptanceBrief(plan) {
 }
 
 function buildApproachChoice() {
-  const summaries = ['Keep patching this class.', 'Change approach.', 'Stop and ship what closes.'];
+  const summaries = ['Keep patching this class.', 'Change approach: remove or narrow the decision that creates these findings, rather than changing how the findings are answered.', 'Stop and ship what closes.'];
   return {
     options: summaries.map((summary, index) => buildBriefOption(optionLabel(index), summary)),
     recommendation: { option_id: optionLabel(1), strength: 'strong', why: 'Patching has not closed this class.' }
   };
+}
+
+/**
+ * Returns the sentence a reply adds to a replan reason when it picks the
+ * recommended option of buildApproachChoice, B, read by readReplyChoices
+ * against the one question of brief: the user chose that option, by its
+ * summary, then the plan must remove or narrow that decision. A reply in free
+ * words picks nothing, so it returns ''.
+ */
+function describeApproachChange(reply, brief) {
+  const option = readReplyChoices(reply, [{ brief: brief }]).map((choice) => brief.options[choice.optionIndex]).find((chosen) => chosen.id === brief.recommendation.option_id);
+  return option === undefined ? '' : ' The user chose: ' + option.summary + ' The plan must remove or narrow that decision.';
+}
+
+function maxFindingsDataLength() {
+  /* A line-trimming hint of 1800 code units of encoded text, not the fit guarantee: the notice charges 5 per & and 4 per < or >, so fitPinned (lib/record.js) decides whether the pause shows it. */
+  return 1800;
+}
+
+function buildFindingsData(root, findings) {
+  const rootLine = root === undefined ? undefined : 'Root: ' + encodeUntrustedText(root);
+  const lines = rootLine !== undefined && rootLine.length <= maxFindingsDataLength() ? [rootLine] : [];
+  let used = lines.join('\n').length;
+  for (const finding of findings) {
+    const line = 'Finding: ' + encodeUntrustedText(finding.title);
+    used += line.length + 1;
+    if (used > maxFindingsDataLength()) {
+      return lines.length === 0 ? undefined : lines.concat('...').join('\n');
+    }
+    lines.push(line);
+  }
+  return lines.length === 0 ? undefined : lines.join('\n');
+}
+
+/**
+ * Returns the pinned text of a pause that asks the remediation plan
+ * acceptance of a plan whose remediation_gate.repeats_surface is true:
+ * buildFindingsData of the replan review's hypothesized_root and run.open.
+ * Returns undefined for any other pause and when nothing is shown.
+ */
+function buildRepeatPinned(resolution, plan, run, replan) {
+  const isRepeatAsk = resolution.asks.some((ask) => ask.kind === REMEDIATION_PLAN_ACCEPTANCE_KIND) && plan.remediation_gate.repeats_surface;
+  return isRepeatAsk ? buildFindingsData(replan?.review?.hypothesized_root, run.open) : undefined;
 }
 
 function buildRemediationPlanBrief(plan) {

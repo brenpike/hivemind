@@ -696,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '8cf8595c4d4382d5';
+const BUILD_ID = 'ae0c035bd3ed43b9';
 
 function supportedSchemaKeywords(){
 return[
@@ -3054,13 +3054,14 @@ if(resettled!==undefined){
 return stopDelivery([{problem:'Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.',terminal:true,nextAction:'report'}],run,[],true);
 }
 const lead=describePlanLine(planResult.plan);
+const pinned=fitPinned(resolution,run,lead,buildRepeatPinned(resolution,planResult.plan,run,replan));
 const round=run.answerLog.length+1;
 const reply=takeNextReply(run,round);
 if(reply===undefined){
-return{result:pauseDelivery(resolution,run,lead)};
+return{result:pauseDelivery(resolution,run,lead,pinned)};
 }
 phase('Revise');
-const questions=lead+'\n\n'+renderQuestions(resolution.asks);
+const questions=[lead].concat(pinned??[],renderQuestions(resolution.asks)).join('\n\n');
 shownAsks=resolution.asks;
 shownResult=planResult;
 shownEntry={question:questions,labels:listShownLabels(shownAsks),reply:reply};
@@ -3208,11 +3209,36 @@ verbatim:plan.summary
 };
 }
 function buildApproachChoice(){
-const summaries=['Keep patching this class.','Change approach.','Stop and ship what closes.'];
+const summaries=['Keep patching this class.','Change approach: remove or narrow the decision that creates these findings, rather than changing how the findings are answered.','Stop and ship what closes.'];
 return{
 options:summaries.map((summary,index)=>buildBriefOption(optionLabel(index),summary)),
 recommendation:{option_id:optionLabel(1),strength:'strong',why:'Patching has not closed this class.'}
 };
+}
+function describeApproachChange(reply,brief){
+const option=readReplyChoices(reply,[{brief:brief}]).map((choice)=>brief.options[choice.optionIndex]).find((chosen)=>chosen.id===brief.recommendation.option_id);
+return option===undefined?'':' The user chose: '+option.summary+' The plan must remove or narrow that decision.';
+}
+function maxFindingsDataLength(){
+return 1800;
+}
+function buildFindingsData(root,findings){
+const rootLine=root===undefined?undefined:'Root: '+encodeUntrustedText(root);
+const lines=rootLine!==undefined&&rootLine.length<=maxFindingsDataLength()?[rootLine]:[];
+let used=lines.join('\n').length;
+for(const finding of findings){
+const line='Finding: '+encodeUntrustedText(finding.title);
+used+=line.length+1;
+if(used>maxFindingsDataLength()){
+return lines.length===0?undefined:lines.concat('...').join('\n');
+}
+lines.push(line);
+}
+return lines.length===0?undefined:lines.join('\n');
+}
+function buildRepeatPinned(resolution,plan,run,replan){
+const isRepeatAsk=resolution.asks.some((ask)=>ask.kind===REMEDIATION_PLAN_ACCEPTANCE_KIND)&&plan.remediation_gate.repeats_surface;
+return isRepeatAsk?buildFindingsData(replan?.review?.hypothesized_root,run.open):undefined;
 }
 function buildRemediationPlanBrief(plan){
 const remediationGate=plan.remediation_gate;
@@ -3480,8 +3506,8 @@ return{answer:{question:question,reply:reply}};
 function askTail(ask,run,lead,pinned){
 return askTails([ask],run,lead,pinned);
 }
-function replanFromTailAsk(ask,run){
-const asked=askTail(ask,run);
+function replanFromTailAsk(ask,run,pinned){
+const asked=askTail(ask,run,undefined,pinned);
 if(asked.answer===undefined){
 return asked;
 }
@@ -3497,13 +3523,14 @@ throw new Error('buildUndecidedAsk: decide() took '+kind);
 }
 return resolution.asks[0];
 }
-function resolveTailDecision(kind,brief,run){
+function resolveTailDecision(kind,brief,run,pinned){
 const resolution={asks:[],taken:[],reversibleEffects:[]};
 if(resolveDecision(kind,brief,undefined,run,resolution)==='take'){
 acceptResolution(resolution,run);
 return{};
 }
-return replanFromTailAsk(resolution.asks[0],run);
+const ask=resolution.asks[0];
+return replanFromTailAsk(ask,run,fitPinned({asks:[ask],taken:[]},run,describeTailLead(run),pinned));
 }
 
 function renderReversibleEffects(effects){
@@ -3654,21 +3681,22 @@ if(isBadStop||!askReasons().includes(ask.reason)){
 throw new Error('pauseDelivery: ask '+ask.kind+' '+ask.reason);
 }
 }
+function planPause(resolution,run,lead,pinned){
+const questions={text:renderQuestions(resolution.asks)};
+if(resolution.asks.some((ask)=>ask.exact===true||hasDestructiveOption(ask))){
+questions.whole=true;
+}
+const pause={resumeArgs:buildResumeArgs(run.answerLog.map((entry)=>entry.reply),BUILD_ID),blocks:[buildLeadBlock(lead,pinned===undefined?maxBlockedLeadLength():maxPinnedLeadLength()),...listPinnedBlocks(pinned),questions]};
+pause.stop=!canCarry(pause.resumeArgs)?'reply_size':canShowWhole(pause)?undefined:'exact_text_size';
+return pause;
+}
 function pauseDelivery(resolution,run,lead,pinned){
 resolution.asks.forEach(checkPauseAsk);
-const resumeArgs=buildResumeArgs(run.answerLog.map((entry)=>entry.reply),BUILD_ID);
-if(!canCarry(resumeArgs)){
-return finishOpenQuestions(resolution,'reply_size',run,pinned);
+const pause=planPause(resolution,run,lead,pinned);
+return pause.stop?finishOpenQuestions(resolution,pause.stop,run,pinned):pauseForUser(pause);
 }
-const questionsBlock={text:renderQuestions(resolution.asks)};
-if(resolution.asks.some((ask)=>ask.exact===true||hasDestructiveOption(ask))){
-questionsBlock.whole=true;
-}
-const blocks=[buildLeadBlock(lead,pinned===undefined?maxBlockedLeadLength():maxPinnedLeadLength()),...listPinnedBlocks(pinned),questionsBlock];
-if(!canShowWhole({resumeArgs:resumeArgs,blocks:blocks})){
-return finishOpenQuestions(resolution,'exact_text_size',run,pinned);
-}
-return pauseForUser({resumeArgs:resumeArgs,blocks:blocks});
+function fitPinned(resolution,run,lead,pinned){
+return pinned!==undefined&&!planPause(resolution,run,lead,pinned).stop?pinned:undefined;
 }
 function describeStopLead(causes,endLines){
 return buildStopBlocks(causes).filter((block)=>block.whole!==true).map((block)=>block.text).concat(endLines).join('\n');
@@ -4964,17 +4992,18 @@ if(run.replans>=maxReplans()){
 return{draft:returned+' after '+maxReplans()+' replans.'};
 }
 const isRepeat=run.reviewReplans>=1&&review.cluster_files?.some((file)=>plan.steps.some((step)=>step.files.includes(file)));
-if(!isRepeat&&run.reviewReplans>=maxReviewReplans()){
-return{draft:returned+' after '+describeCount(maxReviewReplans(),'review replan')+'.'};
+if(isRepeat?run.repeatClusterAsked:run.reviewReplans>=maxReviewReplans()){
+return{draft:returned+(isRepeat?' on the same class after a change of approach.':' after '+describeCount(maxReviewReplans(),'review replan')+'.')};
 }
 const brief=buildReviewEscalationBrief(review,isRepeat);
-const decided=resolveTailDecision(brief.kind,brief,run);
+run.repeatClusterAsked=run.repeatClusterAsked||isRepeat===true;
+const decided=resolveTailDecision(brief.kind,brief,run,isRepeat?buildFindingsData(review.hypothesized_root,run.open):undefined);
 if(decided.result!==undefined){
 return decided;
 }
 run.replans+=1;
 run.reviewReplans+=1;
-return{replan:{reason:returned+', so plan the remediation of what the review block reports, from the fresh facts.',review:projectReplanReview(review)}};
+return{replan:{reason:returned+', so plan the remediation of what the review block reports, from the fresh facts.'+(isRepeat?describeApproachChange(run.answerLog[run.answerLog.length-1].reply,brief):''),review:projectReplanReview(review)}};
 }
 function waitForService(review,run){
 const resumeArgs=buildResumeArgs(run.answerLog.map((entry)=>entry.reply),BUILD_ID);
@@ -5186,6 +5215,7 @@ waveCount:0,
 pass:0,
 replans:0,
 reviewReplans:0,
+repeatClusterAsked:false,
 branchSwitches:0,
 versionAnswer:undefined,
 factsStem:undefined,

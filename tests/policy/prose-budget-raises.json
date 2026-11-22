@@ -10,6 +10,14 @@
       "reason": "Codifies the Instinct delivery path, its standard-delivery engine fallback, and the Tier A stop that sends budget raises to the user (PR #517, ADR-0039)."
     },
     {
+      "path": "plugin/agents/overlord.md",
+      "from": 39038,
+      "to": 39286,
+      "approved_by": "user",
+      "date": "2026-11-22",
+      "reason": "Engine relay exception: one diagnosis paragraph after a relayed question that repeats an earlier escalation, so the user is not asked the same question in a loop (branch bugfix/repeat-escalation-loop)."
+    },
+    {
       "path": "plugin/governance/definitions.md",
       "from": 6362,
       "to": 7084,
@@ -24,6 +32,22 @@
       "approved_by": "user",
       "date": "2026-11-11",
       "reason": "PR5 of #409 slice 3: the draft now runs the shared lib/ tail code standard-delivery already ships (waves, gates, commit, push, record); authored prose across the repo fell 1,452 and standard-delivery's budget dropped 43800 to 42100. Evidence: ADR-0040 Amendment 2026-11-11."
+    },
+    {
+      "path": "plugin/workflows/standard-delivery.js",
+      "from": 42100,
+      "to": 42362,
+      "approved_by": "user",
+      "date": "2026-11-22",
+      "reason": "Restores main's margin for the build prose-guard tests after the repeated-cluster fix (option B text, findings data labels, B replan reason); branch bugfix/repeat-escalation-loop."
+    },
+    {
+      "path": "plugin/workflows/pr-feedback-remediation.js",
+      "from": 38200,
+      "to": 38343,
+      "approved_by": "user",
+      "date": "2026-11-22",
+      "reason": "Restores main's margin for the build prose-guard tests after the repeated-cluster fix (option B text, findings data labels, B replan reason); branch bugfix/repeat-escalation-loop."
     }
   ]
 }

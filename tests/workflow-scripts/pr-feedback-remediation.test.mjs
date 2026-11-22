@@ -884,7 +884,7 @@ const ROW_TESTS = {
       const first = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': repeated }));
       assert.deepEqual(labelsOf(first), ['facts-1', 'fix-1', 'facts-2', 'scope-2', 'plan-2']);
       assert.equal(first.result.needs_user, true);
-      const approach = '**\n- A: Keep patching this class.\n- B: Change approach. (recommended)\n- C: Stop and ship what closes.\nRecommendation: B (strong). Patching has not closed this class.';
+      const approach = '**\n- A: Keep patching this class.\n- B: Change approach: remove or narrow the decision that creates these findings, rather than changing how the findings are answered. (recommended)\n- C: Stop and ship what closes.\nRecommendation: B (strong). Patching has not closed this class.';
       assert.ok(first.result.message.startsWith(PLAN_LINE + '\n\n**Q1. Run the remediation plan for the local review findings on the working branch, then every gate again. The plan repeats a fix that did not close its class.' + approach), first.result.message);
       assert.ok(!first.result.message.includes('**Q2.'), first.result.message);
       const results = escalationResults('planner-escalation', { 'plan-2': repeated, 'revise-1': { ...replacement, settled: ['Q1'] } });
@@ -895,6 +895,54 @@ const ROW_TESTS = {
       assert.ok(callOf(resumed, 'work-2-STEP-001').prompt.includes('src/a.js'));
       assert.ok(!callOf(resumed, 'work-2-STEP-001').prompt.includes('src/other.js'));
       assert.deepEqual(resumed.result, completeResult(ESCALATION_ASK));
+    });
+    test('a plan that repeats a surface after a root cluster pins the encoded root outside the brief, no finding titles since the fix pass gives none, and a reply B reaches the revise with option B in the questions', async () => {
+      const repeated = planResult(makePlan({ remediation_gate: { ...makePlan().remediation_gate, repeats_surface: true } }));
+      const replacement = planResult(makePlan({ summary: 'Narrow the unchecked path.', steps: [{ ...makePlan().steps[0], files: ['src/other.js'] }] }));
+      const first = await runWorkflow(LAUNCH, escalationResults('root-cluster-suspected', { 'plan-2': repeated }));
+      assert.equal(first.result.needs_user, true);
+      const changeApproach = '- B: Change approach: remove or narrow the decision that creates these findings, rather than changing how the findings are answered. (recommended)';
+      assert.ok(first.result.message.startsWith(PLAN_LINE + '\n\nRoot: "One unchecked path."\n\n**Q1. Run the remediation plan for the local review findings'), first.result.message);
+      assert.ok(first.result.message.includes(changeApproach) && !first.result.message.includes('Finding:'), first.result.message);
+      assert.ok(!JSON.stringify(main.buildRemediationPlanBrief(repeated.plan)).includes('One unchecked path.'));
+      assert.equal(main.buildFindingsData(undefined, []), undefined);
+      const results = escalationResults('root-cluster-suspected', { 'plan-2': repeated, 'revise-1': { ...replacement, settled: ['Q1'] } });
+      const resumed = await runWorkflow(resumeArgs(first, 'B'), results);
+      assertReplayed(first, resumed);
+      const revise = callOf(resumed, 'revise-1').prompt;
+      assert.equal(readDataBlock(revise, 'reply'), 'B');
+      assert.ok(readDataBlock(revise, 'questions').startsWith(PLAN_LINE + '\n\nRoot: "One unchecked path."\n\n**Q1. '));
+      assert.ok(readDataBlock(revise, 'questions').includes(changeApproach));
+      assert.ok(callOf(resumed, 'work-2-STEP-001').prompt.includes('src/other.js') || resumed.result.outcome === 'complete', resumed.result.message);
+    });
+    test('an astral root of 300 code points is left out of the pinned text whole, the approach question still pauses, and a root that fits is kept', async () => {
+      const repeated = planResult(makePlan({ remediation_gate: { ...makePlan().remediation_gate, repeats_surface: true } }));
+      const astralFix = { ...EXIT_RESULTS['root-cluster-suspected'], hypothesized_root: ASTRAL.repeat(300) };
+      const first = await runWorkflow(LAUNCH, escalationResults('root-cluster-suspected', { 'fix-1': astralFix, 'plan-2': repeated }));
+      assert.equal(first.result.needs_user, true, first.result.message);
+      assert.ok(first.result.message.startsWith(PLAN_LINE + '\n\n**Q1. Run the remediation plan for the local review findings'), first.result.message);
+      assert.ok(!first.result.message.includes('Root: '), first.result.message);
+      assert.equal(main.buildFindingsData(ASTRAL.repeat(300), []), undefined);
+      assert.equal(main.buildFindingsData(ASTRAL.repeat(100), []), 'Root: ' + main.encodeUntrustedText(ASTRAL.repeat(100)));
+    });
+    test('with the replies at the canCarry limit the pinned root never ends the approach question blocked: it is shown while the pause shows it whole and left out when it does not', () => {
+      const repeated = planResult(makePlan({ remediation_gate: { ...makePlan().remediation_gate, repeats_surface: true } }));
+      const replan = { review: { hypothesized_root: 'y'.repeat(300) } };
+      const brief = main.buildRemediationPlanBrief(repeated.plan);
+      const state = createStateWithReplies(['r'.repeat(findCarryLimit())]);
+      const resolution = { asks: [main.buildUndecidedAsk(brief.kind, brief, state)], taken: [] };
+      const pinned = main.buildRepeatPinned(resolution, repeated.plan, state, replan);
+      assert.equal(pinned, 'Root: ' + main.encodeUntrustedText('y'.repeat(300)));
+      assert.equal(main.fitPinned(resolution, state, PLAN_LINE, pinned), pinned);
+      const paused = main.pauseDelivery(resolution, state, PLAN_LINE, main.fitPinned(resolution, state, PLAN_LINE, pinned));
+      assert.equal(paused.needs_user, true, paused.message);
+      assert.ok(paused.message.includes('\n\n' + pinned + '\n\n**Q1. '), paused.message);
+      const tooLong = 'Root: ' + 'z'.repeat(4500);
+      assert.equal(main.pauseDelivery(resolution, state, PLAN_LINE, tooLong).outcome, 'blocked');
+      assert.equal(main.fitPinned(resolution, state, PLAN_LINE, tooLong), undefined);
+      const asked = main.pauseDelivery(resolution, state, PLAN_LINE, main.fitPinned(resolution, state, PLAN_LINE, tooLong));
+      assert.equal(asked.needs_user, true, asked.message);
+      assert.ok(!asked.message.includes('zzz') && asked.message.includes('**Q1. '), asked.message);
     });
     test('a reply C to the approach question reaches the revise as the reply, and a revise that rejects the shown plan runs its own plan, never the rejected steps', async () => {
       const repeated = planResult(makePlan({ remediation_gate: { ...makePlan().remediation_gate, repeats_surface: true } }));

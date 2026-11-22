@@ -7,8 +7,8 @@
  * Inputs
  *   run    the run state of main.js createRunState: pass, decisions,
  *          answerLog, head, trunk, approvals, taken, rejected, undone, open,
- *          waits, run.replans and run.reviewReplans, and run.resumeLedger,
- *          which only this module sets and reads: true from a review replan
+ *          waits, run.replans, run.reviewReplans, run.repeatClusterAsked and
+ *          run.resumeLedger, which only this module sets and reads: true from a review replan
  *          or a rerun of a blocked review until the next review run, and
  *          run.reviewSkip, set only here: a skip's skip_reason (gates.js).
  *   plan   the accepted plan, from runPlanningPass (plan.js).
@@ -119,12 +119,15 @@
  *           gets the describeNoResult sentence and the run_again Next line
  *           through describeUnusableResult (lib/stop.js). The zoom-out trigger
  *           of requestReviewReplan asks the approach question, gate
- *           architectural, so decide() always asks. No message cuts a reviewer
- *           value: REVIEW_SCHEMA (review-schema.js) bounds each field that
- *           reaches a message or the planner, and a field with no bound is not
- *           shown. rejected_findings lists the findings the loop rejected
- *           under recorded decisions (remediation-doctrine.md, Recorded
- *           Decisions and Repeat Findings), and undone_fixes the findings
+ *           architectural, so decide() always asks, once a run: the next one
+ *           returns {draft} (SD-87). The ask pins the encoded root and open
+ *           titles (buildFindingsData) only when its pause shows them whole
+ *           (fitPinned), and a reply of B adds that choice (describeApproachChange)
+ *           to the replan reason. No message cuts a reviewer value: REVIEW_SCHEMA
+ *           (review-schema.js) bounds each field that reaches a message or the
+ *           planner, and a field with no bound is not shown. rejected_findings
+ *           lists the findings the loop rejected under recorded decisions
+ *           (remediation-doctrine.md, Recorded Decisions and Repeat Findings), and undone_fixes the findings
  *           whose failed fix the loop undid. keepReviewLists keeps each new
  *           finding_id of a usable review in run.rejected or run.undone, and
  *           sets run.open to its open_findings, before its route: a held
@@ -482,7 +485,8 @@ function projectReplanReview(review) {
 /**
  * Returns {replan}, {draft} or a pause. The zoom-out trigger is a root
  * cluster, the one review with cluster_files, after a review replan, whose
- * cluster_files names a step file of plan, the plan the run just ran.
+ * cluster_files names a step file of plan, the plan the run just ran. The
+ * run asks it once: a later trigger returns {draft}.
  */
 function requestReviewReplan(review, run, plan) {
   const returned = 'Local review returned ' + review.exit_reason;
@@ -490,17 +494,18 @@ function requestReviewReplan(review, run, plan) {
     return { draft: returned + ' after ' + maxReplans() + ' replans.' };
   }
   const isRepeat = run.reviewReplans >= 1 && review.cluster_files?.some((file) => plan.steps.some((step) => step.files.includes(file)));
-  if (!isRepeat && run.reviewReplans >= maxReviewReplans()) {
-    return { draft: returned + ' after ' + describeCount(maxReviewReplans(), 'review replan') + '.' };
+  if (isRepeat ? run.repeatClusterAsked : run.reviewReplans >= maxReviewReplans()) {
+    return { draft: returned + (isRepeat ? ' on the same class after a change of approach.' : ' after ' + describeCount(maxReviewReplans(), 'review replan') + '.') };
   }
   const brief = buildReviewEscalationBrief(review, isRepeat);
-  const decided = resolveTailDecision(brief.kind, brief, run);
+  run.repeatClusterAsked = run.repeatClusterAsked || isRepeat === true;
+  const decided = resolveTailDecision(brief.kind, brief, run, isRepeat ? buildFindingsData(review.hypothesized_root, run.open) : undefined);
   if (decided.result !== undefined) {
     return decided;
   }
   run.replans += 1;
   run.reviewReplans += 1;
-  return { replan: { reason: returned + ', so plan the remediation of what the review block reports, from the fresh facts.', review: projectReplanReview(review) } };
+  return { replan: { reason: returned + ', so plan the remediation of what the review block reports, from the fresh facts.' + (isRepeat ? describeApproachChange(run.answerLog[run.answerLog.length - 1].reply, brief) : ''), review: projectReplanReview(review) } };
 }
 
 /**

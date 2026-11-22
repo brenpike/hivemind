@@ -4,7 +4,7 @@
   "plugin/agents/drone.md": 6063,
   "plugin/agents/github-reviewer.md": 17333,
   "plugin/agents/local-reviewer.md": 18265,
-  "plugin/agents/overlord.md": 39038,
+  "plugin/agents/overlord.md": 39286,
   "plugin/agents/synapse.md": 1727,
   "plugin/governance/decision-autonomy.md": 12173,
   "plugin/governance/definitions.md": 7084,
@@ -59,6 +59,6 @@
   "plugin/skills/triage-backlog/SKILL.md": 11952,
   "plugin/skills/zoom-out/SKILL.md": 388,
   "plugin/workflows/analysis-only.js": 16050,
-  "plugin/workflows/pr-feedback-remediation.js": 38200,
-  "plugin/workflows/standard-delivery.js": 42100
+  "plugin/workflows/pr-feedback-remediation.js": 38343,
+  "plugin/workflows/standard-delivery.js": 42362
 }
