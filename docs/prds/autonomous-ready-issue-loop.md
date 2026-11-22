@@ -70,7 +70,7 @@ GitHub is the Lair's state and dashboard. The user steers through labels, park a
   - Unsetting auto-merge stops merges from the next tick.
   - Three consecutive failed, crashed, stalled, timed-out or invalid-result outcomes halt the Lair with a stated cause. Parks and review waits do not count.
 - **Budgets and recovery.**
-  - A run over its wall-clock or agent-call budget ends and its issue is marked failed or parked.
+  - A run over its wall-clock or agent-call budget ends; its issue is marked failed or parked, or, for a remediation run that reaches its agent-call budget, its pull request goes to batch review.
   - On start the Lair resolves every claimed issue that has no live strain and no pull request to failed, never back to ready.
 - **Isolation.** Interactive sessions never enter unattended mode.
 - **Observability.**
@@ -133,7 +133,7 @@ GitHub is the Lair's state and dashboard. The user steers through labels, park a
 ## Further Notes
 
 - The auto tier starts narrow (ADR-0044 gates, no protected paths, no major bump, local review not skipped). Widening it with triage effort or type labels and diff-size bounds is a later decision.
-- Budget values start from the PR #602 baseline of about four hours and 54 agents, and are tuned in use.
+- Budgets start at 6 hours of wall clock and 80 work agent calls (83 in total) per run. These replace the PR #602 baseline of about four hours and 54 agents as the starting point: 54 calls was about the 90th percentile of 94 measured delivery runs, and 80 exceeds all but one. The values are still tuned in use.
 - The release-train mode needs its own decision on fragment format, release cadence and who triggers the release pull request.
 - The intended sequence is human-confirmed triage first, then the Lair. The triage-backlog skill applies `readiness:ready` under the user's own account, which meets the admission rule. Triage leaves Lair-labeled issues alone.
 - Interactive standard-delivery keeps working in the current checkout.

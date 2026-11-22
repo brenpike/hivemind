@@ -6,7 +6,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 0
+rounds: 1
 clean_round: false
 ---
 
@@ -35,14 +35,30 @@ Review rule:
 
 ## Rounds
 
-No round of this review has run yet. Its round 1 covers the whole documents.
+### Round 1
+
+- **Date:** 2026-11-22.
+- **Reviewed commit:** `659554a95fb32d7e1ae036354297b47fdc1a79ca`.
+- **Scope:** the whole PRD, solution design and ADR-0045, with the part designs read as the text they supersede.
+- **Planner pass:** reviewer `hivemind:cerebrate`, a fresh read-only pass with `Memory context: none`, covering every angle. Model: `claude-opus-5-5`. It raised 10 findings, R1-1 to R1-10: 0 critical, 1 high, 4 medium and 5 low.
+- **Local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`. Model: the tool's own default (ADR-0042 decision 7), from another vendor than the planner pass's. It raised 1 finding, C1-1, medium.
+- **Result:** 0 critical, 1 high, 5 medium and 5 low, all new. Under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Design-decision rule update), every finding takes its recommended fix, each a strong recommendation, listed for veto; C1-1's became strong with the run data the user asked for (Decisions asked, Second restart round 1 budget). Every finding is disposed below, so none is open, and the high is fixed. The round raised new findings, so it is not clean, and a confirming round follows.
 
 ## Findings
 
-No finding of this review is recorded yet.
-
 | ID | Round | Angle | Severity | Disposition | Note |
 | --- | --- | --- | --- | --- | --- |
+| R1-1 | 1 | B | high | fixed | A remediation run kept the merge lane's stall window measured from the start marker's `started_at`, so an active run could end `stalled`, against the idle signal of Seams item 13. Fixed: solution design, Seams between the part designs, item 13, a remediation run's stall detection is the idle signal with both stall rules, and the merge lane's `started_at` stall window no longer applies in Components "Fix-up runs", the Failure modes row "Fix-up run lost in flight", Decided for you ("A fix-up run is supervised from its markers", R15), its Seam order #610 row and its #610 test; Failure modes, the Stall row; Decisions, the idle-signal bullet; Verification strategy, the replaced #610 case and a `tools/test_lair_tick.sh` case of an active remediation run past 30 minutes that is not ended. |
+| R1-2 | 1 | A | medium | fixed | A re-claim refusal ran after the claim marker, so claim integrity's crash rule ended it `crashed` and a re-claim's `start_moved` end took the merge lane's `lair:failed`, both counted, against strain launch's `lair:handoff`. Fixed: solution design, Seams between the part designs, new item 15, the re-claim checks run before the claim marker as admission checks, a refusal writes a handoff marker with reason `branch-moved`, `start-config-changed` or `design-superseded`, then `lair:handoff`, `unpushed_work` stays not claimed, and a `start_moved` end, a run-end handoff, takes `lair:handoff` under a handoff marker that reuses the claim's nonce, written before the outcome marker, and its pull request `lair:review`; item 4, the breaker skips that end; item 8, its write order and the claim-sequence order of an admission-time refusal; Failure modes, the Crash row, a remediation run's budget clause replaced by item 3; Lifecycle, the refused-start bullet and stage 2; Component "Park answer round trip"; Decisions; Verification strategy, the `tools/test_lair_tick.sh` cases. |
+| R1-3 | 1 | B | medium | fixed | Seams item 1 brought the merge lane's park record into a parked remediation run's signed end marker, against claim integrity's invariant Lair-written text and the 4096-byte payload cap. Fixed: solution design, Seams item 1, that end marker carries only the park's `key` and `type`, the park text goes only into the park marker's question block, and the merge lane's "or the park record when parked" no longer applies; Verification strategy, #610's case. |
+| R1-4 | 1 | A | medium | fixed | The re-claim's pre-image, the parked branch and head, was recorded nowhere, since claim integrity's park payload carries only `key` and `type`. Fixed: solution design, Seams item 1, the park marker of a park whose branch is on the remote also signs `branch`, under the identifier gate and at most 255 bytes, and `head`, 40 or 64 hex digits, and #609's re-claim reads its pre-image from the issue's latest counting park marker; Component "Park answer round trip"; Verification strategy, the `tools/test_lair_strain.sh` case. |
+| R1-5 | 1 | A | medium | fixed | The queue report printed #615's snake_case readiness codes and strain launch's reasons as `unknown-reason` under claim integrity's reason-code pattern. Fixed: solution design, Seams between the part designs, new item 16, a readiness-check code prints as itself when its stem is in the idea-to-ready design's closed set and its suffix meets that contract's placeholders, a code over 200 bytes as its stem then `:too-long`, and strain launch's reasons from their closed list; Decisions, the queue report bullet and a new bullet; Verification strategy, #608's cases. |
+| R1-6 | 1 | A | low | fixed | Strain launch's `unpushed_head` had no place to be written, since clean-up comes after the outcome marker. Fixed: solution design, Seams item 7, `unpushed_head` is not written to GitHub, the kept worktree is the record, and the queue report reads it locally. |
+| R1-7 | 1 | B | low | fixed | Seams item 9's "the claim's branch" had no source for a run that left no result. Fixed: solution design, Seams item 9, the result's `branch` when the result passes the schema check, else the kept worktree's checked-out branch read at run end, else the merge lane's "Recorded residual: a pull request no result names". |
+| R1-8 | 1 | A | low | fixed | Seams item 14 did not name the digest note of an `--admin` merge, written at the merged exit after the digest row's timing. Fixed: solution design, Seams item 14, #611's list adds that note, written at the merged exit after the run's entry, and the digest row's timing governs only the run's entry. |
+| R1-9 | 1 | A | low | fixed | Component "Strain result and liveness" did not name the builder of crash and stall detection, and Component "Unattended autonomy level" did not name the engine's park record, key and agent-call cap. Fixed: solution design, both Components. |
+| R1-10 | 1 | A | low | fixed | The PRD's Budgets and recovery criterion did not cover a remediation run's agent-call end, which sends its pull request to batch review. Fixed: the PRD, Acceptance Criteria, Budgets and recovery. |
+| C1-1 | 1 | review | medium | fixed | The PRD started budgets from the PR #602 baseline of about four hours and 54 agents, against strain launch's 6 hours and 80 work agent calls, 83 in all. The user asked for data: the overlord measured 94 past standard-delivery workflow runs in this repository's Claude Code logs, runs with at least 5 agent calls from 2026-10-22 to 2026-11-22. Agent calls: median 21, p75 36, p90 54, p95 67, max 82; 7 runs exceeded 54 and 1 exceeded 80. Active hours, the union of agent activity with user waits excluded: median 1.0, p90 2.4, p95 2.9, max 6.5; 4 runs exceeded 4 hours and 1 exceeded 6. A run that hits a cap ends failed and counts toward the breaker, so a cap near p90 fails about 1 run in 13. Fixed: the PRD, Further Notes, budgets start at 6 hours and 80 work agent calls, 83 in total, replacing the #602 baseline; solution design, Failure modes, the Budget overrun row notes the PRD names these values. |
 
 ## Decisions taken, listed for veto
 
@@ -183,9 +199,29 @@ Restarted round 3's calls, each taken on a strong recommendation; the digest's n
 | Restarted R3-2: the ADR-0045 amendment of 2026-11-22 on the digest credits the user only with the digest's status, answer A to restarted R1-2, and its narrowing, answer A after restarted round 3; the solution design's digest Decisions bullet says that amendment records the digest's status and #611 designs the rest | strong | ADR amendment: wording only, in an amendment this pull request adds |
 | Restarted R3-8: the What it touches column marks restarted R1-1 and R1-9 as restarted R2-5 is marked, and the integration tables' cells read "since integration round 3: integration C3-1" | strong | none |
 
+Second restart round 1's calls, each the recommended fix of a finding, a strong recommendation taken and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22; none was asked:
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| C1-1, the PRD's Further Notes: budgets start at 6 hours of wall clock and 80 work agent calls, 83 in total, per run, replacing the PR #602 baseline as the starting point, from 94 measured delivery runs; the Budget overrun row notes the PRD names them | strong | PRD scope and acceptance criteria: the starting budget values the Budgets and recovery criterion ends a run on |
+| R1-1, Seams item 13: a remediation run's stall detection is the idle signal with both stall rules, and the merge lane's stall window from `started_at` no longer applies | strong | none: a remediation run is ended as a delivery run is; no merge gate changes |
+| R1-2, Seams items 4 and 15: a re-claim's start checks run before the claim marker; a refusal or a `start_moved` end hands off with a handoff marker, whose reasons join claim integrity's handoff reasons, and the breaker skips it | strong | none: it applies strain launch's existing `lair:handoff`; no merge gate changes |
+| R1-3, Seams item 1: a parked remediation end marker carries only the park's `key` and `type`, the park text only in the question block | strong | trust: it keeps strain text out of a signed payload, as claim integrity's invariant requires |
+| R1-4, Seams item 1: the park marker of a park on a remote branch also signs the parked `branch` and `head`, the re-claim's pre-image | strong | trust: two validated tokens join a signed payload |
+| R1-5, Seams item 16: the queue report prints readiness-check codes from #615's closed set and strain launch's reasons from their closed list | strong | none |
+| R1-6, Seams item 7: `unpushed_head` is not written to GitHub; the kept worktree is the record | strong | none |
+| R1-7, Seams item 9: the claim's branch is the result's, else the kept worktree's, else the pull request falls under the merge lane's recorded residual | strong | merge path: it names which pull request a batch-review route labels; no merge gate changes |
+| R1-8, Seams item 14: #611 designs the note of an `--admin` merge, written at the merged exit | strong | none |
+| R1-9, Components "Strain result and liveness" and "Unattended autonomy level": the builders named | strong | none |
+| R1-10, the PRD's Budgets and recovery criterion: a remediation run that reaches its agent-call budget sends its pull request to batch review | strong | PRD acceptance criteria: wording only; it names the existing route |
+| R1-2 follow-on, Seams items 4, 8 and 15: a run-end handoff writes its labels, then a handoff marker that reuses the claim's nonce, then the outcome marker last; one test, a `failed` outcome marker whose nonce a counting handoff marker also carries, lets the breaker skip it and the reconciler map it to `lair:handoff`; an admission-time refusal keeps claim integrity's claim sequence order | strong | trust: a signed handoff marker's nonce may now be a claim's, overriding claim integrity's "which no claim marker records" for it; no payload field is added |
+| R1-2 follow-on, Seams item 15: the pull request of a run-end handoff takes item 9's `lair:review` route, as a `failed` delivery run's does | strong | merge path: it applies an existing batch-review route; no merge gate changes |
+
 ## Decisions asked
 
 - **Design-decision rule update.** The user's rule update of 2026-11-22, landed on `main` by PR #649 as the ADR-0046 amendment of 2026-11-22 to decision 8 and merged into this branch at `b9ca37df`. A design-stage decision with a strong recommendation is taken and listed for veto whatever it touches: PRD scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change. Only a decision with a weak or absent recommendation and an action that is irreversible now, outside the unmerged pull request, are asked. This record lists each taken decision with its recommendation strength and what it touches, in every table (Decisions taken, listed for veto). Every restarted round 2 fix had a strong recommendation, so none was asked.
+
+- **Second restart round 1 budget.** The budget question of C1-1 was first asked with a weak recommendation. The user asked for data. With the 94-run data under C1-1's Findings note, the recommendation became strong, 6 hours and 80 work agent calls, and it was taken under the user's standing rule (Standing rule clarification) and listed for veto (Second restart round 1's calls).
 
 - **Standing rule clarification.** The user's clarification of 2026-11-22, given with the answer to the Restarted round 3 advisory below: a strong recommendation is taken and listed for veto, not asked, in every case, a split or restart decision at the round cap included.
 
