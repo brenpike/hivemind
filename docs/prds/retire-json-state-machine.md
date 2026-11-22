@@ -58,7 +58,7 @@ It works in a consumer project with only the plugin installed. Nothing adds a re
   - Uncommitted edits a failed run left stop the takeover and are never discarded. Instinct never relaunches a workflow. A run the user stopped does not fall back.
 - **Instinct paths.**
   - A read-only analysis relays its result as the final report and opens no branch, commit or pull request.
-  - A post-PR remediation checks out the PR head first, then runs the watch or one fix pass. An escalation plans, runs its waves with one checkpoint commit each, validates, and pushes on the existing pull request. It opens no new pull request.
+  - A post-PR remediation works only on the PR head, checked out before any reviewer runs, and runs the watch or one fix pass. An escalation is planned, has one checkpoint commit per wave, passes validation before any push, and pushes on the existing pull request. It opens no new pull request.
   - Every path asks only what `### Stop Conditions` surfaces: the Ask Set and its listed always-surface items. It takes every other question with its recommendation.
 - **Brood dispatch.**
   - It is entered when the router selects `hatchery-dispatch` or an Instinct plan returns delivery `brood`.
@@ -140,7 +140,7 @@ It works in a consumer project with only the plugin installed. Nothing adds a re
 - **The Lair result.** It does not read the brood dashboard, so the collect schema change does not reach it.
 - **The Guide's exception.** The Guide's started-run exception (ADR-0046 decision 10) lands through its own initiative. This retirement keeps it.
 - **The fix ledger** of the GitHub Review Loop is not the run ledger and is unchanged.
-- **Old run ledgers.** They are not migrated, resumed or deleted. Their `.decision-report-done` markers are left as they are.
+- **Old run ledgers.** They are not migrated, resumed or deleted. Their decision-report markers are left as they are.
 - **Rejected options.** A permanent state-machine fallback, stopping on a refused launch, a `hatchery-dispatch` script with the spawn as a synapse runner, an Instinct mode or script for the exploratory path, a post-merge report fed from the merged pull request, and claimed columns fed from pull request state.
 - **Amending ADR-0036 decision 9.** It stands as written.
 - **Text in other initiatives' stamped documents.** The Lair designs, ADR-0045, the Idea to Ready design and ADR-0046 change only through their own re-review, which this retirement neither schedules nor blocks on.
@@ -156,5 +156,5 @@ It works in a consumer project with only the plugin installed. Nothing adds a re
 - **Residual: a brood child's Ask Set question waits.** A child on Instinct that reaches one waits in its own session, reachable through its `attach:` line or remote control when enabled, as a child on the state machine did.
 - **Upgrade effects.** `HIVEMIND_ENABLE_DECISION_REPORT` left in settings has no effect. A `Workflow(hivemind:<id>)` deny entry now sends any workflow to Instinct. A brood spawned before the upgrade shows only the observed status column.
 - **Prose budget.** An overlord change that overruns its prose budget is asked as a budget raise, an always-surface item of the overlord's `### Stop Conditions`, never raised silently.
-- **Shared documents.** The glossary, README, CLAUDE.md, the maintainer references and the website change as the solution design's Changes to shared documents says. The glossary retires Run Ledger, Workflow Definition, Exploratory Intent Session, Transition Engine, Run Ownership, Intent-Driven Fallback and Decision Report.
+- **Shared documents.** The glossary, the user and contributor guides, the maintainer references and the website change as the solution design's Changes to shared documents says. The glossary retires Run Ledger, Workflow Definition, Exploratory Intent Session, Transition Engine, Run Ownership, Intent-Driven Fallback and Decision Report.
 - **Open questions:** None.
