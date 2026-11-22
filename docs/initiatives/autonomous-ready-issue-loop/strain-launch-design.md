@@ -122,7 +122,7 @@ Built by #610. A remediation strain uses the same settings, marker, liveness and
 - **Review text that reaches it:**
   - through the facts step, with the pull request as its one reference: the pull request's title, body and top-level comments;
   - through the fix pass and `fetch-normalize.sh`: review threads, reviews, top-level comments and CI check results.
-- **The author filter.** With a verified marker, `gather-facts.sh` and `fetch-normalize.sh` drop every text whose author is neither an in-scope reviewer Bot (ADR-0043's Bot gate in `reviewer-identity.jq`) nor a login in `launch.json` `review_authors`. They report the count dropped. The Lair fills `review_authors` at dispatch with the users with write permission who wrote review text. Comments by outsiders therefore never reach the strain through its workflow.
+- **The author filter.** With a verified marker, `gather-facts.sh` and `fetch-normalize.sh` drop every text whose author is neither an in-scope reviewer Bot (ADR-0043's Bot gate in `reviewer-identity.jq`) nor a login in `launch.json` `review_authors`. They report the count dropped. The Lair fills `review_authors` at dispatch with the users with write permission who wrote review text. An in-scope Bot passes without a write-permission check: a Bot account is a GitHub App, and only an administrator can install an app on the repository, so an in-scope Bot counts as trusted, as a user with write permission does. `github-actions[bot]` is in scope only when listed (ADR-0043). Comments by other users without write permission therefore never reach the strain through its workflow. This Bot exception needs the PRD and ADR-0045 wording of changes 4 and 5 below.
 - **Scanning.** Every remaining text is external content. The facts-step injection scan of `lib/facts.js` runs on the facts texts before the fix pass. The `hivemind:github-reviewer` classifies each finding per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Injection-Suspect Classification). An injection-suspect verdict ends the run as an `approval` park. The Lair then routes the pull request to `lair:review` (#631).
 
 ## State and ownership
@@ -206,7 +206,7 @@ Only a user with write permission steers the Lair, through the parent design's c
 
 - It starts with no merge key in its environment and runs with both merge keys empty in settings that sit above the user, project and local scopes. Nothing it inherits from those scopes turns a merge on; managed settings are the named residual below.
 - Its launch inputs are Lair-written and checked against the Lair's copy. Its level comes from the settings marker, which task text cannot set.
-- Through its workflow, a delivery strain reads no issue text but the capture, and a remediation strain reads review text only from in-scope Bots and write-access users, scanned before use.
+- Through its workflow, a delivery strain reads no issue text but the capture, and a remediation strain reads review text only from in-scope Bots, trusted because only an administrator installs an app, and write-access users, scanned before use.
 - **The deny rules are a barrier against a strain that makes a mistake, not containment of a prompt-injected strain.** A Bash call can run `bash -c`, a script, `curl` or another interpreter that no deny rule matches. The strain runs with the user's GitHub credentials and can read any file the user can.
 - **Named residual: a prompt-injected strain holds the user's rights.** It could merge, relabel, comment, admit or answer other issues, write the user's settings by a path no rule matches, or rewrite the Lair's strain records, so that a forged marker passes the marker check or another strain's result is replaced. What narrows it is upstream of the strain: admission, the pre-spawn injection scan, the captured text and the author filter. A dedicated identity (ADR-0045 decision 9) is the real fix and is deferred. This is the ADR-0045 residual of that name.
 - **Named residual: a merge key exported from the user's shell profile** reaches the strain's Bash calls, because the shell is started from the profile. The merge keys belong in settings files (CLAUDE.md), and `merge-approved.sh` is reached only from the review watch, which a strain never runs.
@@ -270,7 +270,7 @@ A decision that is not ADR-worthy names the [P20](../../engineering-principles.m
 - **A marker is verified against the Lair's record and the strain's worktree.** Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **The level reaches the engine through the marker, read by `gather-facts.sh`, and the engine checks the launch args against the Lair's copy.** ADR-0045 decision 6 ("never by task text"). The mechanism is not ADR-worthy: fails P20's hard-to-reverse condition. #607 records it in an ADR-0037 amendment, because it changes ADR-0037's "an autonomy key is never read".
 - **A delivery strain reads no issue text but the capture, and `gather-facts.sh` refuses refs the launch file does not name.** ADR-0045 decision 10.
-- **A remediation strain's review text is filtered to in-scope Bots and write-access users.** Extends ADR-0045 decision 11's rule on outsiders to review text. Not ADR-worthy: fails P20's hard-to-reverse condition.
+- **A remediation strain's review text is filtered to in-scope Bots and write-access users.** Extends ADR-0045 decision 11's rule on outsiders to review text, with the in-scope Bot exception that change 5 adds to decision 11 and change 4 to the PRD. The filter mechanism is not ADR-worthy: fails P20's hard-to-reverse condition.
 - **The result's decisions and gates come from the engine record.** Keeps ADR-0045 decision 5's one fixed script. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **Run activity is the hook-touched activity file; stall windows of 5 minutes idle and 30 minutes inactive; a 6-hour wall-clock budget; an agent-call cap of 80 owned by #607.** ADR-0045 decision 17. The values are not ADR-worthy: each fails P20's hard-to-reverse condition.
 - **Session end never waits on a push; unpushed work is kept and reported.** Not ADR-worthy: fails P20's hard-to-reverse condition.
@@ -280,7 +280,7 @@ A decision that is not ADR-worthy names the [P20](../../engineering-principles.m
 
 ### Changes to shared documents
 
-The user answered each change with option A, accepted 2026-11-21. None is applied in this pull request. This design's own sections follow the accepted wording.
+The user answered each change with option A, accepted 2026-11-21: changes 1 to 3 at design, changes 4 and 5 at the local review of this design. None is applied in this pull request. This design's own sections follow the accepted wording.
 
 1. **`docs/adr/0045-lair-software-factory.md`, decision 4 (line 29 and its sub-bullets, lines 30 to 33).** Proposed text:
 
@@ -306,6 +306,22 @@ The user answered each change with option A, accepted 2026-11-21. None is applie
 
    ```markdown
    3. **Strains are interactive sessions.** Each strain is an interactive `claude` session in tmux in its own worktree, started by the brood tooling. A first claim starts off the fetched trunk commit, a re-claim at its pushed branch's head, and a remediation on its pull request's branch. Worktrees stay detached. Headless `claude -p` and the Agent SDK are not used.
+   ```
+
+   User's answer: option A, accepted 2026-11-21.
+
+4. **`docs/prds/autonomous-ready-issue-loop.md`, line 62.** It replaces `- Comments by users without write permission never reach a strain.` Proposed text:
+
+   ```markdown
+     - Comments by users without write permission never reach a strain. An in-scope reviewer Bot (ADR-0043) counts as trusted, because only an administrator can install the app behind it.
+   ```
+
+   User's answer: option A, accepted 2026-11-21.
+
+5. **`docs/adr/0045-lair-software-factory.md`, decision 11 (line 62).** It replaces the sentence `Comments by users without write permission never reach a strain.` Proposed text:
+
+   ```markdown
+   Comments by users without write permission never reach a strain. An in-scope reviewer Bot (ADR-0043) counts as trusted, because only an administrator can install the app behind it, so a remediation strain reads its review text.
    ```
 
    User's answer: option A, accepted 2026-11-21.
@@ -345,3 +361,5 @@ None
 ## Amendments
 
 This design was written on 2026-11-21, after the user accepted the three changes under Decisions. Those changes are not applied in this pull request. Later changes to this design are appended here as dated entries.
+
+- **2026-11-21, local review.** The user chose option A for the remediation author filter: an in-scope reviewer Bot counts as trusted without a write-permission check. Changes 4 and 5 propose the matching PRD and ADR-0045 decision 11 wording.
