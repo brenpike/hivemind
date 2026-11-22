@@ -35,19 +35,19 @@ This design builds on the following code, as it stands on trunk:
 Each invariant below is stated once, here. Every later section cites it by name, as "invariant Claim state", and never restates it.
 
 - **Claim state.**
-  - A Lair issue is an issue that carries a `lair:*` label or a counting claim marker (the user's 2026-11-21 sweep answer). A markerless Lair issue is one with no counting claim marker.
+  - A Lair issue is an issue that carries a `lair:*` label, a counting claim marker or a counting handoff marker (the user's 2026-11-21 sweep answer). A markerless Lair issue is one with no counting claim marker.
   - An open claim is a counting claim marker with no counting outcome marker of its nonce.
-  - A live strain is a strain session for the nonce, or, for a markerless Lair issue, any strain session for the issue; or an unconsumed result file for the nonce.
+  - A live strain is a strain session for the nonce, or, for a markerless Lair issue, any strain session for the issue; or an unconsumed result file, one whose nonce has no counting outcome marker yet.
   - A Lair pull request is a pull request as #631 defines it, bound to the nonce.
-  - An orphan is a Lair issue with no live strain and no Lair pull request that is in `readiness:implementation` or holds an open claim.
+  - An orphan is a Lair issue with no live strain and no Lair pull request that either holds an open claim, or is markerless and in `readiness:implementation`. A Lair issue whose counting claim markers are all closed is never an orphan; its labels follow invariant Markers and labels.
   - An orphan is marked failed and never returned to ready. An orphan holding an open claim gets an outcome marker `crashed`, then the `crashed` labels. A markerless orphan gets labels only: `lair:failed` added, `readiness:implementation` and `readiness:ready` removed.
-  - A non-Lair issue is never touched.
+  - The reconciler never touches a non-Lair issue.
   - This rule runs at start and on each tick. Halt tripwires stop new claims and never suppress this action.
 - **Markers and labels.**
   - Counting markers decide which claim and which outcome exist; labels follow them.
-  - Each label pairs with a marker: `lair:claimed` with a counting claim marker; `lair:handoff` with a counting handoff marker, or with the counting park marker of an `approval` park or a third park; `lair:failed` and `lair:review` with a counting outcome marker under #631's mapping.
-  - The reconciler moves labels forward only. It skips repair when a `readiness:ready` labeled event is newer than the latest counting outcome marker: the Lair never applies `readiness:ready` (ADR-0045 decision 10), so that event is the user's re-admission (ADR-0045 decision 11), and admission decides what happens next.
-  - Only `lair:claimed` without a counting claim marker trips the halt `marker-missing`. Any other `lair:*` label without its marker is left alone and never claimed.
+  - Each label pairs with a marker, except the `lair:failed` a markerless orphan gets under invariant Claim state: `lair:claimed` with a counting claim marker; `lair:handoff` with a counting handoff marker, or with the counting park marker of an `approval` park or a third park; `lair:failed` and `lair:review` with a counting outcome marker under #631's mapping.
+  - The reconciler moves labels forward only. It skips repair when a `readiness:ready` labeled event is newer than the latest counting outcome or handoff marker: the Lair never applies `readiness:ready` (ADR-0045 decision 10), so that event is the user's re-admission (ADR-0045 decision 11), and admission decides what happens next.
+  - Of the labels, only `lair:claimed` without a counting claim marker trips the halt `marker-missing`. Any other `lair:*` label without its marker is left alone and never claimed.
 - **Lock scope.**
   - One controller runs per lock scope. A lock scope is one repository (the state root, keyed by the repository's GraphQL node id), one user account and one machine.
   - Creating the state root and creating the lock file are the only writes before the lock is held, and both are idempotent.
@@ -66,7 +66,7 @@ Each invariant below is stated once, here. Every later section cites it by name,
 
 ### Lair state root
 
-One directory per repository, outside every checkout and worktree: `${XDG_STATE_HOME:-$HOME/.local/state}/hivemind/lair/<repo-key>/`, where `<repo-key>` is the first 32 hex digits of the SHA-256 of the repository's GraphQL node id. Creating the directory, with mode 0700, and creating its `lock` file are the two idempotent writes the Lair makes before it holds the lock, under invariant Lock scope; every other entry is created after. The Lair prints the path on start. It holds:
+One directory per repository, outside every checkout and worktree: `${XDG_STATE_HOME:-$HOME/.local/state}/hivemind/lair/<repo-key>/`, where `<repo-key>` is the first 32 hex digits of the SHA-256 of the repository's GraphQL node id. The directory has mode 0700; it and its `lock` file are the pre-lock writes of invariant Lock scope. The Lair prints the path on start, under invariant Lair-written text. It holds:
 
 - `lock`, the single-instance lock file;
 - `control/`, mode 0700, holding `marker.key` (mode 0600) and the halt file `halt`;
@@ -75,7 +75,7 @@ One directory per repository, outside every checkout and worktree: `${XDG_STATE_
 
 ### Single-instance lock
 
-The controller opens `lock` on one descriptor and takes an exclusive, non-blocking `flock` on it at start, before any other write, and holds it for its whole life. Every command the controller launches runs with that descriptor closed. Its scope, its coverage and the rule that no child holds it are stated in invariant Lock scope.
+The controller opens `lock` on one descriptor and takes an exclusive `flock` on it. When it is taken, how long it is held, its scope, its coverage and the rule that no child holds it are stated in invariant Lock scope.
 
 ### Marker signer and verifier
 
@@ -95,7 +95,7 @@ The ordered reads and writes that take a candidate from snapshot to spawned stra
 
 ### Reconciler and start-up sweep
 
-At start and at the start of every tick, the reconciler ends every orphan under invariant Claim state and repairs labels under invariant Markers and labels. Its order within a tick and its other rules are under Lifecycle.
+The reconciler applies invariants Claim state and Markers and labels. Its place in the tick and its other rules are under Lifecycle.
 
 ### Halt file and circuit breaker
 
@@ -103,7 +103,7 @@ The halt file stops new claims (ADR-0045 decision 17). The circuit breaker count
 
 ### Queue report
 
-A report of the Ready Issue queue that prints no text taken from an issue and gives the cause of each failure. This answers B3-19.
+A report of the Ready Issue queue, under invariant Lair-written text, that gives the cause of each failure. This answers B3-19.
 
 ## State and ownership
 
@@ -129,11 +129,11 @@ The local cache holds the session id, the comment ids of markers written this se
 
 Fields and seams only. Each slice builds the code.
 
-- **Marker comment.** The body's first line is exactly `<!-- lair-marker-v1 <payload> <sig> -->`, then LF, then readable text. `<payload>` is unpadded base64url (`[A-Za-z0-9_-]`, at most 4096 bytes) of a compact JSON object. `<sig>` is the lowercase hex HMAC-SHA256, under `marker.key`, of the payload's bytes as written. The readable text follows invariant Lair-written text: fixed templates and validated tokens and, for a park marker only, the bounded question slot. No Lair reader reads it.
+- **Marker comment.** The body's first line is exactly `<!-- lair-marker-v1 <payload> <sig> -->`, then LF, then readable text. `<payload>` is unpadded base64url (`[A-Za-z0-9_-]`, at most 4096 bytes) of a compact JSON object. `<sig>` is the lowercase hex HMAC-SHA256, under `marker.key`, of the payload's bytes as written. The readable text follows invariant Lair-written text. No Lair reader reads it.
 - **Marker payload, every kind.** `v` (1), `kind` (`claim`, `outcome`, `park` or `handoff`), `repo` (the repository's GraphQL node id), `issue` (number), `nonce` (32 hex digits, one per claim attempt), `session` (the Lair session id, 32 hex digits), `kid` (the first 16 hex digits of the SHA-256 of the key) and `at` (UTC time).
   - `claim` adds `admit_event` (the node id of the admitting labeled event), `body_sha256`, `trunk` (the snapshot commit) and `scan` (the scan id).
   - `outcome` adds `outcome` (`complete`, `parked`, `blocked`, `failed`, `stalled`, `timed-out` or `crashed`), `ended_at`, `pr` (number or null) and, for `crashed`, `stage` (`claim-labels`, `spawn` or `run`).
-  - `park` adds `key`, validated by the pattern of invariant Lair-written text, and `type`, both from the park record. The question, options and recommendation go in the slot of invariant Lair-written text, not in the signed payload.
+  - `park` adds `key` and `type` from the park record, under invariant Lair-written text.
   - `handoff` adds `reason` (`scan-suspect` or `scan-malformed`) and `category` (`P1` to `P4`, or null).
 - **Counting rule.** A comment is a marker candidate when the Lair's login wrote it and its body starts, at byte 0, with `<!-- lair-marker-`. The Lair's login is `viewer { login }`, read once at start. A candidate counts only when all hold:
   - its author is the Lair's login and `viewerDidAuthor` is true;
@@ -155,7 +155,7 @@ Fields and seams only. Each slice builds the code.
 - **`body_sha256`.** Lowercase hex SHA-256 of the ASCII string `v1:<T>:<B>`, where `<T>` is the hex SHA-256 of the title's bytes and `<B>` the hex SHA-256 of the body's bytes, both exactly as the GraphQL read returns them. A null body (REST) and an empty body both hash as zero bytes. CR bytes, CRLF line endings, trailing newlines and Unicode forms are kept as read, with no normalization. Each hash is computed from a pipe, never through command substitution, which drops trailing newlines. The field keeps its name although it covers the title too. This answers B3-18.
 - **Snapshot.** One GraphQL read of the issue: `number`, `state`, `title`, `body`, `lastEditedAt`, `updatedAt`, labels, the `LABELED_EVENT`, `UNLABELED_EVENT` and `RENAMED_TITLE_EVENT` timeline items with actors, `blockedBy` states, the parent's state, the sub-issue count and the comments with the fields the counting rule needs. Any connection with `hasNextPage` true, or a response `hivemind_graphql_response_check` rejects, is a snapshot error. The write permission of the admitting label's actor is one REST read in the same evaluation. The trunk commit is fetched once per tick.
 - **Readiness-check call at claim.** The Lair calls the check with the snapshot and the trunk commit, never letting it read GitHub itself. The result is the one the [idea-to-ready PRD](../../prds/idea-to-ready.md) names under "Readiness check output": track, pass or fail, and reason codes. Only a pass is claimed. A non-zero exit, a malformed result, or no result within 60 seconds is the Lair-side state `check-error`, never a pass. Per tick the Lair checks at most 5 candidates, in ascending issue number. A candidate whose `updatedAt` and trunk commit equal those of its last failed check this session is not checked again; its cached reasons are reported.
-- **Scanner session settings.** Written by the Lair per scan through #630's per-session settings mechanism. They allow `Read` of `scan/<scan-id>/input.txt`, `Write` of `scan/<scan-id>/verdict`, the `hivemind:injection-scan` skill and plugin-folder reads. They allow nothing else: no Bash, no Edit, no web tools, no MCP servers, no agents. The pasted prompt is fixed text holding only the scan id and paths derived from identifiers, under invariant Lair-written text; issue text never enters the pane.
+- **Scanner session settings.** Written by the Lair per scan through #630's per-session settings mechanism. They allow `Read` of `scan/<scan-id>/input.txt`, `Write` of `scan/<scan-id>/verdict`, the `hivemind:injection-scan` skill and plugin-folder reads. They allow nothing else: no Bash, no Edit, no web tools, no MCP servers, no agents. The pasted prompt holds only the scan id and paths derived from identifiers, under invariant Lair-written text.
 - **Scan input.** `input.txt` holds the captured title, LF, then the body: the exact bytes whose hash is the claim's `body_sha256`.
 - **Verdict file.** Exactly one line ending in LF, read bounded to 129 bytes:
   - `lair-scan-v1 <scan-id> clean` is the clean token, and the only verdict the Lair accepts;
@@ -165,7 +165,7 @@ Fields and seams only. Each slice builds the code.
 
   The Lair then ends the scanner session and removes the scan directory, whatever the verdict.
 - **Halt file.** Its path is `control/halt` under the state root. Any directory entry at that path, of any content, halts; so does a state root the Lair cannot read. The Lair writes it as `halt` LF, `cause: <code>` LF, `at: <UTC time>` LF, and for the breaker one `run: <issue> <outcome>` line per counted run. Cause codes: `breaker`, `marker-invalid`, `marker-missing`, `scanner-error`. A file of any other form reads as cause `user`. The Lair never deletes it.
-- **Queue report.** Lines of fixed keys and validated tokens only, under invariant Lair-written text, with no slot: `lair-queue v1 session=<hex> at=<UTC time>`; `halted: <cause code>` or `halted: no`; `ready: <count>`; one `issue <number>: <stage> <code>[,<code>...]` line per ready-labeled issue that failed; and, when `ready` is 0, `hint: run hivemind:triage-backlog`. `<stage>` is `admission`, `snapshot-error`, `readiness`, `check-error`, `scan` or `marker`. A reason code that does not match `^[a-z0-9][a-z0-9-]{0,63}$` prints as `unknown-reason`. No title, body, label text from outside the palette, login or comment text is printed. The Lair prints it to its tmux window and writes it to `cache/queue-report.txt` on start, on each tick that finds nothing to claim, and on each tick where a ready-labeled issue fails.
+- **Queue report.** Lines under invariant Lair-written text: `lair-queue v1 session=<hex> at=<UTC time>`; `halted: <cause code>` or `halted: no`; `ready: <count>`; one `issue <number>: <stage> <code>[,<code>...]` line per ready-labeled issue that failed; and, when `ready` is 0, `hint: run hivemind:triage-backlog`. `<stage>` is `admission`, `snapshot-error`, `readiness`, `check-error`, `scan` or `marker`. A reason code that does not match `^[a-z0-9][a-z0-9-]{0,63}$` prints as `unknown-reason`. The Lair prints it to its tmux window and writes it to `cache/queue-report.txt` on start, on each tick that finds nothing to claim, and on each tick where a ready-labeled issue fails.
 
 ### Assumptions about #630
 
@@ -180,7 +180,7 @@ Fields and seams only. Each slice builds the code.
 
 - **Merge lane.** The lane reads a claim's `body_sha256` and nonce only from a counting claim marker, through this design's verifier, and merges nothing for an issue without one.
 - **What counts as a Lair pull request.** Defined by #631, bound to a claim nonce. It is an input to the orphan rule of invariant Claim state.
-- **Result file at run end.** Run end reads the strain's result file, whose form and location are #631's. A result file run end has not yet read is unconsumed, an input to invariant Claim state.
+- **Result file at run end.** Run end reads the strain's result file, whose form and location are #631's, and records it with an outcome marker. Invariant Claim state decides when a result file is unconsumed, so run end never writes a second outcome marker for a nonce.
 - **Result field checks.** #631 checks the strain result's fields; an outcome marker records the outcome the Lair accepted after those checks.
 - **Run-outcome to label mapping.** Defined by #631, over the outcome values above. The reconciler re-applies it under invariant Markers and labels, and only `failed`, `crashed` and `timed-out` count toward the breaker.
 - **Issue edited after claim.** The merge-side action is #631's; this design supplies the `body_sha256` form.
@@ -195,12 +195,12 @@ Fields and seams only. Each slice builds the code.
 
 ## Trust boundaries
 
-- **Markers.** A marker counts only when the Lair's login wrote it, it is unedited, it carries the claim nonce and its signature verifies with a key no Lair-started session can read. The login check alone cannot tell the Lair from a strain, since both act as the user ([ADR-0045 residuals](../../adr/0045-lair-software-factory.md#residuals)); the signature can. An outsider's comment is never a candidate, so outsiders cannot forge a marker or trip the halt. The signature covers the payload, not the readable text: a park marker's slot is strain-authored data that only a GitHub reader sees (invariant Lair-written text).
+- **Markers.** A marker counts only when the Lair's login wrote it, it is unedited, it carries the claim nonce and its signature verifies with a key no Lair-started session can read. The login check alone cannot tell the Lair from a strain, since both act as the user ([ADR-0045 residuals](../../adr/0045-lair-software-factory.md#residuals)); the signature can. An outsider's comment is never a candidate, so outsiders cannot forge a marker or trip the halt. The signature covers the payload, not the readable text, which invariant Lair-written text governs.
 - **The key.** It lives under `control/`, out of every session's reach by #630's containment. A session that escapes that containment can read the key and sign markers that count. This is proposed as an ADR-0045 residual under Changes to shared documents, as the user chose.
 - **The scanner session.** It receives the captured text as data, through a file, with no tool that can act outside its two files. The verdict is a filter, not a boundary: an injected scanner can write the clean token, and the strain that then runs stays inside #630's containment. A scanner can never write a clean token for another scan, because the token names its scan id.
 - **The halt file.** Only the user removes it. Sessions cannot reach it (#630), so a strain cannot re-arm the Lair.
-- **The queue report and marker text.** Under invariant Lair-written text, the queue report and the claim, outcome and handoff marker text carry no text from an issue or a strain, so none is an injection path into the user's terminal or a later reader. The park slot is strain-authored data that only a GitHub reader sees; the Lair never prints it or reads it.
-- **Admission.** ADR-0045 decision 10 and its amendment stand. A ready label applied by hand on a parked issue is the user's re-admission (ADR-0045 decision 11).
+- **The queue report and marker text.** Under invariant Lair-written text, no Lair-written string is an injection path into the user's terminal, a tmux pane, a scanner prompt or a later Lair reader.
+- **Admission.** ADR-0045 decision 10 and its amendment stand. A ready label applied by hand on a parked issue is the user's re-admission (ADR-0045 decision 11), which invariant Markers and labels respects.
 
 ## Lifecycle
 
@@ -213,7 +213,7 @@ Each tick runs in this order:
 
 The claim sequence, for one candidate:
 
-1. Take the snapshot. Check admission (ADR-0045 decision 10 and its amendment; the PRD Admission criterion), including that every counting claim marker on the issue has a counting outcome marker.
+1. Take the snapshot. Check admission (ADR-0045 decision 10 and its amendment; the PRD Admission criterion), including that the issue holds no open claim (invariant Claim state).
 2. Run the readiness check on the snapshot. Only a pass goes on.
 3. Generate the claim nonce and scan id, capture the text, and compute `body_sha256`.
 4. Run the scanner session. A clean token goes on. A suspect or malformed verdict hands the issue off: a handoff marker, then the `lair:handoff` label, with no other label changed. A scan error leaves the issue unclaimed, with no new label and stage `scan` in the queue report.
@@ -223,14 +223,13 @@ The claim sequence, for one candidate:
 8. Add `lair:claimed`, then add `readiness:implementation`, then remove `readiness:ready`.
 9. Spawn the strain.
 
-At run end the Lair writes the outcome marker first, then the labels of #631's mapping. On a park the issue moves to `readiness:needs-decision` and keeps `lair:claimed`, so triage still skips it (ADR-0045 decision 16). This answers A3-17. The user re-admits it by applying `readiness:ready` by hand.
+At run end the Lair writes the outcome marker first, then the labels of #631's mapping. On a park the issue moves to `readiness:needs-decision` and keeps `lair:claimed`, so triage still skips it (ADR-0045 decision 16). This answers A3-17. The user re-admits it by applying `readiness:ready` by hand, under invariant Markers and labels.
 
 The reconciler applies invariants Claim state and Markers and labels, with these rules of its own:
 
-- The `crashed` outcome marker of an orphan holding an open claim carries `stage` `claim-labels` when the claim's label writes were incomplete, `spawn` when the cache shows no spawn, and `run` otherwise. This covers a write that failed, a write whose response was lost, and an orphan left by an earlier Lair session alike.
-- An unconsumed result file is a live strain, so the reconciler in step 2 never ends a finished run `crashed`; run end reads its result in step 3 of the same tick.
-- A counting outcome marker whose labels do not match #631's mapping gets the mapping's labels again, except on an issue the user re-admitted, which invariant Markers and labels skips.
-- A counting handoff marker without `lair:handoff` gets the label again.
+- The `crashed` outcome marker of an orphan holding an open claim carries `stage` `claim-labels` when the claim's label writes were incomplete, `spawn` when the claim marker's `session` is the current session and the cache shows no spawn, and `run` otherwise. This covers a write that failed, a write whose response was lost, and an orphan left by an earlier Lair session alike.
+- Under invariant Claim state a finished run whose result file is unconsumed still has a live strain, so step 2 never ends it `crashed`; run end records it in step 3 of the same tick. When that outcome marker's response is lost, the marker still counts, so the next tick repairs its labels and run end writes no second marker.
+- A counting outcome marker whose labels do not match #631's mapping gets the mapping's labels again, and a counting handoff marker without `lair:handoff` gets the label again, except on an issue the user re-admitted, which invariant Markers and labels skips.
 - Every label write is idempotent.
 
 The halt and the breaker:
@@ -244,7 +243,7 @@ The halt and the breaker:
 - `hivemind:injection-scan` keeps its contract, and its review-loop callers are unchanged. The scanner session is a new caller.
 - `react-marker.sh` and the review-loop markers are unchanged. The Lair's marker sentinel shares no prefix with them.
 - Triage is unchanged beyond ADR-0045 decision 16's skip, and the skip still holds for a parked issue because it keeps `lair:claimed`.
-- An issue a human labels `readiness:implementation` without the Lair is not a Lair issue, so the reconciler never touches it (invariant Claim state).
+- A non-Lair issue a human labels `readiness:implementation` is never touched by the reconciler (invariant Claim state).
 - Interactive sessions never read the state root, the key or the halt file.
 - `tools/validate.sh` is not changed by this design; the registrations under Verification strategy land with the slices.
 
@@ -254,7 +253,7 @@ The halt and the breaker:
 | --- | --- | --- |
 | GitHub read failure or rate limit | A failed or rate-limited read, or a response `hivemind_graphql_response_check` rejects. | No write for the issue concerned this tick. A candidate's snapshot error is reported with stage `snapshot-error`. The next tick retries. |
 | Incomplete page | A connection in the snapshot has `hasNextPage` true. | Snapshot error; the issue is not claimed. |
-| GitHub write failure mid-sequence | A claim, run-end or handoff write without positive proof of success. | The sequence stops at that write and spawns nothing. The next tick's reconciler moves the partial state forward. |
+| GitHub write failure mid-sequence | A claim, run-end or handoff write without positive proof of success. | The sequence stops at that write and spawns nothing. The next tick moves the partial state forward: the reconciler under invariants Claim state and Markers and labels, or run end for a result file still unconsumed. |
 | Claim stopped partway, or orphaned claim | An orphan under invariant Claim state. | Ended under invariant Claim state, with the `crashed` stage under Lifecycle. A `crashed` outcome marker counts toward the breaker. |
 | Lock already held | `flock` cannot take `lock`: another controller runs in this lock scope (invariant Lock scope). | The second Lair prints `lock held`, exits non-zero and changes nothing beyond the idempotent writes of invariant Lock scope. |
 | `flock` missing | The tool is not on `PATH`, checked before any write. | The Lair refuses to start and changes nothing. |
@@ -263,34 +262,34 @@ The halt and the breaker:
 | Readiness check error | A non-zero exit, a malformed result, or no result within 60 seconds. | Not claimed, no new label, reported with stage `check-error`. |
 | Scan suspect or malformed | The verdict file holds the suspect form or any non-clean content. | Handoff marker, then `lair:handoff`. No strain starts. |
 | Scan error | No verdict file within 300 seconds, or the session failed to start. | Not claimed, no new label, reported with stage `scan`. Three consecutive scan errors in a session write the halt file with cause `scanner-error`. |
-| Park record breaks the text rule | The park record's `key` fails its pattern, or its question slot breaks the slot's limits (invariant Lair-written text). | No park marker is posted. #631's result check handles the run. |
+| Park record breaks the text rule | The park record's `key` fails its pattern, or its question slot breaks the slot's limits (invariant Lair-written text). | Handled under invariant Lair-written text. |
 | Invalid marker | A candidate fails the counting rule. | Halt file with cause `marker-invalid`; the issue is not claimed. |
 | Missing marker | A marker the cache recorded this session is gone, or the `lair:claimed` case of invariant Markers and labels. | Halt file with cause `marker-missing`. An orphan among these issues is still ended under invariant Claim state. |
 | Key missing or replaced | A new key was created, so earlier markers carry another `kid`. | Each earlier marker the Lair reads is invalid, so the Lair halts with `marker-invalid`. The user restores the key or clears the issues by hand. |
-| Second Lair on another machine or account | Its markers carry another `kid`, or another login. The lock cannot see it, since it runs in another lock scope (invariant Lock scope). | Another `kid` halts this Lair with `marker-invalid`. Another login's comments are not candidates, and its `lair:claimed` without a counting claim marker halts this Lair with `marker-missing`. This Lair may also fail the other Lair's claim as an orphan under invariant Claim state. The setup is unsupported, and the lock cannot prevent it. |
+| Second Lair on another machine or account | Its markers carry another `kid`, or another login. It runs in another lock scope (invariant Lock scope). | Another `kid` halts this Lair with `marker-invalid`. Another login's comments are not candidates, and its `lair:claimed` without a counting claim marker halts this Lair with `marker-missing`. Beyond that, invariant Lock scope applies. |
 | Halt file present or state root unreadable | Read at the start of the tick and before the claim marker. | No snapshot, scan or claim. Reconciling and reporting continue. |
 | Circuit breaker trip | Three consecutive counted outcomes in the current window. | Halt file with cause `breaker` and the runs; only the user deleting it re-arms the Lair. |
 
 ## Decisions
 
-A decision that is not ADR-worthy names the [P20](../../engineering-principles.md) condition it fails. The three Tier A answers the user gave on 2026-11-21 come first.
+A decision that is not ADR-worthy names the [P20](../../engineering-principles.md) condition it fails. The four Tier A answers the user gave on 2026-11-21 come first; the fourth is also the bullet for invariant Claim state. One bullet for each other design invariant follows.
 
 - **The injection scan runs in a locked-down scanner session, and ADR-0045 decision 10 keeps its text.** Tier A, answered by the user on 2026-11-21 (B3-1). Implements ADR-0045 decision 10.
 - **Markers count only when signed, unedited, carrying the claim nonce and written by the Lair's login, and forgery after a containment escape becomes an ADR-0045 residual.** Tier A, answered by the user on 2026-11-21 (B3-3). Implements ADR-0045 decisions 2 and 17; the residual is proposed under Changes to shared documents.
 - **The circuit breaker counts the runs that ended in the current Lair session, and a trip writes the halt file with its cause; ADR-0045 decision 17 keeps its text.** Tier A, answered by the user on 2026-11-21 (the breaker part of A3-12). Implements ADR-0045 decision 17.
+- **The sweep covers only Lair issues: invariant Claim state, a claim that stopped partway included.** Tier A, answered by the user on 2026-11-21 (A), through a proposed amendment to ADR-0045 decision 17 under Changes to shared documents. The amendment's wording is derived from the invariant, decided for the user and listed for veto. ADR-worthy under P20: it changes which issues decision 17's orphan rule reaches, so it is proposed as an ADR-0045 amendment rather than decided here.
+- **Invariant Markers and labels governs how labels follow markers and when the reconciler leaves an issue alone.** Implements ADR-0045 decisions 2, 11 and 16. Not ADR-worthy: fails P20's hard-to-reverse condition.
+- **Invariant Lock scope governs the single-instance lock.** Implements ADR-0045 decision 2 (B3-11). Not ADR-worthy: fails P20's hard-to-reverse condition.
+- **Invariant Lair-written text, applied by one renderer that builds every string the Lair writes; the queue report gives a stage and reason codes per failure.** Implements ADR-0045 decision 10 and replaces the solution design's queue report contents (B3-19). Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **HMAC-SHA256 with one local key per repository, and a `kid` in every marker.** Implements the signed-marker answer. Not ADR-worthy: fails P20's hard-to-reverse condition, since the `v` field allows a second scheme.
 - **The state root lives outside every checkout and worktree.** Implements ADR-0045 decision 17's halt file and the signed-marker answer. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **Every marker reader fails toward stopping, and an invalid or missing marker halts the Lair.** Implements ADR-0045 decision 17. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **Markers are append-only; the outcome is a separate outcome marker, not an edit of the claim marker.** Replaces the solution design's outcome in the claim marker, since an edited marker never counts. Implements ADR-0045 decision 2. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **Claim write order: claim marker, then labels, then spawn; run end: outcome marker, then labels.** Implements ADR-0045 decisions 2 and 16 (B3-10). Not ADR-worthy: fails P20's hard-to-reverse condition.
-- **Orphans, a claim that stopped partway included, are ended under invariant Claim state, which covers only Lair issues.** The scope is the user's 2026-11-21 answer (A), through a proposed ADR-0045 amendment to decision 17 under Changes to shared documents. The amendment's wording is derived from the invariant, decided for the user and listed for veto.
-- **One controller per lock scope, through a non-blocking `flock` whose descriptor no launched child holds, under invariant Lock scope.** Implements ADR-0045 decision 2 (B3-11). Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **One snapshot per candidate, a Lair-side `check-error` state, and at most 5 checks of 60 seconds each per tick.** Implements the ADR-0045 2026-11-21 amendment (B3-16). The limits are tuning values. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **The scan verdict is a token file; only the exact clean token passes, malformed is suspect, and missing is an error.** Implements ADR-0045 decision 10. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **Three consecutive scan errors halt the Lair.** Extends ADR-0045 decision 17. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **The `body_sha256` form: a hash of the title and body hashes, with no normalization.** Implements ADR-0045 decision 10 (B3-18). Not ADR-worthy: fails P20's hard-to-reverse condition, since the `v1:` prefix allows another form.
-- **Lair-written text is fixed templates and validated tokens, with one bounded slot for the park marker's question; the queue report has no slot and gives a stage and reason codes per failure.** Replaces the solution design's queue report contents (B3-19). Not ADR-worthy: fails P20's hard-to-reverse condition.
-- **One renderer builds every string the Lair writes to GitHub, a terminal, a tmux pane or a scanner prompt, and it applies invariant Lair-written text.** Implements ADR-0045 decision 10. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **A parked issue keeps `lair:claimed`.** Implements ADR-0045 decision 16 with its label list unchanged (A3-17). Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **Only `failed`, `crashed` and `timed-out` outcomes count toward the breaker; a park is skipped, and any other outcome ends a streak.** Implements ADR-0045 decision 17, which names failed, crashed and timed-out outcomes and excludes parks and review waits. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **The halt file's path and cause codes.** Implements ADR-0045 decision 17 (the owned part of B3-20). Not ADR-worthy: fails P20's hard-to-reverse condition.
@@ -310,7 +309,7 @@ None of these changes is applied in this pull request.
   ```markdown
   ## Amendment 2026-11-21: the orphan rule covers only Lair issues
 
-  This amends decision 17 (Stop controls). An issue is a Lair issue when it carries a `lair:*` label or a counting claim marker. A Lair issue is an orphaned claim when it is in `implementation` or holds a counting claim marker with no counting outcome marker of the same claim, and it has no live strain and no Lair pull request. A live strain is a running strain session for the claim, or for the issue when it has no counting claim marker, or a strain result the Lair has not yet read at run end. An orphaned claim is marked failed, never returned to ready, and this includes a claim that stopped before its label writes. The Lair applies this rule at start and on each tick. Any other issue is left alone, so an issue a person moved to `implementation` by hand is never failed. Decision 17's other stop controls stand unchanged. Status remains accepted.
+  This amends decision 17 (Stop controls). An issue is a Lair issue when it carries a `lair:*` label, a counting claim marker or a counting handoff marker. A Lair issue is an orphaned claim when it has no live strain and no Lair pull request, and it either holds a counting claim marker with no counting outcome marker of the same claim, or has no counting claim marker and is in `implementation`. A live strain is a running strain session for the claim, or for the issue when it has no counting claim marker, or a strain result for the claim that no counting outcome marker records yet. An orphaned claim is marked failed, never returned to ready, and this includes a claim that stopped before its label writes. The Lair applies this rule at start and on each tick, halted or not. The rule touches no other issue: an issue that is not a Lair issue is never failed, even when a person moved it to `implementation` by hand. Decision 17's other stop controls stand unchanged. Status remains accepted.
   ```
 
 - **Target:** `docs/initiatives/autonomous-ready-issue-loop/solution-design.md`, section Amendments, as a new paragraph after the existing one. Decided for the user and listed for veto. **Exact proposed text:**
@@ -333,9 +332,9 @@ The tests are the PRD's [Testing Decisions](../../prds/autonomous-ready-issue-lo
   - The breaker: three counted outcomes trip it and write the halt file with its cause; parks are skipped; a `complete`, `blocked` or `stalled` outcome ends a streak; another session's outcomes are ignored; a run ended with no counting outcome marker counts; a removed halt file starts a new window.
   - `body_sha256` vectors: CRLF, null body, empty body, trailing newline, a title edit only.
   - Check error, check timeout, the per-tick cap, and the cached failed fingerprint.
-  - A parked issue keeps `lair:claimed`. A parked issue the user re-admits by hand keeps `readiness:ready` through the next reconcile.
-  - The orphan matrix, each case checked against invariant Claim state: a partial claim still in `readiness:ready` is ended `crashed` with stage `claim-labels`; an issue in `readiness:implementation` with a Lair pull request is left alone; a finished run with an unconsumed result file is not ended `crashed`, and run end reads its result; a markerless `lair:claimed` issue in `readiness:implementation` gets the markerless orphan labels and halts the Lair with `marker-missing`; a human's `readiness:implementation` issue is never touched.
-- **Queue-report and injection tests.** Fixture titles, bodies and park records hold P1 to P4 text, terminal escape sequences, bidi overrides and a fake `lair-queue` line. Checked against invariant Lair-written text, the test asserts no title or body byte appears in the queue report, the tmux paste, the scanner prompt, or the claim, outcome and handoff marker text; that the park slot's bytes are printable, at most 2000 bytes, fenced and absent from every signed payload; and that a park record breaking the rule is never posted.
+  - A parked issue keeps `lair:claimed`. A parked issue the user re-admits by hand keeps `readiness:ready` through the next reconcile. A handoff whose label write failed gets `lair:handoff` at the next reconcile, and a handed-off issue the user re-admits by hand does not get it again.
+  - The orphan matrix, each case checked against invariant Claim state: a partial claim still in `readiness:ready` is ended `crashed` with stage `claim-labels`; an issue in `readiness:implementation` with a Lair pull request is left alone; a finished run with an unconsumed result file is not ended `crashed`, and run end records its result; an outcome marker whose response was lost gets no second outcome marker; a closed claim still in `readiness:implementation` after its outcome labels failed gets its outcome's labels, not `crashed`; a markerless `lair:claimed` issue in `readiness:implementation` gets the markerless orphan labels and halts the Lair with `marker-missing`; a human's `readiness:implementation` issue is never touched.
+- **Queue-report and injection tests.** Fixture titles, bodies and park records hold P1 to P4 text, terminal escape sequences, bidi overrides and a fake `lair-queue` line. The test checks every clause of invariant Lair-written text at the queue report, the tmux paste, the scanner prompt, each marker's text and each signed payload, and that a park record breaking it is never posted.
 - **`tools/test_lair_scan.sh`.** The exact clean token passes; a trailing space, a stale scan id, a CR and an extra line are malformed and hand off; the suspect form hands off with its category; no verdict file is an error with no label; three errors halt. The scanner settings allow exactly the two scan files, the skill and plugin reads.
 - **Registration in `tools/validate.sh`.** Each new suite gets a `SUITE_*` constant, an `ALL_SUITES` entry, a `KNOWN_SUITES` entry, a change-mapping rule that routes the controller scripts #608 adds and `tests/lair/*` to it, and a `--self-test` probe path. This is the design only: `tools/validate.sh` is not edited here.
 - **Live smoke.** The by-hand smoke run adds a halt-file stop and an outsider's sentinel comment on the throwaway issue.
@@ -348,7 +347,7 @@ The build order of the solution design stands. This design adds two seams: #630'
 | --- | --- | --- |
 | #604 | The scanner session reuses the strain launch and per-session settings; strain settings keep the state root out of reach. | ADR-0045 decisions 3, 4, 5 and 10; ADR-0007; ADR-0010; ADR-0017 |
 | #605 | The merge lane reads `body_sha256` and the nonce only from a counting claim marker. | ADR-0045 decisions 10 and 12; ADR-0044 |
-| #608 | The claim sequence, snapshot, scanner session, signed markers, reconciler and sweep, lock, halt file, queue report and state root. | ADR-0045 decisions 2, 10, 16 and 17 and the 2026-11-21 amendment; ADR-0007; ADR-0019; ADR-0026; ADR-0032 |
+| #608 | The claim sequence, snapshot, scanner session, signed markers, reconciler and sweep, lock, halt file, queue report and state root. | ADR-0045 decisions 2, 10, 16 and 17, the 2026-11-21 admission amendment and the proposed decision 17 amendment; ADR-0007; ADR-0019; ADR-0026; ADR-0032 |
 | #609 | Park markers are signed, the park record's `key` and question slot are validated under invariant Lair-written text before the marker is posted, answers count only against a counting park marker, and a parked issue keeps `lair:claimed`. | ADR-0045 decisions 7, 11 and 16 |
 | #611 | The breaker's session window and halt-file write; the digest reads counting outcome markers. | ADR-0045 decisions 14 and 17 |
 | #612 | Parallel strains keep one lock and at most one claim per tick. | ADR-0045 decisions 12 and 15; ADR-0007 |
