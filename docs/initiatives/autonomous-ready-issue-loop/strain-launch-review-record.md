@@ -4,9 +4,9 @@ verdict: pending
 open_counts:
   critical: 0
   high: 0
-  medium: 0
-  low: 0
-rounds: 6
+  medium: 4
+  low: 3
+rounds: 7
 clean_round: null
 ---
 
@@ -305,6 +305,37 @@ Line numbers marked "design" refer to the reviewed blob `85e17cec`. Line numbers
 | ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
 | --- | --- | --- | --- | --- | --- | --- |
 | L6-T1 | high | `9c6d59d6dfc6adc9923f6c8116b45680b805cd821e912b4adbe3598a09070a91` | Confidence 0.99. Approval precedence suppresses every later change against the fixed baseline. In `pr-change-detect-poll.sh` approval outranks `CI_FAILED` and `CHANGED`, and `--check` never advances the seed, so once an approval crosses the baseline every later check prints `REVIEWER_APPROVED`. Later comments, comment-only reviews, edits and new CI failures are never routed to `lair:review`, and the merge gates do not read top-level comments or comment-only reviews. This contradicts design lines 207 and 214. | design `:207`, `:214`; `pr-change-detect-poll.sh` precedence | Change the precedence, or consume the approval into an advanced baseline that closes the race. Add a test where an approval appears and then a later comment or CI failure routes to `lair:review`. | fixed by construction, from the user's answer A: the Lair reads no `--check` marker, so approval precedence suppresses nothing; any seed difference after the end routes to `lair:review`, an approval included. Design Components > Remediation strain launch ("After it ends", "Closed by construction"), Failure modes ("Change after the remediation ended"), Decisions and Verification strategy (approval present at the end baseline, then a later comment or failed check) |
+
+## Round 7
+
+- **Date:** 2026-11-22.
+- **Kind:** confirming round, per the user's procedure change. It reviewed only the diff `7c4fa15a..3fc897c5` and the fixes to the L6 findings.
+- **Design reviewed:** blob `0b5d4b8024421916b2a6233e330990fb9eb6abb3` at commit `3fc897c50afaa5d45267308ca314be06307b8dd2`.
+- **Cerebrate pass:** one fresh read-only `hivemind:cerebrate` pass covering both angles, effort medium, "Memory context: none".
+- **Tool pass:** one pass through `plugin/skills/adaptation-cycle/scripts/run-review.sh` with the `codex-plugin` preset and `--base 7c4fa15a`, because the design touches trust and the merge path. The raw output was read from the run's scratch file and is not committed.
+
+**Fix check.** L6-T1, L6-C1, L6-C2 and L6-C5 are closed. L6-C3, L6-C4 and L6-C6 are closed in intent with residual defects, carried as L7-C3, L7-C2 and L7-C4 with L7-C5. All trunk line citations were verified.
+
+Round 7 is not clean: it raised new findings (see the tables). All seven are open, with 4 medium and 3 low.
+
+**Decision ids.** The cerebrate pass judged the Tier B bullets in Decisions sound except the tick order (L7-C3).
+
+### Cerebrate pass
+
+| ID | Severity | Section | Finding | Evidence | Proposed fix | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L7-C1 | medium | Remediation strain launch ("One write, deferred on failure"); Lifecycle step 5 | A park result also names a (draft) pull request, so a parked draft gets a delivery baseline and can take the one dispatch. The strain pushes to the parked branch, and a re-claim hands off `branch_moved`. | Design text only | Write the baseline only on a complete delivery or re-claim result. A complete re-claim writes the baseline and `ended_at`. Add tests. | open |
+| L7-C2 | medium | Remediation strain launch ("The one dispatch"); Failure modes ("CI red") | The wait holds only on `PENDING` or `EXPECTED`. A `FAILURE` or `ERROR` rollup dispatches at once, so review feedback and a red CI result share the one strain only when the review comes first. | Design text only | Reword the claims and the CI red row and record the other order as a cost, or hold a red-rollup dispatch to the 30-minute mark. | open |
+| L7-C3 | medium | Remediation strain launch ("Tick order"); Decisions (Tier B); Contracts and seams > Assumptions about #632 | The run-taken Tier B decision that puts the remediation step before the merge lane replaces parent `solution-design.md` line 39 and adds a behavioral assumption on #631. Promotion Gate clause 2 (architectural blast radius) trips, so the decision must be surfaced to the user, not auto-decided. The one-write rule also constrains the write order of #632. | `solution-design.md:39` | Ask the user. State the #632 constraint under Assumptions about #632. | open |
+| L7-C4 | low | Failure modes ("Budget overrun", orphan sweep); Components > Remediation strain launch ("One write, deferred on failure") | A deferred outcome write past 6 hours matches the Budget overrun row and may mark a complete run `lair:failed`. The orphan sweep is not told about deferred writes. | Design text only | State that the budget and orphan rules do not apply once a valid result is read. Add a test. | open |
+| L7-C5 | low | Remediation strain launch ("Per-tick failures") | "No dispatch, no route and no snapshot" while the marker has no outcome forbids the end snapshot itself. | Design text only | Reword to "no per-tick snapshot" and allow the end snapshot while the outcome is unwritten. | open |
+| L7-C6 | low | Verification strategy (`tools/test_lair_tick.sh`) | Missing tests: a failed pull request read at an end; a pull request no longer open gets no dispatch and no route, including a seed that differs only by `MERGED` or `CLOSED`; deferred-write precedence. | Design text only | Add the three cases. | open |
+
+### Tool pass
+
+| ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L7-T1 | medium | `8d0b127486e05ec4582b6bf4063483be4cbada58a8ea220dca5d650f74b6c3ab` | Confidence 0.98. A null check rollup bypasses the CI wait. Dispatch waits only for `PENDING` or `EXPECTED`, and `merge-approved.sh` treats a null rollup as `skipped:no-checks`. Before CI registers its first check, a seed change dispatches at once, and a later failing check cannot join the strain. | design text (CI wait); `merge-approved.sh` null-rollup handling | Treat a null or no-checks rollup as pending within the 30-minute window. Test a seed change with a null rollup, then `PENDING`, then `FAILURE`. | open |
 
 ## Sources
 
