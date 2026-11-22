@@ -72,3 +72,21 @@ The user asked for two things: an approval that fires in this case, and an opt-i
 - **A merge queue can outlast the idle window.** A queue slower than the time left in the idle window ends the watch at `watch-window-elapsed` while the PR is still queued. A queue that drops the PR leaves it open for the human.
 
 References: `plugin/skills/github-review-loop/SKILL.md`, `plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh`, `plugin/skills/github-review-loop/scripts/merge-approved.sh`, `plugin/governance/decision-autonomy.md`; amends ADR-0026; extends ADR-0043.
+
+## Amendment 2026-11-21: the Lair controller runs the merge script (issue 631)
+
+The user approved these changes on 2026-11-21 for the Lair's one merge lane ([ADR-0045](0045-lair-software-factory.md) decision 12). The full design is [merge-lane-design.md](../initiatives/autonomous-ready-issue-loop/merge-lane-design.md). Decisions 1 to 16 stand except where a decision below amends one.
+
+17. **The Lair's tick may run the merge script.** Amends decision 2. Besides the watch, the Lair's tick (ADR-0045 decision 12) may run `merge-approved.sh`, but only for a Lair pull request and only after the tick's settle check (decision 18). The tick passes the merge settings it reads from the user's own settings files: `.claude/settings.local.json`, then `~/.claude/settings.json`, never the committed `.claude/settings.json`, as merge-lane-design.md defines.
+18. **The tick's settle check equals decision 1.** Across ticks, the watch's change check against a cached snapshot must show no change for `SETTLE_SECONDS` (600). The script's own approval and thread gates (decisions 9 and 14) must then hold on its read. The tick never merges on a plain reviewer approval without that quiet period.
+19. **An optional expected head.** Amends decisions 4 and 9. `merge-approved.sh` takes an optional sixth argument, the expected head. When the first read's head differs from it, the script prints `MERGE=wait:head-moved` and makes no merge call. Every merge call matches that head. The watch's five-argument call is unchanged.
+20. **The tick routes its own result.** Amends decision 10. The skill's routing binds the watch only. The tick routes each `MERGE=` line by the table in merge-lane-design.md.
+
+These stay unchanged: the gates, the `--admin` rule (decisions 3, 12 and 13), the one-line form of the output contract, and the watch's own call and routing. Decision 19 adds the error reason `MERGE_ERROR=bad-expected-head` to that contract, and gives `MERGE=wait:head-moved` a second meaning: the head check before gate 1.
+
+The Consequences and Residuals read as follows for the tick:
+
+- A Lair merge needs no watch. The consequences that tie a merge to a clean watch, and to `HIVEMIND_SKIP_PR_WATCH`, bind the watch only.
+- The committed settings never reach the tick. The residual "Committed settings turn auto-merge on in brood worktrees" does not apply to a Lair merge.
+- A head no Lair run recorded never merges a Lair pull request, as long as two assumptions of merge-lane-design.md hold: no other process can write a marker that passes the Lair's marker rule (Assumptions about #632), and every strain push is leased against the head the run expects, so no head built on another account's push is recorded (Assumptions about #630). Then the residual "An unreviewed push by another account can merge" does not apply to a Lair merge. Where either assumption does not hold, the residual applies, through a forged marker or through a fix-up run's recorded head.
+- The tick makes no merge call in a repository whose trunk branch requires a merge queue; it sends such a pull request to batch review. It also makes none while a pull request is in the merge queue or has an auto-merge request. So the tick's own call queues a merge or arms an auto-merge request only when the trunk branch starts requiring a merge queue in the merge gap (merge-lane-design.md, Residual: a queued or armed merge), and the residual "A merge queue can outlast the idle window" binds the watch only. A queue entry or an auto-merge request that someone else made is outside the tick, like any merge another account makes.
