@@ -10,7 +10,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 1
+rounds: 2
 clean_round: false
 ---
 
@@ -18,7 +18,7 @@ clean_round: false
 
 This is a re-review. The PRD [`docs/prds/retire-json-state-machine.md`](../../prds/retire-json-state-machine.md) was written after the first review, so the review runs again over the PRD, the solution design and ADR-0048 (ADR-0046 decision 6, Re-review after an amendment). Rounds count from 1. No record of this initiative has passed, so round 1 covers the whole documents. The first review, its rounds, findings, advisories and one-time exceptions are kept unchanged under History: 2026-11-22 (first review).
 
-Round 1 raised 11 findings, and every one is fixed. The verdict is `fail`, `rounds` is 1 and `clean_round` is `false`. A confirming round follows.
+Round 1 raised 11 cerebrate findings, every one fixed, and 4 local review tool findings, three fixed and one rejected. Round 2, a confirming round, raised 4 findings, every one fixed. The verdict is `fail`, `rounds` is 2 and `clean_round` is `false`. A confirming round follows.
 
 The stamps are unchanged: the blobs at commit `aa9342a244b13150eb141b42ac566611b6b5f268`, the commit the first review's round 1 reviewed. A record with `verdict` `fail` keeps its stamps (ADR-0046 decision 7). Only the passing record re-stamps, to the commit its clean pass reviewed, and it stamps the PRD, the solution design and ADR-0048.
 
@@ -35,9 +35,18 @@ The stamps are unchanged: the blobs at commit `aa9342a244b13150eb141b42ac566611b
 The design touches trust boundaries, so the round has two passes. Neither reviewer wrote the documents.
 
 - Reviewer `hivemind:cerebrate`, model `opus`, `Memory context: none`. One fresh, read-only pass covering the whole PRD, solution design and ADR-0048, angles A and B. It reviewed commit `ec87d495dcd1079ce37bbd4c4dcd23254cb7be30` and raised R1-01 to R1-11.
-- Local review tool pass: pending. The overlord fills it in after the tool pass runs on the fixed commit.
+- Local review tool pass: preset `codex-plugin` (`HIVEMIND_LOCAL_REVIEWER` unset), the tool's own model, run through the local reviewer on commit `4510584963d51fc93acc7039e19efe78479ac565`. It returned four findings, recorded as LR1-01 to LR1-04 with the tool's finding hashes. LR1-01 is rejected; LR1-02 was fixed in `304c1668`, and LR1-03 and LR1-04 in `710ee9fe`. Its third pass, at `710ee9fe`, approved with no findings.
 
-The cerebrate pass raised 11 findings. Five are medium (R1-01, R1-02, R1-04, R1-05, R1-06) and six are low (R1-03, R1-07 to R1-11). Each finding was checked against the repository before its fix, and none was rejected. After the fixes, none is open. The solution design records the fixes in one dated line under Amendments.
+The cerebrate pass raised 11 findings. Five are medium (R1-01, R1-02, R1-04, R1-05, R1-06) and six are low (R1-03, R1-07 to R1-11). Each finding was checked against the repository before its fix, and none was rejected. The tool pass raised LR1-01 (high) and LR1-02 to LR1-04 (medium); LR1-01 is rejected and the other three are fixed. After the fixes, none is open. Round 1 is not clean: both passes raised findings. The solution design records the cerebrate fixes in one dated line under Amendments.
+
+### Round 2
+
+A confirming round over the change `ec87d495..710ee9fe` and round 1's fixes. Neither reviewer wrote the documents.
+
+- Reviewer `hivemind:cerebrate`, model `opus`, `Memory context: none`. One fresh, read-only pass. It reviewed commit `710ee9fea74967ff228fbf56cac844cb76d32817`, confirmed R1-01, R1-03, R1-04, R1-05, R1-07, R1-09, R1-10, R1-11 and the local review fixes LR1-02 to LR1-04, and raised R2-01 to R2-04.
+- Local review tool pass: the tool's third pass at `710ee9fe`, the same commit, approved with no findings.
+
+The cerebrate pass raised R2-01 (medium) and R2-02 to R2-04 (low). Each was checked against the repository before its fix, and none was rejected. After the fixes, none is open. Round 2 is not clean, so `clean_round` is `false`: its cerebrate pass raised findings. The solution design records the fixes in one dated line under Amendments.
 
 ## Findings
 
@@ -54,6 +63,14 @@ The cerebrate pass raised 11 findings. Five are medium (R1-01, R1-02, R1-04, R1-
 | R1-09 | 1 | A | low | fixed | After S2, step 2 of `## Workflow State Execution` would still send a selected `hatchery-dispatch` into the state machine. S2 now edits step 2, the coverage row and the S2 check say so, and the Seam order rationale for S4 is corrected. |
 | R1-10 | 1 | A | low | fixed | "Asks only Ask Set questions" left out the always-surface items of `### Stop Conditions`, such as the script-or-Instinct question and a prose budget raise. The PRD, the Instinct paths and the proposed README texts now say so, and the budget raise is no longer called a Tier A item. |
 | R1-11 | 1 | A | low | fixed | The waves expectations did not say what happens to the `waves.test.mjs:478-521` cases. They keep their literal expected results, checked against `waves.js`, and the oracle-only stderr checks at `:510-512` go with `next-wave.sh`, in the PRD, D13, Waves expectation files and the coverage row. |
+| LR1-01 | 1 | review | high | rejected | Tool finding `9cdf7f3c`: the record's mid-review state reads as failing. Rejected: a failing record between rounds is the planned mid-review state, covered by ADR-0046 decisions 6 and 7. |
+| LR1-02 | 1 | review | medium | fixed | Tool finding `d9036494`: the PRD held HOW detail. Fixed in `304c1668`: the test file line ranges are dropped from the Waves criterion. The Implementation Decisions and Testing Decisions sections stay, since the PRD template requires them. |
+| LR1-03 | 1 | review | medium | fixed | Tool finding `c87a4101`: the PRD's remediation criterion read as a recipe. Fixed in `710ee9fe`: it is stated as outcomes. |
+| LR1-04 | 1 | review | medium | fixed | Tool finding `922485a2`: the PRD named files. Fixed in `710ee9fe`: the shared-document criterion is stated as outcomes. |
+| R2-01 | 2 | confirm | medium | fixed | "No citation of a deleted heading remains" was repo-wide, so no slice could meet it: ADR-0030 and the Autonomous Ready Issue Loop documents cite deleted headings, and D19 and Out of Scope forbid editing them. The PRD's Removal criterion and the S4 check now hold it in what each slice changes, with the removal check's exceptions. |
+| R2-02 | 2 | confirm | low | fixed | The `tools/test_shared_libs.sh` row named only `:1293-1330`, but alive derive cases pass `$STARTED` from `:1256`. The row now names every alive derive case that passes `$STARTED` as started-evidence (`:1256-1259`, `:1269-1270`, `:1277-1278`, `:1293-1330`). |
+| R2-03 | 2 | confirm | low | fixed | The List sentence and the proposed Decision Journal entry said "opens or reuses" a pull request, without the `hivemind:open-plan-pr` limit the PRD and Decision journal carry. Both, the List sentence's copies for README, `web/benefits.html` and `web/functionality.html`, and the Instinct paths' decision-list sentence now say "opens one or pushes to one through `hivemind:open-plan-pr`". |
+| R2-04 | 2 | confirm | low | fixed | "It opens no new pull request" was false: `hivemind:open-plan-pr` creates one when the pull request was closed or merged mid-run (`plugin/workflow-src/pr-feedback-remediation/main.js:76-79`). The PRD's Instinct paths criterion and the design's post-PR remediation path now say such a pull request gets a new one, as the script's residual says. |
 
 ## Decisions taken, listed for veto
 
