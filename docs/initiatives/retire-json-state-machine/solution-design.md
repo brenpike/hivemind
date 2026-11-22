@@ -1,6 +1,6 @@
 # Solution design: Retire the JSON state machine
 
-This is the HOW for #635, part of #409 (workflow engine reimagining). It retires the JSON workflow state machine so one engine remains: the workflow scripts, with Instinct and Reflex beside them. ADR-0048 records the decisions that are hard to reverse. The design review record will be `review-record.md` in this folder; under ADR-0046 decisions 6 and 7 its first version stamps the commit design review round 1 reviews, so it does not exist yet.
+This is the HOW for #635, part of #409 (workflow engine reimagining). It retires the JSON workflow state machine so one engine remains: the workflow scripts, with Instinct and Reflex beside them. ADR-0048 records the decisions that are hard to reverse. The design review record is `review-record.md` in this folder. It carries no stamps until a review passes, and the PRD it must stamp does not exist yet (ADR-0046 decisions 6 and 7).
 
 It works in a consumer project with only the plugin installed. Every capability beyond the plugin, such as the Workflow tool, CI, a validation suite, a local review tool or tmux for a brood, is optional, detected and given a stated fallback (`docs/engineering-principles.md` P26). Nothing here adds a required capability: a session without the Workflow tool runs every request on Instinct.
 
@@ -27,7 +27,7 @@ Checked against trunk at commit `3dc89eff`; line numbers are at that commit. Eac
 - `## Intent-Driven Fallback (Universal)` (`:136-141`).
 - `## Safety Rails` (`:57`) names `pr_branch_preflight` "in `## Implement Loop (Wave Execution)` (PR identity)". `## Brood Execution` (`:173-179`) holds the child-ledger clause and RUN-OWNERSHIP-01. `## Review Remediation Posture` (`:169`) reads the watch opt-out from the run ledger's `request.raw` at the `github_review_decision` state. `### Stop Conditions` (`:226-228`) holds the `user_gate` bullet and the run-ledger journal rule.
 
-**Three safety rules live only in those sections.** The gather-facts and injection scan rule (`:99`), the PR head checkout before any reviewer (`:118`, cited by `:57`) and `expect_commit` on every push (`:120`) are stated nowhere else in the overlord. The workflow scripts carry their own copies in code (`plugin/workflow-src/standard-delivery/main.js:482` and `plugin/workflow-src/pr-feedback-remediation/main.js:248` run `runFactsStep` first). The skills enforce `expect_commit` at their own input gates (`plugin/skills/open-plan-pr/SKILL.md:24`, `plugin/skills/push-branch/SKILL.md:36`).
+**Three safety rules live in those sections.** The gather-facts and injection scan rule (`:99`) and `expect_commit` on every push (`:120`) are stated nowhere else in the overlord. The PR head checkout before any reviewer (`:118`, cited by `:57`) is also in a clause of `:29`, which says a request routed to `pr-feedback-remediation` "first checks out the PR's head branch, then runs the watch". The workflow scripts carry their own copies in code (`plugin/workflow-src/standard-delivery/main.js:482` and `plugin/workflow-src/pr-feedback-remediation/main.js:248` run `runFactsStep` first). The skills enforce `expect_commit` at their own input gates (`plugin/skills/open-plan-pr/SKILL.md:24`, `plugin/skills/push-branch/SKILL.md:36`).
 
 **The run ledger skills.** `plugin/skills/init-run-ledger/`, `plugin/skills/record-state-result/`, `plugin/skills/next-wave/` and `plugin/skills/mark-intent-fallback/` each hold a `SKILL.md` and one script. `init-run-ledger.sh:345-364` and `record-state-result.sh:370-400` read the packaged JSON definition. `plugin/references/run-ledger-schema.md` is the ledger contract.
 
@@ -44,7 +44,7 @@ Checked against trunk at commit `3dc89eff`; line numbers are at that commit. Eac
 - `plugin/skills/route-workflow/SKILL.md:54` selects `hatchery-dispatch`, which has no script. Its definition runs `brood_plan`, `brood_confirm` (a `user_gate`), `spawn_brood` and `hatchery_monitor`.
 - `plugin/skills/spawn-brood/SKILL.md:37-39` takes an optional `hatchery` input `{run_id, workflow}` that "only point[s] at the hatchery ledger the coordinator owns". `spawn-brood.sh:373-376` defaults it, and `:1344-1347` writes `hatchery.ledger` as `.hivemind/runs/<run_id>/state.json` into the manifest. No script reads that block back: the brood-status, brood-state, manifest-json and rc-brood scripts contain no read of it.
 - `spawn-brood.sh:1066-1100` verifies each strain started from either "a valid run-ledger state.current or a gather-facts output file".
-- `plugin/skills/brood-status/SKILL.md:44-53` renders `Strain State (claimed)` and `Strain Status (claimed)` from the collect output's `workflow_state` and `run_status` (schema `brood-status-collect/1`, `:21-28`). The SKILL says a script-engine child "writes no run ledger, so its claimed columns stay `—`".
+- `plugin/skills/brood-status/SKILL.md:44-53` renders `Strain State (claimed)` and `Strain Status (claimed)` from the collect output's `workflow_state` and `run_status` (schema `brood-status-collect/1`, `:21-28`). The SKILL says (`:56`) a script-engine child "writes no run ledger, so its claimed columns stay `—`".
 - `brood-status-project.sh:562-568` projects `NO_LEDGER_POINTER` when a manifest strain has no `run.suggested_id`, and the started-evidence demotion to `starting` then does not apply (`plugin/skills/_shared/brood-status-derive.sh:60-111`).
 - ADR-0037, Amendment 2026-10-24 (slice 4): brood children run the scripts, and "spawn and the dashboard read the gather-facts output file as started-evidence".
 - The brood strain approval is a Tier A item (`plugin/governance/decision-autonomy.md:16`), and its spawn controls are in `plugin/governance/security-policy.md:23-29` (Brood Spawn Bypass-Mode Mitigation).
@@ -61,7 +61,7 @@ Checked against trunk at commit `3dc89eff`; line numbers are at that commit. Eac
 
 **Resume.** ADR-0037 decision 2 (line 71) keeps no run record for `standard-delivery`: "git and GitHub are the record", and a new session "plans what is left on the branch from the facts step's branch history". The Ask Set holds "a resume decision or version-skew door" (`plugin/governance/decision-autonomy.md:15`). The autonomy table has a `resume_or_skew` row resolved at `resume_on_start` (`plugin/references/decision-autonomy-table.json:29`).
 
-**Autonomy table sites.** `decide()` reads the table through `AUTONOMY_TABLE`, which `tools/build_workflows.mjs:215` projects into each script without `resolved_at` (`:227`). Four rows have no script site and no `decide()` call in `plugin/workflow-src/`: `remediation_approach` (`:17`), `version_bump_type` (`:23`), `route_ambiguous` (`:28`) and `resume_or_skew` (`:29`). Every other row names both state-machine sites and `standard-delivery.*` or `pr-feedback-remediation` sites. `tests/workflow-scripts/data.test.mjs:127` asserts "its state-machine sites stay".
+**Autonomy table sites.** `decide()` reads the table through `AUTONOMY_TABLE`, which `tools/build_workflows.mjs:215` projects into each script without `resolved_at` (`:227`). Four rows have no script site and no `decide()` call in `plugin/workflow-src/`: `remediation_approach` (`:17`), `version_bump_type` (`:23`), `route_ambiguous` (`:28`) and `resume_or_skew` (`:29`). `step_stop` (`:25`) and `gate_rerun` (`:27`) name script sites only. Every other row names both state-machine sites and `standard-delivery.*` or `pr-feedback-remediation` sites, and no row names an `analysis-only` site, though `plugin/workflow-src/analysis-only/main.js:417` resolves `planner_question`. `tests/workflow-scripts/data.test.mjs:127` asserts "its state-machine sites stay".
 
 **Waves.** `plugin/workflow-src/lib/waves.js:25-30` names `plugin/skills/next-wave/scripts/next-wave.sh` as "the rule's home and parity oracle". `tests/workflow-scripts/waves.test.mjs:15-16` runs that script live over `tests/next-wave/*.json`, over the overrides and mutations of `tools/test_next_wave.sh` (`:440-462`) and over a seeded corpus at `DEFAULT_SEED = 20261021` (`:20`, `:464-476`).
 
@@ -72,7 +72,7 @@ Checked against trunk at commit `3dc89eff`; line numbers are at that commit. Eac
 - `tools/validate.sh:47-73` and `:329-567` map the engine scripts, fixtures and definitions to those suites.
 - `tools/policy_check.sh:2411-2803` is CHECK 15. Its second arm scans `plugin/workflows/*.json` and fails closed on zero files (`:2799-2803`). `tools/policy_check.sh:6158-6192` checks the `tests/workflows/golden-*.json` fixtures, which cite `plugin/workflows/standard-delivery.json`.
 - `tools/build_workflows.mjs:155-159` lists `plugin/workflows/*.js` and "never the .json engine files". `tests/workflow-scripts/build.test.mjs:466-471` asserts a `.json` there "is not an orphan".
-- `tests/workflow-scripts/standard-delivery.test.mjs:45` reads `plugin/workflows/standard-delivery.json` for `:4853-4889`.
+- `tests/workflow-scripts/standard-delivery.test.mjs:45` reads `plugin/workflows/standard-delivery.json` for `:4853-4913`.
 - `tests/workflow-scripts/state-machine-questions.test.mjs` and the `overlord section-scoped state-machine pins` block of `tests/workflow-scripts/overlord-contract.test.mjs:468` pin state-machine prose.
 - `tests/policy/prose-byte-budget.json:7` holds the overlord's byte budget.
 
@@ -84,14 +84,14 @@ Checked against trunk at commit `3dc89eff`; line numbers are at that commit. Eac
 
 `## Engine` keeps the launch contract and the relay and resume-by-name rules unchanged (`plugin/agents/overlord.md:21-39`). Two rules change:
 
-- **One fallback.** Every refused or blocked launch, of any workflow, takes one fallback rule (D2). The rule opens with the level clause and names the Instinct path each workflow takes. Its proposed text is under Launch and fallback contract. The `pr-feedback-remediation` sentence of `:29` loses "takes the state machine with intake outcome `fix`".
-- **Started runs.** A started `standard-delivery` run that fails or ends blocked continues on Instinct as today (ADR-0039 decision 4), and a started guide run returns to the guide (ADR-0046 decision 10). A started run of any other workflow is reported as it ended, as today.
+- **One fallback.** Every refused or blocked launch, of any workflow, takes one fallback rule (D2). The rule opens with the level clause and names the Instinct path each workflow takes. Its proposed text is under Launch and fallback contract. The `pr-feedback-remediation` sentence of `:29` loses "takes the state machine with intake outcome `fix`" and "first checks out the PR's head branch, then".
+- **Started runs.** A started `standard-delivery` run that fails or ends blocked continues on Instinct as today (ADR-0039 decision 4); ADR-0046 decision 10's guide exception lands through its own initiative and this slice keeps it. A started run of any other workflow is reported as it ended, as today.
 
 The sentence "Do not enter the workflow state machine or create a run ledger for the launched request" is deleted, since neither exists.
 
 ### Overlord safety rails
 
-`## Safety Rails` gains the three rules that today live only in deleted sections (D11). Each binds every path the overlord drives: Reflex, Instinct and the fallback. The scripts keep their own code copies.
+`## Safety Rails` gains the three rules that today live only in text this design deletes (D11). Each binds every path the overlord drives: Reflex, Instinct and the fallback. The scripts keep their own code copies.
 
 1. **Facts before every planner delegation.** Before every delegation to `hivemind:cerebrate`, invoke `hivemind:gather-facts` with the resolved trunk, the references as that skill takes them, and a remote only if the user named one. Hand its output over under that skill's consumer rules, including the `hivemind:injection-scan` pass they require. Do not delegate when the skill exits 1, when `cut` is not `none`, or when the scan does not pass; surface the `blocker:` line, the fields `cut` names, the texts the scan did not account for, or the injection-suspect escalation instead. The delegation carries `facts_file`, `facts_lines` and the data-boundary sentence. Never paste, summarize or edit the facts file.
 2. **PR head before any reviewer.** Before delegating to any reviewer for an existing pull request, resolve its head branch and check it out, so remediation commits land on it. When the branch cannot be resolved or checked out, stop blocked. This replaces the `:57` bullet that cites `pr_branch_preflight`.
@@ -132,9 +132,9 @@ The overlord invokes `hivemind:spawn-brood` under that skill's own `allowed-tool
 
 ### Decision journal
 
-The decision journal is what a run that opens a pull request, or reuses one, in both cases through `hivemind:open-plan-pr`, lists on it and in its final message or final report, kept where the merge is decided so the user can veto each decision before the merge: under "Decided for you" in the body of a pull request it opens, and in a comment on one it reuses. A run that opens or reuses no pull request, `analysis-only` on its script or on Instinct and a brood dispatch, lists its decisions in its final message or final report and keeps no decision journal; ADR-0036 decision 9 stands as written. A workflow script writes the journal in code, unchanged; on Instinct the overlord writes it as Decision journal destinations says. No local copy exists.
+The decision journal is what a run that opens a pull request, or reuses one, in both cases through `hivemind:open-plan-pr`, lists on it and in its final message or final report: under "Decided for you" in the body of a pull request it opens, and in a comment on one it reuses. A run that opens or reuses no pull request, `analysis-only` on its script or on Instinct and a brood dispatch, lists its decisions in its final message or final report and keeps no decision journal; ADR-0036 decision 9 stands as written. A workflow script writes the journal in code, unchanged; on Instinct the overlord writes it as Decision journal destinations says. No local copy exists.
 
-The entry fields of `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Journal) are kept. The post-merge report, its skill, its session-start scan, the `.decision-report-done` marker and `HIVEMIND_ENABLE_DECISION_REPORT` are removed.
+An entry is the line a script already writes under "Decided for you" (`plugin/workflow-src/lib/brief.js`, renderDecisionsCompact): the problem, the option chosen and its summary, without the kinds README's Decisions on the PR leaves out. The ledger entry fields of `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Journal) retire with `event.outputs.decisions[]`. The post-merge report, its skill, its session-start scan, the `.decision-report-done` marker and `HIVEMIND_ENABLE_DECISION_REPORT` are removed.
 
 ### Autonomy table
 
@@ -211,15 +211,15 @@ Each field of the run ledger has one replacement, or is retired with none. The r
 
 ### Launch and fallback contract
 
-The launch args, the relay of the completion notice, the resume by name and `retry_minutes` are unchanged (`plugin/agents/overlord.md:21-39`). Proposed text of the one fallback rule, replacing the last two sentences of `:29` and the whole of `:37`:
+The launch args, the relay of the completion notice, the resume by name and `retry_minutes` are unchanged (`plugin/agents/overlord.md:21-39`). Proposed text of the one fallback rule, replacing the last two sentences of `:29` and the sentences of `:37` this text restates, keeping any other:
 
-> At an interactive autonomy level, the only levels today, a launch that is refused or blocked (denied, not found, or workflows turned off) is said in one line, and the request continues on Instinct without asking: `standard-delivery` as a delivery, `analysis-only` as a read-only analysis, `pr-feedback-remediation` as a post-PR remediation on the route the request asked for, watch or fix. A started `standard-delivery` run that fails or ends blocked continues on Instinct from the branch's last commit; a started run of any other workflow is reported as it ended. The final report says it switched and where the run stopped. Uncommitted edits a failed run left stop the takeover per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State) and are never discarded. Instinct never relaunches a workflow. A run the user stopped does not fall back.
+> At an interactive autonomy level, the only levels today, the request continues on Instinct without asking, said in one line, in two cases. A launch that is refused or blocked (denied, not found, or workflows turned off) continues on the path that matches its workflow: `standard-delivery` as a delivery, `analysis-only` as a read-only analysis, `pr-feedback-remediation` as a post-PR remediation on the route the request asked for, watch or fix. A started `standard-delivery` run that fails or ends blocked continues from the branch's last commit. A started run of any other workflow is reported as it ended. The final report says it switched and where the run stopped. Uncommitted edits a failed run left stop the takeover per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State) and are never discarded. Instinct never relaunches a workflow. A run the user stopped does not fall back.
 
 A watch ending `planner-escalation` or `root-cluster-suspected` outside Instinct still launches `pr-feedback-remediation` with `{"references": [<the pull request number>], "trunk": "<the resolved trunk>"}`, and a refused launch of it takes the rule above.
 
 ### Level check seam
 
-The level clause, "At an interactive autonomy level, the only levels today", is the one level check, and it comes before the fallback. #607 adds the `unattended` level and owns the sentence for it, placed in this paragraph and nowhere else. At that level a refused or blocked launch ends or parks the run instead of continuing on Instinct, as ADR-0045 decision 6 states. This design writes no unattended behavior. It only guarantees one place for it: no other refused-launch path exists to miss.
+The level clause, "At an interactive autonomy level, the only levels today", is the one level check, and it comes before the fallback. #607 adds the `unattended` level and owns the sentence for it, placed in this paragraph and nowhere else. At that level neither case continues on Instinct: the run ends or parks instead, as ADR-0045 decision 6 states. This design writes no unattended behavior. It only guarantees one place for it: no other Instinct takeover exists to miss.
 
 ### Router output contract
 
@@ -272,11 +272,11 @@ When Instinct opens a pull request, `hivemind:open-plan-pr`'s `body` holds the s
 Every boundary below holds on every remaining path. No credential, tool grant, `allowed-tools` entry, hook or permission rule is added; the overlord's frontmatter `tools:` list is unchanged apart from its comment.
 
 - **Strain-approval gate.** Brood dispatch runs only on Instinct, in the main session, and `hivemind:spawn-brood` runs only after the user approves the normalized strain text (Tier A, `decision-autonomy.md:16`). The other two controls of Brood Spawn Bypass-Mode Mitigation are unchanged: the data-boundary preamble in `task.md`, and the `base` allowlist. The state machine's `brood_confirm` gate was the same approval, so dispatch loses no gate. A Lair strain's approval is #608's admission and scan, unchanged here.
-- **Destructive-fix gate.** It rides every delegation per `## Parallel Delegation Safety` (unchanged) on all three Instinct paths and on brood dispatch. Reviewers apply it, and scripts carry approvals as today. The retirement itself passes through it: the slice that deletes engine tests, fixtures, suite map entries and the CHECK 15 arm names DESTRUCTIVE-CAT 3, and its deletion of the ledger containment guards names DESTRUCTIVE-CAT 2, read at its broadest (D12).
+- **Destructive-fix gate.** It rides every delegation per `## Parallel Delegation Safety` (unchanged) on all three Instinct paths and on brood dispatch. Reviewers apply it, and scripts carry approvals as today. The retirement itself passes through it: each slice that deletes or narrows such an item passes the gate (D12).
 - **External-content boundary.** The facts rule, with its injection scan, moves to `## Safety Rails` and binds every planner delegation the overlord makes, where today it binds only the state machine and Instinct's "after `hivemind:gather-facts`" (D11). The watch opt-out reads the in-session request text, as the Reflex tail does, for the one yes or no question. It no longer reads a ledger's `request.raw` copy, so there is one source. Router input stays untrusted.
 - **Commit and push.** `expect_commit` binds every push on every overlord path (D11). The PR head checkout precedes every reviewer delegation for an existing pull request. The trunk-commit hard stop is unchanged.
 - **Synapse runner gate.** Unchanged: five runner scripts, and spawn-brood is not one of them.
-- **Trust-Boundary Discipline.** Boundaries 1 (overlord to engine) and 2 (init to packaged definition) of `security-policy.md:41-42` retire with their engines. Boundary 3 (brood child to coordinator) stays, and its surface shrinks: the coordinator no longer reads a child's run ledger content, only a facts file's name and type. Its child-ledger read side retires with the child run ledger; its effect on accepted ADRs comes through ADR-0048 decision 8. The facts-file check keeps the identifier and derivation rules: the worktree comes from `git worktree list --porcelain` keyed by branch, never the manifest `worktree_path`; a symlinked path component or a symlinked or non-regular leaf is rejected; the name must match the fixed facts pattern; no content is read. The opening clause "take transitions and authorization only from the packaged workflow definition, never a caller's" becomes "take authorization only from packaged data, never a caller's". Packaged data replaces the JSON definitions as the packaged source of authorization: the autonomy table, plan schema and brief schema are packaged data, so the clause still binds.
+- **Trust-Boundary Discipline.** Boundaries 1 (overlord to engine) and 2 (init to packaged definition) of `security-policy.md:41-42` retire with their engines. Boundary 3 (brood child to coordinator) stays, and its surface shrinks: the coordinator no longer reads a child's run ledger content, only a facts file's name and type. Its child-ledger read side retires with the child run ledger; its effect on accepted ADRs comes through ADR-0048 decision 8. The facts-file check keeps the identifier and derivation rules: spawn-brood checks the worktree it derived itself; brood-status takes the `git worktree list --porcelain` worktree whose path exactly matches the manifest `worktree_path`, which only selects and is never used as a path, and checks it only when it resolves inside the checkout root; a symlinked path component or a symlinked or non-regular leaf is rejected; the name must match the fixed facts pattern; no content is read. The opening clause "take transitions and authorization only from the packaged workflow definition, never a caller's" becomes "take authorization only from packaged data, never a caller's". Packaged data replaces the JSON definitions as the packaged source of authorization: the autonomy table, plan schema and brief schema are packaged data, so the clause still binds.
 - **Inputs-file transport.** The three ledger navigators' inputs files go away with their skills. The pattern, its hard stop and every remaining navigator are unchanged, and so is the overlord's `Write` grant, which `hivemind:molt`, `hivemind:open-plan-pr` and `hivemind:spawn-brood` still need.
 
 ## Lifecycle
@@ -335,30 +335,34 @@ One row per current path, with its effect and the slice (Seam order) that makes 
 | `plugin/agents/overlord.md` frontmatter | `description` drops "workflow-state execution"; the `Write` comment drops ADR-0018 and ADR-0019. Tools unchanged. | S4 |
 | `plugin/agents/cerebrate.md:238-251` | "on both engines: on the state machine ..." becomes "on a workflow script and on Instinct"; the open-question form names the question brief only. | S4 |
 | `plugin/agents/drone.md`, `changeling.md`, `local-reviewer.md`, `github-reviewer.md`, `synapse.md` | Unchanged. | none |
-| `plugin/skills/route-workflow/SKILL.md` | Catalog loses `exploratory-intent-session`; the `exploratory` outcome and §G go; the no-fit rule is added. | S1 |
+| `plugin/skills/route-workflow/SKILL.md` | Catalog loses `exploratory-intent-session`; the `exploratory` outcome and §G go; the no-fit rule is added; the `Rules:` line at `:20` drops ADR-0018 and §G. | S1 |
 | `plugin/workflows/*.json` (six) | Deleted. | S5 |
 | `plugin/workflows/*.js` (three) | Rebuilt for the autonomy table change; otherwise unchanged. | S5 |
 | `plugin/workflow-src/lib/waves.js` | Header names its own rule and the frozen expectations. | S5 |
-| `plugin/workflow-src/**` other files | Unchanged. | none |
+| `plugin/workflow-src/**` other files | Unchanged, except `standard-delivery/contract.js` rows SD-35 (`:59`) and SD-86 (`:107`), which drop their `standard-delivery.json` clauses. | S5 |
 | `plugin/skills/init-run-ledger/`, `record-state-result/`, `next-wave/`, `mark-intent-fallback/` | Deleted. | S5 |
 | `plugin/skills/decision-report/` | Deleted. | S4 |
-| `plugin/skills/spawn-brood/` | Drops the `hatchery` input and block and the child-ledger started-evidence. | S2 |
+| `plugin/skills/spawn-brood/` | Drops the `hatchery` input and block and the child-ledger started-evidence; the `SKILL.md:21-24` lines that say child state lives in each child's own run ledger and that `hatchery.ledger` only points at the hatchery ledger are reworded to the facts file. | S2 |
 | `plugin/skills/brood-status/` | Drops the claimed columns and child-ledger reads; schema `brood-status-collect/2`. | S3 |
 | `plugin/skills/enable-brood-remote/` | Unchanged; reads no `hatchery` block. | S2 |
-| `plugin/skills/gather-facts/`, `injection-scan/`, `molt/`, `open-plan-pr/`, `push-branch/`, `create-working-branch/`, `bump-type/` | Unchanged; Instinct relies on them. | S4 |
+| `plugin/skills/bump-type/SKILL.md:13` | "backs the `version_bump_decision` workflow state" becomes "backs the version bump decision on Instinct". | S5 |
+| `plugin/skills/gather-facts/`, `injection-scan/`, `molt/`, `open-plan-pr/`, `push-branch/`, `create-working-branch/` | Unchanged; Instinct relies on them. | S4 |
 | `plugin/skills/github-review-loop/` | Unchanged; the watch and its `loop-state.sh` already run outside the state machine. | S4 |
-| `plugin/skills/_shared/brood-state.sh` | `hivemind_brood_read_child_ledger` and its `ledger-project.sh` dependency note go. | S5 |
+| `plugin/skills/_shared/brood-state.sh` | `hivemind_brood_read_child_ledger` and its `ledger-project.sh` dependency note go, and the comments at `:19` and `:105` that name `ledger-project.sh` are reworded. | S5 |
 | `plugin/skills/_shared/brood-status-derive.sh` | The gate keys on `facts_evidence` alone. | S3 |
 | `plugin/skills/_shared/ledger-project.sh` | Deleted once S2 and S3 removed its two consumers. | S5 |
 | `plugin/skills/_shared/ledger-engine-io.sh` | Deleted. | S5 |
 | `plugin/skills/_shared/containment.sh` | `hivemind_assert_ledger_contained` goes; the header drops the ledger engines. | S5 |
 | `plugin/skills/_shared/ledger-reconstruct-fold.sh`, `ledger-reconstruct-parse.sh` | Unchanged (fix ledger). | none |
 | `plugin/skills/_shared/settings-merge.sh:682` | The comment's `next-wave.sh` comparison names `plugin/workflow-src/lib/waves.js`. | S5 |
+| `plugin/skills/_shared/settings-merge.sh:390-392` | The seed-hive template drops the `Edit(.hivemind/runs/.init-inputs-*.json)`, `.record-inputs-*` and `.markfb-inputs-*` grants of the deleted navigators. | S5 |
+| `plugin/skills/_shared/json-normalize.sh:75`, `:82` | The comments that name `ledger-project.sh` are reworded. | S5 |
+| `.claude/settings.json:57-59` | The same three inputs-file grants go from this repository's settings. | S5 |
 | `plugin/references/run-ledger-schema.md` | Deleted. | S5 |
 | `plugin/references/decision-autonomy-table.json` | Four rows removed; `resolved_at` keeps script sites. | S5 |
 | `plugin/references/plan-schema.json`, `decision-brief-schema.json`, `facts-schema.json` | Unchanged. | none |
 | `plugin/governance/decision-autonomy.md` | Ask Set loses the resume bullet; the Promotion Gate's state-machine clauses (`:66`, `:68`) name Instinct; Decision Journal rewritten to the journal rule; Post-Merge Decision Report Trigger deleted. | S4 |
-| `plugin/governance/security-policy.md` | Trust-Boundary Discipline loses boundaries 1 and 2; Inert Inputs-File Navigator Pattern drops ADR-0018. | S5 |
+| `plugin/governance/security-policy.md` | Trust-Boundary Discipline loses boundaries 1 and 2, its opening clause is as Trust boundaries says, and boundary 3's per-strain ledger anchor and run id become the facts-file check of Trust boundaries; Inert Inputs-File Navigator Pattern drops ADR-0018. | S5 |
 | `plugin/governance/remediation-doctrine.md` Proactive Zoom-Out Ledger Marker | Rewritten as the cluster payload marker (D17). | S4 |
 | `plugin/governance/workflow.md:45` | "workflow script, state machine, or any step outside both" becomes "workflow script or Instinct". | S4 |
 | `plugin/governance/definitions.md`, `safety-rails.md`, `versioning.md`, `report-format.md` | Unchanged. | none |
@@ -373,9 +377,10 @@ One row per current path, with its effect and the slice (Seam order) that makes 
 | `tools/test_brood_compat.sh`, `tests/brood/child-ledger-present.json` | Child-ledger cases and the fixture go; facts-only cases added. | S2, S3 |
 | `tools/test_rc_brood.sh` | Fixture manifests drop the `hatchery` block, and one keeps it to prove it is ignored. | S2 |
 | `tools/test_script_bootstrap.sh` | Rows of the deleted scripts go. | S5 |
+| `tools/test_workflow_scripts.sh:17`, `:45` | The `next-wave.sh` oracle requirement goes; the runner needs no oracle once `waves.test.mjs` reads the frozen expectations. | S5 |
 | `tools/build_workflows.mjs` | `--check` fails on any non-generated entry in `plugin/workflows/`. | S5 |
 | `tests/workflow-scripts/build.test.mjs:466-471` | Inverted: a `.json` there is a finding. | S5 |
-| `tests/workflow-scripts/standard-delivery.test.mjs:45`, `:4853-4889` | The definition-graph cases go; the script's own gate cases stay. | S5 |
+| `tests/workflow-scripts/standard-delivery.test.mjs:45`, `:4853-4913` | The definition-graph cases go; the script's own gate cases stay. | S5 |
 | `tests/workflow-scripts/data.test.mjs:127` | Inverted: every site is a script site. | S5 |
 | `tests/workflow-scripts/waves.test.mjs` | Compares against `tests/next-wave/expected/`. | S5 |
 | `tests/workflow-scripts/state-machine-questions.test.mjs` | Deleted. | S5 |
@@ -393,8 +398,8 @@ One row per current path, with its effect and the slice (Seam order) that makes 
 | Failure | Handling | Slice |
 |---|---|---|
 | A run ledger left `running` by an older version | No scan reads it, and the session starts normally. Giving the request again recovers the run per the run record rule; an `analysis-only` run has no branch and starts over. The folder is never deleted by the plugin; README says the user may delete it. | S4 |
-| A refused or blocked launch at an unattended level | The level check runs first. Today no unattended level exists, so the clause always passes to Instinct. #607 adds the level, whose sentence ends or parks the run instead, so an unattended strain never reaches Instinct's questions. | S4, #607 |
-| A cut completion notice | A defect, said in one line, with what arrived shown, and no file read to recover the rest. The run counts as failed: a `standard-delivery` run continues on Instinct from its last commit (ADR-0039 decision 4), a guide run returns to the guide, and any other run is reported as it ended. | S4 |
+| A refused or blocked launch, or a failed started run, at an unattended level | The level check runs first. Today no unattended level exists, so the clause always passes to Instinct. #607 adds the level, whose sentence ends or parks the run instead, so an unattended strain never reaches Instinct's questions. | S4, #607 |
+| A cut completion notice | A defect, said in one line, with what arrived shown, and no file read to recover the rest. The run counts as failed: a `standard-delivery` run continues on Instinct from its last commit (ADR-0039 decision 4), and any other run is reported as it ended. | S4 |
 | `hivemind:spawn-brood` fails | Exit 1 with a `blocker:` line is relayed verbatim. It is a mutating call, so it is never retried (`## Tool-Error Recovery`), and it surfaces as a Tier A failed tool call. Strains it started before the failure stay in the manifest it wrote, with their `attach:` lines, and `hivemind:brood-status` shows them. Nothing falls back and nothing is re-spawned without the user. | S2 |
 | The user declines the strain approval | Nothing spawns; the final report carries the brood plan. | S2 |
 | A brood child writes no facts file (a Reflex child, or a child that fails before planning) | Alive: `starting`. Dead: `complete`, `blocked` or `failed` from its observables, as today. | S3 |
@@ -409,7 +414,7 @@ One row per current path, with its effect and the slice (Seam order) that makes 
 | The engine removal slice runs without confirmation | Its delegations return Blocked at the destructive-fix gate (DESTRUCTIVE-CAT 3, and 2 for the ledger guards), and nothing is deleted until the user confirms each item. | S5 |
 | A path under a deleted tree is left behind | `tools/validate.sh` maps it nowhere, so `--changed` escalates to the full suite (FAIL-CLOSED), and `build_workflows.mjs --check` fails on a leftover in `plugin/workflows/`. | S5 |
 | A slice edits a stamped document of another initiative | That record goes stale and its slices fail `record_stale`. No retirement slice edits one; each change lands through that initiative's own re-review (D19). | none |
-| A brood child on Instinct asks an Ask Set question | It waits in its session, which has remote control, as a child on the state machine did. Unattended handling is #607's. | S2 |
+| A brood child on Instinct asks an Ask Set question | It waits in its session, which stays alive and reachable through its `attach:` line, or through remote control when enabled, as a child on the state machine did. Unattended handling is #607's. | S2 |
 
 ## Decisions
 
@@ -421,7 +426,7 @@ Answered: Q1 A. The state machine is retired, and the workflow scripts, Instinct
 
 ### D2: One fallback for every refused or blocked launch
 
-Answered: Q2 A. Every refused or blocked launch is said in one line and continues on Instinct. One level check comes first, and there a future unattended level ends or parks the run instead (#607). One path leaves one place for #607 to change. Started runs keep their rules.
+Answered: Q2 A. Every refused or blocked launch is said in one line and continues on Instinct. One level check comes first and covers a failed started `standard-delivery` run as well, and there a future unattended level ends or parks the run instead (#607). One path leaves one place for #607 to change. Otherwise started runs keep their rules.
 
 ### D3: Instinct gains read-only analysis and post-PR remediation
 
@@ -441,7 +446,7 @@ Answered: Q1 A. Resume is a same-session resume by name, or a new session that r
 
 ### D7: The decision journal is kept where the merge is decided
 
-Answered: Q4 A. The journal is kept as [Decision journal](#decision-journal) says. The post-merge report, its session-start scan, the `.decision-report-done` marker and `HIVEMIND_ENABLE_DECISION_REPORT` are retired; their effect on accepted ADRs comes through ADR-0048 decision 8. The reader of a journal decides before merge, so it belongs where the merge is decided.
+Answered: Q4 A. The journal is kept as [Decision journal](#decision-journal) says. The post-merge report, its session-start scan, the `.decision-report-done` marker and `HIVEMIND_ENABLE_DECISION_REPORT` are retired; their effect on accepted ADRs comes through ADR-0048 decision 8. The pull request is where the user reviews the change, so the journal lives there.
 
 ADR-0036 decision 9 stands as written, as ADR-0048 decision 8 records.
 
@@ -480,7 +485,7 @@ Answered: Q1 A, with the items D5, D7, D8 and D15 remove. Removed, each with its
 
 ### D11: Three rules re-homed in the safety rails
 
-Taken, listed for veto. Three rules live only in deleted sections, and each moves to `## Safety Rails` with its meaning kept:
+Taken, listed for veto. Three rules live only in text this design deletes, and each moves to `## Safety Rails` with its meaning kept:
 
 - gather-facts and injection-scan run before every planner delegation;
 - the PR head branch is checked out before any reviewer;
@@ -490,7 +495,7 @@ Taken, listed for veto. Three rules live only in deleted sections, and each move
 
 ### D12: Engine test deletion needs the user's confirmation
 
-Taken, listed for veto. A slice that deletes engine tests, fixtures, suite map entries or a policy check arm names DESTRUCTIVE-CAT 3 and needs the user's confirmation of each item before it lands. Its deletion of `hivemind_assert_ledger_contained` and `ledger-engine-io.sh`'s read guards names DESTRUCTIVE-CAT 2, read at its broadest, as security-relevant code. Retiring a subject does not exempt its tests from the gate. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); it applies a gate and changes none; reversible.
+Taken, listed for veto. Every slice's deletion or narrowing of a test, test case, assertion, fixture, pin, suite map entry, check arm or ledger read guard passes `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Destructive Fix Confirmation Gate), read at its broadest, and needs the user's confirmation of each item before it lands. Retiring a subject does not exempt its tests from the gate. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); it applies a gate and changes none; reversible.
 
 ### D13: waves.js keeps its parity fixtures as frozen expectations
 
@@ -498,7 +503,7 @@ Taken, listed for veto. `waves.js`'s oracle, `next-wave.sh`, is deleted, so its 
 
 ### D14: The autonomy table keeps only script sites
 
-Answered: Q1 A, as the autonomy table part of the removal list. The four rows no script resolves are removed, and `resolved_at` keeps `<workflow>.<step>` sites. The overlord decides by the Ask Set and `### Stop Conditions`, never by the table. The table is only `decide()`'s data, so rows nothing reads would drift.
+Answered: Q1 A, as the autonomy table part of the removal list. The four rows no script resolves are removed, and `resolved_at` keeps `<workflow>.<step>` sites. A row a script resolves whose `resolved_at` lacks that script's site, such as `planner_question` for `analysis-only` (`plugin/workflow-src/analysis-only/main.js:417`), gains the site. The overlord decides by the Ask Set and `### Stop Conditions`, never by the table. The table is only `decide()`'s data, so rows nothing reads would drift.
 
 ### D15: The manifest keeps version 4 without the hatchery block
 
@@ -524,7 +529,7 @@ Taken, listed for veto. Text in another initiative's stamped document is changed
 
 Exact proposed text for each document. None is edited in this run. Each item names the slice that lands it. An item in another initiative's stamped document lands only through that initiative's re-review (D19).
 
-Two named sentences carry the user-facing decision-list and record facts. An item that states either fact uses its named sentence verbatim, says which, and carries no other wording of that fact.
+Two named sentences carry the user-facing decision-list and record facts.
 
 - **List sentence:** "A run lists the decisions it took in its final message or report, and on its pull request when it opens or reuses one, so you can veto them before you merge. A read-only analysis opens no pull request, so its final message or report is its whole list."
 - **Record sentence:** "No path keeps a run ledger: a run that opens a branch and a pull request is recorded by them, and a run that opens none, such as a read-only analysis, keeps no record."
@@ -534,13 +539,13 @@ Two named sentences carry the user-facing decision-list and record facts. An ite
 - Replace the **Instinct** entry (`:92-94`) with:
 
   > **Instinct**:
-  > A permanent, named path the overlord drives by judgment, with no workflow script. Pairs with **Reflex**: Reflex is the trivial fast path, Instinct the full run done by intent. It delivers a `standard-delivery` request, runs a read-only analysis, remediates review feedback on an existing pull request, and dispatches a **Brood**. It names what every run must have (a plan from fresh facts, a **Working Branch** when the run changes files, delegated edits, **Molt** commits and the delivery gates) and leaves order to judgment; not a step sequence. It is the one fallback for every refused or blocked workflow launch at an interactive autonomy level, and for a started `standard-delivery` run that fails or ends blocked. A started run the **Guide** launched is the exception: when it fails or ends blocked it returns to the **Guide** (ADR-0046). The rules live in `plugin/agents/overlord.md` (`## Engine`, `## Instinct`, `## Brood Execution`), ADR-0039 and ADR-0048.
+  > A permanent, named path the overlord drives by judgment, with no workflow script. Pairs with **Reflex**: Reflex is the trivial fast path, Instinct the full run done by intent. It delivers a `standard-delivery` request, runs a read-only analysis, remediates review feedback on an existing pull request, and dispatches a **Brood**. It names what every run must have (a plan from fresh facts, a **Working Branch** when the run changes files, delegated edits, **Molt** commits and the delivery gates) and leaves order to judgment; not a step sequence. At an interactive autonomy level, it is the one fallback for every refused or blocked workflow launch and for a started `standard-delivery` run that fails or ends blocked. A started run the **Guide** launched is the exception: when it fails or ends blocked it returns to the **Guide** (ADR-0046). The rules live in `plugin/agents/overlord.md` (`## Engine`, `## Instinct`, `## Brood Execution`), ADR-0039 and ADR-0048.
   > _Avoid_: light path (the placeholder name), manual mode
 
 - Replace the **Decision Journal** entry (`:249-251`) with:
 
   > **Decision Journal**:
-  > The per-decision record (situation, options, trade-offs, recommendation strength, gate outcome, disposition, decision, rationale, reversibility) of every autonomous and surfaced decision of a run that opens or reuses a pull request, listed on that pull request and in the run's final message or report. A run with no pull request keeps none; where it lists its decisions is set by ADR-0048 decision 6.
+  > The decisions a run that opens or reuses a pull request took for the user, one line each, listed on that pull request and in the run's final message or report. A run with no pull request keeps none; where it lists its decisions is set by ADR-0048 decision 6.
   > _Avoid_: audit log, decision log
 
 - Delete the **Decision Report** entry (`:253-255`).
@@ -596,6 +601,7 @@ Two named sentences carry the user-facing decision-list and record facts. An ite
 
   > - A `Workflow(hivemind:<id>)` entry in `permissions.deny` refuses the launch with no prompt. A refused or blocked launch of any workflow runs on Instinct, and so does a started `standard-delivery` run that fails or ends blocked. The fallback rules are in `plugin/agents/overlord.md` (`## Engine`), `docs/adr/0039-instinct-delivery-path.md` and ADR-0048.
 
+- `:264` (S4): replace "A script run keeps no decision journal, so the final message and the run record on the PR are its only record of decisions." with "The final message and the run record on the PR are the run's decision journal."
 - `:266` (S4): delete the sentence "That watch has no run ledger."
 - `:268-292` (S4): replace the **State machine.** paragraph, its diagram and the numbered list 1-9 with this paragraph, which points to the Decision autonomy paragraph for the decision list:
 
@@ -701,6 +707,10 @@ Two named sentences carry the user-facing decision-list and record facts. An ite
 - `:440`: replace "runs on Instinct under ADR-0039 decision 3" with "runs on Instinct under ADR-0048".
 - `docs/adr/0046-idea-to-ready-process.md`, after decision 10: add "Note 2026-11-22 (ADR-0048 decision 8): 'a refused or blocked launch starts no run and still runs on Instinct' now rests on ADR-0048's one fallback, which covers every workflow."
 
+**9. `docs/adr/0018-declarative-workflow-state-machine.md`** (S5)
+
+- `:3`: the Status line becomes `**Status:** superseded by ADR-0048 — 2026-11-22`.
+
 ## Verification strategy
 
 Each slice runs this repository's own gate, `bash tools/validate.sh --changed`. The suite registrations below are this repository's own; the plugin requires none of them in a consumer project. Per slice:
@@ -734,7 +744,7 @@ Each slice runs this repository's own gate, `bash tools/validate.sh --changed`. 
   - `tests/workflow-scripts/governance-section-refs.test.mjs` passes with no citation of a deleted heading.
   - CHECK 18 passes with the overlord's entry in `tests/policy/prose-byte-budget.json` lowered to its measured size, and the `plugin/governance/decision-autonomy.md` entry lowered the same way.
 - **S5 Engine removal:**
-  - **No JSON definition reads.** A new check in `tests/workflow-scripts/overlord-contract.test.mjs` scans every file under `plugin/` and fails on any `workflows/<id>.json` path or any `.json` read under `plugin/workflows/`. The existing `route-workflow reads no workflow file` test stays.
+  - **No retired reference.** A new check in `tests/workflow-scripts/overlord-contract.test.mjs` scans every file under `plugin/` and `tools/`, and `.claude/settings.json`, and fails on any retired identifier: `init-run-ledger`, `record-state-result`, `mark-intent-fallback`, `next-wave`, `decision-report`, `run-ledger-schema`, `ledger-engine-io`, `ledger-project`, `hatchery.ledger`, `.hivemind/runs/.` and the six definition file names, and on any `workflows/<id>.json` path or any `.json` read under `plugin/workflows/`. The existing `route-workflow reads no workflow file` test stays.
   - **Generated scripts only.** `tools/build_workflows.mjs --check` fails on any non-generated entry, and `build.test.mjs:466-471` is inverted to assert that a `.json` there fails, naming it.
   - **waves.js parity fixtures.** `waves.test.mjs` passes against `tests/next-wave/expected/`, with every fixture, override, mutation and seeded-corpus case of today. The expectation files are produced by `next-wave.sh` in a commit before its deletion, and the slice's review checks that that commit's test run passed.
   - **Autonomy table.** `data.test.mjs` asserts that every `resolved_at` site starts with a workflow id that has a script, and that the four rows are absent. The rebuilt scripts pass `node tools/build_workflows.mjs --check`.
