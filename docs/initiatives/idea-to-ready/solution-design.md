@@ -35,6 +35,8 @@ Checked against main at commit `49787cc9`; line numbers are at that commit. Each
 - **decision-brief-schema.json** carries `recommendation.strength` of `strong`, `weak` or `none`, and has no dissent or member provenance fields. Its `gate` is the producer's read of the recommended option only. Options carry `reversible`, `beyond_request` and an optional `destructive` list, but no gate of their own.
 - **standard-delivery** resolves every question through `decide()` and pauses through `pauseDelivery`; it has no cumulative pause cap. It stops on a dirty tree (`dirty_paths`, `plugin/workflow-src/lib/facts.js`). plan-interrogation and plan-to-prd hold no git grant and leave the files they write uncommitted.
 - **`resume_args`** is `{answers, build}` alone (`plugin/workflow-src/lib/args.js`).
+- **Draft and closing lines.** The standard-delivery `draft` launch arg is absent, true or false, and absent means false (SD-48, `plugin/workflow-src/standard-delivery/contract.js:54`). The pull request body opens with one `Closes #N` line per `plan.closes` number (`renderClosingLines`, `plugin/workflow-src/lib/pr.js:198`), and each number must be a launch reference (`describeClosesProblem`, `plugin/workflow-src/lib/title.js:173`). `open-plan-pr.sh` leaves a reused pull request's title, body and draft state unchanged (`plugin/skills/open-plan-pr/scripts/open-plan-pr.sh:145`).
+- **Docs validation mapping.** `tools/validate.sh` maps `docs/adr/**` to `policy_check` only, and every other `docs/**` path except `docs/skill-authoring.md` to no suite (`tools/validate.sh:429`).
 - **The synapse agent** is the haiku runner that relays one committed script. The name Synapse is taken. The earlier council epic #440 (closed) used it for a bioform.
 - **The Synapse Runner Gate** (`plugin/hooks/synapse-gate.sh`; `plugin/governance/security-policy.md`, Synapse Runner Gate) admits five scripts: molt, gather-facts, create-working-branch, bump-type and open-plan-pr. `run-review.sh` is not one. The gate admits a script only at `skills/<name>/scripts/<name>.sh`. Synapse's Write is limited to `.hivemind/molt-inputs-<token>.json` and `.hivemind/pr-inputs-<token>.json`. The Input contract of `plugin/agents/synapse.md` carries `inputs_file` only for a commit or pull request. `runnerValuePatterns` allows `--inputs` only as a molt or pr inputs file. `hivemind_remove_inputs_file` in `plugin/skills/_shared/containment.sh` accepts kinds `molt` and `pr` only. `plugin/skills/_shared/settings-merge.sh` and `.claude/settings.json` seed `Edit(.hivemind/molt-inputs-*.json)` and `Edit(.hivemind/pr-inputs-*.json)`, held equal by `tests/policy/safety-navigator-transport-rules.json`.
 - **The tool-neutral review runner** `plugin/skills/adaptation-cycle/scripts/run-review.sh` reads `HIVEMIND_LOCAL_REVIEWER` (the `codex-plugin` preset or a JSON argv list run with no shell). Its prompt is fixed: an adversarial review of a branch diff against `--base`, checked against the findings schema. It cannot carry a decision brief today. The `codex-plugin` preset runs a fixed companion command with no prompt path. Per [ADR-0042](../../adr/0042-tool-neutral-local-review.md) decision 7, Hivemind never names a model.
@@ -56,8 +58,9 @@ The guide owns the docs branch (#622):
 
 - Before stage 2 writes any tracked file, it creates `docs/<slug>` from the fetched trunk.
 - It commits the stage-2 and stage-3 outputs on that branch through `hivemind:molt` with exact paths: the glossary and ADR edits from `hivemind:plan-interrogation` and the PRD from `hivemind:plan-to-prd`. The tree is then clean before stage 4's standard-delivery run, whose `dirty_paths` stop would otherwise refuse it.
-- It opens the docs pull request as a draft with no closing keyword.
-- It runs the record verify against the pull request head before `gh pr ready`. When it later pushes a change to a stamped path, it returns the pull request to draft.
+- It launches every standard-delivery run on the docs branch with `draft` true and no launch reference the run could close, so the docs pull request opens as a draft with no Closes line. Stage 4's first run opens it, and later runs reuse it.
+- It runs the record verify at the pull request head before `gh pr ready`. A later push to a stamped path returns the pull request to draft.
+- Before a run that edits a stamped document of a passing record, it makes that run's first step the design review's record step, which sets `verdict` to `fail`.
 
 Docs writing happens in a standard-delivery run on the docs branch, whose steps give a drone exact file scope. The design review runs from the main session between those runs. A standalone idea ends with an issue carrying the spec block, per Standalone spec block format, ready for triage.
 
@@ -79,7 +82,7 @@ A leaf skill that turns a merged-or-branch PRD into `docs/initiatives/<slug>/sol
 
 ### Design review
 
-A main-session skill that runs fresh read-only cerebrate analysis passes with `Memory context: none`. Round 1 is angles A and B in parallel; a confirming round follows. It records every finding with exactly one disposition. Only the design review's drone step writes or re-stamps a record, and it rewrites the record after every round. It exits per the design review rounds lifecycle.
+A main-session skill that runs fresh read-only cerebrate analysis passes with `Memory context: none`. Round 1 is angles A and B in parallel; a confirming round follows. It records every finding with exactly one disposition. Only its record step, a drone step, writes or re-stamps a record, and it rewrites the record after every round. A validation fix round or a post-PR fix never edits a record. A review fix that stales a passing record stops the run, and goes through the confirming pass before the record step re-stamps, per Re-review and re-stamp. It exits per the design review rounds lifecycle.
 
 ### Slice design section
 
@@ -152,7 +155,7 @@ No progress state is stored anywhere. Every row below is ground truth in GitHub 
 | PRD | `docs/prds/<slug>.md` | `hivemind:plan-to-prd` | design stages, readiness check |
 | Solution design | `docs/initiatives/<slug>/solution-design.md` | a drone with exact file scope | design review, slices, readiness check |
 | ADRs | `docs/adr/NNNN-<title>.md` | a drone with exact file scope at the design stage; `hivemind:plan-interrogation` during interrogation | readiness check |
-| Review record | `docs/initiatives/<slug>/review-record.md` | the design review's drone step only | readiness check, stage derivation, the design review's verify |
+| Review record | `docs/initiatives/<slug>/review-record.md` | the design review's record step only | readiness check, stage derivation, the design review's verify |
 | Slices and blocked-by edges | GitHub sub-issues and issue dependencies | `hivemind:prd-to-issues` (sub-issues); triage `deps-add` (edges) | readiness check, handoff check, the Lair |
 | Rating labels | GitHub labels | triage only, behind its confirm gate | readiness check |
 | `readiness:ready` | GitHub label | a user with write permission, through triage (D29) | the handoff check, the Lair, under ADR-0045 decision 10 as amended by #625 |
@@ -177,7 +180,7 @@ Reason codes, a closed set:
 
 - Every issue: `issue_closed`, `rating_missing:<family>`, `is_epic`, `is_idea`, `has_subissues`, `no_acceptance_criteria`.
 - Standalone: `spec_problem_missing`, `spec_evidence_missing`, `spec_scope_missing`, `open_questions_not_none`, `promote_type`, `promote_effort`.
-- Slice: `epic_closed`, `parent_not_epic`, `design_block_missing`, `design_link_invalid`, `prd_missing`, `design_missing`, `record_missing`, `template_section_missing:<name>`, `template_order`, `heading_duplicate`, `design_section_unfilled:<n>`, `design_open_questions`, `adr_missing:<path>`, `adr_not_accepted:<path>`, `record_malformed`, `record_not_passed`, `record_open_blocking`, `record_rounds_exceeded`, `record_stale:<path>`, `record_unstamped:<path>`, `heading_unmatched:<n>`, `heading_ambiguous:<n>`, `dependency_edge_missing:<n>`. `design_block_missing` replaces the earlier `design_section_missing`.
+- Slice: `epic_closed`, `parent_not_epic`, `epic_marker_missing`, `design_block_missing`, `design_link_invalid`, `design_slug_mismatch`, `prd_missing`, `design_missing`, `record_missing`, `template_section_missing:<name>`, `template_order`, `heading_duplicate`, `design_section_unfilled:<n>`, `design_open_questions`, `adr_missing:<path>`, `adr_not_accepted:<path>`, `record_malformed`, `record_not_passed`, `record_open_blocking`, `record_rounds_exceeded`, `record_stale:<path>`, `record_unstamped:<path>`, `heading_unmatched:<n>`, `heading_ambiguous:<n>`, `dependency_edge_missing:<n>`. `design_block_missing` replaces the earlier `design_section_missing`.
 
 Placeholders:
 
@@ -203,27 +206,35 @@ A standalone issue body carries these sections: `## Problem`, `## Evidence`, `##
 
 ### Slice design section format
 
-A slice body's `## Design` section holds one item per line:
+A slice body holds exactly one `## Design` section, with one item per line:
 
-- `- Solution design: [<path>](<link>)`
-- `- Heading: <exact heading text>`, one line per heading
+- `- Solution design: [<path>](<link>)`, exactly one line
+- `- Heading: <exact heading text>`, at least one line, one per heading
 - `- ADR: [<path>](<link>)`, one line per ADR
-- `- Review record: [<path>](<link>)`
+- `- Review record: [<path>](<link>)`, exactly one line
+
+Any other count of these sections or lines gives `design_block_missing`.
+
+The slug is the parent epic's seed issue marker slug, never read from the issue. An epic whose body does not open with a valid seed issue marker gives `epic_marker_missing`.
 
 Link rules, the path allowlist:
 
 - A link is a bare path or `https://github.com/<owner>/<repo>/blob/<trunk>/<path>`.
-- The slug matches `^[a-z0-9]+(-[a-z0-9]+)*$`. The Solution design link must resolve to `docs/initiatives/<slug>/solution-design.md`, and the Review record link to `docs/initiatives/<slug>/review-record.md` with the same slug.
+- The Solution design link must resolve to a path of the shape `docs/initiatives/<s>/solution-design.md`, and the Review record link to `docs/initiatives/<s>/review-record.md`, where `<s>` matches `^[a-z0-9]+(-[a-z0-9]+)*$`.
 - Each ADR link must resolve to a path matching `^docs/adr/[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*\.md$`.
-- The PRD is derived as `docs/prds/<slug>.md`, never read from the issue.
-- A link failing any rule yields `design_link_invalid`, and no git call is made for it.
+- A link failing any shape rule yields `design_link_invalid`.
+- A Solution design or Review record link whose `<s>` is not the epic's slug yields `design_slug_mismatch`.
+- No git call is made for a failing link.
+- The PRD is derived as `docs/prds/<slug>.md` from the epic's slug, never read from the issue.
 - The record must stamp the PRD and the solution design, else `record_unstamped:<path>`.
 
 Each heading must match exactly one heading of the solution design, at any level, as literal text without `#` marks, per Document parsing rules.
 
 ### Seed issue marker
 
-The guide writes `<!-- hivemind-initiative: <slug> -->` as the first line of the seed issue body at capture (#622). #617 keeps the line when it reuses the seed as the epic. Stage derivation (#621) takes as seed only an open issue with that line whose author has write permission. Any other issue carrying it is ignored and named. Two qualifying issues for one slug are ambiguous.
+The guide writes `<!-- hivemind-initiative: <slug> -->` as the first line of the seed issue body at capture (#622). The marker slug must match `^[a-z0-9]+(-[a-z0-9]+)*$` before any `git` or `gh` use, else the issue is ignored and named (#621). #617 keeps the line when it reuses the seed as the epic, and #615 binds the epic's slices to its slug. Stage derivation (#621) takes as seed only an open issue with that line whose author has write permission. Any other issue carrying it is ignored and named. Two qualifying issues for one slug are ambiguous.
+
+Epics created before the guide gain the seed marker in #615's delivery, which adds it by hand to epics #603 and #614 before the readiness check is first used to label any slice ready. Until then their slices fail `epic_marker_missing`.
 
 ### Solution design template
 
@@ -264,10 +275,10 @@ Each `blob` is the output of `git rev-parse HEAD:<path>` on the docs branch when
 
 - Each blob matches `^[0-9a-f]{40}$` or `^[0-9a-f]{64}$`.
 - Each stamp path passes the path allowlist in Slice design section format, else `record_malformed`.
-- Stamps must include the PRD, the solution design and every ADR the docs pull request adds or edits, never an ADR it only cites.
-- The record passes when `verdict` is `pass`, `open.critical` and `open.high` are 0, `clean_round` is `true` and `rounds` is 2 to 3. Round 1 is always followed by a confirming round.
+- Stamps must include the PRD, the solution design and every ADR its own docs pull request adds or edits, never an ADR it only cites.
+- The record passes when `verdict` is `pass`, every open count (`critical`, `high`, `medium`, `low`) is 0, `clean_round` is `true` and `rounds` is 2 to 3. Round 1 is always followed by a confirming round.
 - `open.<severity>` counts that severity's findings whose disposition is `open`. Any critical or high whose disposition is not `fixed` or `rejected` counts as open.
-- A record is authoritative only through a human-reviewed merge (D24). Only the design review's drone step writes or re-stamps it.
+- A record is authoritative only through a human-reviewed merge (D24). Only the design review's record step writes or re-stamps it. A validation fix round or a post-PR fix never edits `docs/initiatives/*/review-record.md`.
 
 Staleness rule: the record is stale when any stamped path's `git rev-parse <commit>:<path>` differs from its blob, or the path is missing. A blob id is a content hash, so the merge method does not matter, and any edit to a stamped file makes the record stale until a review of the change re-stamps it.
 
@@ -293,12 +304,12 @@ The readiness check never reads the body. The design review skill's `verify` (#6
 
 - the front matter shape;
 - that each stamp equals the blob at the pull request head;
-- that the stamps include every ADR the pull request adds or edits, read from its diff against the merge-base with trunk; on trunk, only stamp equality is checked;
+- for each record the pull request adds or edits, that its stamps include every ADR the pull request adds or edits, read from its diff against the merge-base with trunk; every other passing record gets stamp equality only, as on trunk;
 - that the Findings table parses, IDs are unique and every row has exactly one disposition from the set;
 - that the open counts equal the table under the open rule;
-- that `verdict` is `pass` only under the pass rule.
+- that `verdict` is `pass` only under the pass rule, so a passing record with any open Findings row fails.
 
-The guide runs verify before `gh pr ready`. `tools/validate.sh` runs it in CI for every record whose verdict is `pass` and whose design is not delivered; #619 maps `docs/initiatives/` to that suite.
+The guide runs verify before `gh pr ready`. `tools/validate.sh` runs it in CI for every record whose verdict is `pass` and whose design is not delivered; #619 maps `docs/initiatives/`, `docs/prds/` and `docs/adr/` to that suite. A verify failure is never fixed in place. In a run, the validate step reports it as blocked, naming the record, so the run stops with that reason and no fix round runs (#619). The guide then starts the re-review path.
 
 ### Council brief contract
 
@@ -386,7 +397,7 @@ Every take a council causes matches the plan that runs. The planner plans assumi
 - **External content stays data.** Issue bodies, PRD and design text, review findings, member opinions and Abathur's brief are data per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (External Content Boundary). The readiness check parses fixed shapes and literal heading text and never runs or evaluates content. Links pass the path allowlist before any git call. Reason codes carry line indexes, never issue text. JSON is built with `jq --arg`. The Lair queue report and parks show reason codes encoded as untrusted data, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Trust-Boundary Discipline).
 - **Write permission authorizes the ready label.** The authorization is write permission on the latest `readiness:ready` labeled event, with the title and body unedited since (ADR-0045 decision 10, as amended by #625; D29). The handoff check verifies the same (#621), and the Lair keeps its check (#623). "Maintainer" names a role, and triage's confirm gate is a workflow step, not an authorization boundary. The guide and the Lair never apply the label.
 - **Reviewers are fresh and read-only.** Review passes run on cerebrate, whose tool list holds no Bash, Write or Edit. `Memory context: none` keeps the writing session's memory from steering a reviewer. A pass that errors, times out or returns unparseable output yields no round.
-- **Stamps bind the reviewed content.** The record ships in the same pull request as the design, so it passes the same local review and bot review. Trunk never holds an unreviewed design, and any later edit is detected by blob id. Authority is a human-reviewed merge (D24). Only the design review's drone step writes or re-stamps a record. Verify runs before the pull request leaves draft and in CI (D28). #623 keeps docs paths out of the Lair's auto tier. Recorded residual: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval with no human review of the design. It is recorded per the user's decision, on the ground that it is outside the threat model as the maintainer's own opt-in (ADR-0044). It is bounded because verify keeps a merged record consistent and current (ADR-0046, Residuals).
+- **Stamps bind the reviewed content.** The record ships in the same pull request as the design, so it passes the same local review and bot review. Trunk never holds an unreviewed design, and any later edit is detected by blob id. Authority is a human-reviewed merge (D24). Only the design review's record step writes or re-stamps a record. Verify runs before the pull request leaves draft and in CI (D28). #623 keeps docs paths out of the Lair's auto tier. Recorded residual: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval with no human review of the design. It is recorded per the user's decision, on the ground that it is outside the threat model as the maintainer's own opt-in (ADR-0044). It is bounded because verify keeps a merged record consistent and current (ADR-0046, Residuals).
 - **The council cannot widen authority.** Options, option ids, problem, criticality and assumptions never change. Every gate is a producer read: the input's for the producer's own option, and a fresh gate read for another, so no gate is council-written. `decide()` resolves every composed brief. Abathur writes only an option id among the input's, a strength and a why. A question marked `needs_user_fact` true, or left unmarked, is never convened. No member or Abathur text reaches a planner prompt, since the council answer entry is code-built. Member provenance comes from the caller's launch records. The `abathur` and `overseer` tools lists hold no Bash, Write, Edit or agent-launch tool, pinned by a safety fixture under `tests/policy/` (#618). The runner member runs under the kernel's no-shell argv run and before/after check. Opinions are scanned before Abathur, and Abathur's output before compose. A suspect one is a terminal stop in standard-delivery, an approval park in an unattended run, and is asked in the design stages (Tier A injection-suspect) (#618, #622, #624).
 - **Unattended runs never decide a split.** A split or always-ask call parks with the brief and dissent. Its text is encoded as untrusted data in the park record (#624, with #607).
 - **No new credential and no merge-path change.** Everything runs under the executing user's credentials, and `merge-approved.sh` is untouched. The two trust-boundary changes, a sixth runner-gate script and the overlord's two new agents, were asked (D22, D23). The seeded `Edit(.hivemind/council-inputs-*.json)` rule was asked (D30, answer Q7 A).
@@ -398,9 +409,9 @@ Every take a council causes matches the plan that runs. The planner plans assumi
 1. **Capture.** The guide creates the seed issue. Its body links `docs/prds/<slug>.md`, which may not resolve until the docs merge.
 2. **Interrogation.** The guide has created the docs branch before interrogation writes tracked files. `hivemind:plan-interrogation` runs in one session. This is the one single-machine window: its plan lives in the session or `.hivemind/`, so another machine sees only the seed issue.
 3. **PRD.** `hivemind:plan-to-prd` writes the PRD on the docs branch `docs/<slug>` or `docs/<slug>-<suffix>`. The guide commits the PRD and the interrogation outputs on that branch.
-4. **Solution design and ADRs.** Written on the docs branch by drones with exact file scope.
+4. **Solution design and ADRs.** Written on the docs branch by drones with exact file scope, in standard-delivery runs the guide launches with `draft` true and no closable launch reference. The first run opens the docs pull request as a draft with no Closes line; later runs reuse it.
 5. **Design review.** Per the design review rounds below; the record is written on the docs branch.
-6. **Docs pull request.** The guide opens it as a draft with no closing keyword. It leaves draft only after verify passes at its head, and merges to trunk. A later push by the guide that changes a stamped path returns it to draft.
+6. **Docs pull request.** It has been a draft since stage 4. It leaves draft through `gh pr ready` only after verify passes at its head, and merges to trunk. A later push by the guide that changes a stamped path returns it to draft.
 7. **Slicing.** `hivemind:prd-to-issues` reuses the seed issue as the epic and adds each slice's design section.
 8. **Triage.** The maintainer runs triage; it gates `readiness:ready` on the readiness check and writes native blocked-by edges.
 9. **Handoff check.** It passes only when every slice passes, and names each slice as claimable now or blocked.
@@ -411,11 +422,11 @@ Stage derivation picks the latest stage whose evidence exists. Evidence it canno
 
 Round 1 is two parallel fresh passes: angle A (code truth, governance and ADR conflicts, existing-path coverage) and angle B (failure modes, trust and injection, testability). Findings are fixed on the docs branch. Each later round is one fresh confirming pass over both angles. A pass that errors, times out or returns output the skill cannot parse yields no round and is re-run. Only a completed pass whose parsed list of new findings is empty makes a clean round. The review exits only with zero open critical or high findings and one clean round, so a passing review has 2 or 3 rounds. A review that has not converged after round 3 stops and reaches the maintainer as a signal to split the initiative. Every finding gets exactly one disposition: `fixed`, `rejected` with its reason, `deferred` or `recorded`. Critical and high findings are only `fixed` or `rejected`. Mediums follow `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Defer-with-Scope, Recorded Residual).
 
-The drone rewrites the record after every round: `verdict` stays `fail` until exit, and `rounds`, the open counts and the Findings table stay current. A lost session resumes from the record's rounds.
+The record step rewrites the record after every round: `verdict` stays `fail` until exit, and `rounds`, the open counts and the Findings table stay current. A lost session resumes from the record's rounds.
 
 ### Re-review and re-stamp
 
-- Review fix: when local review or the post-PR review changes a stamped document after the review exited, the design review runs one fresh confirming pass over the diff since the stamped blobs. With no new finding the drone re-stamps, and the pass is appended under Rounds as a confirming pass that does not change `rounds` and does not count toward the cap. With a new finding it becomes a re-review.
+- Review fix: a local-review or post-PR fix that changes a stamped document of a passing record after the review exited stales it, so verify stops the run (Review record body). The design review then runs one fresh confirming pass over the diff since the stamped blobs. With no new finding the record step re-stamps, and the pass is appended under Rounds as a confirming pass that does not change `rounds` and does not count toward the cap. With a new finding it becomes a re-review.
 - Re-review after an amendment: fresh passes run over the diff since the stamped blobs, with rounds counted from 1 for that review. The front matter is replaced, and the body history is appended under a dated heading.
 
 ### Close-out
@@ -463,9 +474,11 @@ One row per existing path, with its effect and the slice that makes it. "Unchang
 | `plugin/agents/overlord.md` | The Agent allowlist gains hivemind:abathur and hivemind:overseer. The Write grant is unchanged. | #622 |
 | `CONTEXT.md` | This pull request adds the initiative's terms and fixes the stale "planned" notes. | #627 |
 | `docs/adr/0045-lair-software-factory.md` | Not edited here; decision 10 is amended by #625. | #625 |
-| `tools/validate.sh` | Maps `docs/initiatives/` to the verify suite. | #619 |
+| `tools/validate.sh` | Maps `docs/initiatives/`, `docs/prds/` and `docs/adr/` to the record verify suite, and registers the readiness check (#615), design review (#619) and stage derivation (#621) suites. | #615, #619, #621 |
+| `plugin/workflow-src/lib/gates.js` | The validate step, shared with pr-feedback-remediation, reports a record verify failure as blocked. | #619 |
+| `plugin/skills/open-plan-pr/scripts/open-plan-pr.sh` | Unchanged. A reused pull request keeps its draft state, and the `draft` launch arg (SD-48) is unchanged. | #622 |
 | Lair controller, not yet built (#608) | The readiness check is its admission step. Its protected-path list gains `docs/prds/`, `docs/initiatives/` and `docs/adr/` under the #625 amendment. | #623 |
-| Lair initiative, epic #603 | The PRD's Lair retrofit criterion is covered by #625, the first pilot. #625's acceptance criteria verify it: the record passes with stamps equal to trunk, and every Lair slice passes the readiness checklist by hand. Once #615 and #620 land, triage's readiness gate also checks the Lair slices before any is labeled ready under the new rule. | #625 |
+| Lair initiative, epic #603 | The PRD's Lair retrofit criterion is covered by #625, the first pilot. #625's acceptance criteria verify it: the record passes with stamps equal to trunk, and every Lair slice passes the readiness checklist by hand. Once #615 and #620 land, triage's readiness gate also checks the Lair slices before any is labeled ready under the new rule. #615's delivery adds the seed marker to epic #603 by hand before the readiness check is first used to label any slice ready; until then its slices fail `epic_marker_missing`. | #625, #615 |
 
 ## Failure modes
 
@@ -474,6 +487,11 @@ One row per existing path, with its effect and the slice that makes it. "Unchang
 | A stamped document is edited after review | The record is stale (`record_stale:<path>`) until a review of the change re-stamps it; every slice fails the check meanwhile. | #615, #619 |
 | A merge conflict resolution edits a stamped document | Same as above, seen on trunk; a follow-up docs pull request re-reviews and re-stamps. | #615, #619 |
 | A passing record goes stale on a later push | Verify fails in CI, and the guide returns the pull request to draft. | #619, #622 |
+| Another initiative's docs pull request adds an ADR | ADR inclusion is checked only for records the pull request adds or edits, so every other passing record gets stamp equality only. | #619 |
+| A fix round or post-PR fix would re-stamp a record to clear verify | Never: a verify failure stops the run as blocked with the record named, and only the design review's record step writes a record. | #619 |
+| A docs-branch run would open a ready pull request or add a Closes line | The guide launches every docs-branch run with `draft` true and no closable launch reference. | #622 |
+| A pull request edits a stamped PRD or ADR outside `docs/initiatives/` | CI maps `docs/prds/` and `docs/adr/` to verify, which fails it. A record stale on trunk fails every slice with `record_stale:<path>` until a re-review. | #619, #615 |
+| A record claims pass with an open Findings row | Verify fails. | #619 |
 | #625 merges first and changes ADR-0045 | No effect: this design cites ADR-0045 decision 10 by number and never stamps ADR-0045. | #625 |
 | ADR number 0046 or 0047 is taken on main | Checked before the pull request opens and before it leaves draft; the ADR is renumbered and every link updated. | #627 |
 | A design review pass errors, times out or returns unparseable output | It gives no round and is re-run. | #619 |
@@ -486,10 +504,13 @@ One row per existing path, with its effect and the slice that makes it. "Unchang
 | Link or heading text in an issue body is hostile | A link failing the path allowlist gives `design_link_invalid` with no git call. Heading codes carry the line index, never the text. | #615 |
 | A named heading matches zero or several headings | `heading_unmatched` or `heading_ambiguous`; the slice fails. | #615 |
 | The review record's front matter is off its shape | `record_malformed`; the slice fails. | #615 |
+| Design links name another slug, or the epic lacks a seed marker | `design_slug_mismatch` or `epic_marker_missing`; the slice fails. | #615 |
+| A Design block has duplicate or missing lines | `design_block_missing`; the slice fails. | #615 |
+| A seed marker carries a malformed slug | Ignored and named, with no `git` or `gh` call. | #621 |
 | A Dependencies ref has no native blocked-by edge | `dependency_edge_missing:<n>`; triage writes the edge through `deps-add`. | #615, #620 |
 | Labels are applied after the check | The overlay checks the pending labels, and the post-apply re-check drops any issue that now fails. | #620 |
 | A slice passes with open blockers | It may be labeled ready; the Lair still claims it only when no blocked-by dependency is open. | #620, #623 |
-| The issue is edited between the check and the claim | ADR-0045 decision 10's unedited check and the body hash captured at claim time stop it. | #623 |
+| The issue is edited between the check and the claim | The unedited check of ADR-0045 decision 10, as amended by #625, and the body hash captured at claim time stop it. | #623 |
 | A council member fails, times out or returns off schema | Abathur weighs the rest. With too few members on two models, or off-schema Abathur output, there is no council result, and the question is resolved as it came. The attempt counts toward the cap. | #618, #624 |
 | Abathur picks an option other than the producer's recommendation | The producer's gate read of that option decides. Clean: the take is journaled and the run plans again with it settled. A trip asks or parks. No usable read gives strength `none`, asked or parked. Options and option ids never change. | #618, #624 |
 | A composed brief `decide()` refuses as a defect | No council result; the question is resolved as it came. No ask outside the Ask Set reaches `pauseDelivery`. | #624 |
@@ -624,7 +645,7 @@ Asked, answer Q4 A. #622 adds `hivemind:abathur` and `hivemind:overseer` to the 
 
 ### D24: Review record authority is a human-reviewed merge
 
-Asked, answer Q5 A. A review record is authoritative only through a human-reviewed merge, and only the design review's drone step writes or re-stamps it. #623, with the #625 amendment, adds `docs/prds/`, `docs/initiatives/` and `docs/adr/` to the Lair's protected-path list, so a docs pull request never takes the auto tier. Recorded residual: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval with no human review of the design. ADR-0046 (decision 7 and Residuals).
+Asked, answer Q5 A. A review record is authoritative only through a human-reviewed merge, and only the design review's record step writes or re-stamps it. #623, with the #625 amendment, adds `docs/prds/`, `docs/initiatives/` and `docs/adr/` to the Lair's protected-path list, so a docs pull request never takes the auto tier. Recorded residual: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval with no human review of the design. ADR-0046 (decision 7 and Residuals).
 
 ### D25: Consult step with decide unchanged
 
@@ -640,7 +661,7 @@ Taken and listed for veto. The design stages run no `decide()`. Take or ask is t
 
 ### D28: Record verified before ready and on every push
 
-Taken and listed for veto. The design review skill's verify checks the front matter, the stamps and the Findings table, per Review record body. The guide runs it before `gh pr ready`, and `tools/validate.sh` runs it in CI on every push for each passing record whose design is not delivered. ADR-0046.
+Taken and listed for veto. The design review skill's verify checks the front matter, the stamps and the Findings table, per Review record body. ADR inclusion is checked only for records the pull request adds or edits; every other passing record gets stamp equality only. A record with `verdict` pass and any open Findings row fails verify. The guide runs it before `gh pr ready`, and `tools/validate.sh` runs it in CI on every push for each passing record whose design is not delivered, with `docs/initiatives/`, `docs/prds/` and `docs/adr/` mapped to it. In a run, the validate step reports a verify failure as blocked, naming the record, so the run stops and no fix round runs. ADR-0046.
 
 ### D29: Write permission is the ready label's authority
 
@@ -668,14 +689,14 @@ Answer Q8 A: the round-2 remediation plan was accepted with the Q6 answer. ADR-0
 
 Each slice runs `bash tools/validate.sh --changed` at its validate state. Per slice:
 
-- **#615:** contract tests over recorded issue fixtures for each track and each reason code. Cases include a document edited after stamping, an epic, a standalone issue that must be promoted, a slice with open blockers that passes, hostile link and heading text, a design link and record of different slugs, an unstamped PRD, a missing blocked-by edge, a truncated read, a missing document versus a `git` failure, a malformed commit id, and template order, duplicate heading and missing-section cases.
+- **#615:** contract tests over recorded issue fixtures for each track and each reason code. Cases include a document edited after stamping, an epic, a standalone issue that must be promoted, a slice with open blockers that passes, hostile link and heading text, a design link and record of different slugs, an unstamped PRD, a missing blocked-by edge, a truncated read, a missing document versus a `git` failure, a malformed commit id, and template order, duplicate heading and missing-section cases. More cases: `design_slug_mismatch`, `epic_marker_missing`, and Design blocks with zero or two `## Design` sections, Solution design lines or Review record lines, or no Heading line. Test script `tools/test_readiness_check.sh`, fixtures in `tests/readiness-check/`, and a `tools/validate.sh` suite mapped from `plugin/skills/_shared/readiness-check.sh`, `tests/readiness-check/` and the script.
 - **#616:** a fixture run on the Lair PRD yields every template section filled; skill authoring checks prove the skill names no sibling.
 - **#617:** `tools/test_subissue_ops.sh` with `tests/prd-to-issues/` fixtures: the Design section, seed reuse with the marker line kept, and no duplicate on rerun. A policy fixture under `tests/policy/` pins the Design section and the Design-link carve-out of the "No file paths or code snippets" rule in `plugin/skills/prd-to-issues/SKILL.md`.
 - **#618:** `tests/workflow-scripts/data.test.mjs` checks that `needs_user_fact` is an optional boolean, that every existing brief and fixture stays valid, and the council bounds: `members` 2 to 4 counting a runner member, `dissent` at most 4, `why` at most 200, `id`, `angle` and `model` at most 64. Composed-brief tests: a claimed model is ignored, and fewer than two distinct `model` values give no result. `tests/workflow-scripts/decide.test.mjs` stays green. `tools/test_synapse_gate.sh` with `tests/policy/safety-synapse-gate.json` covers `council-member.sh` and its inputs file. `tools/test_shared_libs.sh` covers remove-inputs kind `council`. `tools/test_seed_hive.sh` and `tests/policy/safety-navigator-transport-rules.json` cover the seeded rule. The safety fixture pins both agents' tools lists. `tools/test_run_review.sh` stays green.
-- **#619:** stamping then verify passes. Each of these fails: an open high, a deferred high, a missing clean round, `rounds` of 1 or 4, an errored pass counted as a round, an unstamped added ADR, and a Findings table that disagrees with the open counts. A resume continues from the record's rounds, a confirming pass flags a taken decision that amends an accepted ADR, and the CI suite fails a stale passing record.
+- **#619:** stamping then verify passes. Each of these fails: an open high, a deferred high, a missing clean round, `rounds` of 1 or 4, an errored pass counted as a round, an unstamped added ADR, and a Findings table that disagrees with the open counts. A resume continues from the record's rounds, a confirming pass flags a taken decision that amends an accepted ADR, and the CI suite fails a stale passing record. More cases: an added ADR fails only the record the pull request edits; a verify failure stops the run with no fix round; a pass with an open medium fails; and CI runs verify on a `docs/prds/` or `docs/adr/` edit. Test script `tools/test_design_review.sh`, fixtures in `tests/design-review/`, and `tools/validate.sh` registrations for the design review suite and the record verify suite.
 - **#620:** `tools/test_triage_ops.sh` with `tests/triage-backlog/`: the overlay, a post-apply re-check that drops a now-failing issue, edges written before readiness, a failing issue that never enters the apply set as ready with its reasons shown, a passing slice with open blockers proposed ready, and the existing cases.
-- **#621:** recorded fixtures for every stage give the expected stage and next action. Cases: `**Status:** delivered` read before staleness, seed identity, fork and non-write evidence ignored and named, the latest-label check, and two open docs pull requests reported as ambiguous. Handoff mode passes only when every slice passes.
-- **#622:** the skill is user-only. A live smoke takes a throwaway idea to ready slices: it creates the docs branch, commits the stage-2 and stage-3 outputs so the tree is clean, and runs verify before `gh pr ready`. A design decision marked `needs_user_fact` true is asked with no council. A fresh session resumes at the derived stage.
+- **#621:** recorded fixtures for every stage give the expected stage and next action. Cases: `**Status:** delivered` read before staleness, seed identity, fork and non-write evidence ignored and named, the latest-label check, and two open docs pull requests reported as ambiguous. Handoff mode passes only when every slice passes. A malformed marker slug is ignored and named with no `git` or `gh` call. Test script `tools/test_stage_derivation.sh`, fixtures in `tests/stage-derivation/`, and a `tools/validate.sh` suite.
+- **#622:** the skill is user-only. A live smoke takes a throwaway idea to ready slices: it creates the docs branch, commits the stage-2 and stage-3 outputs so the tree is clean, and runs verify before `gh pr ready`. Every docs-branch run launches with `draft` true, and the pull request stays a draft with no Closes line across reused runs, leaving draft only after verify. A design decision marked `needs_user_fact` true is asked with no council. A fresh session resumes at the derived stage.
 - **#623:** a tick contract test where an epic and a stale design are not claimed and are named in the queue report with encoded reason codes, and a docs pull request never takes the auto tier.
 - **#624:** `tests/workflow-scripts/` engine tests:
   - only planner questions are consulted;
