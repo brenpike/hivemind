@@ -66,7 +66,7 @@ Each invariant below is stated once, here. Every later section cites it by name,
 
 ### Lair state root
 
-One directory per repository, outside every checkout and worktree: `${XDG_STATE_HOME:-$HOME/.local/state}/hivemind/lair/<repo-key>/`, where `<repo-key>` is the first 32 hex digits of the SHA-256 of the repository's GraphQL node id. The Lair creates it with mode 0700 and prints its path on start. It holds:
+One directory per repository, outside every checkout and worktree: `${XDG_STATE_HOME:-$HOME/.local/state}/hivemind/lair/<repo-key>/`, where `<repo-key>` is the first 32 hex digits of the SHA-256 of the repository's GraphQL node id. Creating the directory, with mode 0700, and creating its `lock` file are the two idempotent writes the Lair makes before it holds the lock, under invariant Lock scope; every other entry is created after. The Lair prints the path on start. It holds:
 
 - `lock`, the single-instance lock file;
 - `control/`, mode 0700, holding `marker.key` (mode 0600) and the halt file `halt`;
@@ -75,7 +75,7 @@ One directory per repository, outside every checkout and worktree: `${XDG_STATE_
 
 ### Single-instance lock
 
-The controller takes an exclusive, non-blocking `flock` on `lock` at start and holds it for its whole life. The kernel releases it when the process exits, so no stale lock survives a crash. The lock's scope is one repository for one user account on one machine, whatever the checkout. It serializes every write the controller makes: GitHub writes, scanner and strain launches, key creation and halt-file writes. It does not serialize the user's own edits, triage, interactive sessions, or a Lair on another machine or account; one Lair per repository is the supported setup, and a second Lair elsewhere is caught only through its markers (see Failure modes).
+The controller opens `lock` on one descriptor and takes an exclusive, non-blocking `flock` on it at start, before any other write, and holds it for its whole life. Every command the controller launches runs with that descriptor closed. Its scope, its coverage and the rule that no child holds it are stated in invariant Lock scope.
 
 ### Marker signer and verifier
 
@@ -118,7 +118,7 @@ GitHub alone is authoritative (ADR-0045 decision 2). These rows replace the solu
 | `lair:claimed` label | Lair | Lair, triage, user | no; it pairs with a counting claim marker under invariant Markers and labels |
 | Marker key `control/marker.key` | Lair, once, on first start | Lair signer and verifier only | no; a secret |
 | Halt file `control/halt` | User, or the Lair's breaker and tripwires; removed only by the user | Lair, each tick | no; a control input |
-| Lock `lock` | Lair | Lair | no; process exclusion only |
+| Lock `lock` | Lair | Lair | no; process exclusion within one lock scope under invariant Lock scope |
 | Scan input and verdict `scan/<scan-id>/` | Lair writes the input; the scanner session writes the verdict | Scanner session reads the input; Lair reads the verdict | no; removed after each scan |
 | Local cache `cache/` | Lair | Lair | no; rebuildable from GitHub |
 | Lair session id | Lair, at start | Lair; written into every marker | no |
@@ -256,8 +256,8 @@ The halt and the breaker:
 | Incomplete page | A connection in the snapshot has `hasNextPage` true. | Snapshot error; the issue is not claimed. |
 | GitHub write failure mid-sequence | A claim, run-end or handoff write without positive proof of success. | The sequence stops at that write and spawns nothing. The next tick's reconciler moves the partial state forward. |
 | Claim stopped partway, or orphaned claim | An orphan under invariant Claim state. | Ended under invariant Claim state, with the `crashed` stage under Lifecycle. A `crashed` outcome marker counts toward the breaker. |
-| Lock already held | `flock` cannot take `lock`. | The second Lair prints `lock held`, exits non-zero and changes nothing. |
-| `flock` missing | The tool is not on `PATH`. | The Lair refuses to start and changes nothing. |
+| Lock already held | `flock` cannot take `lock`: another controller runs in this lock scope (invariant Lock scope). | The second Lair prints `lock held`, exits non-zero and changes nothing beyond the idempotent writes of invariant Lock scope. |
+| `flock` missing | The tool is not on `PATH`, checked before any write. | The Lair refuses to start and changes nothing. |
 | Issue changed during evaluation | The re-read before the claim marker differs from the snapshot. | No write; the issue is evaluated again next tick. |
 | Stale design, or an epic | The readiness check fails, or the issue carries `type:epic`. | Not claimed and given no new label. Reported with its stage and reason codes. |
 | Readiness check error | A non-zero exit, a malformed result, or no result within 60 seconds. | Not claimed, no new label, reported with stage `check-error`. |
@@ -266,7 +266,7 @@ The halt and the breaker:
 | Invalid marker | A candidate fails the counting rule. | Halt file with cause `marker-invalid`; the issue is not claimed. |
 | Missing marker | A marker the cache recorded this session is gone, or the `lair:claimed` case of invariant Markers and labels. | Halt file with cause `marker-missing`. An orphan among these issues is still ended under invariant Claim state. |
 | Key missing or replaced | A new key was created, so earlier markers carry another `kid`. | Each earlier marker the Lair reads is invalid, so the Lair halts with `marker-invalid`. The user restores the key or clears the issues by hand. |
-| Second Lair on another machine or account | Its markers carry another `kid`, or another login. | Another `kid` halts this Lair with `marker-invalid`. Another login's comments are not candidates, and its `lair:claimed` without a counting claim marker halts this Lair with `marker-missing`. |
+| Second Lair on another machine or account | Its markers carry another `kid`, or another login. The lock cannot see it, since it runs in another lock scope (invariant Lock scope). | Another `kid` halts this Lair with `marker-invalid`. Another login's comments are not candidates, and its `lair:claimed` without a counting claim marker halts this Lair with `marker-missing`. This Lair may also fail the other Lair's claim as an orphan under invariant Claim state. The setup is unsupported, and the lock cannot prevent it. |
 | Halt file present or state root unreadable | Read at the start of the tick and before the claim marker. | No snapshot, scan or claim. Reconciling and reporting continue. |
 | Circuit breaker trip | Three consecutive counted outcomes in the current window. | Halt file with cause `breaker` and the runs; only the user deleting it re-arms the Lair. |
 
@@ -283,7 +283,7 @@ A decision that is not ADR-worthy names the [P20](../../engineering-principles.m
 - **Markers are append-only; the outcome is a separate outcome marker, not an edit of the claim marker.** Replaces the solution design's outcome in the claim marker, since an edited marker never counts. Implements ADR-0045 decision 2. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **Claim write order: claim marker, then labels, then spawn; run end: outcome marker, then labels.** Implements ADR-0045 decisions 2 and 16 (B3-10). Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **Orphans, a claim that stopped partway included, are ended under invariant Claim state, which covers only Lair issues.** The scope is the user's 2026-11-21 answer (A), through a proposed ADR-0045 amendment to decision 17 under Changes to shared documents. The amendment's wording is derived from the invariant, decided for the user and listed for veto.
-- **The lock covers one repository for one account on one machine, through `flock`.** Implements ADR-0045 decision 2 (B3-11). Not ADR-worthy: fails P20's hard-to-reverse condition.
+- **One controller per lock scope, through a non-blocking `flock` whose descriptor no launched child holds, under invariant Lock scope.** Implements ADR-0045 decision 2 (B3-11). Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **One snapshot per candidate, a Lair-side `check-error` state, and at most 5 checks of 60 seconds each per tick.** Implements the ADR-0045 2026-11-21 amendment (B3-16). The limits are tuning values. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **The scan verdict is a token file; only the exact clean token passes, malformed is suspect, and missing is an error.** Implements ADR-0045 decision 10. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **Three consecutive scan errors halt the Lair.** Extends ADR-0045 decision 17. Not ADR-worthy: fails P20's hard-to-reverse condition.
@@ -325,6 +325,7 @@ The tests are the PRD's [Testing Decisions](../../prds/autonomous-ready-issue-lo
 - **`tools/test_lair_claim.sh`.**
   - Write order, and the reconciler's result for a stop after each write, including a lost response.
   - The lock held twice, and `flock` missing.
+  - A tmux or strain child still alive after the controller is killed does not stop a new controller taking the lock, and no launched child holds the lock descriptor.
   - A change between snapshot and re-read.
   - The halt file present at tick start, appearing before the claim marker, and appearing after it.
   - The breaker: three counted outcomes trip it and write the halt file with its cause; parks are skipped; a `complete`, `blocked` or `stalled` outcome ends a streak; another session's outcomes are ignored; a run ended with no counting outcome marker counts; a removed halt file starts a new window.
