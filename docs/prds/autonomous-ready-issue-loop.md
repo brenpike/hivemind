@@ -49,7 +49,7 @@ GitHub is the Lair's state and dashboard. The user steers through labels, park a
 
   An issue that fails the readiness check stays unclaimed and is named in the tick's queue report, with no new label. The Lair never applies `readiness:ready` itself.
 - **Injection.** An issue the injection scan flags is handed off before any strain starts and never runs.
-- **Labels.** On claim the issue moves to `readiness:implementation` with a marker comment naming the run. It moves to `readiness:done` only when GitHub shows the pull request merged, and to `readiness:needs-decision` on an answerable park. It gets a handoff, failed or review marker in the Lair's own label family. The Lair never uses `readiness:blocked` or `readiness:parked`.
+- **Labels.** On claim the issue moves to `readiness:implementation` with a marker comment naming the run. It moves to `readiness:done` only when GitHub shows the pull request merged, and to `readiness:needs-decision` on an answerable park. It gets the `lair:handoff`, `lair:failed` or `lair:review` label. The Lair never uses `readiness:blocked` or `readiness:parked`.
 - **Unattended runs.**
   - An unattended run never waits for input. Every stop is taken and journaled, or ends the run with a result naming its outcome.
   - The Lair learns of every run end, a crash or stall included, without a human.

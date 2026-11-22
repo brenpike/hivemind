@@ -6,7 +6,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 0
+rounds: 1
 clean_round: false
 ---
 
@@ -20,9 +20,9 @@ The first review, rounds 1 to 3, did not converge. After round 3 the user split 
 - [Solution design: Lair — Software Factory](solution-design.md)
 - [ADR-0045](../../adr/0045-lair-software-factory.md): the Lair software factory
 
-Stamps follow ADR-0046 decision 7, Blob stamps. The record written after round 1 stamps these three documents at the commit round 1 reviewed. The record that sets `verdict` `pass` re-stamps them at the commit its clean pass reviewed.
+Stamps follow ADR-0046 decision 7, Blob stamps. This re-review kept the first review's stamps under ADR-0046 decision 6, Re-review after an amendment, and they were empty; a record written with `verdict` `fail` keeps its stamps, so they stay empty after round 1. The record that sets `verdict` `pass` stamps these three documents at the commit its clean pass reviewed.
 
-The three part designs, [strain launch](strain-launch-design.md), the [merge lane](merge-lane-design.md) and [claim integrity](claim-integrity-design.md), are read as the text they supersede in the solution design.
+The three part designs, [strain launch](strain-launch-design.md), the [merge lane](merge-lane-design.md) and [claim integrity](claim-integrity-design.md), are read as the text they supersede in the solution design. They are not stamped: the stamp path rule admits no other file of this folder than the solution design and this record. That is bounded: each part design is frozen, and a change to one lands only with a dated Amendments entry in the solution design, which is stamped, so the change stales this record (solution design, opening paragraphs).
 
 Review rule:
 
@@ -33,12 +33,51 @@ Review rule:
 
 ## Rounds
 
-None yet.
+### Round 1
+
+- **Date:** 2026-11-22.
+- **Reviewed commit:** `9d5438ea2d82d379bedf134c3a13a595f946a7be`.
+- **Scope:** the whole PRD, solution design and ADR-0045, with the part designs read as the text they supersede.
+- **Planner pass:** reviewer `hivemind:cerebrate`, a fresh read-only pass with `Memory context: none`, covering every angle. Model: Claude Opus. It raised 31 findings, R1-1 to R1-31.
+- **Local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`. Model: the Codex tool's own default, which hivemind does not name (ADR-0042 decision 7), from another vendor than the planner pass's. It raised 1 finding, C1-1, high, a duplicate of R1-3.
+- **Result:** 5 high, 18 medium and 9 low, all new. The user answered the three questions under Decisions asked "1A 2A 3A". Every finding is disposed below, so none is open. The round raised new findings, so it is not clean, and a confirming round follows.
 
 ## Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
 | --- | --- | --- | --- | --- | --- |
+| R1-1 | 1 | B | high | fixed | Seams item 6 gave containment no tmux reach, so a strain on the default tmux server could run `tmux new-window` or `run-shell` outside its sandbox. Fixed per answer 1A: solution design, Seams between the part designs, item 6, hides every tmux socket of the Lair, with the Lair's window on a server of its own, and Verification strategy adds the tmux probe cases. |
+| R1-2 | 1 | B | high | fixed | The containment of `control/` had no building slice and no test, and macOS was unaddressed. Fixed per answer 1A: solution design, Seams item 6 (#604 builds it on Linux and macOS), with the containment probe cases under Verification strategy. |
+| R1-3 | 1 | B | high | fixed | Lifecycle stage 1's "outcome marker, then the labels" inverted the merge lane's Write order. Fixed: solution design, Seams item 8, Run-end write order, for every multi-write route, with the result file kept until the last marker and `gh pr ready` before the run-end mapping; Lifecycle stages 1, 2 and 3; the Failure modes row "A route stopped before its last marker"; and the write-boundary tests under Verification strategy. Claim integrity's order is superseded there. |
+| R1-4 | 1 | A | high | fixed | Seams item 1 named markers claim integrity's payload has no kind for. Fixed: solution design, Seams item 1, adds the kinds `fixup-start`, `review` and `exit`, each carrying a counting claim marker's nonce, the field mapping and the outcome values `no-pr`, `invalid-result` and `not-launched`. |
+| R1-5 | 1 | B | medium | fixed | No check stopped the Lair where containment was missing. Fixed per answer 1A: solution design, Seams item 6, the preflight probe `sandbox`, and the Failure modes row "Strain containment cannot be confirmed". |
+| R1-6 | 1 | B | medium | fixed | Strain launch's `lair:review` route of a delivery that did not complete could label a pull request the Lair never recorded. Fixed: solution design, Seams item 9, only a pull request that passes the Lair pull request checks other than the head. |
+| R1-7 | 1 | A | medium | fixed | The merge lane removed `lair:claimed` on a remediation run's answerable park, against claim integrity. Fixed: solution design, Seams item 10. |
+| R1-8 | 1 | A | medium | fixed | Items 2 and 3 left the budget precondition, the `not-launched` retry, the CI-red rule and the halt's effect on the review wait unreconciled with one remediation per pull request. Fixed: solution design, Seams items 2 and 3. |
+| R1-9 | 1 | B | medium | fixed | The merge lane ended an unchecked valid result `timed-out`, against strain launch's deferred write. Fixed: solution design, Seams item 11, with the merge lane's rule and its #608 test superseded and the replacing case under Verification strategy. |
+| R1-10 | 1 | B | medium | fixed | Item 4 lost the live-claim qualifier, the ended-claim rule and the outcome of an invalid result. Fixed: solution design, Seams item 4, and the Failure modes row "Invalid result". |
+| R1-11 | 1 | A | medium | fixed | The merged exit did not close the issue that strain launch requires closed. Fixed: solution design, Seams item 12, and the Lifecycle `readiness:done` bullet. |
+| R1-12 | 1 | B | medium | fixed | The merge lane's cache sat where a strain could write it, and the result-file assumption had no bound. Fixed per answer 1A: solution design, Seams item 6, the cache under `control/`, and the result file under strain launch's residual bounded by the merge lane's result checks. |
+| R1-13 | 1 | B | medium | fixed | A run's decisions could be lost at clean-up, and their trust was unstated. Fixed: solution design, Component "Decision digest and circuit breaker". |
+| R1-14 | 1 | B | medium | fixed | The park key had no builder, so a re-claim could not keep it stable. Fixed: solution design, Contract "Park record", the key built by the engine from the stop's identity, and the #607 and #609 test under Verification strategy. |
+| R1-15 | 1 | B | medium | fixed | Trust boundaries said only a user with write permission steers the Lair, though Bots, CI descriptions and any commenter reach it. Fixed: solution design, Trust boundaries, its reworded lead and two more channels. The PRD's user story is unchanged; the call is listed for veto. |
+| R1-16 | 1 | A | medium | fixed | ADR-0045 decisions 6 and 8 narrow ADR-0039 decisions 3 and 4 and ADR-0026 decision 3 with no slice to record it. Fixed: solution design, Decisions, the unattended-level bullet assigns #607. ADR-0045's Status line is unchanged. |
+| R1-17 | 1 | A | medium | fixed | Seam order claimed no link blocks #604, #605 and #606. Fixed: solution design, Seam order, states the native links read from GitHub and #606's edge on #605. Pending overlord action per answer 3A: add `#605` to #606's Dependencies and the native link. |
+| R1-18 | 1 | A | medium | fixed | A consumer project's own protected-path list could let a docs pull request take the auto tier. Fixed per answer 2A: solution design, Component "Merge lane and auto tier", the docs directories in the floor built by #605, and Seam order, #623's overlap with #608 and #605. |
+| R1-19 | 1 | A | medium | deferred | The readiness check's input mode, the snapshot and trunk commit passed by the Lair with no GitHub read of its own, is a requirement on #615, stated under the solution design's Seam order, cross-epic seams. Deferred to #615, which builds the check. |
+| R1-20 | 1 | A | medium | fixed | The slices carried no `## Design` block for the readiness check. Fixed: solution design, Seam order, states each block's form. Pending overlord action per answer 3A: write the block into #604 to #612 after the clean round, before the pull request leaves draft. |
+| R1-21 | 1 | A | medium | fixed | A part design could change with no stamp staling. Fixed: solution design, opening paragraphs, each part design frozen and changed only through a dated Amendments entry, and this record's Reviewed documents. |
+| R1-22 | 1 | A | medium | fixed | B3-9's Note did not name #604's stale acceptance criterion. Fixed: B3-9's Note under History. Pending overlord action per answer 3A: the #604 acceptance-criteria edit stated in the solution design's Seam order. |
+| R1-23 | 1 | B | low | fixed | Claim integrity's and strain launch's fallbacks for a `Stop` hook that does not fire disagreed. Fixed: solution design, Seams item 13, and the Stall and `Stop` hook rows of Failure modes. |
+| R1-24 | 1 | A | low | fixed | The admission sentence said a Dependencies ref is not read, though the readiness check reads it. Fixed: solution design, Component "Controller tick and admission", and the matching Decisions bullet. |
+| R1-25 | 1 | A | low | fixed | Two Decisions bullets named no P20 condition, and the containment bullet cited no amendment. Fixed: solution design, Decisions. |
+| R1-26 | 1 | B | low | fixed | Existing-path coverage and Verification strategy did not point to the part designs, and crash and stall tests had no one home. Fixed: solution design, both sections, with `tools/test_lair_tick.sh` as that home. |
+| R1-27 | 1 | A | low | fixed | One run had two names. Fixed: solution design, Seams item 2, declares remediation run, used throughout. |
+| R1-28 | 1 | A | low | fixed | The glossary's Lair entry omitted the remediation strain, and its Park entry pushed with no commits. Fixed: `CONTEXT.md`, the **Lair** and **Park** entries. |
+| R1-29 | 1 | A | low | fixed | The PRD Labels criterion called the labels markers. Fixed: the PRD, Acceptance Criteria, Labels, wording only. |
+| R1-30 | 1 | A | low | rejected | The finding contested the review rule "A round never runs two passes of one model". The rule stays: the two passes run different models from different vendors, the planner pass Claude Opus through `hivemind:cerebrate` and the tool pass the Codex tool's own model through the `codex-plugin` preset. This record now names each pass's reviewer and model under Rounds. |
+| R1-31 | 1 | A | low | recorded | The part designs' Assumptions about #630 still say the strain settings carry no merge key. Recorded: ADR-0045 decision 4 as amended, the merge keys set empty, governs, in [solution-design.md](solution-design.md), Contract "Lair-written settings". |
+| C1-1 | 1 | review | high | fixed | Lifecycle stage 1 recorded the outcome marker before the labels, against the merge lane's Write order. A duplicate of R1-3, fixed by the same change: solution design, Seams item 8. |
 
 ## Decisions taken, listed for veto
 
@@ -79,7 +118,35 @@ The parent design's own calls, listed for veto under A3-12:
 | The release-train decisions are deferred with full scope to #606, so #606 and #612 are not ready until a dated Amendments entry settles them | no | no | no | no |
 | #608's admission needs the readiness check from #615, recorded in Seam order and left for the maintainer to link | no | no | no | no |
 
+Round 1's calls, each in the solution design:
+
+| Decision | Scope change | ADR amendment | Trust, credential or merge path | Irreversible |
+| --- | --- | --- | --- | --- |
+| R1-4, Seams item 1: the kinds `fixup-start`, `review` and `exit`, the field mapping onto claim integrity's payload, the extra outcome values, and the merge lane's start-marker `kind` not carried | no | no | no: claim integrity's signing and counting rules are unchanged | no |
+| R1-6, Seams item 9: strain launch's `lair:review` route of a delivery run that did not complete applies only to a pull request that passes the Lair pull request checks other than the head | no | no | no: it narrows which pull request a route labels; no merge rule changes | no |
+| R1-7, Seams item 10: a remediation run's answerable park keeps `lair:claimed`, and the claim still ends at its end marker | no | no | no | no |
+| R1-8, Seams items 2 and 3: a landed start marker spends the one remediation; a `not-launched` end goes to `lair:review`; the CI-red rule never starts a second run; the issue's budget no longer gates a remediation; a due dispatch under a halt does not block the review wait | no | no | no: no merge gate changes; each reading sends more pull requests to batch review, never fewer | no |
+| R1-9, Seams item 11: a valid result whose reads cannot be made yet is never ended `timed-out` | no | no | no | no |
+| R1-10, Seams item 4: the live-claim qualifier, a remediation run end under an ended claim neither counts nor ends a streak, and an invalid result is `invalid-result`, never a crash | no | no | no | no |
+| R1-11, Seams item 12: the merged exit closes the issue before its exit marker | no | no | no | no: a closed issue can be reopened |
+| R1-13: run end copies each run's decisions into the session digest before clean-up, trusted by its outcome marker | no | no | no | no |
+| R1-14, Contract "Park record": the engine builds the park key from the stop's identity | no | no | no | no |
+| R1-15, Trust boundaries: the reworded lead and the two channels from Bots, CI check descriptions and any commenter | no: the PRD's user story is unchanged | no | no: it names channels strain launch's Decisions already decided and changes no boundary | no |
+| R1-16, Decisions: #607 records ADR-0045 decision 6's narrowing of ADR-0039 decisions 3 and 4 and decision 8's narrowing of ADR-0026 decision 3 in ADR amendments | no | no: accepted ADR-0045 decisions 6 and 8 already decide both narrowings; #607 records them, as strain launch assigns it ADR-0037's | no | no |
+| R1-23, Seams item 13: claim integrity's idle signal takes strain launch's activity rule | no | no | no | no |
+| R1-27, Seams item 2: one term, remediation run | no | no | no | no |
+| R1-18, Seam order: #608 builds the readiness-check call at claim and #605 the docs floor, so #623 builds neither again and keeps its acceptance tests | no: no PRD scope moves; #623's text in ADR-0046 and the idea-to-ready design is left to that epic | no | no | no |
+| R1-17, Seam order: #606 after #605, with its native link and Dependencies ref | no | no | no | no |
+| Answer 1A on macOS: no ADR-0045 amendment is added, because the `sandbox-exec` profile denies `control/` and the tmux sockets but does not hide the Lair's processes, so the 2026-11-22 residual on process reach still holds as written | no | no: the accepted residual stands unchanged | no | no |
+| R1-29: the PRD Labels criterion names the three `lair:*` labels | no: wording only; the criterion keeps its meaning | no | no | no |
+| R1-28: the **Lair** and **Park** entries in `CONTEXT.md` | no | no | no | no |
+
 ## Decisions asked
+
+- **Round 1 questions.** Tier A, asked after this design's review round 1. The user answered "1A 2A 3A" on 2026-11-22.
+  - Q1 (R1-1, R1-2, R1-5, R1-12), containment. Answer A: #604 builds per-platform containment. On Linux, the strain sandbox that hides the Lair's processes also hides `control/` and every tmux socket, and the Lair's own window runs on its own tmux server no strain can reach. On macOS, a `sandbox-exec` profile denies `control/` and the Lair's tmux sockets. A #608 preflight probe `sandbox` makes the Lair claim nothing when containment cannot be confirmed, stopping with `strain_env_preflight`, probe `sandbox`. The merge lane's cache moves under `control/`. Strain launch's "tmux global environment" residual does not apply under containment. #604's probe cases, on each supported platform: from inside a strain, `tmux -S <socket> list-sessions` and `new-window` fail for each Lair socket, and Bash cannot read `control/marker.key`, append to `control/halt` or delete it.
+  - Q2 (R1-18), docs pull requests and the auto tier. Answer A: `docs/prds/`, `docs/initiatives/` and `docs/adr/` go into the auto-tier script's built-in floor, built by #605, so ADR-0046's "A docs pull request never takes the Lair's auto tier (#623)" holds in every consumer project. #623's overlap with #608, the readiness-check call at claim, is recorded in Seam order with who builds it.
+  - Q3 (R1-17, R1-20, R1-22), issue-body edits. Answer A: the edits are made after the clean round, before the pull request leaves draft: #604's stale acceptance criteria; #606's Dependencies gaining #605, with the native link; and the `## Design` blocks of #604 to #612. The solution design's Seam order states this obligation. The overlord makes these edits; they are still to be made.
 
 - **Key containment.** Answered A by the user on 2026-11-22. Both approved ADR-0045 residual texts stand unchanged. #604 keeps every Lair strain and remediation strain out of the `control/` folder of the Lair's state root and, on Linux, runs each in a sandbox with its own process namespace. Strain launch's statement that a strain can read any file the user can read holds outside that folder. The solution design states it under Seams between the part designs, item 6.
 - **Stalled outcomes.** Answered A by the user on 2026-11-22. The PRD's Stop controls criterion counts stalled outcomes: "Three consecutive failed, crashed, stalled or timed-out outcomes halt the Lair with a stated cause. Parks and review waits do not count." This matches the ADR-0045 amendment of 2026-11-22, more causes stop the Lair.
@@ -224,7 +291,7 @@ The dispositions below were set on 2026-11-22. A finding a part design owns take
 | B3-6 | high | The merge-result failure-mode row maps `merge-approved.sh` results wrongly. | A3-2 | fixed: merge-lane-design.md, Routing table and Failure modes |
 | B3-7 | high | No defined source for merge settings in the tick. | A3-3 | fixed: merge-lane-design.md, Merge settings source and Merge environment; completed in round 1 by M1-A2, M1-B10 and M1-B15 |
 | B3-8 | high | Auto-tier inputs (protected-path list, local-review-skipped evidence, bump type) are undefined or untrusted. | A3-10 | fixed: merge-lane-design.md, Auto-tier script, Git and tool reads and Trust boundaries; completed in round 1 by M1-B1, M1-B11, M1-B12 and M1-B17, in round 2 by M2-B4, M2-B6, M2-B12 and M2-B14, in round 3 by M3-A5, M3-B2 and M3-B4, and in round 4 by M4-C4 and M4-C5 |
-| B3-9 | high | Deny rules cannot deliver "a strain cannot merge, change labels or edit the issue" (`gh api`, `curl`, `bash -c`, committed allows), so an injected strain could admit or answer other issues. | | fixed: the claim it attacks is removed by [strain launch](strain-launch-design.md)'s changes 1, 2 and 9 (Decisions, Changes to shared documents), applied in this pull request to ADR-0045 decision 4, the PRD's Merges bullet and ADR-0045's Residuals: deny rules are a barrier against a strain's mistake, not full containment, and a prompt-injected strain stays a named residual. The strain launch review record's `recorded` disposition is not kept, because a recorded high counts as open under ADR-0046 decision 7 |
+| B3-9 | high | Deny rules cannot deliver "a strain cannot merge, change labels or edit the issue" (`gh api`, `curl`, `bash -c`, committed allows), so an injected strain could admit or answer other issues. | | fixed: the claim it attacks is removed by [strain launch](strain-launch-design.md)'s changes 1, 2 and 9 (Decisions, Changes to shared documents), applied in this pull request to ADR-0045 decision 4, the PRD's Merges bullet and ADR-0045's Residuals: deny rules are a barrier against a strain's mistake, not full containment, and a prompt-injected strain stays a named residual. The strain launch review record's `recorded` disposition is not kept, because a recorded high counts as open under ADR-0046 decision 7. #604's acceptance criterion "A strain cannot merge a pull request, change labels or edit the issue" still states the removed claim; its edit is pending overlord action after the clean round, before the pull request leaves draft (solution design, Seam order; R1-22) |
 | B3-10 | medium | A claim is several writes, and the partial states and the sweep are undefined. | | fixed: [Claim sequence](claim-integrity-design.md#claim-sequence) and [Design invariants](claim-integrity-design.md#design-invariants) (per the [claim integrity review record](claim-integrity-review-record.md), Inherited findings) |
 | B3-11 | medium | The single-instance lock scope is not stated. | | fixed: [Single-instance lock](claim-integrity-design.md#single-instance-lock), [Lair state root](claim-integrity-design.md#lair-state-root) and [Design invariants](claim-integrity-design.md#design-invariants) (per the [claim integrity review record](claim-integrity-review-record.md), Inherited findings) |
 | B3-12 | medium | Session end waits for "branch pushed", which can block forever, and run activity is undefined. | | fixed: the opening list of replaced parent parts now holds the Lifecycle stage 1 sentence; Lifecycle steps 4 and 5 and Strain result and liveness ("Run activity") stand (in [strain-launch-design.md](strain-launch-design.md), per the [strain launch review record](strain-launch-review-record.md), Round 3 findings owned by #630) |
