@@ -49,7 +49,7 @@ GitHub is the Lair's state and dashboard. The user steers through labels, park a
 
   An issue that fails the readiness check stays unclaimed and is named in the tick's queue report, with no new label. The Lair never applies `readiness:ready` itself.
 - **Injection.** An issue the injection scan flags is handed off before any strain starts and never runs.
-- **Labels.** On claim the issue moves to `readiness:implementation` with a marker comment naming the run. It moves to `readiness:done` only when GitHub shows the pull request merged, and to `readiness:needs-decision` on an answerable park. A handed-off, failed or batch-review issue gets `lair:handoff`, `lair:failed` or `lair:review`. The Lair never uses `readiness:blocked` or `readiness:parked`.
+- **Labels.** On claim the issue moves to `readiness:implementation` with a marker comment naming the run. It moves to `readiness:done` only when GitHub shows the pull request merged, and to `readiness:needs-decision` on an answerable park. A handed-off issue gets `lair:handoff`, a failed one `lair:failed`, and one sent to batch review `lair:review`. The Lair never uses `readiness:blocked` or `readiness:parked`.
 - **Unattended runs.**
   - An unattended run never waits for input. Every stop is taken and journaled, or ends the run with a result naming its outcome.
   - The Lair learns of every run end, a crash or stall included, without a human.
@@ -68,7 +68,7 @@ GitHub is the Lair's state and dashboard. The user steers through labels, park a
 - **Stop controls.**
   - Setting the halt switch stops new claims within one tick, and strains in flight finish.
   - Unsetting auto-merge stops merges from the next tick.
-  - Three consecutive failed, crashed, stalled or timed-out outcomes halt the Lair with a stated cause. Parks and review waits do not count.
+  - Three consecutive failed, crashed, stalled, timed-out or invalid-result outcomes halt the Lair with a stated cause. Parks and review waits do not count.
 - **Budgets and recovery.**
   - A run over its wall-clock or agent-call budget ends and its issue is marked failed or parked.
   - On start the Lair resolves every claimed issue that has no live strain and no pull request to failed, never back to ready.

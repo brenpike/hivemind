@@ -141,3 +141,7 @@ This adds a residual to Residuals. The Lair reads its marker key into its own pr
 ## Amendment 2026-11-22: more causes stop the Lair
 
 This amends decision 17 (Stop controls). Besides the circuit breaker, these causes halt the Lair: the injection scan fails three times in a row in one Lair session; a comment by the Lair's login that starts like a marker does not count, as when it was faked or edited, unless it is a well-formed marker that names another key, which halts nothing; an issue carries `lair:claimed` with no counting claim marker, as when its marker was deleted; and a Lair issue, as the 2026-11-21 amendment on orphans defines it, has more comments than the Lair reads, 10 pages of 100. The circuit breaker counts a stalled outcome as a failure, beside failed, crashed and timed-out ones. Status remains accepted.
+
+## Amendment 2026-11-22: the circuit breaker counts invalid results
+
+This amends decision 17 (Stop controls). The circuit breaker also counts an `invalid-result` outcome, a run that ended with no valid result, as a failure, beside failed, crashed, stalled and timed-out ones. The user took this on 2026-11-22, answer A to Q1 after design review round 3 of the Lair's solution design. Status remains accepted.
