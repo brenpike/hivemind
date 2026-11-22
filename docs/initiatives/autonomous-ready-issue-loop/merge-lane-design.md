@@ -40,7 +40,7 @@ Built by #605, called by #608's tick under the single-instance lock. Each tick, 
 2. **Held by review.** A review marker exists for this pull request (Contracts and seams). The Lair never merges it again; the step skips it.
 3. **Fix-up in flight.** A fix-up run on this pull request has a start marker and no end. The step skips it, because the run will move the head.
 4. **Draft.** The pull request is a draft. The step routes it to the draft exit.
-5. **Pinned head.** The pinned head is the head the Lair last recorded for this pull request. It must equal GitHub's head. Otherwise the pull request goes to batch review with reason `unrecorded-head`.
+5. **Pinned head.** The pinned head is the head the Lair last recorded for this pull request. It must equal GitHub's head. Otherwise the pull request goes to batch review with reason `unrecorded-head`. On the same read, every Lair pull request check (Contracts and seams) except the head must still hold: same repository, not a fork, trunk base, the Lair's own login as author, and the recorded branch. A base retargeted away from the trunk, or any other mismatch, sends the pull request to batch review with reason `identity-changed`.
 6. **Review wait.** When 3600 seconds have passed since the `ended_at` of the run that recorded the pinned head, the pull request goes to batch review with reason `review-wait-elapsed`.
 7. **Auto tier.** The auto-tier script runs on the pinned head. A `review` result sends the pull request to batch review with its reason codes. A script error means no merge this tick.
 8. **Merge settings.** The step reads the two user settings files. A file that does not parse means no merge this tick.
@@ -125,7 +125,7 @@ A pull request is a Lair pull request only when the Lair recorded it in the run-
 - its head branch equals the result's `branch`;
 - its head commit equals the result's `head`.
 
-Any failure makes the result invalid (Lifecycle). The Lair never merges, labels or holds the lane for a pull request it did not record.
+Any failure makes the result invalid (Lifecycle). The Lair never merges, labels or holds the lane for a pull request it did not record. The base can be changed after recording, so step 5 of the merge-lane step checks these again on every tick.
 
 ### Pinned head
 
@@ -222,6 +222,7 @@ This section replaces the merge-settings part of solution-design.md's channel li
   - the bump is computed from version-file values, not from commit messages, plan fields or labels;
   - the local-review proof is a head the Lair recorded from a checked result.
 - **The pinned head.** A head no Lair run recorded never merges a Lair pull request.
+- **The recorded identity.** A pull request whose base, repository, author or branch no longer matches what the Lair recorded never merges; step 5 rechecks them on every tick.
 - **Residual: under-declared bump.** The bump check sees the version a pull request declares, not its real compatibility impact. A breaking change shipped with a minor bump passes it. The protected-path list is the control for compatibility surfaces.
 - **Residual: a compromised strain.** It can still report a false local-review head if it subverts #630's fixed result script. The head must still pass the Lair pull request checks.
 - **Residual: the interactive watch.** A user who runs the interactive watch on a Lair pull request merges under ADR-0044 unchanged, outside the auto tier.
@@ -283,6 +284,7 @@ These rows replace "Merge refused", "CI red" and "Issue edited after claim" in s
 | Malformed settings file | A user settings file does not parse, or its `env` or a merge value has the wrong type. | No merge this tick. The queue report names the file. No label changes. |
 | Merge-script error | `MERGE_ERROR=`, a non-zero exit, no line, or an unknown line. | No change. Retried next tick. The review wait bounds the retries. |
 | Unrecorded or moved head | GitHub's head differs from the pinned head, or the script prints `MERGE=wait:head-moved`. | No merge. With no fix-up run in flight: batch review, reason `unrecorded-head`. |
+| Changed identity | On a tick, the pull request's base is not the trunk, or its repository, author or branch no longer matches the Lair pull request checks. | No merge. Batch review, reason `identity-changed`. |
 | Invalid result | The schema check fails, or a Lair pull request check or the ancestor check fails. | Delivery: `lair:failed`, outcome `invalid-result`, the pull request unrecorded. Fix-up: batch review, reason `fixup-failed`. Both count toward the breaker. |
 | Failed or parked fix-up run | The fix-up end marker's outcome. | Batch review, reason `fixup-failed` or `fixup-parked`. A failure counts toward the breaker; a park does not. |
 | Lost settle cache | No cache entry, or one for another head. | A new `re-arm` snapshot. The quiet period starts again. The merge is delayed by at least 600 seconds, never taken early. A lost merge-pending mark can let one more merge call run for a queued head, with the same `--match-head-commit`. |
@@ -401,6 +403,7 @@ The tests follow the PRD's [Testing Decisions](../../prds/autonomous-ready-issue
   - Merge settings: the local file winning; the user file used alone; an empty local value overriding the user's; committed settings ignored; a key in the Lair's environment ignored; an unparseable file meaning no merge; the clean environment holding only the allowed names.
   - Settle check: the first sighting; `UNCHANGED` under 600 seconds and at 600 seconds, on an injected clock; each resetting marker; a lost cache; `CHECK_ERROR`.
   - Pinned head: equal, moved, unrecorded, and a fix-up head that is not a descendant.
+  - Recorded identity after recording: a base retargeted away from the trunk, giving `identity-changed` and no merge call.
   - Lair pull request checks: a fork, a wrong base, another author, a branch mismatch and a head mismatch.
   - Issue edit before merge, the draft and closed-unmerged exits, and the review wait.
   - Fix-up runs: the CI-red rule; the review-finding cap; fix-up run outcomes and the breaker count; the halt and the breaker stopping fix-up runs while merges continue.
