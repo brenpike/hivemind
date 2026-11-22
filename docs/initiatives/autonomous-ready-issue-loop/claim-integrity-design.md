@@ -248,7 +248,7 @@ A decision that is not ADR-worthy names the [P20](../../engineering-principles.m
 - **Markers are append-only; the outcome is a separate outcome marker, not an edit of the claim marker.** Replaces the solution design's outcome in the claim marker, since an edited marker never counts. Implements ADR-0045 decision 2. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **Claim write order: claim marker, then labels, then spawn; run end: outcome marker, then labels.** Implements ADR-0045 decisions 2 and 16 (B3-10). Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **A claim that stopped partway always moves forward to `crashed`, never back to ready and never retried.** Extends ADR-0045 decision 17 to partial claims. Not ADR-worthy: fails P20's hard-to-reverse condition.
-- **The sweep covers only Lair issues: a `lair:*` label or a counting claim marker.** Narrows ADR-0045 decision 17's orphan rule so a human's `readiness:implementation` issue is never failed. Not ADR-worthy: fails P20's hard-to-reverse condition.
+- **The sweep covers only Lair issues: a `lair:*` label or a counting claim marker.** Narrows ADR-0045 decision 17's orphan rule so a human's `readiness:implementation` issue is never failed. Answered by the user on 2026-11-21, through a proposed ADR-0045 amendment to decision 17 under Changes to shared documents.
 - **The lock covers one repository for one account on one machine, through `flock`.** Implements ADR-0045 decision 2 (B3-11). Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **One snapshot per candidate, a Lair-side `check-error` state, and at most 5 checks of 60 seconds each per tick.** Implements the ADR-0045 2026-11-21 amendment (B3-16). The limits are tuning values. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **The scan verdict is a token file; only the exact clean token passes, malformed is suspect, and missing is an error.** Implements ADR-0045 decision 10. Not ADR-worthy: fails P20's hard-to-reverse condition.
@@ -267,6 +267,14 @@ None of these changes is applied in this pull request.
 
   ```markdown
   - **A session that escapes its containment can forge markers.** Marker comments count only when signed with a key no Lair-started session can read. A session that escapes the containment of the Lair-written settings can read that key and sign claim, outcome, park and handoff markers that count. The user chose signed markers with this residual on 2026-11-21.
+  ```
+
+- **Target:** `docs/adr/0045-lair-software-factory.md`, as a new last section after the 2026-11-21 admission amendment. **Answer:** the sweep covers only Lair issues, through an ADR-0045 amendment, chosen by the user on 2026-11-21. **Exact proposed text:**
+
+  ```markdown
+  ## Amendment 2026-11-21: the start-up sweep covers only Lair issues
+
+  This amends decision 17 (Stop controls). The start-up sweep treats an issue as an orphaned claim only when it carries a `lair:*` label or a counting claim marker. Such an issue in `implementation` with no live strain and no PR is marked failed, never returned to ready. An issue in `implementation` with neither is not the Lair's, and the sweep leaves it alone. Without this rule, the sweep would fail an issue a person moved to `implementation` by hand. Decision 17's other stop controls stand unchanged. Status remains accepted.
   ```
 
 - **Target:** `docs/initiatives/autonomous-ready-issue-loop/solution-design.md`, section Amendments, as a new paragraph after the existing one. Decided for the user and listed for veto. **Exact proposed text:**

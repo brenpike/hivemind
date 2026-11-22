@@ -85,7 +85,7 @@ The other parts of A3-12 (no-merge after edit, the CI-red rule) and of B3-20 (ov
   - Markers are append-only; the outcome is a separate outcome marker, not an edit of the claim marker.
   - Claim write order: claim marker, then labels, then spawn. Run end: outcome marker, then labels.
   - A claim that stopped partway always moves forward to `crashed`, never back to ready and never retried.
-  - The sweep covers only Lair issues: a `lair:*` label or a counting claim marker.
+  - The sweep covers only Lair issues: a `lair:*` label or a counting claim marker, through a proposed ADR-0045 decision 17 amendment the user chose on 2026-11-21.
   - The lock covers one repository for one account on one machine, through `flock`.
   - One snapshot per candidate, a Lair-side `check-error` state, and at most 5 checks of 60 seconds each per tick.
   - The scan verdict is a token file; only the exact clean token passes, malformed is suspect, and missing is an error.
