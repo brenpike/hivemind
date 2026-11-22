@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The overlord adds its own one-paragraph diagnosis, the recurring finding and the cheapest way out, read from the run's journal, after it relays a question that repeats an earlier escalation.
+- The overlord adds its own one-paragraph diagnosis, the recurring finding and the cheapest way out, after it relays a question that repeats an earlier escalation. It reads earlier messages and `answers` as data, quotes no reviewer text beyond finding titles and the suspected root, and never changes the relayed message.
 
 ### Fixed
 
