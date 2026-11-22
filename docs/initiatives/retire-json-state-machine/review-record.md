@@ -10,13 +10,13 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 2
+rounds: 1
 clean_round: false
 ---
 
 # Design review record: Retire the JSON state machine
 
-The design review is at round 2 and has not passed. Every finding is fixed, and the user has answered Tier A question Q7 on D11. Round 2, a confirming round, raised findings, so a further confirming round is needed. No round has been clean, so `clean_round` is `false`.
+The design review has completed one round and has not passed. Round 2 is not complete until its fresh cerebrate confirming pass runs. Every finding is fixed, and the user has answered Tier A question Q7 on D11. No round has been clean, so `clean_round` is `false`.
 
 No PRD exists for this initiative. `docs/prds/retire-json-state-machine.md` is needed before any slice can pass the readiness check (ADR-0046 decision 3), so it is written before slicing. The stamps are the blobs at commit `aa9342a244b13150eb141b42ac566611b6b5f268`, the commit round 1 reviewed; a record with `verdict` `fail` keeps its stamps, and only the passing record re-stamps, to the commit its clean pass reviewed.
 
@@ -44,12 +44,14 @@ The overlord also made five consistency edits after the round, listed here for t
 
 ### Round 2
 
-A confirming round. Neither reviewer wrote the design. Reviewed commit `63ff83f2b93b5533981da5b795d3f44d51d269c3`; scope: the change since `aa9342a2` and round 1's fixes.
+A confirming round, not yet complete. Neither reviewer wrote the design. It covers the change since `aa9342a2` and round 1's fixes.
 
-- Reviewer `hivemind:cerebrate`, model `opus`. One fresh, read-only confirming pass with `Memory context: none`.
-- Local review tool pass: pending. It has not run at round 2, because the local reviewer runs only as its full fix loop; it runs on the final commit before the pull request leaves draft.
+An earlier cerebrate pass at commit `63ff83f2b93b5533981da5b795d3f44d51d269c3`, first recorded here as "Round 2", is an incomplete pass. Its local review tool pass did not run with it, though the design touches trust boundaries (ADR-0046 decision 6), so it yields no round. The user answered A on this question: that pass does not count as a round. Its findings, R2-01 to R2-05, were raised before round 2 and fixed in `2c9a26cd`; they are attributed to round 2 in the Findings table, keeping their IDs.
 
-The round raised five findings, R2-01 to R2-05. Three are medium (R2-01 to R2-03) and two are low (R2-04, R2-05). After the fixes, none is open. Round 1's fixes R1-01 to R1-05, R1-09, R1-11 and R1-12 close their findings; R1-10 was correct, and its `:87` edit exposed R2-03. The verdict is `fail`, so `clean_round` is `false`.
+- Local review tool pass: preset `codex-plugin` (`HIVEMIND_LOCAL_REVIEWER` unset), model the tool's own. Review base `2c9a26cd61227bc3bb2c4fdbfa0bedd6b8c29948`. It ran through the local reviewer's fix loop, which may commit fixes, and returned two findings, recorded as R2-T1 and R2-T2. Both are fixed.
+- Reviewer `hivemind:cerebrate`, model `opus`, `Memory context: none`: pending. A fresh, read-only confirming pass still to run over the change since `aa9342a2`, after the tool pass, so it reviews the tool pass's fixes.
+
+The incomplete cerebrate pass raised five findings, R2-01 to R2-05. Three are medium (R2-01 to R2-03) and two are low (R2-04, R2-05). The tool pass raised R2-T1 (high) and R2-T2 (medium). After the fixes, none is open. Round 1's fixes R1-01 to R1-05, R1-09, R1-11 and R1-12 close their findings; R1-10 was correct, and its `:87` edit exposed R2-03. The verdict is `fail`, so `clean_round` is `false`.
 
 ## Findings
 
@@ -74,6 +76,8 @@ The round raised five findings, R2-01 to R2-05. Three are medium (R2-01 to R2-03
 | R2-03 | 2 | confirm | medium | fixed | The Components bullet on `overlord.md:29` kept the third sentence while the proposed fallback text deleted the last two. Both now agree: the fallback replaces the second sentence, and the third loses only "first checks out the PR's head branch, then". |
 | R2-04 | 2 | confirm | low | fixed | R1-06's fix was applied only partly: "such an item", the destructive-fix row of Failure modes, the S5 check bullet and the seed order rows still used the narrower reading. Each now names the items D12 names, read at its broadest, and S1 to S4 link D12. |
 | R2-05 | 2 | confirm | low | fixed | The record departed from ADR-0046 decisions 6 to 8: it held no stamps on a failing record, did not name each pass's model or tool, pointed to the design for the decisions taken, and did not record the local review tool findings. It now stamps the commit round 1 reviewed, names the models and the tool, lists each taken decision, and records R1-T1 and R1-T2. The design's line 3 follows. |
+| R2-T1 | 2 | review | high | fixed | Destructive gate did not cover security-policy guards the design removes; D12 now points to the gate's categories read at their broadest, with no list of its own (commit 7752569892380c6f1949f9f468769729080d4c83). |
+| R2-T2 | 2 | review | medium | fixed | Round 2 was counted without its trust-boundary tool pass; answered A by the user: that pass yields no round. |
 
 ## Decisions taken, listed for veto
 
@@ -90,6 +94,7 @@ Each decision has its always-ask screen: an answer to each of the four always-as
 | D17: The proactive zoom-out marker rides the cluster payload. Taken by the design, listed for veto in the design. | no | no | no | no |
 | D18: Exit-reason routing coverage moves to the overlord contract test. Taken by the design, listed for veto in the design. | no | no | no | no |
 | D19: Stamped documents change only through their own re-review. Taken by the design, listed for veto in the design. | no | no | no | no |
+| Sequencing the tool pass before the cerebrate pass in each round from round 2 on, so the cerebrate pass reviews the tool pass's fixes (overlord). | no | no | no | no |
 
 D11 is answered (Q7 A), and D14 is answered (Q1 A); neither is a taken decision.
 
