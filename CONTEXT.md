@@ -90,7 +90,7 @@ _Alias_: trivial fast path (TFP)
 _Avoid_: quick path, shortcut
 
 **Instinct**:
-A permanent, named delivery path for a non-Reflex `standard-delivery` request, beside the script engine. The overlord drives it by judgment — no workflow script, no **Run Ledger**, no state-machine gating. Pairs with **Reflex**: Reflex is the trivial fast path, Instinct the full delivery done by intent. It names what every run must have (a plan, a **Working Branch**, delegated edits, **Molt** commits and the delivery gates) and leaves order to judgment; not a step sequence. It is also the fallback for a refused or failed `standard-delivery` engine run. The path choice and the fallback rules live in `plugin/agents/overlord.md` (`## Engine`, `## Instinct`) and ADR-0039.
+A permanent, named delivery path for a non-Reflex `standard-delivery` request, beside the script engine. The overlord drives it by judgment — no workflow script, no **Run Ledger**, no state-machine gating. Pairs with **Reflex**: Reflex is the trivial fast path, Instinct the full delivery done by intent. It names what every run must have (a plan, a **Working Branch**, delegated edits, **Molt** commits and the delivery gates) and leaves order to judgment; not a step sequence. It is also the fallback for a refused or failed `standard-delivery` engine run. A started run the **Guide** launched is the exception: when it fails or ends blocked it returns to the **Guide** (ADR-0046). The path choice and the fallback rules live in `plugin/agents/overlord.md` (`## Engine`, `## Instinct`) and ADR-0039.
 _Avoid_: light path (the placeholder name), intent-driven fallback (the degraded mode of a ledgered run), manual mode
 
 **Session Facts**:
@@ -388,7 +388,7 @@ The review of an **Initiative**'s **PRD**, **Solution Design** and ADRs before t
 _Avoid_: plan interrogation (which interviews the user), **Adaptation Cycle** (which reviews a code diff), design pass
 
 **Review Record**:
-The committed outcome of a **Design Review**, at `docs/initiatives/<slug>/review-record.md`, shipped in the same pull request as the **Solution Design**. It stamps the **PRD**, the **Solution Design** and every ADR its docs pull request adds or edits, each by its git blob id, and records the verdict, the open findings by severity, the rounds, every finding's disposition, the decisions taken (listed for veto) and the decisions asked (with the user's answer). Any later edit to a stamped document makes it stale until a review of the change re-stamps it. Its authority is a human-reviewed merge (ADR-0046). Only the design review's record step writes or re-stamps it; a validation fix-round commit and a pr-feedback-remediation wave commit refuse it in code.
+The committed outcome of a **Design Review**, at `docs/initiatives/<slug>/review-record.md`, shipped in the same pull request as the **Solution Design**. It stamps the **PRD**, the **Solution Design** and every ADR its docs pull request adds or edits, each by its git blob id at the commit a review pass read, and records the verdict, the open findings by severity, the rounds, every finding's disposition, the decisions taken (listed for veto) and the decisions asked (with the user's answer). Any later edit to a stamped document makes it stale until a review of the change re-stamps it. Its authority is a human-reviewed merge (ADR-0046). Only the design review's record step writes or re-stamps it; a validation fix-round commit and a pr-feedback-remediation wave commit refuse it in code.
 _Avoid_: review log, **Fix Ledger** (which tracks a pull request's review findings), **Decision Journal**
 
 **Readiness Check**:
@@ -498,7 +498,7 @@ _Avoid_: degraded mode, manual mode, safe mode
 - A **Workflow Router** selects exactly one **Workflow Definition** for a request, or routes to the **Exploratory Intent Session** when no concrete workflow matches; outside **Instinct**, the **Overlord** then executes that definition's states, advancing only via the **Transition Engine** and recording progress in the **Run Ledger**
 - A **Reflex** (trivial fast path) bypasses the **Workflow Router** and the **Run Ledger** entirely — the **Overlord** drives the short delivery tail by intent, just as it skips the **Cerebrate**
 - **Instinct** follows the **Workflow Router** (it is taken only for `standard-delivery`) but bypasses the **Run Ledger** and the **Transition Engine** — unlike a **Reflex**, it keeps the **Cerebrate** plan, the **Working Branch**, and every delivery gate
-- **Instinct** is the fallback for a refused or failed `standard-delivery` script-engine run; its rules live in ADR-0039
+- **Instinct** is the fallback for a refused or failed `standard-delivery` script-engine run, except a started run the **Guide** launched; its rules live in ADR-0039 and ADR-0046
 - **Intent-Driven Fallback** is the floor beneath every **Workflow Definition**: when the deterministic substrate is invalidated, execution degrades to judgment rather than failing
 - **Run Ownership** (RUN-OWNERSHIP-01) is enforced by worktree isolation; a **Hatchery** reads child **Run Ledgers** read-only and never mutates them (consistent with ADR-0007)
 - The declarative **Workflow Definition** + **Run Ledger** are JSON (parsed by `jq`); all inter-agent/human-read contracts stay YAML — format follows consumer (ADR-0018)
