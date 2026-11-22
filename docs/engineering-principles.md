@@ -127,6 +127,10 @@ These rules hold for new and edited prose under `plugin/`.
 - A review-fix commit adds no net prose to a `plugin/` file: fix by cutting, or by a pointer to the rule's home.
 - Each covered file must fit its byte budget in `tests/policy/prose-byte-budget.json`, enforced by CHECK 18 of `tools/policy_check.sh`, which defines what is measured and what fails. Raising a budget needs a user-approved entry in `tests/policy/prose-budget-raises.json`; CHECK 18 compares each budget with the one at the merge-base and fails an unapproved raise.
 
+## P26 — Design for the consumer project, not this repo
+
+HIVEMIND is a plugin that runs in any consumer project. A design must work in a project that has none of this repo's own setup: no CI workflow or required status checks, no `tools/validate.sh`, no branch protection or ruleset, no admin bypass, no Codex, no Fable, no claude-mem, no GitHub App. Each of those is an optional capability. A design may use one only when it detects it and degrades with a stated fallback when it is absent, the way local review is skipped with a warning when no reviewer is configured. A design never makes the consumer add infrastructure (a CI workflow, a check, a ruleset, a service) for a feature to work. This repo's CI, validation suite and settings exist to develop the plugin; they are never part of what the plugin needs. The test: would this still work, unchanged, in a fresh repository with only the plugin installed? If not, the design is wrong, or the dependency is an optional capability with a fallback.
+
 ## Sources
 
 - https://code.claude.com/docs/en/skills — Claude Code "Extend Claude with skills": the create-a-skill trigger ("a section of CLAUDE.md has grown into a procedure rather than a fact"; "a skill's body loads only when it's used"). Roots for P4/P6/P8/P10.

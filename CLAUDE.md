@@ -6,6 +6,8 @@ Guidance for Claude Code instances working **on this repo** (not consuming the p
 
 Source for the `hivemind` Claude Code plugin + a single-plugin marketplace pointing at it. The agent roster lives in `plugin/agents/` and the skill roster in `plugin/skills/` — read those directories for the current set rather than a count here; governance docs are plugin **runtime data** loaded by agents, not just human reference.
 
+**Design for the consumer project.** HIVEMIND runs in arbitrary consumer projects. This repo's CI, `tools/validate.sh`, branch ruleset, admin bypass and local settings exist to develop the plugin, not as things the plugin may rely on. Never plan or design a feature that requires a consumer to have CI, required checks, a ruleset, Codex, Fable, claude-mem or any other optional capability; detect it and degrade with a stated fallback. See `docs/engineering-principles.md` P26.
+
 ## Engineering principles
 
 Project engineering principles governing how prose, scripts, and skills are factored across agents/skills/governance live in `docs/engineering-principles.md`. Consult it before extracting procedure out of an agent or skill, or when deciding whether something belongs in a script, a skill, or a governance doc.
