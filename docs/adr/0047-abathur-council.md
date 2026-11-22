@@ -77,7 +77,7 @@ The council absorbs and rescopes the council work of the earlier Abathur and Sco
 
 - Fewer runs stop: a weak or unanswered planner question the council answers strongly is taken, on the planner's option or, with a clean gate read, on another, and a real split is asked with the dissent. A question that needs a fact only the user holds never goes to the council.
 - Each standard-delivery consult costs at least five agent runs (two members, Abathur, two scans), and a switch adds a gate read and a new pass, bounded by `per_run_cap`.
-- A member that fails, times out or returns off schema leaves Abathur the rest. With fewer than two members on two models, or off-schema Abathur output, there is no council result and the question is resolved as it came. The attempt counts toward the cap. A failed scan gives no council result, and the attempt counts toward the cap.
+- A member that fails, times out or returns off schema leaves Abathur the rest. With fewer than two members on two models, off-schema Abathur output or a failed scan, there is no council result and the question is resolved as it came. The attempt counts toward the cap.
 - Once the cap is reached, the question is resolved as it came.
 - `decide()`, `resolveDecision` and `resolvePlanAsks` are unchanged: the Ask Set, list reasons, check order and `resume_args` stay as they are.
 - Whether a later plan honors a council answer is the planner's judgment, as for a user's answer. Both are listed for veto in the pull request decisions.

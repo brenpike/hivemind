@@ -183,7 +183,17 @@ Reason codes, a closed set:
 
 - Every issue: `issue_closed`, `rating_missing:<family>`, `is_epic`, `is_idea`, `has_subissues`, `no_acceptance_criteria`.
 - Standalone: `spec_problem_missing`, `spec_evidence_missing`, `spec_scope_missing`, `open_questions_not_none`, `promote_type`, `promote_effort`.
-- Slice: `epic_closed`, `parent_not_epic`, `epic_marker_missing`, `design_block_missing`, `design_link_invalid`, `design_slug_mismatch`, `prd_missing`, `design_missing`, `design_delivered`, `record_missing`, `template_section_missing:<name>`, `template_order`, `heading_duplicate`, `design_section_unfilled:<n>`, `design_open_questions`, `adr_missing:<path>`, `adr_not_accepted:<path>`, `record_malformed`, `record_not_passed`, `record_open_blocking`, `record_rounds_exceeded`, `record_stale:<path>`, `record_unstamped:<path>`, `heading_unmatched:<n>`, `heading_ambiguous:<n>`, `dependency_edge_missing:<n>`. `design_block_missing` replaces the earlier `design_section_missing`.
+- Slice: `epic_closed`, `parent_not_epic`, `epic_marker_missing`, `design_block_missing`, `design_link_invalid`, `design_slug_mismatch`, `prd_missing`, `design_missing`, `design_delivered`, `record_missing`, `template_section_missing:<name>`, `template_order`, `heading_duplicate`, `design_section_unfilled:<n>`, `design_open_questions`, `adr_missing:<path>`, `adr_not_accepted:<path>`, `record_malformed`, `record_not_passed`, `record_open`, `record_rounds_exceeded`, `record_stale:<path>`, `record_unstamped:<path>`, `heading_unmatched:<n>`, `heading_ambiguous:<n>`, `dependency_edge_missing:<n>`. `design_block_missing` replaces the earlier `design_section_missing`.
+
+Pass-rule codes, one per clause of the pass rule in Review record front matter:
+
+- `verdict` not `pass` gives `record_not_passed`.
+- `clean_round` not `true` gives `record_not_passed`.
+- `rounds` below 2 gives `record_not_passed`.
+- `rounds` above 3 gives `record_rounds_exceeded`.
+- Any open count above 0, at any severity, gives `record_open`.
+
+A front matter off its shape, a blob off its pattern or a stamp path outside the path allowlist gives `record_malformed`.
 
 Placeholders:
 
@@ -229,6 +239,7 @@ Link rules, the path allowlist:
 - A Solution design or Review record link whose `<s>` is not the epic's slug yields `design_slug_mismatch`.
 - No git call is made for a failing link.
 - The PRD is derived as `docs/prds/<slug>.md` from the epic's slug, never read from the issue.
+- The PRD path must match `^docs/prds/[a-z0-9]+(-[a-z0-9]+)*\.md$`, both the path derived from the epic's slug and a PRD stamp path.
 - The record must stamp the PRD and the solution design, else `record_unstamped:<path>`.
 
 Each heading must match exactly one heading of the solution design, at any level, as literal text without `#` marks, per Document parsing rules.
@@ -279,7 +290,7 @@ Each `blob` is the output of `git rev-parse HEAD:<path>` on the docs branch when
 - Each blob matches `^[0-9a-f]{40}$` or `^[0-9a-f]{64}$`.
 - Each stamp path passes the path allowlist in Slice design section format, else `record_malformed`.
 - Stamps must include the PRD, the solution design and every ADR its own docs pull request adds or edits, never an ADR it only cites.
-- The record passes when `verdict` is `pass`, every open count (`critical`, `high`, `medium`, `low`) is 0, `clean_round` is `true` and `rounds` is 2 to 3. Round 1 is always followed by a confirming round.
+- The record passes when `verdict` is `pass`, every open count (`critical`, `high`, `medium`, `low`) is 0, `clean_round` is `true` and `rounds` is 2 to 3. Round 1 is always followed by a confirming round. Each clause gives one reason code, per Readiness check output contract.
 - `open.<severity>` counts that severity's findings whose disposition is `open`. Any critical or high whose disposition is not `fixed` or `rejected` counts as open.
 - A record is authoritative only through a human-reviewed merge (D24). Only the design review's record step writes or re-stamps it. Every commit except a standard-delivery wave refuses `docs/initiatives/*/review-record.md` in code, per Review record body. The github-reviewer commits its own simple fixes with git, outside the workflow scripts: the Validation Procedure it loads forbids a fix that edits a record, and any record edit is authoritative only through the human-reviewed merge.
 
@@ -716,7 +727,7 @@ Answer Q8 A: the round-2 remediation plan was accepted with the Q6 answer. ADR-0
 
 Each slice runs `bash tools/validate.sh --changed` at its validate state. Per slice:
 
-- **#615:** contract tests over recorded issue fixtures for each track and each reason code. Cases include a document edited after stamping, an epic, a standalone issue that must be promoted, a slice with open blockers that passes, hostile link and heading text, a design link and record of different slugs, an unstamped PRD, a missing blocked-by edge, a truncated read, a missing document versus a `git` failure, a malformed commit id, and template order, duplicate heading and missing-section cases. More cases: `design_slug_mismatch`, `epic_marker_missing`, and Design blocks with zero or two `## Design` sections, Solution design lines or Review record lines, or no Heading line. A delivered design gives `design_delivered`. Test script `tools/test_readiness_check.sh`, fixtures in `tests/readiness-check/`, and a `tools/validate.sh` suite mapped from `plugin/skills/_shared/readiness-check.sh`, `tests/readiness-check/` and the script.
+- **#615:** contract tests over recorded issue fixtures for each track and each reason code. Cases include a document edited after stamping, an epic, a standalone issue that must be promoted, a slice with open blockers that passes, hostile link and heading text, a design link and record of different slugs, an unstamped PRD, a missing blocked-by edge, a truncated read, a missing document versus a `git` failure, a malformed commit id, and template order, duplicate heading and missing-section cases. More cases: `design_slug_mismatch`, `epic_marker_missing`, and Design blocks with zero or two `## Design` sections, Solution design lines or Review record lines, or no Heading line. A delivered design gives `design_delivered`. One case per pass-rule clause with its code: `verdict` fail, `clean_round` false and `rounds` 1 give `record_not_passed`; `rounds` 4 gives `record_rounds_exceeded`; an open medium gives `record_open`. A PRD stamp path passes the allowlist, and a stamp path outside every shape gives `record_malformed`. Test script `tools/test_readiness_check.sh`, fixtures in `tests/readiness-check/`, and a `tools/validate.sh` suite mapped from `plugin/skills/_shared/readiness-check.sh`, `tests/readiness-check/` and the script.
 - **#616:** a fixture run on the Lair PRD yields every template section filled; skill authoring checks prove the skill names no sibling.
 - **#617:** `tools/test_subissue_ops.sh` with `tests/prd-to-issues/` fixtures: the Design section, seed reuse with the marker line kept, and no duplicate on rerun. A policy fixture under `tests/policy/` pins the Design section and the Design-link carve-out of the "No file paths or code snippets" rule in `plugin/skills/prd-to-issues/SKILL.md`.
 - **#618:** `tests/workflow-scripts/data.test.mjs` checks that `needs_user_fact` is an optional boolean, that every existing brief and fixture stays valid, and the council bounds: `members` 2 to 4 counting a runner member, `dissent` at most 4, `why` at most 200, `id`, `angle` and `model` at most 64. Composed-brief tests: a claimed model is ignored, and fewer than two distinct `model` values give no result. `tests/workflow-scripts/decide.test.mjs` stays green. `tools/test_synapse_gate.sh` with `tests/policy/safety-synapse-gate.json` covers `council-member.sh` and its inputs file. `tools/test_shared_libs.sh` covers remove-inputs kind `council`. `tools/test_seed_hive.sh` and `tests/policy/safety-navigator-transport-rules.json` cover the seeded rule. The safety fixture pins both agents' tools lists. `tools/test_run_review.sh` stays green.
