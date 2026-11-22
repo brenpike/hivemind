@@ -58,7 +58,7 @@ It works in a consumer project with only the plugin installed. Nothing adds a re
   - Uncommitted edits a failed run left stop the takeover and are never discarded. Instinct never relaunches a workflow. A run the user stopped does not fall back.
 - **Instinct paths.**
   - A read-only analysis relays its result as the final report and opens no branch, commit or pull request.
-  - A post-PR remediation works only on the PR head, checked out before any reviewer runs, and runs the watch or one fix pass. An escalation is planned, has one checkpoint commit per wave, passes validation before any push, and pushes on the existing pull request. A pull request closed or merged mid-run gets a new one, as the `pr-feedback-remediation` script's residual says.
+  - A post-PR remediation works only on the PR head, checked out before any reviewer runs, and runs the watch or one fix pass. An escalation is planned, has one checkpoint commit per wave, passes validation before any push, and pushes on the existing pull request. An escalation whose pull request was closed or merged mid-run opens a new one through `hivemind:open-plan-pr`, as the `pr-feedback-remediation` script's residual says.
   - Every path asks only what `### Stop Conditions` surfaces: the Ask Set and its listed always-surface items. It takes every other question with its recommendation.
 - **Brood dispatch.**
   - It is entered when the router selects `hatchery-dispatch` or an Instinct plan returns delivery `brood`.
@@ -87,7 +87,7 @@ It works in a consumer project with only the plugin installed. Nothing adds a re
 - **Proactive zoom-out.** The proactive zoom-out marker rides the cluster payload, and its governance heading and every citer of it agree.
 - **Autonomy table.** Every remaining site starts with a workflow id that has a script. The four rows no script resolves are gone.
 - **Waves.** The script wave rule matches its frozen expectations on every fixture, override, mutation and seeded-corpus case checked today. The expectations come from the old wave oracle in a commit before its deletion whose test run passed. The edge-id cases checked today, ids with a line feed, hostile ids, and ids of 64, 65 and 5000 characters, keep their literal expected results, checked against the script wave rule. Their checks of the oracle's error output go with the oracle. The solution design names the cases.
-- **Removal.** No live reference to a removed item remains in the files each slice changes, apart from text a later re-review owns and text that pins an absence. No citation of a deleted heading remains in the files each slice changes, with the same exceptions.
+- **Removal.** No live reference to a removed item remains in the files each slice changes, apart from text a later re-review owns, text that pins an absence, and history text: earlier changelog sections and a slice's own changelog entry recording the deletion. No live citation of a deleted heading remains in the files each slice changes, apart from text a later re-review owns, text that pins an absence, and history text: earlier changelog sections and a slice's own changelog entry recording the deletion.
 - **Validation and budgets.** The repository's full validation suite passes, with no map entry, suite or budget entry for a deleted path. The overlord's prose budget shrinks. The overlord's and the autonomy governance's budgets are lowered to their measured size.
 - **Confirmation.** Each slice's review checks the user's confirmation of each item in a destructive-fix category that the slice deletes or narrows.
 

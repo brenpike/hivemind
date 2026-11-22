@@ -10,7 +10,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 2
+rounds: 3
 clean_round: false
 ---
 
@@ -18,7 +18,7 @@ clean_round: false
 
 This is a re-review. The PRD [`docs/prds/retire-json-state-machine.md`](../../prds/retire-json-state-machine.md) was written after the first review, so the review runs again over the PRD, the solution design and ADR-0048 (ADR-0046 decision 6, Re-review after an amendment). Rounds count from 1. No record of this initiative has passed, so round 1 covers the whole documents. The first review, its rounds, findings, advisories and one-time exceptions are kept unchanged under History: 2026-11-22 (first review).
 
-Round 1 raised 11 cerebrate findings, every one fixed, and 4 local review tool findings, three fixed and one rejected. Round 2, a confirming round, raised 4 findings, every one fixed. The verdict is `fail`, `rounds` is 2 and `clean_round` is `false`. A confirming round follows.
+Round 1 raised 11 cerebrate findings, every one fixed, and 4 local review tool findings, three fixed and one rejected. Round 2, a confirming round, raised 4 findings, every one fixed. Round 3, a confirming round, raised 2 findings, both fixed. The verdict is `fail`, `rounds` is 3 and `clean_round` is `false`. Round 3 is the cap round; one round 4 over its fixes follows, as a one-time exception (Round 3).
 
 The stamps are unchanged: the blobs at commit `aa9342a244b13150eb141b42ac566611b6b5f268`, the commit the first review's round 1 reviewed. A record with `verdict` `fail` keeps its stamps (ADR-0046 decision 7). Only the passing record re-stamps, to the commit its clean pass reviewed, and it stamps the PRD, the solution design and ADR-0048.
 
@@ -48,6 +48,19 @@ A confirming round over the change `ec87d495..710ee9fe` and round 1's fixes. Nei
 
 The cerebrate pass raised R2-01 (medium) and R2-02 to R2-04 (low). Each was checked against the repository before its fix, and none was rejected. After the fixes, none is open. Round 2 is not clean, so `clean_round` is `false`: its cerebrate pass raised findings. The solution design records the fixes in one dated line under Amendments.
 
+### Round 3
+
+A confirming round over the change `710ee9fe..f8715ece` and round 2's fixes. Neither reviewer wrote the documents.
+
+- Reviewer `hivemind:cerebrate`, model `opus`, `Memory context: none`. One fresh, read-only pass. It reviewed commit `f8715ece8e0ad3fd3dca903669231f10cb861a78`, confirmed R2-02, R2-03 and R2-04's finding, and raised R3-01 and R3-02.
+- Local review tool pass for round 3: pending. It runs after the commit that lands round 3's fixes.
+
+The cerebrate pass raised R3-01 (medium), which shows R2-01 not closed, and R3-02 (low), a new defect in the sentence that replaced R2-04's. Each was checked against the repository before its fix, and none was rejected. After the fixes, none is open. Round 3 is not clean, so `clean_round` is `false`: its cerebrate pass raised findings. The solution design records the fixes in one dated line under Amendments.
+
+Round 3 was the last round under the three-round cap (ADR-0046 decision 6). Taken by the overlord with a strong recommendation, listed for veto under ADR-0046 decision 8 as amended 2026-11-22: fix R3-01 and R3-02, then run one round 4 over that change only, a one-time exception for this initiative, recorded like the earlier round-4 exceptions. Splitting was not recommended: the solution design's decisions drew no finding after round 1; every later finding is acceptance-criterion wording.
+
+Diminishing-returns advisory: signals: recurrence on the Removal and remediation acceptance-criterion wording (R1-02, then R2-01, then R3-01; R2-04, then R3-02); severity medium and low only.
+
 ## Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
@@ -71,6 +84,8 @@ The cerebrate pass raised R2-01 (medium) and R2-02 to R2-04 (low). Each was chec
 | R2-02 | 2 | confirm | low | fixed | The `tools/test_shared_libs.sh` row named only `:1293-1330`, but alive derive cases pass `$STARTED` from `:1256`. The row now names every alive derive case that passes `$STARTED` as started-evidence (`:1256-1259`, `:1269-1270`, `:1277-1278`, `:1293-1330`). |
 | R2-03 | 2 | confirm | low | fixed | The List sentence and the proposed Decision Journal entry said "opens or reuses" a pull request, without the `hivemind:open-plan-pr` limit the PRD and Decision journal carry. Both, the List sentence's copies for README, `web/benefits.html` and `web/functionality.html`, and the Instinct paths' decision-list sentence now say "opens one or pushes to one through `hivemind:open-plan-pr`". |
 | R2-04 | 2 | confirm | low | fixed | "It opens no new pull request" was false: `hivemind:open-plan-pr` creates one when the pull request was closed or merged mid-run (`plugin/workflow-src/pr-feedback-remediation/main.js:76-79`). The PRD's Instinct paths criterion and the design's post-PR remediation path now say such a pull request gets a new one, as the script's residual says. |
+| R3-01 | 3 | confirm | medium | fixed | R2-01 not closed: the deleted-heading sentence lacked "live", so history text in a changed file, such as `CHANGELOG.md:366` and `:536` and a slice's own changelog entry recording the deletion, counted, and S4 could not meet it. The PRD's Removal criterion and the design's S4 and S5 checks now say "live" and share one exception list that names history text: earlier changelog sections and a slice's own entry recording the deletion. |
+| R3-02 | 3 | confirm | low | fixed | R2-04's replacement sentence said any post-PR remediation's pull request closed or merged mid-run gets a new one, but the watch and the `hivemind:github-reviewer` fix pass push with `push-branch.sh` and open no pull request (`plugin/agents/github-reviewer.md:60`). The PRD's Instinct paths criterion and the design's post-PR remediation path now limit it to an escalation, which opens a new one through `hivemind:open-plan-pr`, as the `pr-feedback-remediation` script's residual says. |
 
 ## Decisions taken, listed for veto
 
@@ -102,6 +117,7 @@ Each decision carries its recommendation strength and what it touches, per ADR-0
 | Each rule stated once at its owner; other sites point to it (overlord). | Strong | none |
 | The round-3 narrowing's wording, and each design decision's screen conformed to ADR-0046 decision 8 as amended (overlord). | Strong | none |
 | PRD written from the design with no new decision; the `hivemind:plan-to-prd` story-completeness and scope-boundary confirm gates taken, not asked (overlord). | Strong | PRD scope |
+| The re-review's round-3 cap: fix R3-01 and R3-02, then one round 4 over that change only, a one-time exception for this initiative; no split (overlord). | Strong | none |
 
 D11 is answered (Q7 A), D12 is answered (Q8 A), and D14 is answered (Q1 A); none is a taken decision.
 
