@@ -113,13 +113,13 @@ At claim time the Lair controller (#608) runs the readiness check against the tr
 
 ### Design-decision rule
 
-An extension of Review Calls in `plugin/governance/decision-autonomy.md` for the design stages. A decision is taken when its recommendation is strong, it is inside the PRD's scope and its gate is clean. A decision with a weak or absent recommendation is asked (D32); #638 may change this only by its own ADR.
+An extension of Review Calls in `plugin/governance/decision-autonomy.md` for the design stages. A decision with a strong recommendation is taken and listed for veto in the review record and the pull request body, whatever it touches: PRD scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change. A design changes nothing until the docs pull request merges, and the maintainer reviews every listed decision at merge.
 
-A design decision's gate reads Promotion Gate clause 1, irreversible, and clause 3, safety-relevant. The always-ask list replaces clause 2. This narrows ADR-0026 decision 3 for design-stage decisions only (asked in re-review round 1, answer Q18 A; D9). So a decision inside the PRD's scope that amends no accepted ADR does not trip it.
+Only two kinds are asked. A decision with a weak or absent recommendation is asked, never deferred (D32); #638 may change this only by its own ADR. An action that is irreversible now, outside the unmerged pull request, is asked: for example closing or deleting an issue, publishing, a push to trunk.
 
-These are always asked: a change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible.
+The design-decision gate reads Promotion Gate clause 1, irreversible, only, applied to the action taken now, not to what the design proposes. Clauses 2 and 3 are not read for design-stage decisions, because a design proposes changes and performs none. This narrows ADR-0026 decision 3 for design-stage decisions only (previously narrowed by answer Q18 A; D9).
 
-The design stages run no `decide()`. Take or ask is the conductor's judgment, checked by review. The review record lists each taken decision with its always-ask screen: an answer to each of the four always-ask items. The confirming pass checks every screen. A taken decision that should have been asked is a finding (#619).
+The design stages run no `decide()`. Take or ask is the conductor's judgment, checked by review. The review record lists each taken decision with its recommendation strength and what it touches (scope, ADR amendment, trust, credential, merge path), so the maintainer can veto at merge. The confirming pass checks that each taken decision had a strong recommendation and took no irreversible action. A taken decision with a weak or absent recommendation is a finding (#619).
 
 ## State and ownership
 
@@ -275,7 +275,7 @@ The body has these sections:
 - `## Reviewed documents`.
 - `## Rounds`, with one `### Round <n>` per round naming, per pass, its reviewer (the agent, or the local review tool's preset or argv list), its model and what it covered. When a round needs the local review tool pass and no tool is configured, it says the tool pass was skipped. When the diminishing-returns check (D35) fired after a round, its `### Round <n>` carries a `Diminishing-returns advisory:` line giving the signals and the maintainer's answer. Verify does not parse that line.
 - `## Findings`.
-- `## Decisions taken, listed for veto`, each with its always-ask screen.
+- `## Decisions taken, listed for veto`, each with its recommendation strength and what it touches.
 - `## Decisions asked`, each with the user's answer.
 - `## Residuals`, optional: each residual's scope, ground, bounded impact and where it is recorded.
 - `## History: <date>`, optional, per Re-review and re-stamp.
@@ -514,7 +514,7 @@ Taken and listed for veto; set by the PRD. A passing slice is ready with open bl
 
 ### D9: Design-decision always-ask rule
 
-Set by the PRD; its gate asked in re-review round 1, answer Q18 A. Review Calls gains the rule in the design-decision rule component. A design decision's gate reads Promotion Gate clauses 1 and 3, and the always-ask list replaces clause 2, the architectural clause. ADR-0046 records this as narrowing ADR-0026 decision 3 for design-stage decisions only.
+Set by the PRD; its gate first asked in re-review round 1, answer Q18 A, and amended 2026-11-22 at the maintainer's direction. Review Calls gains the rule in the design-decision rule component. A strong-recommendation decision is taken and listed for veto in every category. A design decision's gate reads Promotion Gate clause 1 only, applied to the action taken now. ADR-0046 records this as narrowing ADR-0026 decision 3 for design-stage decisions only.
 
 ### D10: Delivered design frozen as history
 
@@ -562,7 +562,7 @@ Asked, answer Q5 A. A review record is authoritative only through a human-review
 
 ### D27: Design-stage resolution is judgment checked by review
 
-Taken and listed for veto. The design stages run no `decide()`. Take or ask is the conductor's judgment under the design-decision rule. The review record lists each taken decision with its always-ask screen, and the confirming pass checks every screen (#619). ADR-0046.
+Taken and listed for veto. The design stages run no `decide()`. Take or ask is the conductor's judgment under the design-decision rule. The review record lists each taken decision with its recommendation strength and what it touches, and the confirming pass checks each (#619). ADR-0046.
 
 ### D28: Record verified before ready
 
@@ -588,7 +588,7 @@ Spent: round 4 ran both angles and raised new high findings, so the council spli
 
 ### D32: Council split into its own initiative
 
-Asked after design review round 4, answers Q12 A and Q14 B. The council, slices #618 and #624 and the decisions listed under Decisions moved to the council initiative go to #638. The PRD loses its council requirements. A design decision with a weak or absent recommendation is asked; #638 may change that only by its own ADR. That is recorded as an amendment of ADR-0026 decision 2 for design-stage decisions (answer Q16 A), and the always-ask list's replacement of the Promotion Gate's architectural clause as a narrowing of ADR-0026 decision 3 (asked in re-review round 1, answer Q18 A; D9). ADR-0046.
+Asked after design review round 4, answers Q12 A and Q14 B. The council, slices #618 and #624 and the decisions listed under Decisions moved to the council initiative go to #638. The PRD loses its council requirements. A design decision with a weak or absent recommendation is asked; #638 may change that only by its own ADR. That is recorded as an amendment of ADR-0026 decision 2 for design-stage decisions (answer Q16 A), and the design-decision gate's narrowing of ADR-0026 decision 3 (asked in re-review round 1, answer Q18 A; amended 2026-11-22; D9). ADR-0046.
 
 ### D33: Guide-launched runs return to the guide
 
@@ -691,3 +691,7 @@ After re-review round 4, asked after that round, answer Q25 A:
 
 - Merge-time enforcement on the plugin's merge paths moved out to #619's own design, superseding the merge-check parts of Q21 A, Q23 A and Q24 A. The guarantee narrows to the guide's draft rule and the readiness check (D28, D34).
 - A diminishing-returns check runs after every design review round (D35), at the user's direction after re-review round 4.
+
+After the maintainer's decision of 2026-11-22:
+
+- The always-ask list is removed (D9). A design-stage decision with a strong recommendation is taken and listed for veto whatever it touches, and only a weak or absent recommendation and an action irreversible now are asked. The gate reads Promotion Gate clause 1 only. The review record lists each taken decision with its recommendation strength and what it touches. ADR-0046 decision 8 is amended.

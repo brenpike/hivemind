@@ -26,7 +26,7 @@ A **readiness check** that a machine can repeat decides whether an issue may be 
 - As a maintainer, I want small bugs and chores to qualify as ready with a short spec block and no design documents, so that the factory is not starved by process.
 - As a maintainer, I want every initiative to have a PRD, a solution design and the ADRs its hard-to-reverse decisions need, so that the HOW shared across slices is written down once.
 - As a maintainer, I want the design reviewed adversarially against the current code before any slice is cut, so that gaps are found while they are cheap and not inside factory runs.
-- As a maintainer, I want design decisions with a strong recommendation inside the PRD's scope taken and listed for my veto, and only scope changes, accepted-ADR amendments, trust, credential or merge-path changes, irreversible calls and calls with no strong recommendation asked, so that I answer only what matters.
+- As a maintainer, I want design decisions with a strong recommendation taken and listed for my veto, whatever they touch, and only calls with a weak or absent recommendation and actions that are irreversible now asked, so that I answer only what matters.
 - As a maintainer, I want `readiness:ready` applied only when a repeatable check passes for the issue's track, so that "ready" means the same thing every time.
 - As the factory, I want to claim only issues that pass the readiness check at claim time, and never an epic, so that no unattended run starts against an unreviewed or changed design.
 - As a maintainer, I want a slice that passes the check to be ready even while its blockers are open, with its blocked-by links holding it back, so that I do not re-triage after every merge.
@@ -59,7 +59,7 @@ A **readiness check** that a machine can repeat decides whether an issue may be 
   - Every finding gets exactly one disposition, and mediums follow the existing defer-or-record rules.
   - A round's findings land before the next round runs: each is fixed in the solution design, the PRD or an ADR in the same pull request, or gets a deferred, recorded or rejected disposition with its reason. A finding is never left open to be applied later.
 - **Review record.** The record stamps the exact versions of the PRD and solution design it reviewed. Any later edit makes it stale until a review of the change restores it. The record ships in the same docs pull request, and a record with any open finding or a failed verdict cannot merge, so trunk never holds an unreviewed design or one with known open findings. An initiative that does not converge is split before its docs merge.
-- **Design decisions.** A strong recommendation inside the PRD's scope with a clean gate is taken and listed in the record for veto. A change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, anything irreversible and a call with no strong recommendation are always asked.
+- **Design decisions.** A design-stage decision with a strong recommendation is taken and listed for veto in the review record and the pull request body, whatever it touches: PRD scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change. Only a call with a weak or absent recommendation and an action that is irreversible now, outside the unmerged pull request, are asked.
 - **Slicing.** Each slice of an initiative carries a design section naming the solution design, the exact headings it implements, its ADRs and the review record. The seed issue becomes the epic, and a rerun creates no duplicates.
 - **Handoff check.** Passes only when:
   - the docs are on trunk and the review is current;
@@ -81,7 +81,7 @@ A **readiness check** that a machine can repeat decides whether an issue may be 
 - **Design review uses fresh planner passes, not a new agent.** The review record is the contract: stamped versions, verdict, open counts, rounds, findings with dispositions, decisions taken and asked.
 - **A second model is used only when configured, never required.** The cross-model design pass reuses the configured local review tool, and Fable is an opt-in reviewer model. Neither Codex nor Fable is required. The record names each pass's reviewer and model.
 - **ADR-0045 is amended:** Lair admission excludes epics and requires the readiness check at claim time.
-- **The design-decision rule** extends Review Calls in the autonomy governance with the always-ask list above.
+- **The design-decision rule** extends Review Calls in the autonomy governance with the rule above: strong recommendations taken and listed for veto, only weak or absent recommendations and actions irreversible now asked.
 - **The maintainer stays the only writer of `readiness:ready`.** The guide sends the maintainer to triage at that stage.
 
 ## Testing Decisions
@@ -120,3 +120,4 @@ A **readiness check** that a machine can repeat decides whether an issue may be 
 - **Prose headroom** in the autonomy and remediation governance docs is unverified. The design-decision rule and the spec-block reference may need a budget raise, which is a user decision.
 - **The council moved out.** After the design review's fourth round (#627) the maintainer split the Abathur council into its own initiative, #638. A design decision with no strong recommendation goes to the maintainer; #638 may change that only by its own ADR.
 - **Glossary drift:** CONTEXT.md still calls the three pipeline skills "planned — not yet implemented". Fix it with this initiative's glossary terms.
+- **2026-11-22: the always-ask list is removed.** A design-stage decision with a strong recommendation is taken and listed for veto in every category, including scope, accepted-ADR amendments and trust, credential and merge-path changes, because a design changes nothing until the docs pull request merges and the maintainer reviews every listed decision at merge.
