@@ -6,7 +6,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 1
+rounds: 2
 clean_round: false
 ---
 
@@ -44,6 +44,16 @@ Review rule:
 - **Local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, an angle review. Model: the tool's own default (ADR-0042 decision 7), from another vendor than the planner pass's. It raised 1 finding, C1-1, high.
 - **Result:** 0 critical, 1 high, 2 medium and 3 low. R1-1 to R1-5 are new, and under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Design-decision rule update) each takes its recommended fix, a strong recommendation, listed for veto (Decisions taken, listed for veto, Third restart round 1's calls). C1-1 contests a recorded decision of claim integrity, so it is a repeat and is rejected with that reason, not fixed and not asked. Every finding is disposed below, so none is open, and the high is rejected with a reason. The round raised new findings, so it is not clean, and a confirming round follows.
 
+### Round 2
+
+- **Date:** 2026-11-22.
+- **Reviewed commit:** `56eddef438963d06b3378888d899e8e2d30c0395`.
+- **Scope:** a confirming round: the change since `2fd1b055` and round 1's fixes, in the solution design and this record, with the part designs read as the text they supersede.
+- **Planner pass:** reviewer `hivemind:cerebrate`, a fresh read-only pass with `Memory context: none`. Model: `claude-opus-5-5`. It raised 3 findings, R2-1 to R2-3: 0 critical, 0 high, 1 medium and 2 low. It judged the C1-1 rejection valid.
+- **Local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, an angle review. Model: the tool's own default (ADR-0042 decision 7), from another vendor than the planner pass's. It raised 1 finding, C2-1, rated high by the tool and medium by the pass's reviewer agent, recorded as medium.
+- **Result:** 0 critical, 0 high, 2 medium and 2 low, all new. Under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Design-decision rule update), each finding takes its recommended fix, a strong recommendation, listed for veto (Decisions taken, listed for veto, Third restart round 2's calls). Every finding is disposed below, so none is open. The round raised new findings, so it is not clean, and round 3, the last under the cap, follows.
+- **Diminishing-returns advisory:** signal 1, recurrence: the `remediation-spent` route (R1-1: R2-1, C2-1), item 4's list of text replaced for invalid results (R1-2: R2-2) and #608's ADRs cell (R1-5: R2-3); signal 2 did not fire: severity flat at medium and low, 2 medium in each round, round 1's one high a rejected repeat; signal 3, partly: C2-1's case, a remediation that parks on an already-held pull request, is one the merge lane's Write order already bounds; the maintainer's standing rule: a strong recommendation is taken (Decisions asked, Standing rule clarification); the conductor's strong recommendation: keep going to round 3.
+
 ## Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
@@ -54,6 +64,10 @@ Review rule:
 | R1-4 | 1 | A | low | fixed | ADR-0046 decision 3 says the Lair passes the readiness check the commit it spawns the strain from, which for a re-claim is the parked head, not the trunk commit claim integrity passes. Fixed: solution design, Seam order, a cross-epic seam states that for a re-claim the Lair passes the snapshot's trunk commit, never the parked head, and the #615 issue-edit comment records it for that initiative's amendment of ADR-0046 decision 3 and of the idea-to-ready design's Component "Lair admission". |
 | R1-5 | 1 | A | low | fixed | #608 builds the readiness-check call at claim, but its ADRs cell did not name ADR-0046 decision 3. Fixed: solution design, Seam order, #608's ADRs cell adds ADR-0046 decision 3. |
 | C1-1 | 1 | review | high | rejected | The finding held that resetting the marker key makes existing Lair state unreadable, citing ADR-0045's amendment of 2026-11-21, the marker key is the one local file the Lair cannot rebuild. Rejected as a repeat of a recorded decision: the [claim integrity review record](claim-integrity-review-record.md), Decisions taken (listed for veto), records that a candidate under another `kid` is foreign, never counting and never halting, so a key reset needs no stored list of retired keys while a replaced key or a second Lair is still caught by the `lair:claimed` rule, and that the retired id is not stored; the [claim integrity design](claim-integrity-design.md) states the same under Decisions, Lifecycle (the user's key reset, which ends the old key's strains and handles each named issue first, a remaining `lair:claimed` halting with `marker-missing`) and Failure modes, "Key replaced or invalid". The halt is the designed fail-safe, and changing it is a change to a frozen part design. Listed for the user before the merge as a repeat rejection. |
+| R2-1 | 2 | confirm | medium | fixed | The item 2 case under Verification strategy said the CI-red rule, applied to a red CI result on the pull request under the new claim, ends at batch review with reason `checks-failed`, which is false: the pull request is already held on its review marker, and no route writes a second one. Fixed: solution design, Verification strategy, the item 2 case, a red CI result on that pull request under the new claim starts no run and writes no second review marker, since the merge lane's step 4 holds it on its review marker and the remediation step dispatches nothing, the pull request having a dispatch marker and `lair:review`. Item 2's reading of the CI-red rule's step 1, a start marker under any claim, stays. R1-1's Note keeps its round 1 text as history. |
+| R2-2 | 2 | confirm | low | fixed | Seams item 4's list of text replaced for invalid results left out the merge lane's Decisions bullet "The breaker counts only `failed`, `crashed`, `stalled` and `timed-out`". Fixed: solution design, Seams between the part designs, item 4, names that bullet; Amendments, the entry of 2026-11-22, third restarted review round 2, mentions it. |
+| R2-3 | 2 | confirm | low | fixed | #608's ADRs cell named ADR-0046 decision 3 but not decision 4, the native blocked-by links its admission reads. Fixed: solution design, Seam order, #608's ADRs cell ends "ADR-0044 decision 17; ADR-0046 decisions 3 and 4". |
+| C2-1 | 2 | review | medium | fixed | Rated high by the tool; the pass's reviewer agent rated it medium, and it is recorded as medium. Seams items 2 and 8 had the `remediation-spent` route always write a review marker, while item 8 adopts the merge lane's Write order, under which a route writes no review marker when the pull request already has one on the claimed issue, under any claim, and a remediation can park on an already-held pull request (merge lane, Lifecycle "Run outcome to labels"; Failure modes "Parked fix-up run"). Fixed: solution design, Seams between the part designs, item 2, the route writes the `remediation-spent` review marker only when the pull request has no review marker under any claim, an existing review marker keeps holding it, as the merge lane's Write order states, and the labels and the run-end marker land either way; item 8, the same; Lifecycle, the run-end bullet; Decisions, the item 2 bullet; Verification strategy, a case of a remediation run that parks on a pull request that already has a review marker under the old claim, then a `complete` re-claim: no second review marker, `lair:review` applied, no merge, with a tick stopped after the labels or after the check for an existing review marker. |
 
 ## Decisions taken, listed for veto
 
@@ -242,6 +256,16 @@ Third restart round 1's calls, each the recommended fix of a finding, a strong r
 | R1-3, Verification strategy: #609's marker-selection and park-signing cases move to `tools/test_lair_tick.sh`; `tools/test_lair_strain.sh` keeps the push of the strain record's pre-image | strong | none |
 | R1-4, Seam order: a re-claim passes the snapshot's trunk commit to the readiness check, never the parked head, and the #615 comment records it for that initiative's amendment of ADR-0046 decision 3 | strong | ADR amendment: it records, for the idea-to-ready initiative to amend, that ADR-0046 decision 3's spawn commit does not hold for a re-claim; ADR-0046 is not edited here |
 | R1-5, Seam order: #608's ADRs cell adds ADR-0046 decision 3 | strong | none |
+
+Third restart round 2's calls, each the recommended fix of a finding or, in the last row, the diminishing-returns advisory's recommendation, a strong recommendation taken and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked:
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| C2-1, Seams items 2 and 8: the `remediation-spent` route writes its review marker only when the pull request has no review marker under any claim, as the merge lane's Write order states; an existing review marker keeps holding it, and the labels and the run-end marker land either way | strong | merge path: the pull request stays held and is never merged by the Lair; it applies the merge lane's existing Write order; no merge gate changes |
+| R2-1, Verification strategy: the item 2 case states that a red CI result under the new claim starts no run and writes no second review marker, held by the merge lane's step 4 | strong | none |
+| R2-2, Seams item 4: the merge lane's Decisions bullet "The breaker counts only `failed`, `crashed`, `stalled` and `timed-out`" is also replaced for invalid results | strong | none: it names part-design text the breaker's one set already replaces |
+| R2-3, Seam order: #608's ADRs cell names ADR-0046 decisions 3 and 4 | strong | none |
+| The diminishing-returns advisory after round 2: keep going to round 3, the last under the cap | strong | none: the round cap and the pass rule are unchanged |
 
 ## Decisions asked
 
