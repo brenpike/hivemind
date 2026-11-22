@@ -50,7 +50,7 @@ The findings come from round 3 of the [parent review record](review-record.md), 
 | --- | --- | --- | --- | --- |
 | A3-2 | high | The tick runs `merge-approved.sh` outside the watch, dropping ADR-0044's settled-approval precondition, and the failure-mode row maps the script's results wrongly. | B3-5, B3-6 | fixed: merge-lane-design.md, Settle check, Routing table and Failure modes, under ADR-0044 decisions 17, 18 and 20 |
 | A3-3 | high | The controller has no defined source for the merge settings it reads each tick, so unsetting auto-merge may never stop merges. | B3-7 | fixed: merge-lane-design.md, Merge settings source and Lifecycle "Stage 4: halt and circuit breaker" |
-| B3-4 | high | Strain result fields (`pr`, `branch`, `head`) are trusted unchecked, and "Lair PR" is undefined. | | fixed: merge-lane-design.md, Lair pull request and Pinned head |
+| B3-4 | high | Strain result fields (`pr`, `branch`, `head`) are trusted unchecked, and "Lair PR" is undefined. | | fixed: merge-lane-design.md, Lair pull request, Pinned head and Merge-lane step of the tick (late group) |
 | B3-5 | high | The tick's merge drops ADR-0044's settle period and does not tie the auto tier to the merged head. | A3-2 | fixed: merge-lane-design.md, Settle check, Pinned head and Expected-head argument |
 | B3-6 | high | The merge-result failure-mode row maps `merge-approved.sh` results wrongly. | A3-2 | fixed: merge-lane-design.md, Routing table and Failure modes |
 | B3-7 | high | No defined source for merge settings in the tick. | A3-3 | fixed: merge-lane-design.md, Merge settings source |
@@ -83,6 +83,9 @@ The calls of the design, each also listed under its Decided for you or Decisions
 - The routing rows: no checks, conflicts, a blocked merge and a refused merge go to batch review; a script error, malformed output and `merge-pending` wait, bounded by the review wait; `skipped:bad-setting` is handled like `off`.
 - `merge-pending` makes no second merge call for the same head while the cache marks it.
 - The head check goes first in `merge-approved.sh`, before gate 1.
+- The merge call pins only the head, and every input it does not pin is one class of known limit: each merge condition is exactly one of five kinds (pinned, derived from the pinned head's git objects, judged by `merge-approved.sh` on its own read, read by the tick in the late group, and Lair-owned state). The seconds between the late group's reads and the merge call are the merge gap; a finding that names a late-group input changing in that gap is a repeat. It extends ADR-0044 decision 15 by analogy and changes nothing in ADR-0044.
+- The late group is the last tick work before the merge call, in this order: the merge settings, the identity, the issue edit and the settle check, then the merge call and nothing else. The Lair pull request checks are one function, called when a result is recorded and again in the late group, which leaves out the head because the merge call pins it.
+- No expected base, author or branch arguments for `merge-approved.sh`. Rejected: GitHub offers no merge call that pins those inputs, so the arguments would only narrow the merge gap, add script surface and amend ADR-0044 decision 19 beyond what the user approved.
 - `HIVEMIND_PR_REVIEWERS` comes from the same two user settings files as the merge keys, and the reviewer filter is `automated`.
 - The clean environment holds `PATH`, `HOME`, the `gh` auth variables when set, and the three merge keys.
 - The settle snapshots use the `re-arm` arm kind and are keyed by pull request and pinned head.
@@ -106,6 +109,7 @@ The calls of this run:
 - A3-11, A3-12 and B3-20 are owned only in part; their other parts stay open in the parent record.
 - Every owned round-3 finding is dispositioned `fixed` by the design as written; the review rounds confirm or reopen each one.
 - The seams with #630 and #632 are stated as assumptions in the design, and their files are not created.
+- Local review returned a root-cluster finding on the merge-lane tick's unpinned inputs. Root cause: the tick judged its merge conditions on its own reads, in a step list that grew one check per review round, while the merge call pins only the head, and the design never said which inputs the call can cover and which it never can. Class fix: every merge condition is keyed to one of five kinds by who reads it relative to the merge call, the tick's reads run in one late group with only the merge call after it, and the Lair pull request checks are one function used at recording and in the late group. The residual merge gap is recorded once as a class in merge-lane-design.md, Merge-lane step of the tick (Known limit) and Trust boundaries. Linked findings: `6cae4d438fcbd73fb76c1487beac991a3f98ae859ad5079fc9455024a74a23ed`, `b81db886da79ea26f3ece2cccdac1982ba7c77d628fc10391a295e0e7a20a4d2`, `ff9090699d221fd738ca76ed6b8d479146ba249d1eeb623d09eb7003d2ce1b41` and `bf472704b77555a397febc7472498d3c3e9e4d789170f336accca5151bef9024`. ADR-0044 is unchanged by this fix. The design review rounds have not run.
 
 ## Decisions asked
 
