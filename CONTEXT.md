@@ -352,9 +352,13 @@ The per-brood JSON file at `.hivemind/broods/<brood-id>/manifest.json` (schema `
 _Avoid_: brood config, brood state, registry
 
 **Lair**:
-The Software Factory: a deterministic controller, with no model in it, that runs in a long-lived tmux window and reconciles GitHub each tick. It claims **Ready Issues**, starts one strain per claimed issue (an interactive session in its own worktree running standard-delivery in unattended mode), reads each strain's result, owns the issue's labels, and is the only merger of its pull requests. GitHub holds its state; its local files are a rebuildable cache. For its strains it owns lifecycle, merge order and version coordination (ADR-0045).
+The Software Factory: a deterministic controller, with no model in it, that runs in a long-lived tmux window and reconciles GitHub each tick. It claims **Ready Issues**, starts one strain per claimed issue (an interactive session in its own worktree running standard-delivery in unattended mode), reads each strain's result, owns the issue's labels, and is the only merger of its pull requests. GitHub holds its state; its local files are a rebuildable cache, except the key that signs its marker comments (ADR-0045 amendment of 2026-11-21 to decision 2). For its strains it owns lifecycle, merge order and version coordination (ADR-0045).
 _Alias_: Software Factory
 _Avoid_: loop, autopilot, scheduler, daemon, Overmind
+
+**Lair Pull Request**:
+A pull request the **Lair** recorded on its claimed issue after checking a strain's complete result against GitHub: same repository, trunk base, the Lair's own login as author, and the result's branch and head. It stays one while its claim is live and the issue is open and carries `lair:claimed`. Only a Lair Pull Request can be merged by the Lair.
+_Avoid_: strain PR, factory PR
 
 **Park**:
 The unattended-mode outcome for a stop a run may not take itself: the run ends without asking, pushes its branch, and reports a typed park. An answerable park (a decision or a fact) puts its question on the issue and moves it to `readiness:needs-decision`; a user with write access answers on the issue, and the answer re-enters as a settled decision when the issue is re-admitted. An approval park (a destructive fix, an external effect, injection-suspect content) hands the issue off for an interactive run. Distinct from the triage label `readiness:parked`, which means shelved.

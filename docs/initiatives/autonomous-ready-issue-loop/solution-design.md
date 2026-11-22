@@ -2,11 +2,13 @@
 
 This is the solution design for the Lair, epic #603. It covers the HOW that the slices share. It links the [PRD](../../prds/autonomous-ready-issue-loop.md) and [ADR-0045](../../adr/0045-lair-software-factory.md) rather than restating them, cites them as "ADR-0045 decision N", and adds only what they lack. The design review is recorded in the [review record](review-record.md).
 
+Three part designs govern parts of this design: [strain launch](strain-launch-design.md) (#630), the [merge lane](merge-lane-design.md) (#631) and [claim integrity](claim-integrity-design.md) (#632). Each part this design hands to one of them is a link to the part design and section that govern it. Where several part designs govern one place, the text names the aspect each one governs. Seams between the part designs, under Contracts and seams, states how they fit where they disagree.
+
 ## Context and code truth
 
 The Lair builds on this code, as it stands on trunk:
 
-- `plugin/skills/spawn-brood/scripts/spawn-brood.sh` starts each strain as a detached tmux session running `claude` in auto mode in its own worktree. It copies the coordinator's `.claude/settings.local.json` into every strain worktree. It has no way to write per-strain settings.
+- `plugin/skills/spawn-brood/scripts/spawn-brood.sh` starts each strain as a detached tmux session running `claude` in auto mode in its own worktree. It copies the coordinator's `.claude/settings.local.json` into every strain worktree. What its per-brood settings file holds is in [strain launch](strain-launch-design.md), Context and code truth, "Correction to the parent design".
 - `plugin/skills/brood-status/scripts/brood-status-collect.sh` reports, per strain, whether the tmux session is alive, the pull request state and the run ledger state. It reads no run result, so for the Lair it gives liveness only: it cannot tell a run end, a park or a stall apart.
 - `plugin/skills/github-review-loop/scripts/merge-approved.sh` is the only merge path. It reads `HIVEMIND_AUTO_MERGE` (the merge method) and `HIVEMIND_AUTO_MERGE_ADMIN` (by presence) each time it runs. Its tests are `tools/test_merge_approved.sh`.
 - `plugin/workflow-src/lib/decide.js`, with `plugin/references/decision-autonomy-table.json`, has the levels `high`, `balanced` and `low`. An unknown level resolves to `low`. Its only actions are `take` and `ask`. There is no `unattended` level and no park action.
@@ -22,45 +24,48 @@ The Lair builds on this code, as it stands on trunk:
 
 ### Strain launch and settings
 
-Built by #604. The Lair starts each strain through the brood tooling, as an interactive session in tmux in its own worktree (ADR-0045 decision 3). A first claim starts off the fetched trunk commit. A re-claimed issue starts on its pushed branch (ADR-0045 decision 11). For a Lair strain the launch writes the strain's settings file and does not copy the coordinator's (ADR-0045 decision 4); the fields are under Contracts and seams. The run's request is the issue text captured at claim (ADR-0045 decision 10). The run also receives the settled decisions and the draft flag through the standard-delivery launch inputs.
+Built by #604. [Strain launch](strain-launch-design.md) governs it: Components "Strain launch and settings", "Launch inputs" and "Start points".
 
 ### Strain result and liveness
 
-Built by #604. At run end the strain's overlord runs one fixed script that writes the result file (ADR-0045 decision 5). The Lair schema-checks the result, ends the session, and removes the worktree once the branch is pushed. Crash and stall detection follow ADR-0045 decision 5. #604 also settles the two unverified items in the ADR-0045 residuals, with the fallbacks under Failure modes.
+Built by #604. Each aspect has its own governing part:
+
+- the result and the liveness files: [strain launch](strain-launch-design.md), Components "Strain result and liveness";
+- crash and stall detection: [claim integrity](claim-integrity-design.md), Design invariants (Claim state) and Lifecycle (the run checks);
+- when the Lair removes a run's worktree: never before the run's outcome marker is written, per the [merge lane](merge-lane-design.md), Contracts and seams "Lair pull request" (Result recording) and Decided for you (R37), with strain launch's Lifecycle step 5 after it.
 
 ### Unattended autonomy level
 
-Built by #607. It adds the `unattended` level to the autonomy table and the park action to `decide()`. The level is selected only by `HIVEMIND_LAIR_STRAIN` (ADR-0045 decision 6). With the marker set, the overlord's Instinct fallback, Resume On Start question and post-PR watch are replaced as ADR-0045 decision 6 states. Park types follow ADR-0045 decision 7, and the architectural gate follows ADR-0045 decision 8. With the marker absent, the levels and actions are today's.
+Built by #607. It adds the `unattended` level to the autonomy table and the park action to `decide()`. The level is selected only by `HIVEMIND_LAIR_STRAIN` (ADR-0045 decision 6). The governance and agent edits that replace the overlord's Instinct fallback, Resume On Start question and post-PR watch for a verified strain are under [strain launch](strain-launch-design.md), Components "Unattended governance edits". Park types follow ADR-0045 decision 7, and the architectural gate follows ADR-0045 decision 8. With the marker absent, the levels and actions are today's.
 
 ### Controller tick and admission
 
-Built by #608. The controller is a deterministic script in a tmux window under a single-instance lock (ADR-0045 decision 2). #608 covers:
+Built by #608. The controller is a deterministic script in a tmux window (ADR-0045 decision 2). #608 covers:
 
-- the tick loop: observe GitHub, reconcile strains, work the merge lane, take park answers, claim and dispatch;
-- the claim: admission per ADR-0045 decision 10 and its 2026-11-21 amendment, the readiness-check call, the injection scan before spawn, and the claim-time capture of the issue text and its hash;
-- labels and marker comments (ADR-0045 decision 16);
-- the halt switch and the wall-clock budget (ADR-0045 decision 17);
-- orphan recovery in the start-up sweep (ADR-0045 decision 17);
-- the change to `triage-ops.sh` so that triage leaves `lair:*` issues alone (ADR-0045 decision 16);
-- the queue report.
+- the tick loop, in the one tick order under Seams between the part designs, item 5;
+- the single-instance lock, the claim, the readiness-check call, the injection scan, labels and marker comments, the halt file, the wall-clock budget, the start-up sweep and the queue report, which [claim integrity](claim-integrity-design.md) governs: its Components and Lifecycle;
+- the change to `triage-ops.sh` so that triage leaves `lair:*` issues alone (ADR-0045 decision 16).
 
 Admission reads native blocked-by links only (ADR-0045 decisions 2 and 10). A `#N` ref in a `## Dependencies` section is not read.
 
 ### Merge lane and auto tier
 
-Built by #605. Only the tick merges, through `merge-approved.sh`, with the merge settings read fresh each tick (ADR-0045 decision 12). A script computes the auto tier v0 from the ADR-0044 gates, the protected-path list, the bump type and whether local review was skipped (ADR-0045 decision 12). A pull request outside the auto tier is labeled `lair:review`. While one strain runs at a time, the lane rule of ADR-0045 decision 12 holds: no claim while a non-draft Lair pull request is open.
+Built by #605. The [merge lane](merge-lane-design.md) governs it: Components "Merge-lane step of the tick", "Settle check" and "Auto-tier script", and Contracts and seams "Lair pull request", which holds the lane rule.
 
 ### Park answer round trip
 
-Built by #609. A park writes the park marker comment and moves the issue per ADR-0045 decision 16. An answer counts only as ADR-0045 decision 11 states. Relabeling `readiness:ready` re-admits the issue. The Lair alone builds the settled decisions from the answers, and the re-claimed run continues on the pushed branch. A third park, or an `approval` park, hands the issue off (ADR-0045 decision 7).
+Built by #609. A park writes the park marker comment. Its form and signature follow [claim integrity](claim-integrity-design.md), Contracts and seams ("Marker comment", "Counting rule"), and its label moves follow claim integrity's Lifecycle (run end). An answer counts only as ADR-0045 decision 11 states, against a counting park marker. Relabeling `readiness:ready` re-admits the issue. The Lair alone builds the settled decisions from the answers ([strain launch](strain-launch-design.md), Contracts and seams, "Settled decisions"), and the re-claimed run continues on the pushed branch (strain launch, Start points). A third park, or an `approval` park, hands the issue off (ADR-0045 decision 7).
 
 ### Post-PR remediation strains
 
-Built by #610. The tick polls each open Lair pull request. Review findings start exactly one unattended `pr-feedback-remediation` strain for that pull request (ADR-0045 decision 13). That strain uses the same settings and result contract as a delivery strain.
+Built by #610. The tick polls each open Lair pull request. What starts a remediation is Seams between the part designs, item 2. Each aspect has its own governing part:
+
+- the dispatch, the launch, the settings, the author filter and the result contract: [strain launch](strain-launch-design.md), Components "Remediation strain launch";
+- the markers, the park route, the halt and the outcome mapping of each remediation run, a fix-up run: the [merge lane](merge-lane-design.md), Components "Fix-up runs" and Lifecycle "Run outcome to labels".
 
 ### Decision digest and circuit breaker
 
-Built by #611. Each Lair session produces a digest of every decision taken for the user, with its issue and pull request (ADR-0045 decision 14). The circuit breaker halts the Lair after 3 consecutive failed, crashed or timed-out outcomes, recomputed from GitHub markers, with a stated cause (ADR-0045 decision 17). The count covers runs that ended in the current Lair session, so a restart by the user re-arms the Lair.
+Built by #611. Each Lair session produces a digest of every decision taken for the user, with its issue and pull request (ADR-0045 decision 14). The circuit breaker follows [claim integrity](claim-integrity-design.md), Components "Halt file and circuit breaker" and its Lifecycle rules for the halt and the breaker, with the outcomes it counts and skips under Seams between the part designs, item 4.
 
 ### Release-train versioning mode
 
@@ -72,40 +77,52 @@ Built by #612, after #606. More than one strain runs at once. Parallel Lair pull
 
 ## State and ownership
 
-GitHub alone is authoritative (ADR-0045 decision 2). Every local file is a cache, a control input or a hand-off from a strain.
+GitHub alone is authoritative (ADR-0045 decision 2). Every local file is a cache, a control input or a hand-off from a strain, except the marker key, the one local item the Lair cannot rebuild from GitHub ([claim integrity](claim-integrity-design.md), State and ownership).
 
 | State | Writer | Readers | Authoritative |
 | --- | --- | --- | --- |
 | Labels | The user through triage writes `readiness:ready` and `type:*`. The Lair writes the other `readiness:*` moves and every `lair:*` label. | Lair, triage, user | yes |
-| Claim marker comment | Lair, at claim, updated with the outcome at run end | Lair (budget, orphan sweep, circuit breaker), user | yes |
-| Park marker comment | Lair, from the strain's park record | Lair, user | yes |
 | Answer comments | User with write permission | Lair only | yes, when the answer rule admits them |
 | Captured issue text and its hash | Lair, at claim; the hash also goes into the claim marker | Strain, as its request; Lair | no; the hash in the claim marker is |
-| Strain settings | Lair, at launch | Claude Code in the strain session | no; rebuilt from the claim |
-| Result file | The strain's fixed result script | Lair | no; the Lair turns it into labels and markers |
-| Idle marker | The strain's `Stop` hook | Lair | no |
-| Halt file | User | Lair, each tick | no; a control input |
-| Single-instance lock | Lair | Lair | no; process exclusion only |
-| Local cache | Lair | Lair | no; rebuildable from GitHub |
+
+The part designs govern every other row, each in its State and ownership section:
+
+- [claim integrity](claim-integrity-design.md): the claim, outcome, park and handoff marker comments, the `lair:claimed` label, the marker key, the halt file, the lock, the scanner files, the queue report and the session records, which replace the local cache;
+- [strain launch](strain-launch-design.md): the strain record, the launch file, the settings fragment and strain settings, the result file, the liveness files, the worktree and its local branch ref, and the remediation dispatch marker, which is a fix-up start marker (Seams between the part designs, item 1);
+- the [merge lane](merge-lane-design.md): its run-end, fix-up, review and exit markers, the run-end and fix-up end markers being outcome markers (Seams between the part designs, item 1), the `lair:review` label, the merge settings, the settle cache, the lane order, the lane-holder set and the Lair git repository.
 
 ## Contracts and seams
 
 Fields and seams only. Each slice builds the code.
 
-- **Strain result.** `schema`, `claim_nonce`, `outcome` (`complete`, `parked`, `blocked` or `failed`), `pr` (number or null), `branch`, `head` (commit), `park` (a park record or null), `decisions` (the decisions taken, each with its key, choice and reason).
-- **Lair-written settings.**
-  - An `env` entry `HIVEMIND_LAIR_STRAIN` holding the claim nonce and the level `unattended`.
-  - No `HIVEMIND_AUTO_MERGE` or `HIVEMIND_AUTO_MERGE_ADMIN` key.
-  - Deny rules on merging, label edits, and issue edits and comments.
-  - A `Stop` hook that writes the idle marker.
-- **Claim marker comment.** A machine-readable marker naming `claim_nonce`, `claimed_at`, the admitting labeled event, and `body_sha256` of the captured title and body. At run end the Lair adds `outcome` and `ended_at`.
-- **Park marker comment.** The question, options and recommendation in readable text, plus a machine-readable park record and the `claim_nonce` of the run that parked.
+- **Strain result.** [Strain launch](strain-launch-design.md), Contracts and seams, "Strain result", extended by `local_review_head` ([merge lane](merge-lane-design.md), "Assumptions about #630").
+- **Lair-written settings.** Strain launch, Contracts and seams, "Strain settings" and "Strain environment".
+- **Claim marker comment.** [Claim integrity](claim-integrity-design.md), Contracts and seams, "Marker comment", "Marker payload, every kind" and "Counting rule". A run end goes into an outcome marker (Seams between the part designs, item 1).
+- **Park marker comment.** Claim integrity, Contracts and seams, "Marker comment" and "Marker payload, every kind", with its question block under Design invariants (Lair-written text).
 - **Park record.** `key`, `type` (`decision`, `fact` or `approval`), `question`, `options`, `recommendation`, `branch`, `pr` (a draft pull request or null). The `key` is stable: the same question on the same issue keeps the same key across runs, whatever its wording.
 - **Answer form.** `/lair answer <key> <option or text>`. `<key>` names an open park on that issue. A `decision` answer names one option. A `fact` answer is free text.
-- **Settled decisions.** They enter the run through the standard-delivery `decisions` launch input. The Lair alone builds each entry from an admitted answer. Each entry names the question key, the answer and its provenance: the answering user, the answer comment and the park marker it answers.
-- **Auto-tier script result.** `tier` (`auto` or `review`) and, for `review`, `reasons`: one reason code per failed condition among the ADR-0044 gates, a protected path, a major bump and local review skipped.
-- **Readiness-check call at claim.** The Lair calls the check for each candidate before claiming it. The result is the one the [idea-to-ready PRD](../../prds/idea-to-ready.md) names under "Readiness check output": track, pass or fail, and reason codes. Only a pass is claimed.
-- **Queue report.** The Ready Issue count, and each ready-labeled issue that failed admission with its reason codes. The Lair emits it on start, on each tick that finds nothing to claim, and on any tick where a ready-labeled issue fails the readiness check. When the queue is empty it points the user to the triage-backlog skill.
+- **Settled decisions.** Strain launch, Contracts and seams, "Settled decisions".
+- **Auto-tier script result.** The merge lane, Components "Auto-tier script".
+- **Readiness-check call at claim.** Claim integrity, Contracts and seams, "Readiness-check call at claim".
+- **Queue report.** Claim integrity, Contracts and seams, "Queue report".
+
+### Seams between the part designs
+
+Where the part designs disagree, these rules decide. Each names its source.
+
+1. **Markers.** Every Lair marker is append-only and signed, and is posted on the claimed issue ([claim integrity](claim-integrity-design.md), Contracts and seams, "Marker comment" and "Counting rule"; Decisions, "Markers are append-only"). The [merge lane](merge-lane-design.md)'s run-end and fix-up end markers ("Markers the merge lane writes") are claim integrity's outcome markers, and carry the fields the merge lane names for that end. [Strain launch](strain-launch-design.md)'s single write of the outcome, `ended_at`, the baseline and, after a remediation, the end head ("Assumptions about #632") is one appended outcome marker, never an edit of the claim marker. Strain launch's remediation dispatch marker is the merge lane's fix-up start marker, on the issue. Claim-time fields, such as `design_stamps`, go in the claim marker.
+2. **What starts a remediation.** One remediation strain per pull request, the user's 2026-11-22 answer in strain launch (Components "Remediation strain launch"; Decisions), decides what starts a remediation, from review feedback or a red CI result. The merge lane's fix-up runs are those runs. They keep their fix-up start and end markers, their CI-red rule (Q9), their park route and their outcome mapping (merge lane, Components "Fix-up runs" and Lifecycle "Run outcome to labels"). A pull request whose one remediation has started gets no second, whatever starts it. The merge lane's R2, no cap on fix-up runs, no longer applies.
+3. **A remediation run's budget.** A remediation run's wall-clock budget is timed from its own launch (claim integrity, Lifecycle, the budget check; Decisions). This replaces the merge lane's timing of a fix-up run from the claim marker's `claimed_at`.
+4. **The circuit breaker.** As the PRD's Stop controls criterion and the [ADR-0045](../../adr/0045-lair-software-factory.md) amendment of 2026-11-22 both state, the breaker:
+   - counts `failed`, `crashed`, `stalled` and `timed-out` outcomes, and any run whose outcome marker does not count;
+   - skips `parked`, `blocked`, `no-pr`, `invalid-result` and `not-launched` outcomes, which neither count nor end a streak;
+   - ends a streak on a `complete` outcome;
+   - covers only runs this Lair session launched.
+
+   This one set replaces the merge lane's ("Stage 4: halt and circuit breaker") and claim integrity's (Lifecycle, the breaker) separate lists. The rest of the breaker follows claim integrity.
+5. **One tick order.** Run end and the run checks, then the remediation step (strain launch, Components "Remediation strain launch", "Tick order"), then the merge lane (merge lane, Components "Merge-lane step of the tick"), then claims. In claim integrity's tick (Lifecycle), steps 1 and 2 still come first, the remediation step and the merge lane run in step 3 after the run checks, with park answers after the merge lane, and claims are step 4.
+6. **Containment of the key and the halt file.** Per the user's answer A of 2026-11-22 to the key-containment question, #604 keeps every Lair strain and remediation strain out of the `control/` folder of the Lair's state root ([claim integrity](claim-integrity-design.md), Components "Lair state root"). On Linux it runs each one in a sandbox with its own process namespace. Claim integrity's "Assumptions about #630" and the ADR-0045 amendment of 2026-11-22 require both. Strain launch's statement that a strain can read any file the user can read (Contracts and seams, "Strain environment"; Trust boundaries) holds outside that folder.
+7. **Orphans and the start-up sweep.** The orphan rule and the start-up sweep follow claim integrity (Design invariants, Claim state; Components "Reconciler and start-up sweep"; Lifecycle). A strain whose kept worktree holds a valid result file whose outcome is unwritten is exempt: the sweep keeps it (strain launch, Components "Remediation strain launch", "A deferred write is not a budget overrun or an orphan"). The Lair removes a run's worktree only after that run's outcome marker is written (merge lane, Decided for you, R37), and then as strain launch's Lifecycle step 5 states.
 
 ## Trust boundaries
 
@@ -113,10 +130,12 @@ Only a user with write permission steers the Lair, through these channels:
 
 - the `readiness:ready` label on an unedited issue, as admission (ADR-0045 decision 10 and its 2026-11-21 amendment);
 - `/lair answer` comments, as park answers (ADR-0045 decision 11);
-- the halt file and the merge settings on the user's own machine (ADR-0045 decisions 12 and 17);
+- the halt file on the user's own machine (ADR-0045 decision 17);
+- the merge settings, only through the user's own settings files on the Lair's machine, as the [merge lane](merge-lane-design.md)'s Trust boundaries state (ADR-0045 decision 12);
+- remote control on a Lair strain, as [strain launch](strain-launch-design.md)'s Trust boundaries state;
 - the batch review of `lair:review` pull requests, and the decision digest as the veto channel (ADR-0045 decisions 12 and 14).
 
-The strain is untrusted after spawn. It works only from the captured issue text, treated as data, and never re-reads the issue. Comments by users without write permission never reach it. An issue the injection scan flags never runs. The Lair-written settings contain the strain (ADR-0045 decision 4). The remaining risks are the [ADR-0045 residuals](../../adr/0045-lair-software-factory.md#residuals).
+Strain containment follows strain launch, Trust boundaries, "Strain containment", with the containment of the key and the halt file under Seams between the part designs, item 6. The markers, the key, the scanner session and the halt file follow [claim integrity](claim-integrity-design.md), Trust boundaries. The remaining risks are the [ADR-0045 residuals](../../adr/0045-lair-software-factory.md#residuals) and the residuals its amendments add.
 
 ## Lifecycle
 
@@ -124,18 +143,19 @@ Issue labels move as ADR-0045 decision 16 states:
 
 - `readiness:ready` to `readiness:implementation` with `lair:claimed` at claim;
 - to `readiness:done` when GitHub shows the pull request merged;
-- to `readiness:needs-decision` on an answerable park, with `lair:claimed` removed;
-- `lair:handoff` on an approval park, a third park or an injection-suspect issue;
-- `lair:failed` on a failed, crashed, stalled or over-budget run;
-- `lair:review` on a pull request outside the auto tier.
+- to `readiness:needs-decision` on an answerable park, keeping `lair:claimed` ([claim integrity](claim-integrity-design.md), Lifecycle, run end);
+- `lair:handoff`, `lair:failed` and `lair:review` as each part design maps them:
+  - every run end and exit: the [merge lane](merge-lane-design.md), Lifecycle "Run outcome to labels" and "Exits";
+  - a suspect scan and an orphan: claim integrity, Lifecycle (claim sequence step 4) and Design invariants (Claim state);
+  - a refused start or push, by start kind: [strain launch](strain-launch-design.md), Components "Start points", "Handling by start kind".
 
 A run moves through these stages:
 
-1. **Claim, spawn, run, result, labels, merge.** The tick admits an issue, writes the claim marker and labels, and spawns the strain. The strain runs standard-delivery unattended and writes its result. The Lair records the outcome in the claim marker, ends the session and removes the worktree after the branch is pushed. The merge lane merges an auto-tier pull request, or labels it `lair:review`.
+1. **Claim, spawn, run, result, labels, merge.** The tick admits an issue, writes the claim marker and labels, and spawns the strain (claim integrity, Lifecycle, claim sequence). The strain runs standard-delivery unattended and writes its result. The Lair records the run end in an outcome marker, then the labels (the merge lane, Lifecycle "Run outcome to labels"; Seams between the part designs, item 1). It ends the session and cleans up as strain launch's Lifecycle steps 4 and 5 state, under Seams between the part designs, item 7. The merge lane then works the pull request (the merge lane, Components "Merge-lane step of the tick").
 2. **Park, answer, re-admit, continue.** A parked result becomes a park marker and a label move. The user answers and relabels `readiness:ready`. Admission runs again, the readiness check included. The new strain starts on the pushed branch with the answers as settled decisions.
-3. **Post-PR remediation.** Review findings on an open Lair pull request start one remediation strain. It pushes to the same branch, and the merge lane evaluates the pull request again on a later tick.
-4. **Halt and circuit breaker.** The halt file, or a tripped circuit breaker, stops new claims while strains in flight finish. Unsetting `HIVEMIND_AUTO_MERGE` stops merges from the next tick.
-5. **Start-up sweep.** On start the Lair takes the lock and removes orphaned sessions and worktrees. Each issue in `readiness:implementation` with no live strain and no pull request becomes `lair:failed`, never ready again.
+3. **Post-PR remediation.** A Lair pull request gets at most one remediation run, under Seams between the part designs, item 2. Its dispatch and launch follow strain launch, Components "Remediation strain launch", and its markers and route follow the merge lane, Lifecycle "Stage 3: post-PR fix-up".
+4. **Halt and circuit breaker.** The halt file and the breaker follow claim integrity, Lifecycle, with the outcomes of Seams between the part designs, item 4. Their effect on fix-up runs and merges follows the merge lane, Lifecycle "Stage 4: halt and circuit breaker".
+5. **Start-up sweep.** The start-up sweep and the removal of orphaned sessions and worktrees follow Seams between the part designs, item 7.
 
 ## Existing-path coverage
 
@@ -147,20 +167,20 @@ A run moves through these stages:
 
 | Failure | Detection | Resulting state |
 | --- | --- | --- |
-| Crash | The strain session has exited with no result file. | `lair:failed`; the outcome `crashed` goes into the claim marker and counts toward the circuit breaker. |
-| Stall | An idle marker, no result and no run activity past the stall window. | The Lair ends the session after the branch is pushed; `lair:failed`, counted as a stall toward the circuit breaker. |
-| The `Stop` hook does not fire while a workflow runs in the background | Found while building #604. | Fallback: the Lair judges a stall on run activity and the wall-clock budget alone, with the same result as a stall. |
-| `/exit` sent through tmux does not end a session | The session is still alive after `/exit` and a grace period. | Fallback: once the branch is pushed, the Lair kills the tmux session, then removes the worktree. |
-| GitHub API failure or rate limit | A failed or rate-limited GitHub call. | The tick changes no state: no claim, label, comment or merge. The next tick retries. |
-| Lock already held | The single-instance lock cannot be taken. | The second Lair exits and changes nothing. |
-| Merge refused | `merge-approved.sh` reports a result other than merged. | The pull request stays open and holds the lane; it is labeled `lair:review` unless checks are still pending, in which case the next tick retries. |
-| CI red | The head commit's check rollup has failed. | One remediation strain for the pull request, as for review findings. A second red result labels it `lair:review`. |
-| Issue edited after claim | The title and body hash differs from the claim marker's `body_sha256`. | The strain keeps its captured text. The Lair does not merge the pull request and labels it `lair:review`. |
+| Crash | The session side: [strain launch](strain-launch-design.md), Failure modes "Crash". The claim side: [claim integrity](claim-integrity-design.md), Failure modes "Crash, or claim stopped partway". | The outcome `crashed` in an outcome marker (claim integrity). Labels by the [merge lane](merge-lane-design.md), Lifecycle "Run outcome to labels", and for a fix-up run its Failure modes "Fix-up run lost in flight". The pull request's `lair:review` route by strain launch's "Crash" row. Counts toward the breaker (Seams between the part designs, item 4). |
+| Stall | The stall rules: strain launch, Failure modes "Stall". The idle signal the Lair acts on: claim integrity, Failure modes "Stall". | The outcome `stalled` in an outcome marker (claim integrity), labels by the merge lane's "Run outcome to labels", and the pull request route by strain launch's "Stall" row. Counts toward the breaker. |
+| The `Stop` hook does not fire while a workflow runs in the background | Found while building #604. | The fallback stall rules: strain launch's row of that name. A run with no idle signal is ended `timed-out` by the budget check: claim integrity, Failure modes "Stall". |
+| `/exit` sent through tmux does not end a session | Strain launch, Failure modes, the row of that name. | The Lair kills the session, then cleans up under Seams between the part designs, item 7. |
+| GitHub API failure or rate limit | Claim integrity, Failure modes "GitHub read failure or rate limit"; for the merge lane, its Failure modes "Failed or incomplete tick read"; for the remediation step, strain launch's Failure modes "Snapshot or pull request read fails on a tick". | As each of those rows states. |
+| Lock already held | Claim integrity, Failure modes "Lock already held". | As that row states. |
+| Merge refused | The merge lane, Failure modes "Merge refused". | As that row states. |
+| CI red | The merge lane, Failure modes "CI red", and strain launch, Failure modes "CI red". | Under Seams between the part designs, item 2: the pull request's one remediation, whose dispatch timing follows strain launch's row and whose routes follow the merge lane's CI-red rule (Components "Fix-up runs"). |
+| Issue edited after claim | The merge lane, Failure modes "Issue edited after claim". | As that row states. |
 | Edited answer, or an answer from a user without write access | The comment's edit history, or the user's permission. | The answer is ignored and never reaches a strain. The issue stays in `readiness:needs-decision`. |
 | Third park | The issue's park marker count reaches 3. | `lair:handoff`; the issue leaves the factory. |
-| Budget overrun | Wall-clock time since the claim marker exceeds the budget, or the engine's agent-call cap ends the run. | The Lair ends the session after the branch is pushed. The issue becomes `lair:failed` (timed out) or is parked, per the result. A timeout counts toward the circuit breaker. |
-| Orphaned claim | The start-up sweep finds an issue in `readiness:implementation` with no live strain and no pull request. | `lair:failed`, never back to ready. |
-| Stale design, or an epic | The readiness check fails at claim, or the issue carries `type:epic`. | Not claimed and given no new label. It is named in the queue report with its reason codes. |
+| Budget overrun | The wall-clock budget clock: claim integrity, Lifecycle (the budget check), with a remediation run timed from its own launch (Seams between the part designs, item 3). The agent-call cap and the deferred-write exemption: strain launch, Failure modes "Budget overrun". | The outcome `timed-out` in an outcome marker (claim integrity), labels by the merge lane's "Run outcome to labels", or a park when a parked result was written first. Counts toward the breaker. |
+| Orphaned claim | Claim integrity, Failure modes "Orphaned claim", with strain launch's Failure modes "Start-up sweep while an outcome write is deferred". | Under Seams between the part designs, item 7. |
+| Stale design, or an epic | Claim integrity, Failure modes "Stale design, or an epic". | As that row states. |
 
 ## Decisions
 
@@ -172,13 +192,20 @@ A decision that is not ADR-worthy names the [P20](../../engineering-principles.m
 - **Lair strains through the brood tooling, owned by the Lair.** ADR-0045 decision 3, amending ADR-0007.
 - **Admission replaces brood strain approval for Lair strains.** ADR-0045 decision 10, amending ADR-0026.
 - **The `unattended` level and park action.** ADR-0045 decision 6, amending ADR-0036 decision 8.
-- **Merges only through `merge-approved.sh` and its gates.** ADR-0044, kept by ADR-0045 decision 12.
-- **The stall and exit fallbacks.** Not ADR-worthy: each fails P20's hard-to-reverse condition. They cover the unverified items in the ADR-0045 residuals.
-- **The queue report contents.** Not ADR-worthy: fails P20's hard-to-reverse condition.
-- **The outcome recorded in the claim marker, and the circuit-breaker count scoped to the Lair session.** Not ADR-worthy: each fails P20's hard-to-reverse condition. Both keep ADR-0045 decision 17's rule that counts come from GitHub markers.
-- **A red CI result gets one remediation strain, then `lair:review`.** Extends ADR-0045 decision 13. Not ADR-worthy: fails P20's hard-to-reverse condition.
-- **An issue edited after claim is not merged and goes to `lair:review`.** Extends ADR-0045 decision 10. Not ADR-worthy: fails P20's hard-to-reverse condition.
+- **Merges only through `merge-approved.sh` and its gates.** The [merge lane](merge-lane-design.md)'s Decisions govern it, under ADR-0044 decisions 17 to 20.
+- **The exit fallback.** Not ADR-worthy: fails P20's hard-to-reverse condition. It covers an unverified item in the ADR-0045 residuals. Its rule is [strain launch](strain-launch-design.md)'s Failure modes row on `/exit`. The stall fallback is [claim integrity](claim-integrity-design.md)'s, in its Decisions.
+- **The queue report contents.** Claim integrity's Decisions govern them.
+- **The outcome in an outcome marker, and the circuit breaker scoped to the Lair session.** Claim integrity's Decisions govern both, under Seams between the part designs, items 1 and 4.
+- **A red CI result.** The merge lane's Decisions govern the CI-red rule, under Seams between the part designs, item 2.
+- **An issue edited after claim is not merged and goes to `lair:review`.** The merge lane's Decisions govern it.
 - **The release-train decisions are deferred with full scope to #606.** ADR-0045 decision 15. These are the fragment format, the release cadence, and who triggers the release pull request. #606 and #612 are therefore not ready until a dated entry under Amendments settles them.
+- **Markers are append-only, signed and posted on the claimed issue; the merge lane's run-end and fix-up end markers and strain launch's outcome write are outcome markers; the dispatch marker is the fix-up start marker; claim-time fields go in the claim marker.** Seams between the part designs, item 1. Implements ADR-0045 decision 2. Not ADR-worthy: fails P20's hard-to-reverse condition.
+- **One remediation strain per pull request decides what starts a remediation; the merge lane's fix-up runs are those runs, and its R2 no longer applies.** Seams between the part designs, item 2. The user's answer A of 2026-11-22 at strain launch's design review round 5.
+- **A remediation run's wall-clock budget is timed from its own launch.** Seams between the part designs, item 3. Claim integrity's decision, listed for veto there. Not ADR-worthy: fails P20's hard-to-reverse condition.
+- **One set of counted and skipped breaker outcomes.** Seams between the part designs, item 4. The counted outcomes are the PRD's Stop controls criterion and the ADR-0045 amendment of 2026-11-22, which rest on the user's answers of 2026-11-22: yes after claim integrity's design review round 2, and A to the stalled-outcome question. The skipped outcomes, the streak end and the session scope are not ADR-worthy: each fails P20's hard-to-reverse condition.
+- **One tick order, with the remediation step before the merge lane.** Seams between the part designs, item 5. The user's answer A of 2026-11-22 at strain launch's design review round 7.
+- **#604 keeps every Lair strain and remediation strain out of `control/`, and on Linux runs each in a sandbox with its own process namespace.** Seams between the part designs, item 6. The user's answer A of 2026-11-22 to the key-containment question.
+- **The orphan rule and the start-up sweep follow claim integrity, with strain launch's deferred-write exemption and the merge lane's worktree removal after the end marker.** Seams between the part designs, item 7. Not ADR-worthy: fails P20's hard-to-reverse condition.
 
 ## Verification strategy
 
