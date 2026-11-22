@@ -1,20 +1,24 @@
 ---
-stamps: []
+stamps:
+  - path: docs/initiatives/retire-json-state-machine/solution-design.md
+    blob: 46e74677105b5a7cea24bd6ad067c43e6f3a0765
+  - path: docs/adr/0048-retire-json-state-machine.md
+    blob: b819e8d4dee726eb3be1dd1065853c1ef2e9f479
 verdict: fail
 open:
   critical: 0
   high: 0
   medium: 0
   low: 0
-rounds: 1
+rounds: 2
 clean_round: false
 ---
 
 # Design review record: Retire the JSON state machine
 
-The design review is at round 1 and has not passed. Every finding is fixed, and the user has answered Tier A question Q7 on D11. Round 2, a confirming round, has not run. No round has been clean, so `clean_round` is `false`. The record carries no stamps: only the record that sets `verdict` `pass` stamps, and a stamp needs the PRD.
+The design review is at round 2 and has not passed. Every finding is fixed, and the user has answered Tier A question Q7 on D11. Round 2, a confirming round, raised findings, so a further confirming round is needed. No round has been clean, so `clean_round` is `false`.
 
-No PRD exists for this initiative. `docs/prds/retire-json-state-machine.md` is needed before any slice can pass the readiness check (ADR-0046 decision 3), so it is written before slicing. The passing record will stamp the PRD, the solution design and ADR-0048, each at the commit its clean pass reviewed, under the stamp rule of Review record front matter in the Idea to Ready design.
+No PRD exists for this initiative. `docs/prds/retire-json-state-machine.md` is needed before any slice can pass the readiness check (ADR-0046 decision 3), so it is written before slicing. The stamps are the blobs at commit `aa9342a244b13150eb141b42ac566611b6b5f268`, the commit round 1 reviewed; a record with `verdict` `fail` keeps its stamps, and only the passing record re-stamps, to the commit its clean pass reviewed.
 
 ## Reviewed documents
 
@@ -29,14 +33,23 @@ No PRD is reviewed, since none exists.
 
 Two passes. Neither reviewer wrote the design. Both reviewed commit `aa9342a244b13150eb141b42ac566611b6b5f268`.
 
-- Reviewer `hivemind:cerebrate`. One fresh, read-only pass with `Memory context: none`, covering the whole documents, angles A and B. The model is not recorded in the run's report.
-- Local review tool pass, run because the design touches trust boundaries. The configured local review tool reviewed the same commit and returned two findings:
+- Reviewer `hivemind:cerebrate`. One fresh, read-only pass with `Memory context: none`, covering the whole documents, angles A and B. The model is `opus`, cerebrate's own model (`HIVEMIND_DESIGN_REVIEW_MODEL` unset).
+- Local review tool pass, run because the design touches trust boundaries. The tool is the `codex-plugin` default preset (`HIVEMIND_LOCAL_REVIEWER` unset), its model the tool's own. It reviewed the same commit and returned two findings:
   - "Universal question rule overrides the Lair's unattended park semantics": real, fixed by R1-01.
   - "The new journal rule makes pre-merge PR listing the Lair veto channel": partly real, fixed by R1-05.
 
-The round raised 12 findings, R1-01 to R1-12. Two are high (R1-01, R1-03), seven are medium (R1-02, R1-04 to R1-09) and three are low (R1-10 to R1-12). After the fixes, none is open. Round 2, a confirming round, has not run.
+The round raised 12 findings, R1-01 to R1-12. Two are high (R1-01, R1-03), seven are medium (R1-02, R1-04 to R1-09) and three are low (R1-10 to R1-12). After the fixes, none is open. The two local review tool findings are recorded as R1-T1 and R1-T2.
 
 The overlord also made five consistency edits after the round, listed here for the user's veto: the D2 level-check wording; the phrase "live only in text this design deletes"; the ADR Considered options wording on the journal; the design's line 3 record status; the R1-10 `:30` wording.
+
+### Round 2
+
+A confirming round. Neither reviewer wrote the design. Reviewed commit `63ff83f2b93b5533981da5b795d3f44d51d269c3`; scope: the change since `aa9342a2` and round 1's fixes.
+
+- Reviewer `hivemind:cerebrate`, model `opus`. One fresh, read-only confirming pass with `Memory context: none`.
+- Local review tool pass: pending. It has not run at round 2, because the local reviewer runs only as its full fix loop; it runs on the final commit before the pull request leaves draft.
+
+The round raised five findings, R2-01 to R2-05. Three are medium (R2-01 to R2-03) and two are low (R2-04, R2-05). After the fixes, none is open. Round 1's fixes R1-01 to R1-05, R1-09, R1-11 and R1-12 close their findings; R1-10 was correct, and its `:87` edit exposed R2-03. The verdict is `fail`, so `clean_round` is `false`.
 
 ## Findings
 
@@ -54,6 +67,13 @@ The overlord also made five consistency edits after the round, listed here for t
 | R1-10 | 1 | A | low | fixed | Code-truth errors: the PR head rule is also stated at `overlord.md:29`; the definition-graph cases run to `standard-delivery.test.mjs:4913`; the brood-status sentence on claimed columns is at `SKILL.md:56`; the autonomy table's site coverage was misdescribed for `step_stop`, `gate_rerun` and the `analysis-only` script site. All are corrected. |
 | R1-11 | 1 | A | low | fixed | ADR-0018's Status line was not updated. S5 now changes it to superseded by ADR-0048, as a shared-document item. |
 | R1-12 | 1 | B | low | fixed | The residual bounded impact for a waiting brood child assumed remote control. It now says the session stays alive and reachable through its `attach:` line, or through remote control when enabled. |
+| R1-T1 | 1 | review | high | fixed | Local review tool pass: the same defect as R1-01, fixed by it. |
+| R1-T2 | 1 | review | medium | fixed | Local review tool pass: partly the same defect as R1-05, fixed by it. |
+| R2-01 | 2 | confirm | medium | fixed | R1-08's fix declared ADR-0026 inert, an unasked amendment of an accepted ADR (ADR-0044, ADR-0045 and ADR-0046 amend ADR-0026 for remaining paths, and the design keeps its Promotion Gate). ADR-0048 decision 8 and the Decisions taken row now say only that the clause is history and is not amended. |
+| R2-02 | 2 | confirm | medium | fixed | The S5 "No retired reference" check could not pass: `next-wave` matched kept text, and `.hivemind/runs/.` matched the CHECK 16 canary glob. The check now lists `next-wave.sh`, `hivemind:next-wave` and `skills/next-wave`, drops the `.hivemind/runs/.` prefix and states why, and Existing-path coverage gains a row for the canary. |
+| R2-03 | 2 | confirm | medium | fixed | The Components bullet on `overlord.md:29` kept the third sentence while the proposed fallback text deleted the last two. Both now agree: the fallback replaces the second sentence, and the third loses only "first checks out the PR's head branch, then". |
+| R2-04 | 2 | confirm | low | fixed | R1-06's fix was applied only partly: "such an item", the destructive-fix row of Failure modes, the S5 check bullet and the seed order rows still used the narrower reading. Each now names the items D12 names, read at its broadest, and S1 to S4 link D12. |
+| R2-05 | 2 | confirm | low | fixed | The record departed from ADR-0046 decisions 6 to 8: it held no stamps on a failing record, did not name each pass's model or tool, pointed to the design for the decisions taken, and did not record the local review tool findings. It now stamps the commit round 1 reviewed, names the models and the tool, lists each taken decision, and records R1-T1 and R1-T2. The design's line 3 follows. |
 
 ## Decisions taken, listed for veto
 
@@ -61,9 +81,17 @@ Each decision has its always-ask screen: an answer to each of the four always-as
 
 | Decision | Scope change | ADR amendment | Trust, credential or merge path | Irreversible |
 |---|---|---|---|---|
-| Round 1 fix R1-08: a clause that scopes an ADR to the current engine is history under ADR-0048 decision 8, so it is not amended and the ADR it scopes governs no remaining path. Taken by the overlord as a strong in-scope recommendation. | no | no: it states that no clause is amended | no | no |
+| Round 1 fix R1-08: a clause that scopes an ADR to the current engine is history under ADR-0048 decision 8, so it is not amended. Taken by the overlord as a strong in-scope recommendation. | no | no: it states that no clause is amended | no | no |
+| D9: ADR-0005 is unchanged. Taken by the design, listed for veto in the design. | no | no | no | no |
+| D12: Engine test deletion needs the user's confirmation. Taken by the design, listed for veto in the design. | no | no | no: it applies a gate and changes none | no |
+| D13: waves.js keeps its parity fixtures as frozen expectations. Taken by the design, listed for veto in the design. | no | no | no | no |
+| D15: The manifest keeps version 4 without the hatchery block. Taken by the design, listed for veto in the design. | no | no | no: the manifest's validated fields and its readers' gates are unchanged | no |
+| D16: The Reflex heading is kept. Taken by the design, listed for veto in the design. | no | no | no | no |
+| D17: The proactive zoom-out marker rides the cluster payload. Taken by the design, listed for veto in the design. | no | no | no | no |
+| D18: Exit-reason routing coverage moves to the overlord contract test. Taken by the design, listed for veto in the design. | no | no | no | no |
+| D19: Stamped documents change only through their own re-review. Taken by the design, listed for veto in the design. | no | no | no | no |
 
-The decisions D9 and D12 to D19, which the design takes itself, are listed for veto in the design with their screens. D11 is answered (Q7 A).
+D11 is answered (Q7 A), and D14 is answered (Q1 A); neither is a taken decision.
 
 ## Decisions asked
 
