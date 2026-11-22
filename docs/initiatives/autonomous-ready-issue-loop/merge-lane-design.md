@@ -41,12 +41,16 @@ Built by #605, called by #608's tick under the single-instance lock. Each tick, 
 3. **Fix-up in flight.** A fix-up run on this pull request has a start marker and no end. The step skips it, because the run will move the head.
 4. **Draft.** The pull request is a draft. The step routes it to the draft exit.
 5. **Pinned head.** The pinned head is the head the Lair last recorded for this pull request. It must equal GitHub's head. Otherwise the pull request goes to batch review with reason `unrecorded-head`.
-6. **Issue edit.** The step recomputes `body_sha256` of the claimed issue's title and body and compares it with the latest claim marker's. A difference sends the pull request to batch review with reason `issue-edited` (Q8). The check runs before every merge attempt.
-7. **Review wait.** When 3600 seconds have passed since the `ended_at` of the run that recorded the pinned head, the pull request goes to batch review with reason `review-wait-elapsed`.
-8. **Auto tier.** The auto-tier script runs on the pinned head. A `review` result sends the pull request to batch review with its reason codes. A script error means no merge this tick.
-9. **Settle check.** See below. Not settled means no merge this tick.
-10. **Merge settings.** The step reads the two user settings files. A file that does not parse means no merge this tick.
+6. **Review wait.** When 3600 seconds have passed since the `ended_at` of the run that recorded the pinned head, the pull request goes to batch review with reason `review-wait-elapsed`.
+7. **Auto tier.** The auto-tier script runs on the pinned head. A `review` result sends the pull request to batch review with its reason codes. A script error means no merge this tick.
+8. **Merge settings.** The step reads the two user settings files. A file that does not parse means no merge this tick.
+9. **Issue edit.** The step recomputes `body_sha256` of the claimed issue's title and body and compares it with the latest claim marker's. A difference sends the pull request to batch review with reason `issue-edited` (Q8). The check runs before every merge attempt.
+10. **Settle check.** See below. Not settled means no merge this tick.
 11. **Merge.** The step runs `merge-approved.sh` with six arguments in a clean environment and routes its one line by the routing table under Contracts and seams.
+
+Steps 9 and 10 run last, with no other step between them and the merge, so the gap between their reads and the merge call is a few seconds.
+
+**Known limit.** Decided by the run under `plugin/governance/decision-autonomy.md` (Review Calls), on a local-review finding, 2026-11-21. An issue edit or a change the settle check would see, landing between step 9's or step 10's read and the merge call, is not seen. `merge-approved.sh` rechecks the approval and threads on its own read, but it never reads the issue, and the expected-head argument pins only the head: GitHub offers no merge call that also pins issue text or the settle snapshot, so no client-side check can close the gap. This is the same kind of limit as ADR-0044 decision 15. Passing a settle digest and the issue hash into `merge-approved.sh` was rejected: it adds script surface, and a gap inside the script remains. A finding that only says the issue or the settle state can change between steps 9 and 10 and the merge call contests this decision and is a repeat.
 
 Under parallel strains (#612) the step runs the same way for each pull request.
 
@@ -315,7 +319,7 @@ The user answered A to each question on 2026-11-21:
 - **Q5.** Protected paths from a trunk list plus a fixed floor; the bump from the version-file diff. Applied in the Auto-tier script component.
 - **Q6.** Local-review proof is the delivery run's recorded head plus heads the Lair's own fix-up runs recorded. Applied in the Auto-tier script component.
 - **Q7.** Only a pull request the Lair recorded on the claimed issue after checking it against GitHub may merge. Applied under Contracts and seams.
-- **Q8.** No merge after an issue edit; the pull request goes to batch review. Applied as step 6 of the merge-lane step.
+- **Q8.** No merge after an issue edit; the pull request goes to batch review. Applied as step 9 of the merge-lane step.
 - **Q9.** One fix-up run for failed checks, then batch review. Applied as the CI-red rule.
 - **Q10.** The halt and the breaker stop claims and fix-up dispatch; merges continue; unsetting auto-merge stops merges. Applied in Lifecycle stage 4.
 
@@ -328,6 +332,7 @@ Each of these is listed for veto. None is ADR-worthy: each fails P20's hard-to-r
 - **The review wait is 3600 seconds**, the watch's `max_watch_duration` default (ADR-0029 decision 3), measured from the recording run's `ended_at`, so it survives a lost cache.
 - **The routing rows.** No checks, conflicts, a blocked merge and a refused merge go to batch review. A script error, malformed output and `merge-pending` wait, bounded by the review wait. `skipped:bad-setting` is handled like `off`.
 - **`merge-pending` makes no second merge call** for the same head while the cache marks it.
+- **The issue-edit and settle checks run last**, just before the merge call, and the few seconds left between their reads and that call are a known limit (Merge-lane step of the tick), decided by the run on a local-review finding.
 - **The head check goes first** in `merge-approved.sh`, before gate 1, so a moved head never yields another gate line.
 - **`HIVEMIND_PR_REVIEWERS` comes from the same two user files** as the merge keys (ADR-0043 decision 2), and the reviewer filter is `automated`.
 - **The clean environment** holds `PATH`, `HOME`, the `gh` auth variables when set, and the three keys.
