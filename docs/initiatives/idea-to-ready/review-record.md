@@ -12,7 +12,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 1
+rounds: 2
 clean_round: false
 ---
 
@@ -40,6 +40,8 @@ From round 2, by the user's instruction after round 1:
 - When the design touches trust, credentials or the merge path and a local review tool is configured (`HIVEMIND_LOCAL_REVIEWER`, or the `codex-plugin` default when the Codex plugin is installed), one more pass runs through that tool via `run-review.sh`. When none is configured, that pass is skipped and the skip is recorded in this record.
 - The confirming round reviews only the diff since the previous round and the fixes to open findings, with effort medium.
 
+#640, #641 and #643, merged from main after round 2, set this procedure in the PRD, so the PRD and this note now agree. The PRD names no effort level.
+
 This design touches trust and the merge path. `HIVEMIND_LOCAL_REVIEWER` is unset and the Codex plugin is installed, so the `codex-plugin` default runs the extra pass.
 
 ### Round 1
@@ -50,6 +52,19 @@ Two parallel passes. Each was fresh and read-only, ran with `Memory context: non
 - Angle B: reviewer `hivemind:cerebrate`, model opus (Claude Opus). Failure modes, trust and injection, testability.
 
 The round raised 15 findings, RR1A1 to RR1A6 and RR1B1 to RR1B9. RR1B1 is high. After the round the user answered Q18 A and Q19 A and accepted the remediation plan (Q20 A). Round 2, a confirming round, follows.
+
+### Round 2
+
+The confirming round. Neither reviewer wrote the design.
+
+- Reviewer `hivemind:cerebrate`, model opus (Claude Opus), effort medium. One fresh, read-only pass with `Memory context: none`, covering both angles, A and B, over the change since round 1 and the fixes to its findings. It reviewed commit `20169518422a183c3735c5ca3ccd61ddc507a9f6`.
+- Reviewer: the local review tool, the `codex-plugin` preset, run through `run-review.sh` against base `92c9981f905531d8f4ba20040baf0cab2b855916`. The tool names no model (ADR-0042 decision 7). Its verdict was needs-attention, with one high finding.
+
+The cerebrate pass confirmed all 15 round-1 findings fixed. The round raised 4 new findings, RR2-C1 (high, from the tool pass), RR2-1, RR2-2 and RR2-3, so it is not clean.
+
+After the round the branch merged main at `5881e389`, bringing in #628, #640, #641, #642 and #643. #642 added principle P26, which drove a consumer-portability sweep of the design: CI, `tools/validate.sh`, the Codex plugin and Fable are each optional, with a stated fallback. The user answered the merge check question (Q21 A) and accepted the remediation plan (Q22 A).
+
+Round 3, the confirming round and the last under the three-round cap, follows. It reviews the diff since `20169518`, which includes the merge of main, and the fixes to round 2's findings.
 
 ## Findings
 
@@ -70,6 +85,10 @@ The round raised 15 findings, RR1A1 to RR1A6 and RR1B1 to RR1B9. RR1B1 is high. 
 | RR1B7 | 1 | B | low | fixed | #621's paged reads had no truncation rule. Any `pageInfo.hasNextPage` fails with no stage (Stage derivation and handoff check). |
 | RR1B8 | 1 | B | low | fixed | Verify did not check destinations. A deferred Note needs a `#<n>` issue reference and a recorded Note a repository path (Review record body). |
 | RR1B9 | 1 | B | low | fixed | The end condition "asked until #638 ships" could not be evaluated. A weak or absent recommendation is asked, and #638 may change that only by its own ADR (ADR-0046, Design-decision rule, D32, PRD Further Notes). |
+| RR2-C1 | 2 | review | high | fixed | Local review tool pass, finding_id `2b482094fd606613bd5ffb179042cd21786865347cf098217baa4555ff2d33f2`: design review findings entered a guide run's request in a data block, outside the pass scan (SD-06), so quoted hostile text or a fence could reach the run's instruction channel. The data block is removed, and no review text enters the request. The guide posts each round's findings as comments on the docs pull request, the run's one launch reference, so gather-facts carries them under the pass scan (Guide skill, Trust boundaries, ADR-0046 decision 10). |
+| RR2-1 | 2 | confirm | medium | fixed | The keep-stamps rule conflicted with ADR inclusion: a failing record stamped before an ADR was added could not include it. Stamp equality and ADR inclusion are checked only on a record whose verdict is pass, which re-stamps at its clean pass and includes every added or edited ADR (Review record front matter, Review record body, D28, ADR-0046 decision 7). |
+| RR2-2 | 2 | confirm | medium | fixed | The guide request's layout was unfixed, and the overlord's reading of the Docs pull request line was ambiguous. Line 1 is the marker, line 2 is exactly `Docs pull request: #<n>` or `Docs pull request: none`, and the overlord reads references only from line 2. No issue number becomes a launch reference, and a reused pull request's body never gains a Closes line (Guide skill, D33). |
+| RR2-3 | 2 | confirm | low | fixed | A recorded Note's repository path and a deferred Note's issue reference were undefined. A repository path is a link target read from the record's folder or a code span read from the repository root, naming a file present at the pull request head; `#<n>` is checked by shape only, with no gh call (Review record body). |
 
 ## Decisions taken, listed for veto
 
@@ -86,27 +105,27 @@ Each decision has its always-ask screen: an answer to each of the four always-as
 | D7: Review record front matter with blob stamps | no | no | no | no |
 | D8: Ready label allowed with open blockers | no | no | no | no |
 | D10: Delivered design frozen as history | no | no | no | no |
-| D11: No dedicated different-model design pass in v1 | no | no | no | no |
+| D11: A second model only when configured | no | no | no | no |
 | D15: Drone with exact file scope writes designs and records | no | no | no | no |
 | D17: Readiness check is a shared library | no | no | no | no |
 | D19: Native blocked-by edges written at triage | no | no | no | no |
 | D27: Design-stage resolution is judgment checked by review | no | no | no | no |
-| D28: Record verified before ready and on every push | no | no | no | no |
+| D28: Record verified before ready and before merge | no | no | no | no |
 | D29: Write permission is the ready label's authority | no | Restates ADR-0045 decision 10, as amended by #625. | no | no |
 | A16: the PRD's Lair retrofit criterion covered by #625 | No. The criterion stands, and #625's acceptance criteria verify it. | no | no | no |
 | Local-review severities: d224e40e medium, 820000d7 medium, 0c9bd346 high | no | no | no | No. All three are fixed, so the open counts do not depend on the severities. |
 | Round-0 placeholder record, now replaced by this record | no | no | no | No. This record replaces it. |
-| R2B2: ADR inclusion checked only for records the pull request adds or edits | no | no | no | no |
+| R2B2: ADR inclusion checked only for records the pull request adds or edits and whose verdict is pass (RR2-1) | no | no | no | no |
 | R2B3: a verify failure stops the run, and fix rounds never edit a record | no | No. ADR-0026 Tier B surfaces a validation failure remediation cannot resolve. | Narrows: a fix can no longer re-stamp a record. | no |
 | R2B4: every docs-branch run launches as a draft with no closable launch reference | no | no | no | no |
-| R2B5: CI maps `docs/prds/` and `docs/adr/` to verify, beside `docs/initiatives/` | no | no | no | no |
+| R2B5: where a repository wires verify in its own CI, which is optional, it maps `docs/prds/` and `docs/adr/` to verify beside `docs/initiatives/`; this repository does through its own `tools/validate.sh` as an example | no | no | no | no |
 | R2B6: the design slug is derived from the parent epic's seed marker; #615's delivery adds the marker by hand to epics #603 and #614 | No. This pull request edits no epic. | no | no | no |
 | R2B8 and R2B9: exact Design block line counts, and the seed marker slug checked before any `git` or `gh` call | no | no | no | no |
-| R2B10: every open count is 0 at pass, stricter than the PRD's exit rule of zero open critical or high | No. A medium or low may still be deferred or recorded, which is a disposition, not open, so the PRD's one-disposition rule leaves no open finding at exit. | no | no | no |
-| R2B11: named test scripts, fixture folders and `tools/validate.sh` suites | no | no | no | no |
+| R2B10: every open count is 0 at pass, stricter than the PRD's exit rule of zero open critical or high | No. It matches the PRD's rule that a record with any open finding cannot merge (#641). | no | no | no |
+| R2B11: named test scripts, fixture folders and this repository's own `tools/validate.sh` suites, an example of optional verify wiring | no | no | no | no |
 | R2A8: #623 blocked by #625 | no | no | no | no |
 | D20's list covers `standard-delivery.js` and `pr-feedback-remediation.js` | no | no | no | no |
-| Consumer repositories rely on the guide's verify, the readiness check and the fix-round commit refusal; D28, ADR-0046 decision 7 and the auto-merge residual are scoped to repositories that wire verify in CI | no | no | No change: it states where the existing bound holds. | no |
+| In every repository the fallbacks are the guide's verify before ready, the plugin's merge-path checks (`merge-approved.sh` and the Lair's merge refuse a failing record), the readiness check and the fix-round commit refusal; verify in a repository's own CI is optional, never required (P26, Q21 A), and D28, ADR-0046 decision 7 and the auto-merge residual state that | no | no | No change: it states where the existing bound holds. | no |
 | The guide does not pass verify as a validation command | no | no | no | no |
 | The guide's verdict-fail-first step removed | no | no | no | no |
 | The github-reviewer's own fix commits are bound by a Validation Procedure rule and D24 | no | no | No change: its commit path is unchanged, a record edit is authoritative only through the human-reviewed merge (D24, answer Q5 A), and its git commits fall inside the recorded residual Record commits outside the fix-round commit step. | no |
@@ -114,7 +133,7 @@ Each decision has its always-ask screen: an answer to each of the four always-as
 | R3A7: the PRD path shape in the allowlist | no | no | no | no |
 | R3B9: one reason code per pass-rule clause, and `record_open_blocking` renamed `record_open` | no | no | no | no |
 | Duplicates merged: R3B6 with R3A7 | no | no | no | no |
-| Verify checks stamp equality only for a record whose `verdict` is `pass` | no | no | No change: a failing record fails the pass rule and the readiness check either way. | no |
+| Verify checks stamp equality and ADR inclusion only for a record whose `verdict` is `pass` (RR2-1) | no | no | No change: a failing record fails the pass rule and the readiness check either way. | no |
 | Each round's fixes and its record rewrite land in one standard-delivery run, the record wave last | no | no | no | no |
 | The run that writes `verdict` `pass` carries only the record wave and launches with `local_review` false | no | no | No change: the documents it stamps passed local review in earlier runs, and the merge stays human-reviewed (D24). | no |
 | A review fix after the review exits follows the order of Re-review and re-stamp | no | no | no | no |
@@ -125,7 +144,7 @@ Each decision has its always-ask screen: an answer to each of the four always-as
 | RR1B1 and RR1B2: stamps name blobs at the commit a pass reviewed, under one stamp rule | no | no | Narrows: a stamp names only content a pass read. | no |
 | A clean round raises no new finding and finds no earlier finding unfixed | no | no | no | no |
 | RR1B3: the post-apply re-check's overlay holds exactly `readiness:ready` | no | no | no | no |
-| RR1B4: guide runs take a request of the marker line, the guide's fixed wording and the maintainer's words; review text only through the docs pull request launch reference; pass findings only in a data block | no | no | Narrows: review text reaches a run only under the pass scan, and pass findings only as data. | no |
+| RR1B4 and RR2-C1: guide runs take the fixed request layout; review text, findings included, reaches a run only as the docs pull request's body and comments under the pass scan | no | no | Narrows: no review text enters a run's request. | no |
 | D33's mechanism: the marker line `hivemind-guide-run: <slug>`, not a new launch arg | no | Within the ADR-0039 decision 4 narrowing asked in re-review round 1, answer Q19 A. | no | no |
 | A refused or blocked guide launch starts no run and still runs on Instinct under ADR-0039 decision 3 | no | No. ADR-0039 decision 3 is unchanged. | No change: its commits stay inside the recorded residual Record commits outside the fix-round commit step. | no |
 | RR1B6: line-ending carriage returns are removed before parsing | no | no | no | no |
@@ -135,10 +154,19 @@ Each decision has its always-ask screen: an answer to each of the four always-as
 | RR1A3: the record-commit residual covers every commit route outside `runCommitStep` | no | no | No change: it restates the residual of answer Q15 A by its rule, not by a count. | no |
 | RR1A4, RR1A5 and RR1A6: coverage rows, Seam order headings and consumer-assertion fixtures | no | no | no | no |
 | The glossary's Instinct and Review Record entries reflect D33 and the stamp rule | no | no | no | no |
+| RR2-2: line 2 of a guide request is `Docs pull request: #<n>` or `Docs pull request: none`, and references come only from line 2 | no | Within the ADR-0039 decision 4 narrowing asked in re-review round 1, answer Q19 A. | Narrows: no other number reaches references. | no |
+| The guide posts each round's findings as docs pull request comments with `gh pr comment` | no | no | No change: the executing user's credentials, on the pull request the guide already writes. | no |
+| RR2-3: a recorded Note's repository path, and a deferred Note's `#<n>` checked by shape with no gh call | no | no | no | no |
+| D11: the local review tool pass runs through `hivemind:adaptation-cycle`, and `HIVEMIND_DESIGN_REVIEW_MODEL` falls back to cerebrate's own model | no | no | no | no |
+| The Findings Angle column: A or B for a round-1 finding's angle group, confirm for a confirming pass, review for the local review tool, local review or post-PR review | no | no | no | no |
+| One pass per round covering every angle, confirming rounds over the change and fixes only, and findings landing before the next round, set by the PRD (#640, #641, #643) | no | no | no | no |
+| Verify and its merge mode are one shared library, `plugin/skills/_shared/record-verify.sh`, sourced by the design review skill's script, `merge-approved.sh` and the Lair controller | no | no | No change: the merge check it carries was asked (answer Q21 A). | no |
+| `merge-approved.sh` prints `MERGE=skipped:record-blocked` for a docs pull request whose record fails merge mode, and a record it cannot read refuses the merge | no | Within the ADR-0044 narrowing asked in re-review round 2, answer Q21 A. | Narrows: an unreadable record refuses the merge, never passes it. | no |
+| The P26 sweep (#642): CI, `tools/validate.sh`, the Codex plugin and Fable are each optional, with a stated fallback | No. #642 set P26 on main. | no | No change: the guide's verify before ready, the merge check, the readiness check and the fix-round commit refusal hold in every repository. | no |
 
 Moved to #638 with the council, so no longer listed here: D12, D13, D14, D16, D18 and D18's `skip` at `balanced`, D25, D26, the A1 redesign, ADR-0042 decision 9 not amended, A15, R2A3, the switched-option gate, the `needs_user_fact` absent rule, the council switch re-plan, script-local council answers, the composed-brief defect, the `dissent` bound, `council.js`, the merges of A5 with B12, A6 with B13, R2A1 with R2B1, R2A4 with B15, R2B7 with A2, R3A8 with R3B1 and R3B8 with R3A2, R3B1, R3B2, R3B3, R3A2, R3A3, R3A4 and R3B7.
 
-The commit refusal, the code-read verify stop, CI verify on every record the pull request adds or edits and `design_delivered` were asked (Q10 A), and the round-4 count was asked (Q11 A). After round 4 the council split (Q12 A, Q14 B), the narrowing of ADR-0037 decision 16 (Q13 A), the commit refusal's scope (Q15 A), the ADR-0026 decision 2 amendment (Q16 A) and the remediation plan (Q17 A) were asked. In re-review round 1 the narrowing of ADR-0026 decision 3 (Q18 A, D9), the return of a guide-launched run to the guide (Q19 A, D33) and the remediation plan (Q20 A) were asked. So none of them has a taken row.
+The commit refusal, the code-read verify stop, verify on every record the pull request adds or edits (in a repository's own CI where it wires verify there, optional per Q21 A) and `design_delivered` were asked (Q10 A), and the round-4 count was asked (Q11 A). After round 4 the council split (Q12 A, Q14 B), the narrowing of ADR-0037 decision 16 (Q13 A), the commit refusal's scope (Q15 A), the ADR-0026 decision 2 amendment (Q16 A) and the remediation plan (Q17 A) were asked. In re-review round 1 the narrowing of ADR-0026 decision 3 (Q18 A, D9), the return of a guide-launched run to the guide (Q19 A, D33) and the remediation plan (Q20 A) were asked. In re-review round 2 the plugin-only merge check with the narrowing of ADR-0044's merge conditions (Q21 A, D28) and the remediation plan (Q22 A) were asked. So none of them has a taken row.
 
 ## Decisions asked
 
@@ -146,9 +174,10 @@ The commit refusal, the code-read verify stop, CI verify on every record the pul
 - D20, prose budget with no pre-approved raise. The user's answer: Q1 B, no budget raise is pre-approved.
 - D24, review record authority is a human-reviewed merge. The user's answer: Q5 A, take the recommendation.
 - D28, record integrity enforced in code. The user's answers:
-  - Q10 A, asked after design review round 3: every commit except a standard-delivery wave refuses a review record, the validate step reads verify's `record-verify-failed: <record path>` line in code and stops the run blocked before any fix decision, CI verify runs on every record the pull request adds or edits, and a delivered design's slices fail `design_delivered`.
+  - Q10 A, asked after design review round 3: every commit except a standard-delivery wave refuses a review record, the validate step reads verify's `record-verify-failed: <record path>` line in code and stops the run blocked before any fix decision, verify runs on every record the pull request adds or edits (in a repository's own CI where it wires verify there, optional per Q21 A), and a delivered design's slices fail `design_delivered`.
   - Q15 A, asked after design review round 4, narrows Q10 A: the commit refusal covers `runCommitStep` only. Every commit route outside it carries no refusal, a recorded residual (Residuals).
   - Q13 A, asked after design review round 4: the validate step's record stop narrows ADR-0037 decision 16.
+  - Q21 A, asked in re-review round 2: the merge check needs only the plugin, with no CI merge gate. The guide keeps the docs pull request a draft until verify passes at its head and the record passes the pass rule. Verify's merge mode fails a record the pull request adds or edits whose verdict is not pass or whose open counts are not all 0. `merge-approved.sh` and the Lair's merge (#623) run it and refuse a docs pull request it fails, which narrows ADR-0044's merge conditions by one refusal. A human who marks the pull request ready and merges it is a recorded residual bounded by D24 (Residuals). Verify in a repository's own CI is optional.
 - D31, one-time fourth design review round. Asked after design review round 3. Spent: round 4 raised new high findings, so the council split out (D32). The user's answers:
   - Q9 A: fix all round-3 findings, then run round 4 as a one-time confirming round; if it raises any new critical or high finding, the council work (#618, #624) splits out into its own initiative.
   - Q11 A: round 4 is recorded under Rounds as the D31 confirming round, and `rounds` stays 3.
@@ -157,6 +186,7 @@ The commit refusal, the code-read verify stop, CI verify on every record the pul
   - Q16 A: until #638 ships, a design decision with a weak or absent recommendation is asked, recorded as an amendment of ADR-0026 decision 2 for design-stage decisions. Re-worded in re-review round 1 (RR1B9): #638 may change it only by its own ADR.
   - Q17 A: the round-4 remediation plan is accepted.
 - D33, guide-launched runs return to the guide. Asked in re-review round 1. The user's answer: Q19 A: a run the guide launched that fails or ends blocked returns to the guide, which re-derives the stage, with no Instinct takeover. This narrows ADR-0039 decision 4 for guide-launched runs, recorded in ADR-0046; #622 edits `plugin/agents/overlord.md` (`## Engine`) within D20.
+- Round-2 remediation plan. Asked in re-review round 2. The user's answer: Q22 A, the plan is accepted. Review findings reach a guide run only as docs pull request comments under the pass scan, the guide request has a fixed layout (RR2-C1, RR2-2; D33), stamp equality and ADR inclusion are checked only on a passing record (RR2-1; D28), and the Note shapes are defined (RR2-3).
 
 ## Moved to #638 with the council
 
@@ -176,14 +206,21 @@ Auto-merge of a docs pull request, from finding B5:
 
 - Scope: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval and green checks with no human review of the design.
 - Ground: the user's decision of 2026-11-21 (answer Q5). It is outside the threat model as the maintainer's own opt-in under [ADR-0044](../../adr/0044-settled-approval-and-opt-in-auto-merge.md).
-- Bounded impact: in a repository that wires verify in CI, verify keeps a merged record consistent and current. In any repository, the fix-round commit refusal holds, the guide runs verify before ready, the readiness check fails every slice of a stale or delivered design, and #623 closes the Lair path. A wrong design is caught only by a later review.
+- Bounded impact: in any repository, `merge-approved.sh` refuses a docs pull request whose record fails verify's merge mode, the fix-round commit refusal holds, the guide runs verify before ready, the readiness check fails every slice of a stale or delivered design, and #623 closes the Lair path. Where a repository adds verify to its own CI, verify there also keeps a merged record consistent and current. A wrong design is caught only by a later review.
 - Recorded in [ADR-0046](../../adr/0046-idea-to-ready-process.md), Residuals.
 
 Record commits outside the fix-round commit step, from findings R4A1, R4B1 and RR1A3:
 
 - Scope: every commit route outside `runCommitStep` can carry a review record path with no code refusal, such as Instinct, chosen or as the fallback after a refused launch or a failed or blocked run the guide did not launch, the Reflex tail's molt checkpoint, the state-machine implement loop's molt checkpoints, the local reviewer's molt fix commits on every path, the github-reviewer's git commits and the guide's own molt commits. A run the guide launched does not fall back to Instinct (answer Q19 A).
 - Ground: unclosable on this engine, because a model that writes a molt inputs file or runs git can carry any path. The user decided so (asked after design review round 4, answer Q15 A).
-- Bounded impact: verify in CI where wired, the guide's verify before ready, and the readiness check failing every slice of a stale record. A re-stamp without review reaches trunk only through a human-reviewed merge (D24) or under the auto-merge residual.
+- Bounded impact: the guide's verify before ready, the plugin's merge-path checks, the readiness check failing every slice of a stale record, and verify in the repository's own CI where it adds it. A re-stamp without review reaches trunk only through a human-reviewed merge (D24) or under the auto-merge residual.
+- Recorded in [ADR-0046](../../adr/0046-idea-to-ready-process.md), Residuals.
+
+Human merge of a record that does not pass, from re-review round 2:
+
+- Scope: a human with write permission who deliberately marks the docs pull request ready and merges it can merge a record with an open finding or a failed verdict, unless the repository adds its own merge block.
+- Ground: HIVEMIND requires no consumer CI, so it has no merge gate a human cannot pass (`docs/engineering-principles.md` P26). The user decided so (asked in re-review round 2, answer Q21 A).
+- Bounded impact: the merge is a human-reviewed merge (D24). The guide keeps the pull request a draft until the record passes, the plugin's merge paths refuse it, and the readiness check fails every slice of a record that does not pass the pass rule, so no slice of it is labeled ready or claimed. A repository may add verify to its own CI as an optional capability.
 - Recorded in [ADR-0046](../../adr/0046-idea-to-ready-process.md), Residuals.
 
 ## History: 2026-11-22
