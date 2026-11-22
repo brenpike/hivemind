@@ -48,14 +48,14 @@ The round 3 findings come from the parent [review record](review-record.md). #63
 
 | ID | Severity | Finding | Disposition |
 | --- | --- | --- | --- |
-| A3-1 | high | Lair-written settings do not keep merge keys out of strains. | fixed: Components > Strain launch and settings, and Contracts and seams > Strain settings and Strain environment |
+| A3-1 | high | Lair-written settings do not keep merge keys out of strains. | fixed: Components > Strain launch and settings, and Contracts and seams > Strain settings and Strain environment, for the user, project and local scopes; a managed merge key stays the named residual "managed settings" under Trust boundaries > Strain containment |
 | A3-4 | high | There is no contract for the strain's launch inputs or for carrying parked, branch, head and decisions out of the run result. | fixed: Components > Launch inputs, and Contracts and seams > Launch file and Strain result |
-| A3-5 | high | Re-claim and remediation contradict the detached spawn and the brood-child fresh-branch rule. | fixed: Components > Start points |
+| A3-5 | high | Re-claim and remediation contradict the detached spawn and the brood-child fresh-branch rule. | fixed: Components > Start points, with the head recheck after the switch and the Failure modes row "Start moved" |
 | A3-6 | high | Governance the strain overlord loads still tells it to ask, and no slice owns the edits. | fixed: Components > Unattended governance edits |
 | A3-7 | high | The facts step re-reads referenced issues and outsider comments live. | fixed: Components > Launch inputs ("Facts come only from the captured issue text") |
 | B3-2 | high | The strain's model derives launch inputs from the issue text, and the facts step re-reads GitHub live. | fixed: Components > Launch inputs |
 | B3-9 | high | Deny rules cannot deliver "a strain cannot merge, change labels or edit the issue". | recorded: Trust boundaries > Strain containment, as the named residual "a prompt-injected strain holds the user's rights", with the reworded claims in Decisions > Changes to shared documents, changes 1 and 2 |
-| B3-17 | high | Env values leak into strains both ways, and the marker's source cannot be told. | fixed: Components > Strain launch and settings, and Contracts and seams > Strain environment and Marker check |
+| B3-17 | high | Env values leak into strains both ways, and the marker's source cannot be told. | fixed: Components > Strain launch and settings, and Contracts and seams > Strain environment and Marker check, against a stray or copied marker; a prompt-injected strain that rewrites the Lair's records stays the named residual under Trust boundaries > Strain containment |
 | B3-15 | medium | Re-claim from the pushed branch has four gaps: moved head, superseded design, unanswered park, decision size limit. | fixed: Components > Start points |
 | A3-9 | medium | Stall and agent-call budget rules rely on signals nothing produces, and the agent-call cap has no owner. | fixed: Components > Strain result and liveness ("Run activity") and Launch inputs ("Agent-call cap") |
 | B3-12 | medium | Session end waits for "branch pushed", and run activity is undefined. | fixed: Lifecycle, steps 4 and 5, and Components > Strain result and liveness ("Run activity") |
