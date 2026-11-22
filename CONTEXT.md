@@ -389,7 +389,7 @@ The optional, ephemeral session-resumption artifact at `.hivemind/handoffs/<slug
 _Avoid_: essence (which is the worker report), spawn
 
 **Solution Design**:
-The committed HOW of an **Initiative**, at `docs/initiatives/<slug>/solution-design.md`, written after the **PRD** and before slicing. It names the components, state and ownership, contracts, trust boundaries, failure modes and decisions, each decision with its ADR or the ADR condition it fails, and its Open questions read exactly `None`. Each slice names the exact headings it implements. Once every slice is done it is marked delivered and never maintained again (ADR-0046).
+The committed HOW of an **Initiative**, at `docs/initiatives/<slug>/solution-design.md`, written after the **PRD** and before slicing. It names the components, state and ownership, contracts, trust boundaries, failure modes and decisions, each decision with its ADR or the ADR condition it fails, and its Open questions read exactly `None`. Each slice names the exact headings it implements. Once every slice is done it is marked delivered and never maintained again, and a slice that links it fails the **Readiness Check** (ADR-0046).
 _Avoid_: design doc, directive (which is one run's plan), architecture doc
 
 **Design Review**:
@@ -397,7 +397,7 @@ The review of an **Initiative**'s **PRD**, **Solution Design** and ADRs before t
 _Avoid_: plan interrogation (which interviews the user), **Adaptation Cycle** (which reviews a code diff), design pass
 
 **Review Record**:
-The committed outcome of a **Design Review**, at `docs/initiatives/<slug>/review-record.md`, shipped in the same pull request as the **Solution Design**. It stamps the **PRD**, the **Solution Design** and every ADR its docs pull request adds or edits, each by its git blob id, and records the verdict, the open findings by severity, the rounds, every finding's disposition, the decisions taken (listed for veto) and the decisions asked (with the user's answer). Any later edit to a stamped document makes it stale until a review of the change re-stamps it. Its authority is a human-reviewed merge (ADR-0046).
+The committed outcome of a **Design Review**, at `docs/initiatives/<slug>/review-record.md`, shipped in the same pull request as the **Solution Design**. It stamps the **PRD**, the **Solution Design** and every ADR its docs pull request adds or edits, each by its git blob id, and records the verdict, the open findings by severity, the rounds, every finding's disposition, the decisions taken (listed for veto) and the decisions asked (with the user's answer). Any later edit to a stamped document makes it stale until a review of the change re-stamps it. Its authority is a human-reviewed merge (ADR-0046). Only the design review's record step writes or re-stamps it; a validation fix round and a pr-feedback-remediation commit refuse it in code.
 _Avoid_: review log, **Fix Ledger** (which tracks a pull request's review findings), **Decision Journal**
 
 **Readiness Check**:

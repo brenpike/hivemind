@@ -51,11 +51,12 @@ The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../init
    - **Pass.** The record passes when `verdict` is `pass`, every open count (critical, high, medium and low) is 0, `clean_round` is `true` and `rounds` is 2 to 3.
    - **Open counts.** Each severity's count is its findings with disposition `open`. Any critical or high whose disposition is not `fixed` or `rejected` counts as open.
    - **Staleness.** The record is stale when any stamped path's `git rev-parse <commit>:<path>` at the passed trunk commit differs from its blob, or the path is missing. A blob id is a content hash, so the merge method does not matter. Any edit to a stamped file makes the record stale until a review of the change re-stamps it.
-   - **Verify.** The body holds a fixed Findings table. The design review skill's verify checks the front matter, the stamps and the table before the pull request leaves draft, and in CI on every push for a passing record.
-     - ADR inclusion is checked only for a record the pull request adds or edits. Every other passing record gets stamp equality only.
-     - CI maps `docs/initiatives/`, `docs/prds/` and `docs/adr/` to verify.
-     - A verify failure is never fixed in place. The validate step reports it as blocked, so the run stops with that reason and runs no fix round. A validation fix round or a post-PR fix never edits a review record.
-   - **Authority.** A record is authoritative only through a human-reviewed merge. Only the design review's record step, a drone with exact file scope, writes or re-stamps it. The first run that edits a stamped document of a passing record begins with that record step setting `verdict` to `fail`. #623, with the #625 amendment, adds `docs/prds/`, `docs/initiatives/` and `docs/adr/` to the Lair's protected-path list.
+   - **Verify.** The body holds a fixed Findings table. The design review skill's verify checks the front matter, the stamps and the table, and prints one `record-verify-failed: <record path>` line per failing record.
+     - The guide runs it before the pull request leaves draft, in any repository.
+     - In a repository that wires it into CI, as this one does through `tools/validate.sh`, CI maps `docs/initiatives/`, `docs/prds/` and `docs/adr/` to it. Every record the pull request adds or edits gets every check, whether or not its design is delivered. Every other passing record whose design is not delivered gets stamp equality only. ADR inclusion is checked only for a record the pull request adds or edits.
+     - A verify failure is never fixed in place. The validate step reads verify's line in code and stops the run blocked, naming the record, before any fix decision, so no fix round runs.
+     - A repository with no verify in CI keeps the guide's verify, the readiness check and the commit refusal.
+   - **Authority.** A record is authoritative only through a human-reviewed merge. Only the design review's record step, a drone with exact file scope, writes or re-stamps it. Every commit except a standard-delivery wave, the record step's path, refuses a review record path in code, a terminal stop naming it, so no validation fix round and no pr-feedback-remediation commit carries one. #623, with the #625 amendment, adds `docs/prds/`, `docs/initiatives/` and `docs/adr/` to the Lair's protected-path list.
    - The record ships in the same pull request as the design, whose draft rule is decision 10.
 8. **Design-decision rule.** Review Calls in the autonomy governance gains a rule for the design stages. A decision with a strong recommendation inside the PRD's scope and a clean gate is taken and listed in the review record for veto. These are always asked: a change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible.
    - A decision with a weak recommendation or none goes to the council first (ADR-0047). It is asked instead, never sent to the council, when its brief marks it as needing a fact only the user holds or leaves the mark out.
@@ -64,7 +65,7 @@ The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../init
    - A split is asked.
    - A design decision's gate reads Promotion Gate clause 1, irreversible, and clause 3, safety-relevant. The always-ask list replaces clause 2.
    - The design stages run no `decide()`. Take or ask is the conductor's judgment. The review record lists each taken decision with its always-ask screen, which the confirming pass checks.
-9. **A delivered design is frozen.** When every slice is done, the solution design gains `**Status:** delivered` and an `## As-built deltas` section in one docs pull request, and is never maintained afterward. The truth then lives in code, ADRs, the glossary and governance. Stage derivation reads `**Status:** delivered` before record staleness, and a delivered design's record is never re-stamped.
+9. **A delivered design is frozen.** When every slice is done, the solution design gains `**Status:** delivered` and an `## As-built deltas` section in one docs pull request, and is never maintained afterward. The truth then lives in code, ADRs, the glossary and governance. Stage derivation reads `**Status:** delivered` before record staleness, and a delivered design's record is never re-stamped. A design is delivered when the first non-blank line after its title is exactly `**Status:** delivered`. Its slices then fail the readiness check with `design_delivered`, and CI verify skips its unedited record.
 
 ### Conductor and writers
 
@@ -93,6 +94,8 @@ The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../init
 - **Extending the interrogation skill's writer exception.** Not taken: a drone's exact file scope bounds each write with no new exception.
 - **The readiness check parses the record body.** Rejected: the check stays a fixed front-matter parser, and verify checks the body before ready and in CI.
 - **Each caller passes its own trunk ref.** Rejected: a stale local main would pass.
+- **Fix rounds kept off records by prose and agent reports.** Rejected: three review rounds found paths around it; the commit step refuses a record in code.
+- **The guide passes verify as a validation command.** Rejected: a plan's validation commands are the planner's reading of the project's documented commands, so no code carries a guide-passed command to the validate step.
 
 ## Consequences
 
@@ -102,6 +105,7 @@ The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../init
 - An initiative pays for design review rounds before slicing. One that has not converged after round 3 reaches the maintainer as a signal to split it.
 - The readiness check depends on #625 for Lair admission and on the Lair controller (#608) to run at claim time.
 - A docs pull request never takes the Lair's auto tier (#623).
+- A slice whose solution design is delivered fails the readiness check (`design_delivered`).
 
 ### Residuals
 
@@ -110,7 +114,7 @@ The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../init
 - **Auto-merge of a docs pull request.**
   - Scope: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval and green checks with no human review of the design.
   - Ground: the user's decision of 2026-11-21 (answer Q5). It is outside the threat model as the maintainer's own opt-in under [ADR-0044](0044-settled-approval-and-opt-in-auto-merge.md).
-  - Bounded impact: verify in CI, which runs on every change under `docs/initiatives/`, `docs/prds/` and `docs/adr/`, keeps a merged record consistent and current, and #623 closes the Lair path. A wrong design is caught only by a later review.
+  - Bounded impact: in a repository that wires verify in CI, verify keeps a merged record consistent and current. In any repository, every commit except a standard-delivery wave refuses a record, the guide runs verify before ready, the readiness check fails every slice of a stale or delivered design, and #623 closes the Lair path. A wrong design is caught only by a later review.
   - Source: design review round 1, finding B5, recorded in the [review record](../initiatives/idea-to-ready/review-record.md).
 
 References: [docs/prds/idea-to-ready.md](../prds/idea-to-ready.md), [docs/initiatives/idea-to-ready/solution-design.md](../initiatives/idea-to-ready/solution-design.md), [ADR-0013](0013-decoupled-leaf-pipeline-skills.md), [ADR-0045](0045-lair-software-factory.md), [ADR-0047](0047-abathur-council.md).
