@@ -147,7 +147,7 @@ Fields and seams only. Each slice builds the code.
 - **Merge lane.** The lane reads a claim's `body_sha256` and nonce only from a counting claim marker, through this design's verifier, and merges nothing for an issue without one.
 - **What counts as a Lair pull request.** Defined by #631, bound to a claim nonce.
 - **Result field checks.** #631 checks the strain result's fields; an outcome marker records the outcome the Lair accepted after those checks.
-- **Run-outcome to label mapping.** Defined by #631, over the outcome values above. The reconciler re-applies it, and every value except `complete` and `parked` counts toward the breaker.
+- **Run-outcome to label mapping.** Defined by #631, over the outcome values above. The reconciler re-applies it, and only `failed`, `crashed` and `timed-out` count toward the breaker.
 - **Issue edited after claim.** The merge-side action is #631's; this design supplies the `body_sha256` form.
 - **Halt.** The halt's effect on merges and remediation strains is #631's. A remediation run counts toward the breaker only if #631 gives it an outcome marker.
 
@@ -201,7 +201,7 @@ The reconciler handles a claim that stopped partway:
 The halt and the breaker:
 
 - With the halt file present, the tick reconciles and reports, and makes no snapshot, scan or claim. A halt that appears after the claim marker is written takes effect from the next tick, and that claim completes.
-- After each outcome marker, the breaker reads the counting outcome markers of this session's ended runs, ordered by `ended_at`, from the latest re-arm on. Three consecutive outcomes other than `complete` and `parked` write the halt file with cause `breaker` and the three runs; `parked` and `complete` outcomes are skipped and do not end a streak. The Lair's first tick and every tick that finds a halt file gone after it was present start a new window.
+- After each outcome marker, the breaker reads the counting outcome markers of this session's ended runs, ordered by `ended_at`, from the latest re-arm on. Three consecutive `failed`, `crashed` or `timed-out` outcomes write the halt file with cause `breaker` and the three runs. A `parked` outcome is skipped and does not end a streak; any other outcome, `complete`, `blocked` or `stalled`, ends it. The Lair's first tick and every tick that finds a halt file gone after it was present start a new window.
 
 ## Existing-path coverage
 
@@ -256,7 +256,7 @@ A decision that is not ADR-worthy names the [P20](../../engineering-principles.m
 - **The `body_sha256` form: a hash of the title and body hashes, with no normalization.** Implements ADR-0045 decision 10 (B3-18). Not ADR-worthy: fails P20's hard-to-reverse condition, since the `v1:` prefix allows another form.
 - **The queue report prints only fixed keys and validated tokens, with a stage and reason codes per failure.** Replaces the solution design's queue report contents (B3-19). Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **A parked issue keeps `lair:claimed`.** Implements ADR-0045 decision 16 with its label list unchanged (A3-17). Not ADR-worthy: fails P20's hard-to-reverse condition.
-- **Every outcome other than `complete` and `parked` counts toward the breaker, and parks do not end a streak.** Implements ADR-0045 decision 17, which names failed, crashed and timed-out outcomes and excludes parks and review waits. Not ADR-worthy: fails P20's hard-to-reverse condition.
+- **Only `failed`, `crashed` and `timed-out` outcomes count toward the breaker; a park is skipped, and any other outcome ends a streak.** Implements ADR-0045 decision 17, which names failed, crashed and timed-out outcomes and excludes parks and review waits. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **The halt file's path and cause codes.** Implements ADR-0045 decision 17 (the owned part of B3-20). Not ADR-worthy: fails P20's hard-to-reverse condition.
 
 ### Changes to shared documents
@@ -285,7 +285,7 @@ The tests are the PRD's [Testing Decisions](../../prds/autonomous-ready-issue-lo
   - The lock held twice, and `flock` missing.
   - A change between snapshot and re-read.
   - The halt file present at tick start, appearing before the claim marker, and appearing after it.
-  - The breaker: three counted outcomes trip it and write the halt file with its cause; parks are skipped; another session's outcomes are ignored; a run ended with no counting outcome marker counts; a removed halt file starts a new window.
+  - The breaker: three counted outcomes trip it and write the halt file with its cause; parks are skipped; a `complete`, `blocked` or `stalled` outcome ends a streak; another session's outcomes are ignored; a run ended with no counting outcome marker counts; a removed halt file starts a new window.
   - `body_sha256` vectors: CRLF, null body, empty body, trailing newline, a title edit only.
   - Check error, check timeout, the per-tick cap, and the cached failed fingerprint.
   - A parked issue keeps `lair:claimed`, and a human's `readiness:implementation` issue is never swept.

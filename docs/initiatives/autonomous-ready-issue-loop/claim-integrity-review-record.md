@@ -93,7 +93,7 @@ The other parts of A3-12 (no-merge after edit, the CI-red rule) and of B3-20 (ov
   - The `body_sha256` form: a hash of the title and body hashes, with no normalization.
   - The queue report prints only fixed keys and validated tokens, with a stage and reason codes per failure.
   - A parked issue keeps `lair:claimed`.
-  - Every outcome other than `complete` and `parked` counts toward the breaker, and parks do not end a streak.
+  - Only `failed`, `crashed` and `timed-out` outcomes count toward the breaker; a park is skipped, and any other outcome ends a streak.
   - The halt file's path and cause codes.
 - The proposed `solution-design.md` Amendments pointer, under the design's Changes to shared documents. It is not applied in this pull request.
 
