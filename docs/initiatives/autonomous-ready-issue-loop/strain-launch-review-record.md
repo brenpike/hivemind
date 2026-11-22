@@ -1,11 +1,13 @@
 ---
-stamps: []
-verdict: pending
+stamps:
+  - path: docs/initiatives/autonomous-ready-issue-loop/strain-launch-design.md
+    blob: e6273b21fd347a1e85e154fee2725194c4b62c14
+verdict: pass
 open_counts:
   critical: 0
   high: 0
-  medium: 2
-  low: 1
+  medium: 0
+  low: 0
 rounds: 10
 clean_round: null
 ---
@@ -14,7 +16,7 @@ clean_round: null
 
 This record covers the design review of issue #630, the strain launch and containment part of the Lair, epic #603. Only the [strain launch design](strain-launch-design.md) is stamped. Its stamp's blob is `git rev-parse HEAD:docs/initiatives/autonomous-ready-issue-loop/strain-launch-design.md`, and the stamp is written last. The [PRD](../../prds/autonomous-ready-issue-loop.md), [ADR-0045](../../adr/0045-lair-software-factory.md) and the parent [solution design](solution-design.md) are reviewed, not stamped.
 
-The review exits only when zero critical or high findings are open and one round raises no new findings. It runs at most 3 rounds. On 2026-11-22 the user authorized one more round beyond that cap (Round 3, Decisions asked). Round 4 ran under that authorization. On 2026-11-22 the user authorized one confirming round 5 (Round 4, Decisions asked). Round 5 ran under that authorization. Round 6 ran after the user's answer to the round 5 question, round 7 after the user's answer to the round 6 question, and round 8 after the user's answer to the round 7 question (Decisions asked). Round 9 follows the user's answer to the round 8 question and is the final round under that answer's stop rule (Decisions asked). Round 10 followed the user's answer A on 2026-11-22 to "How do you want to get it out of draft?" (Decisions asked): one small confirming round at effort medium on the fix diff.
+The review exits only when zero critical or high findings are open and one round raises no new findings. It runs at most 3 rounds. On 2026-11-22 the user authorized one more round beyond that cap (Round 3, Decisions asked). Round 4 ran under that authorization. On 2026-11-22 the user authorized one confirming round 5 (Round 4, Decisions asked). Round 5 ran under that authorization. Round 6 ran after the user's answer to the round 5 question, round 7 after the user's answer to the round 6 question, and round 8 after the user's answer to the round 7 question (Decisions asked). Round 9 follows the user's answer to the round 8 question and is the final round under that answer's stop rule (Decisions asked). Round 10 followed the user's answer A on 2026-11-22 to "How do you want to get it out of draft?" (Decisions asked): one small confirming round at effort medium on the fix diff. After round 10, the user's answer A to "How should I finish?" closed the review with no further round (Decisions asked).
 
 Round 1 ran under the original procedure: two parallel, fresh, read-only `hivemind:cerebrate` passes (A and B), model opus, effort xhigh, each with "Memory context: none". Its IDs stay `L1-A<n>` and `L1-B<n>`.
 
@@ -422,13 +424,19 @@ Round 10 is not clean: it raised new findings (see the table). All three are ope
 
 No fix has been made. The verdict stays `pending`, no stamp is written, `clean_round` stays `null` and PR #637 stays a draft.
 
+**User's answer after round 10.** The run first recommended patching all three findings in the design's prose. The user challenged that recommendation as whack-a-mole: since round 5 every finding has been on the controller's stored state and retries, details the owning slices settle in code with tests (#608 the tick, #631 the merge lane, #632 the marker writes), and the design states invariants rather than patch prose edge cases. The run agreed. On 2026-11-22 the user answered "A" to "How should I finish?" (Decisions asked): state invariants 1 and 2 under the #631 assumptions, record L10-C1 as a residual owned by #632 and #608, and run no review round.
+
+**Remediation after round 10.** L10-C2 and L10-C3 are fixed by the two invariants in the design's Contracts and seams > Assumptions about #631, which "Tick order" points to. L10-C1 is recorded as the residual "a lost route after clean-up" in the design's Components > Remediation strain launch. The design's Decisions and Amendments sections have the matching entries.
+
+No review round confirmed the round-9 and round-10 edits; the user accepted the design without one on 2026-11-22. The verdict is `pass` by the user's decision, the design is stamped, and `clean_round` stays `null`, since no round was clean.
+
 ### Cerebrate pass
 
 | ID | Severity | Section | Finding | Evidence | Proposed fix | State |
 | --- | --- | --- | --- | --- | --- | --- |
-| L10-C1 | medium | Failure modes (Crash, Stall, Invalid result, Budget overrun); Lifecycle step 5 | The route for a crash, stall, invalid result or timeout finds the pull request through the branch checked out in the worktree. Lifecycle step 5 removes the worktree and the local ref once the outcome is written, so the "retried until observed" route cannot be retried after a first failed label write or lookup. The risk is a lost notification, not a merge. | Design text only | Look up the branch and the open pull request before the outcome write, and store `branch` and `pr` (or none found) in the claim marker in the same write. Defer the write when the lookup fails. A retry reads `pr` from the marker. Add tests. | open |
-| L10-C2 | medium | Remediation strain launch ("The delivery baseline", "Tick order"); Contracts and seams > Assumptions about #631; Decisions | "A route to `lair:review` due, label not yet observed" is computed fresh each tick and never stored. If the label write fails and the trigger goes away (a red check re-run to green, a comment deleted), the skip lifts while the positive condition holds, and the merge lane can merge a pull request that should have gone to a human. Bounded by a green rollup and settled threads. | Design text only | Latch `route_due` in the dispatch marker before the label write. Add "no `route_due` recorded" to the positive condition, the #631 assumption and Decisions. Add a test. | open |
-| L10-C3 | low | Remediation strain launch ("The delivery baseline"); Contracts and seams > Assumptions about #631 | The rule is keyed on "its claim marker" but never ties a pull request to a marker or defines which pull requests are Lair pull requests. A crashed run's pull request with no stored `pr` could be read as not a Lair pull request. | Design text only | State positively that the Lair merges only a pull request that a claim marker names as the `pr` of a `complete` result, never any other. Add a test. | open |
+| L10-C1 | medium | Failure modes (Crash, Stall, Invalid result, Budget overrun); Lifecycle step 5 | The route for a crash, stall, invalid result or timeout finds the pull request through the branch checked out in the worktree. Lifecycle step 5 removes the worktree and the local ref once the outcome is written, so the "retried until observed" route cannot be retried after a first failed label write or lookup. The risk is a lost notification, not a merge. | Design text only | Look up the branch and the open pull request before the outcome write, and store `branch` and `pr` (or none found) in the claim marker in the same write. Defer the write when the lookup fails. A retry reads `pr` from the marker. Add tests. | recorded residual (owned by #632, #608): design Components > Remediation strain launch ("Recorded residual: a lost route after clean-up"), from the user's answer A on 2026-11-22 |
+| L10-C2 | medium | Remediation strain launch ("The delivery baseline", "Tick order"); Contracts and seams > Assumptions about #631; Decisions | "A route to `lair:review` due, label not yet observed" is computed fresh each tick and never stored. If the label write fails and the trigger goes away (a red check re-run to green, a comment deleted), the skip lifts while the positive condition holds, and the merge lane can merge a pull request that should have gone to a human. Bounded by a green rollup and settled threads. | Design text only | Latch `route_due` in the dispatch marker before the label write. Add "no `route_due` recorded" to the positive condition, the #631 assumption and Decisions. Add a test. | fixed by invariant (#631): invariant 1 in design Contracts and seams > Assumptions about #631, from the user's answer A on 2026-11-22 |
+| L10-C3 | low | Remediation strain launch ("The delivery baseline"); Contracts and seams > Assumptions about #631 | The rule is keyed on "its claim marker" but never ties a pull request to a marker or defines which pull requests are Lair pull requests. A crashed run's pull request with no stored `pr` could be read as not a Lair pull request. | Design text only | State positively that the Lair merges only a pull request that a claim marker names as the `pr` of a `complete` result, never any other. Add a test. | fixed by invariant (#631): invariant 2 in design Contracts and seams > Assumptions about #631, from the user's answer A on 2026-11-22 |
 
 ### Tool pass
 
@@ -593,5 +601,13 @@ After design review round 9, the user was asked one more always-ask (Tier A) que
 - C: leave it a draft.
 
 The user answered "A" on 2026-11-22. The answer authorizes round 10 after the round 9 stop rule (Round 10). It changes no ADR-0045 or PRD text.
+
+After design review round 10, the user was asked one more always-ask (Tier A) question (round-10 Q1) on 2026-11-22: "How should I finish?" The options:
+
+- A: "State invariants 1 and 2 under the #631 assumptions, record L10-C1 as a residual owned by #632 and #608, and run no review round. You accept it, and I record your decision, stamp the design, set `verdict: pass`, take the PR out of draft and start the watch."
+- B: "Patch all three in the design's prose, as I recommended before."
+- C: "Leave the PR a draft as it is."
+
+The user answered "A" on 2026-11-22 (Round 10). The answer sets the verdict to `pass` by the user's decision, with no review round after round 10. It changes no ADR-0045 or PRD text.
 
 The design's section Decisions > Changes to shared documents holds each rewording as exact proposed text. A later integration issue applies them. None is applied in this pull request.
