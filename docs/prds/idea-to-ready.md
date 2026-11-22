@@ -65,7 +65,8 @@ A strong recommendation with a clean gate is taken and listed for veto. A real s
   - The reviewer's model is configurable. A maintainer with Fable can use it for the full pass; a model the maintainer cannot reach falls back to the default, and the record names the model each pass used.
   - It exits only with zero open critical or high findings and one round with no new ones, capped at three rounds. Non-convergence reaches the maintainer as a signal to split the initiative.
   - Every finding gets exactly one disposition, and mediums follow the existing defer-or-record rules.
-- **Review record.** The record stamps the exact versions of the PRD and solution design it reviewed. Any later edit makes it stale until a review of the change restores it. The record ships in the same docs pull request, so trunk never holds an unreviewed design.
+  - A round's findings land before the next round runs: each is fixed in the solution design, the PRD or an ADR in the same pull request, or gets a deferred, recorded or rejected disposition with its reason. A finding is never left open to be applied later.
+- **Review record.** The record stamps the exact versions of the PRD and solution design it reviewed. Any later edit makes it stale until a review of the change restores it. The record ships in the same docs pull request, and a record with any open finding or a failed verdict cannot merge, so trunk never holds an unreviewed design or one with known open findings. An initiative that does not converge is split before its docs merge.
 - **Design decisions.** A strong recommendation inside the PRD's scope with a clean gate is taken and listed in the record for veto. A change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible are always asked.
 - **Council.**
   - Takes a decision brief and returns one with a recommendation, its strength, the reasoning, the dissent and each member's angle and model.
@@ -108,7 +109,7 @@ A strong recommendation with a clean gate is taken and listed for veto. A real s
 ## Testing Decisions
 
 - **Readiness check:** contract tests over recorded issue fixtures for each track and each reason code. These include a document edited after its review was stamped, an epic, a standalone issue that must be promoted, and a slice with open blockers that still passes.
-- **Review record:** stamping then verifying passes; an open high finding, a missing clean round or a fourth round fails.
+- **Review record:** stamping then verifying passes; an open finding of any severity, a missing clean round or a fourth round fails, and a record with an open finding or a failed verdict blocks the docs merge.
 - **Stage derivation:** recorded fixtures for every stage give the expected stage and next action. The handoff mode passes only when every slice passes.
 - **Triage gate:** a failing issue never enters the apply set as ready, and its reason shows.
 - **Lair admission:** a tick contract test where a stale design or an epic is not claimed and is named in the queue report.
