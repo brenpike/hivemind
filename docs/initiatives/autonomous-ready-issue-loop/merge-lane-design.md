@@ -18,6 +18,7 @@ The merge lane builds on this code, as it stands on trunk:
 
 - `plugin/skills/github-review-loop/scripts/merge-approved.sh` takes exactly five arguments: owner, repo, pull request number, reviewer filter and self login. Any other count is `MERGE_ERROR=bad-arguments`. It reads `HIVEMIND_AUTO_MERGE`, `HIVEMIND_AUTO_MERGE_ADMIN` and `HIVEMIND_PR_REVIEWERS` from its environment. It prints exactly one line, a `MERGE=` line with exit 0 or a `MERGE_ERROR=` line with exit 1, and nothing on stderr.
 - The script reads the PR once, then runs gates 1 to 7 in order: not open, draft, no settled evidence (`has_settled_evidence`), an open thread (`is_settled_thread`), no check rollup, pending, failed. Only then does it call `gh pr merge` with `--match-head-commit` set to the head of that read. A read past its page is `MERGE_ERROR=read-incomplete`.
+- That one read is `PR_QUERY` (lines 247 to 282). It holds the pull request's state, draft flag, head, merge state, check rollup, reviews, reactions and review threads. It holds no base, repository, author or branch name, so the script judges none of them. `--match-head-commit` pins only the head.
 - `MERGE=wait:head-moved` already exists. Today it prints only after a refused plain merge, when the re-read shows a different head. The script has no way to be told which head the caller expects.
 - A merge call that exits 0 is followed by a confirm read. `MERGE=merged` and `MERGE=merged-admin` print only when that read shows `MERGED`, else `MERGE=wait:merge-pending` (ADR-0044 decision 16).
 - `tools/test_merge_approved.sh` runs the script against a PATH-shim `gh` that serves canned GraphQL bodies and logs every call. After the cases it checks five properties over every case, among them that every merge call carries `--match-head-commit` equal to the head of the read before it.
@@ -40,17 +41,29 @@ Built by #605, called by #608's tick under the single-instance lock. Each tick, 
 2. **Held by review.** A review marker exists for this pull request (Contracts and seams). The Lair never merges it again; the step skips it.
 3. **Fix-up in flight.** A fix-up run on this pull request has a start marker and no end. The step skips it, because the run will move the head.
 4. **Draft.** The pull request is a draft. The step routes it to the draft exit.
-5. **Pinned head.** The pinned head is the head the Lair last recorded for this pull request. It must equal GitHub's head. Otherwise the pull request goes to batch review with reason `unrecorded-head`. On the same read, every Lair pull request check (Contracts and seams) except the head must still hold: same repository, not a fork, trunk base, the Lair's own login as author, and the recorded branch. A base retargeted away from the trunk, or any other mismatch, sends the pull request to batch review with reason `identity-changed`.
+5. **Pinned head.** The pinned head is the head the Lair last recorded for this pull request. It must equal GitHub's head on step 1's read. Otherwise the pull request goes to batch review with reason `unrecorded-head`. This step compares only the head.
 6. **Review wait.** When 3600 seconds have passed since the `ended_at` of the run that recorded the pinned head, the pull request goes to batch review with reason `review-wait-elapsed`.
 7. **Auto tier.** The auto-tier script runs on the pinned head. A `review` result sends the pull request to batch review with its reason codes. A script error means no merge this tick.
+
+Steps 8 to 11 are the late group. They are the last tick work before the merge call, in this order, and nothing but step 12 follows them:
+
 8. **Merge settings.** The step reads the two user settings files. A file that does not parse means no merge this tick.
-9. **Issue edit.** The step recomputes `body_sha256` of the claimed issue's title and body and compares it with the latest claim marker's. A difference sends the pull request to batch review with reason `issue-edited` (Q8). The check runs before every merge attempt.
-10. **Settle check.** See below. Not settled means no merge this tick.
-11. **Merge.** The step runs `merge-approved.sh` with six arguments in a clean environment and routes its one line by the routing table under Contracts and seams.
+9. **Identity.** The step reads the pull request once more and reruns the Lair pull request checks (Contracts and seams) on that read, every check other than the head: same repository, not a fork, trunk base, the Lair's own login as author, and the recorded branch. A base retargeted away from the trunk, or any other mismatch, sends the pull request to batch review with reason `identity-changed`.
+10. **Issue edit.** The step recomputes `body_sha256` of the claimed issue's title and body and compares it with the latest claim marker's. A difference sends the pull request to batch review with reason `issue-edited` (Q8). The check runs before every merge attempt.
+11. **Settle check.** See below. Not settled means no merge this tick.
+12. **Merge.** The step runs `merge-approved.sh` with six arguments in a clean environment and routes its one line by the routing table under Contracts and seams.
 
-Steps 9 and 10 run last, with no other step between them and the merge, so the gap between their reads and the merge call is a few seconds.
+A check whose input can change after the tick reads it belongs in the late group. Steps 1 and 4 read state and draft only to route exits; `merge-approved.sh` judges both again on its own read.
 
-**Known limit.** Decided by the run under `plugin/governance/decision-autonomy.md` (Review Calls), on a local-review finding, 2026-11-21. An issue edit or a change the settle check would see, landing between step 9's or step 10's read and the merge call, is not seen. `merge-approved.sh` rechecks the approval and threads on its own read, but it never reads the issue, and the expected-head argument pins only the head: GitHub offers no merge call that also pins issue text or the settle snapshot, so no client-side check can close the gap. This is the same kind of limit as ADR-0044 decision 15. Passing a settle digest and the issue hash into `merge-approved.sh` was rejected: it adds script surface, and a gap inside the script remains. A finding that only says the issue or the settle state can change between steps 9 and 10 and the merge call contests this decision and is a repeat.
+**Known limit: the merge gap.** Decided by the run under `plugin/governance/decision-autonomy.md` (Review Calls), on a local-review finding, 2026-11-21. The merge call pins one input, the head. Every merge condition is exactly one of five kinds, each with its control:
+
+- **Pinned.** The head: every merge call carries `--match-head-commit` with the pinned head (ADR-0044 decision 19).
+- **Derived from the pinned head's git objects.** The auto tier: it reads only commits, which do not change, at the pinned head and the trunk commit the tick fetched.
+- **Judged by `merge-approved.sh` on its own read.** State, draft, approval, threads, checks and conflicts. The gap between that read and the merge call is ADR-0044 decision 15.
+- **Read by the tick in the late group.** The Lair pull request checks, the base included; the issue text; the settle snapshot; the merge settings.
+- **Lair-owned state.** The markers and the settle cache, which only the Lair writes, under the single-instance lock.
+
+The late-group kind can change in the seconds between its read and the merge call. No check closes that. GitHub offers no merge call that pins those inputs. Moving a check into `merge-approved.sh`, as expected base, author or branch arguments, a settle digest or the issue hash, only narrows the window and adds script surface, and the issue text and the settle snapshot stay outside what the merge call pins. A finding that names a late-group input changing in that gap contests this decision and is a repeat. A finding that shows a merge condition fitting no kind, or a tick read placed after the late group, is new.
 
 Under parallel strains (#612) the step runs the same way for each pull request.
 
@@ -125,7 +138,7 @@ A pull request is a Lair pull request only when the Lair recorded it in the run-
 - its head branch equals the result's `branch`;
 - its head commit equals the result's `head`.
 
-Any failure makes the result invalid (Lifecycle). The Lair never merges, labels or holds the lane for a pull request it did not record. The base can be changed after recording, so step 5 of the merge-lane step checks these again on every tick.
+Any failure makes the result invalid (Lifecycle). The Lair never merges, labels or holds the lane for a pull request it did not record. These checks are one function, called by the step that records a result and again by the merge-lane step's late group, which leaves out the head because the merge call pins it, so there is no second list.
 
 ### Pinned head
 
@@ -200,6 +213,7 @@ Each marker is a machine-readable comment on the claimed issue, under #632's aut
 - Deny rules in the strain settings cover reads and writes of the two files the Lair reads merge settings from, and writes to the Lair's cache directory.
 - The result schema carries `local_review_head`: a commit, or null when local review was not configured, was skipped, or did not hold. #630's fixed result script writes it from the run's own state, never from a value the model passes.
 - A fix-up run starts on the pull request's branch at the pinned head, pushes to that branch only, and writes the same result schema, with `local_review_head` null.
+- A finished strain run holds no live process or credential that can edit its pull request.
 
 ### Assumptions about #632
 
@@ -222,9 +236,10 @@ This section replaces the merge-settings part of solution-design.md's channel li
   - the bump is computed from version-file values, not from commit messages, plan fields or labels;
   - the local-review proof is a head the Lair recorded from a checked result.
 - **The pinned head.** A head no Lair run recorded never merges a Lair pull request.
-- **The recorded identity.** A pull request whose base, repository, author or branch no longer matches what the Lair recorded never merges; step 5 rechecks them on every tick.
+- **The recorded identity.** The late group of the merge-lane step reruns the Lair pull request checks on a fresh read before every merge call.
 - **Residual: under-declared bump.** The bump check sees the version a pull request declares, not its real compatibility impact. A breaking change shipped with a minor bump passes it. The protected-path list is the control for compatibility surfaces.
 - **Residual: a compromised strain.** It can still report a false local-review head if it subverts #630's fixed result script. The head must still pass the Lair pull request checks.
+- **Residual: the merge gap.** A late-group input can change in the seconds before the merge call (Known limit, Merge-lane step of the tick). The lane trusts repository writers and the user's machine, who can already merge, push or change the settings with no gap to time. The issue's author was admitted on the text as it stood, and an edit inside the gap equals an edit one second after the merge, which no check sees. A strain is not trusted: no strain run on the pull request is in flight when the late group runs, and what a finished strain can still do is #630's containment (Assumptions about #630). Ground: outside the recorded threat model. Bounded impact: a merge is reverted (ADR-0045 decision 14).
 - **Residual: the interactive watch.** A user who runs the interactive watch on a Lair pull request merges under ADR-0044 unchanged, outside the auto tier.
 
 ## Lifecycle
@@ -284,7 +299,8 @@ These rows replace "Merge refused", "CI red" and "Issue edited after claim" in s
 | Malformed settings file | A user settings file does not parse, or its `env` or a merge value has the wrong type. | No merge this tick. The queue report names the file. No label changes. |
 | Merge-script error | `MERGE_ERROR=`, a non-zero exit, no line, or an unknown line. | No change. Retried next tick. The review wait bounds the retries. |
 | Unrecorded or moved head | GitHub's head differs from the pinned head, or the script prints `MERGE=wait:head-moved`. | No merge. With no fix-up run in flight: batch review, reason `unrecorded-head`. |
-| Changed identity | On a tick, the pull request's base is not the trunk, or its repository, author or branch no longer matches the Lair pull request checks. | No merge. Batch review, reason `identity-changed`. |
+| Changed identity | The late group's fresh pull request read shows a base that is not the trunk, or a repository, author or branch that no longer matches the Lair pull request checks. | No merge. Batch review, reason `identity-changed`. |
+| Late-group input changed in the merge gap | None: the change lands between the late group's read and the merge call. | The pull request merges. A revert is the veto (ADR-0045 decision 14). See the Known limit under Merge-lane step of the tick. |
 | Invalid result | The schema check fails, or a Lair pull request check or the ancestor check fails. | Delivery: `lair:failed`, outcome `invalid-result`, the pull request unrecorded. Fix-up: batch review, reason `fixup-failed`. Both count toward the breaker. |
 | Failed or parked fix-up run | The fix-up end marker's outcome. | Batch review, reason `fixup-failed` or `fixup-parked`. A failure counts toward the breaker; a park does not. |
 | Lost settle cache | No cache entry, or one for another head. | A new `re-arm` snapshot. The quiet period starts again. The merge is delayed by at least 600 seconds, never taken early. A lost merge-pending mark can let one more merge call run for a queued head, with the same `--match-head-commit`. |
@@ -321,7 +337,7 @@ The user answered A to each question on 2026-11-21:
 - **Q5.** Protected paths from a trunk list plus a fixed floor; the bump from the version-file diff. Applied in the Auto-tier script component.
 - **Q6.** Local-review proof is the delivery run's recorded head plus heads the Lair's own fix-up runs recorded. Applied in the Auto-tier script component.
 - **Q7.** Only a pull request the Lair recorded on the claimed issue after checking it against GitHub may merge. Applied under Contracts and seams.
-- **Q8.** No merge after an issue edit; the pull request goes to batch review. Applied as step 9 of the merge-lane step.
+- **Q8.** No merge after an issue edit; the pull request goes to batch review. Applied as step 10 of the merge-lane step.
 - **Q9.** One fix-up run for failed checks, then batch review. Applied as the CI-red rule.
 - **Q10.** The halt and the breaker stop claims and fix-up dispatch; merges continue; unsetting auto-merge stops merges. Applied in Lifecycle stage 4.
 
@@ -334,7 +350,7 @@ Each of these is listed for veto. None is ADR-worthy: each fails P20's hard-to-r
 - **The review wait is 3600 seconds**, the watch's `max_watch_duration` default (ADR-0029 decision 3), measured from the recording run's `ended_at`, so it survives a lost cache.
 - **The routing rows.** No checks, conflicts, a blocked merge and a refused merge go to batch review. A script error, malformed output and `merge-pending` wait, bounded by the review wait. `skipped:bad-setting` is handled like `off`.
 - **`merge-pending` makes no second merge call** for the same head while the cache marks it.
-- **The issue-edit and settle checks run last**, just before the merge call, and the few seconds left between their reads and that call are a known limit (Merge-lane step of the tick), decided by the run on a local-review finding.
+- **The late group runs last**: the merge-settings read, the fresh identity read, the issue-edit check and the settle check, with only the merge call after them. The few seconds left between their reads and that call are the merge gap, a known limit (Merge-lane step of the tick), decided by the run on a local-review finding.
 - **The head check goes first** in `merge-approved.sh`, before gate 1, so a moved head never yields another gate line.
 - **`HIVEMIND_PR_REVIEWERS` comes from the same two user files** as the merge keys (ADR-0043 decision 2), and the reviewer filter is `automated`.
 - **The clean environment** holds `PATH`, `HOME`, the `gh` auth variables when set, and the three keys.
@@ -403,7 +419,8 @@ The tests follow the PRD's [Testing Decisions](../../prds/autonomous-ready-issue
   - Merge settings: the local file winning; the user file used alone; an empty local value overriding the user's; committed settings ignored; a key in the Lair's environment ignored; an unparseable file meaning no merge; the clean environment holding only the allowed names.
   - Settle check: the first sighting; `UNCHANGED` under 600 seconds and at 600 seconds, on an injected clock; each resetting marker; a lost cache; `CHECK_ERROR`.
   - Pinned head: equal, moved, unrecorded, and a fix-up head that is not a descendant.
-  - Recorded identity after recording: a base retargeted away from the trunk, giving `identity-changed` and no merge call.
+  - Recorded identity after recording: a base retargeted away from the trunk, seen on the late group's fresh read, giving `identity-changed` and no merge call.
+  - Late group: one property checked over every case that reaches the merge call. In the call log, the merge-settings read, the fresh pull request read, the issue read and the settle check come after every other tick read, in that order, and only the merge call follows them.
   - Lair pull request checks: a fork, a wrong base, another author, a branch mismatch and a head mismatch.
   - Issue edit before merge, the draft and closed-unmerged exits, and the review wait.
   - Fix-up runs: the CI-red rule; the review-finding cap; fix-up run outcomes and the breaker count; the halt and the breaker stopping fix-up runs while merges continue.
