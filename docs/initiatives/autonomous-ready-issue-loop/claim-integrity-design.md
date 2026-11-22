@@ -42,7 +42,7 @@ Each invariant below is stated once, here. Every later section cites it by name,
   - An orphan is a Lair issue with no live strain and no Lair pull request that either holds an open claim, or is markerless and in `readiness:implementation`. A Lair issue whose counting claim markers are all closed is never an orphan; its labels follow invariant Markers and labels.
   - An orphan is marked failed and never returned to ready. An orphan holding an open claim gets an outcome marker `crashed`, then the `crashed` labels. A markerless orphan gets labels only: `lair:failed` added, `readiness:implementation` and `readiness:ready` removed.
   - The reconciler never touches a non-Lair issue.
-  - When this rule runs is the Reconcile row of invariant Path inputs.
+  - The orphan rule reads the verifier's results, the Lair issue list (the issues labeled `lair:*`, `readiness:ready` or `readiness:implementation`), the strain-session lookup, the Lair pull request lookup and the result file. When one of them is unavailable, that tick gives no orphan verdict it would decide, under invariant Unavailable reads.
 - **Markers and labels.**
   - Counting markers decide which claim and which outcome exist; labels follow them.
   - Each label pairs with a marker, except the `lair:failed` a markerless orphan gets under invariant Claim state: `lair:claimed` with a counting claim marker; `lair:handoff` with a counting handoff marker, or with the counting park marker of an `approval` park or a third park; `lair:failed` and `lair:review` with a counting outcome marker under #631's mapping.
@@ -63,33 +63,17 @@ Each invariant below is stated once, here. Every later section cites it by name,
   - Beyond the fields every marker carries, the signed park payload carries only `key` (pattern `^[a-z0-9][a-z0-9-]{0,63}$`) and `type`.
   - A park record that breaks this rule is never posted; its handling is #631's result check.
   - Claim, outcome and handoff marker text and the queue report have no slot.
-- **Path inputs.**
-  - Every controller path has a fixed input list, given in the table below. A path runs only when every input on its row is available when it runs.
-  - An unavailable input skips exactly the paths that list it. It is never read as an invalid marker, a halt cause or a failed check.
-  - Availability is probed each tick and never stored, so a restored input returns its paths on the next tick with no re-arm.
-  - A halt is an unavailable `halt-clear`. An unreadable `control/` makes `halt-clear` unavailable, because the halt file's absence cannot be known.
-  - `snapshot` is the issue's complete snapshot, per the Snapshot contract under Contracts and seams.
-  - `trunk` is the trunk commit fetched this tick.
-  - `control` is `control/` readable and writable.
-  - `key` is `control` plus a readable `marker.key`.
-  - `halt-clear` is `control` plus no directory entry at `control/halt`.
-  - `cache` is `cache/` readable and writable.
-  - `scan` is `scan/` writable and the scanner session startable.
-
-  | Path | Inputs |
-  | --- | --- |
-  | Start | `flock` on `PATH`, the state root, `lock`, `key` |
-  | Halt read | `control` |
-  | Reconcile | `snapshot` of each issue it reconciles, `key`, and `cache` for the cache tripwires. It reads the issues labeled `lair:*`, `readiness:ready` or `readiness:implementation`, the set the orphan rule of invariant Claim state can reach. |
-  | Candidate evaluation | `snapshot`, `trunk`, `key`, `halt-clear` |
-  | Scan | `scan`, plus the Candidate evaluation inputs |
-  | Claim writes and spawn | the Scan inputs, taken again at the claim, plus `cache` |
-  | Run end and breaker | `snapshot`, `key`, `cache`, #631's result file |
-  | Queue report | none for the terminal; `cache` for `cache/queue-report.txt` |
+- **Unavailable reads.**
+  - Every read the controller makes returns a value or `unavailable`. A read is unavailable when its call fails, is rate-limited or times out, when `hivemind_graphql_response_check` rejects its response, when a connection in it has `hasNextPage` true, or when a file or directory cannot be read, created or written where the step needs it.
+  - Absence is a value only where the read's own contract says so: for the halt read, no entry is `clear`.
+  - A guard is the condition a write, halt or verdict waits on, as these invariants, Contracts and seams and Lifecycle state it. The reads a guard uses are the reads its own definition names, the probe of each file or directory it writes included.
+  - A guard that uses an unavailable read does not fire, and neither does its negation: no write, halt cause, `marker-invalid` verdict, failed-check cache entry or orphan verdict follows from it. A decision's writes begin only after every read of its guards returned a value.
+  - Availability is never stored, so the next tick reads again with no re-arm.
+  - The controller reaches GitHub, the trunk fetch, tmux and the state root only through one read-and-write library, built by #608, that records each read. Reads another slice adds (#605, #609, #631) follow the same rule.
 
 ### Lair state root
 
-One directory per repository, outside every checkout and worktree: `${XDG_STATE_HOME:-$HOME/.local/state}/hivemind/lair/<repo-key>/`, where `<repo-key>` is the first 32 hex digits of the SHA-256 of the repository's GraphQL node id. The directory has mode 0700; it and its `lock` file are the pre-lock writes of invariant Lock scope. The Lair prints the path on start, under invariant Lair-written text. It holds:
+One directory per repository, outside every checkout and worktree: `${XDG_STATE_HOME:-$HOME/.local/state}/hivemind/lair/<repo-key>/`, where `<repo-key>` is the first 32 hex digits of the SHA-256 of the repository's GraphQL node id. The directory has mode 0700; it and its `lock` file are the pre-lock writes of invariant Lock scope, made by Start under Lifecycle. The Lair prints the path on start, under invariant Lair-written text. It holds:
 
 - `lock`, the single-instance lock file;
 - `control/`, mode 0700, holding `marker.key` (mode 0600) and the halt file `halt`;
@@ -102,7 +86,7 @@ The controller opens `lock` on one descriptor and takes an exclusive `flock` on 
 
 ### Marker signer and verifier
 
-The Lair writes four marker kinds as issue comments: claim, outcome, park and handoff. Each carries a claim nonce and a signature made with `marker.key`, a 32-byte random key the Lair creates on first start. The signing helper reads the key from its file and never passes it on a command line, in an environment variable, or through any file inside a session's reach. Every Lair reader of a marker goes through one verifier, which applies the counting rule under Contracts and seams. This answers B3-3.
+The Lair writes four marker kinds as issue comments: claim, outcome, park and handoff. Each carries a claim nonce and a signature made with `marker.key`, a 32-byte random key the Lair creates on first start (Start under Lifecycle). The signing helper reads the key from its file and never passes it on a command line, in an environment variable, or through any file inside a session's reach. Every Lair reader of a marker goes through one verifier, which applies the counting rule under Contracts and seams and returns one of its three results. This answers B3-3.
 
 ### Readiness snapshot
 
@@ -146,7 +130,7 @@ GitHub alone is authoritative (ADR-0045 decision 2). These rows replace the solu
 | Local cache `cache/` | Lair | Lair | no; rebuildable from GitHub |
 | Lair session id | Lair, at start | Lair; written into every marker | no |
 
-The local cache holds the session id, the comment ids of markers written this session, the nonces spawned and ended this session in order, and the fingerprint of each failed readiness check. Which paths need it, and what an unavailable cache skips, is invariant Path inputs.
+The local cache holds the session id, the comment ids of markers written this session, the nonces spawned and ended this session in order, and the fingerprint of each failed readiness check. Its reads, the probe before each write included, follow invariant Unavailable reads.
 
 ## Contracts and seams
 
@@ -166,9 +150,9 @@ Fields and seams only. Each slice builds the code.
   - its payload decodes, with `v` 1, `kid` equal to the current key's id, and `repo` and `issue` equal to the issue being read;
   - it carries the claim nonce: a `claim` marker carries its own; an `outcome` or `park` marker carries the nonce of a counting `claim` marker on the same issue; a `handoff` marker carries the nonce generated for the claim attempt its scan stopped.
 
-  A candidate that fails any check is invalid. A comment by any other login is never a candidate, whatever it holds. Identical counting markers count once.
-- **Reader failure direction.** Every marker reader fails toward stopping:
-  - any invalid candidate, on any issue the Lair reads, writes the halt file with cause `marker-invalid`, and the issue is not claimed;
+  A candidate that fails any check is invalid. A comment by any other login is never a candidate, whatever it holds. Identical counting markers count once. For each candidate the verifier returns `counts`, `invalid`, or `unavailable` when the key or the issue's comment page is unavailable (invariant Unavailable reads); a check it cannot run never makes a candidate invalid.
+- **Reader failure direction.** Every marker reader fails toward stopping. In the rules below, "does not count" means the verifier read every comment and returned `invalid` or found no counting marker. An `unavailable` result skips the reader for that tick and never ends a strain `timed-out`, counts as a breaker failure, lists as `unverified`, halts, or refuses a park answer for good:
+  - any `invalid` candidate, on any issue the Lair reads, writes the halt file with cause `marker-invalid`, and the issue is not claimed;
   - a marker id the cache recorded this session that GitHub no longer returns writes the halt file with cause `marker-missing`;
   - the `lair:claimed` case of invariant Markers and labels writes the halt file with cause `marker-missing`;
   - the budget check ends as `timed-out` a live strain whose claim marker does not count;
@@ -177,7 +161,7 @@ Fields and seams only. Each slice builds the code.
   - the digest lists as `unverified` a run whose outcome marker does not count (#611).
 - **`body_sha256`.** Lowercase hex SHA-256 of the ASCII string `v1:<T>:<B>`, where `<T>` is the hex SHA-256 of the title's bytes and `<B>` the hex SHA-256 of the body's bytes, both exactly as the GraphQL read returns them. A null body (REST) and an empty body both hash as zero bytes. CR bytes, CRLF line endings, trailing newlines and Unicode forms are kept as read, with no normalization. Each hash is computed from a pipe, never through command substitution, which drops trailing newlines. The field keeps its name although it covers the title too. This answers B3-18.
 - **Snapshot.** One GraphQL read of the issue: `number`, `state`, `title`, `body`, `lastEditedAt`, `updatedAt`, labels, the `LABELED_EVENT`, `UNLABELED_EVENT` and `RENAMED_TITLE_EVENT` timeline items with actors, `blockedBy` states, the parent's state, the sub-issue count and the comments with the fields the counting rule needs. Any connection with `hasNextPage` true, or a response `hivemind_graphql_response_check` rejects, is a snapshot error. The write permission of the admitting label's actor is one REST read in the same evaluation. The trunk commit is fetched once per tick and again at the claim. This field list is the one definition of the snapshot.
-  - The claim inputs are the snapshot, the trunk commit, the admitting actor's write permission, the key's `kid` and `halt-clear` (invariant Path inputs). Admission, the readiness-check call, the captured text and `body_sha256` are functions of the claim inputs only: the Lair reads nothing else to decide a claim.
+  - The claim inputs are the snapshot, the trunk commit, the admitting actor's write permission, the key's `kid` and the halt read. Admission, the readiness-check call, the captured text and `body_sha256` are functions of the claim inputs only: the Lair reads nothing else to decide a claim.
 - **Readiness-check call at claim.** The Lair calls the check with the snapshot and the trunk commit, never letting it read GitHub itself. The result is the one the [idea-to-ready PRD](../../prds/idea-to-ready.md) names under "Readiness check output": track, pass or fail, and reason codes. Only a pass is claimed. A non-zero exit, a malformed result, or no result within 60 seconds is the Lair-side state `check-error`, never a pass. Per tick the Lair checks at most 5 candidates, in ascending issue number. A candidate whose `updatedAt` and trunk commit equal those of its last failed check this session is not checked again; its cached reasons are reported.
 - **Scanner session settings.** Written by the Lair per scan through #630's per-session settings mechanism. They allow `Read` of `scan/<scan-id>/input.txt`, `Write` of `scan/<scan-id>/verdict`, the `hivemind:injection-scan` skill and plugin-folder reads. They allow nothing else: no Bash, no Edit, no web tools, no MCP servers, no agents. The pasted prompt holds only the scan id and paths derived from identifiers, under invariant Lair-written text.
 - **Scan input.** `input.txt` holds the captured title, LF, then the body: the exact bytes whose hash is the claim's `body_sha256`.
@@ -188,8 +172,8 @@ Fields and seams only. Each slice builds the code.
   - no file within 300 seconds is a scan error.
 
   The Lair then ends the scanner session and removes the scan directory, whatever the verdict.
-- **Halt file.** Its path is `control/halt` under the state root. Any directory entry at that path, of any content, halts; an unreadable `control/` is under invariant Path inputs. The Lair writes it as `halt` LF, `cause: <code>` LF, `at: <UTC time>` LF, and for the breaker one `run: <issue> <outcome>` line per counted run. Cause codes: `breaker`, `marker-invalid`, `marker-missing`, `scanner-error`, and the report-only `state-root`, which the queue report gives and the Lair never writes to the file. A file of any other form reads as cause `user`. The Lair never deletes it.
-- **Queue report.** Lines under invariant Lair-written text: `lair-queue v1 session=<hex> at=<UTC time>`; `halted: <cause code>` or `halted: no`; `ready: <count>`; one `issue <number>: <stage> <code>[,<code>...]` line per ready-labeled issue that failed; and, when `ready` is 0, `hint: run hivemind:triage-backlog`. `<stage>` is `admission`, `snapshot-error`, `readiness`, `check-error`, `scan` or `marker`. A reason code that does not match `^[a-z0-9][a-z0-9-]{0,63}$` prints as `unknown-reason`. When `control` is unreadable, the report prints `halted: state-root` and no issue lines. The Lair prints it to its tmux window on start, on each tick that finds nothing to claim, and on each tick where a ready-labeled issue fails, and at those times writes it to `cache/queue-report.txt` under invariant Path inputs.
+- **Halt file.** Its path is `control/halt` under the state root. The halt read is the directory entry at that path: any entry, of any content, halts, and no entry is clear; an unreadable `control/` makes the halt read unavailable (invariant Unavailable reads). The Lair writes it as `halt` LF, `cause: <code>` LF, `at: <UTC time>` LF, and for the breaker one `run: <issue> <outcome>` line per counted run. Cause codes: `breaker`, `marker-invalid`, `marker-missing`, `scanner-error`, and the report-only `state-root`, which the queue report gives and the Lair never writes to the file. A file of any other form reads as cause `user`. The Lair never deletes it.
+- **Queue report.** Lines under invariant Lair-written text: `lair-queue v1 session=<hex> at=<UTC time>`; `halted: <cause code>` or `halted: no`; `ready: <count>`; one `issue <number>: <stage> <code>[,<code>...]` line per ready-labeled issue that failed; and, when `ready` is 0, `hint: run hivemind:triage-backlog`. `<stage>` is `admission`, `snapshot-error`, `readiness`, `check-error`, `scan` or `marker`. A reason code that does not match `^[a-z0-9][a-z0-9-]{0,63}$` prints as `unknown-reason`. When the halt read is unavailable, the report prints `halted: state-root` and no issue lines. The Lair prints it to its tmux window on start, on each tick that finds nothing to claim, and on each tick where a ready-labeled issue fails, and at those times writes it to `cache/queue-report.txt` under invariant Unavailable reads.
 
 ### Assumptions about #630
 
@@ -202,7 +186,7 @@ Fields and seams only. Each slice builds the code.
 
 ### Assumptions about #631
 
-- **Merge lane.** The lane reads a claim's `body_sha256` and nonce only from a counting claim marker, through this design's verifier, and merges nothing for an issue without one.
+- **Merge lane.** The lane reads a claim's `body_sha256` and nonce only from a counting claim marker, through this design's verifier, and merges nothing for an issue without one. A verifier result of `unavailable` merges nothing that tick and never reads as no counting marker.
 - **What counts as a Lair pull request.** Defined by #631, bound to a claim nonce. It is an input to the orphan rule of invariant Claim state.
 - **Result file at run end.** Run end reads the strain's result file, whose form and location are #631's, and records it with an outcome marker. Invariant Claim state decides when a result file is unconsumed, so run end never writes a second outcome marker for a nonce.
 - **Result field checks.** #631 checks the strain result's fields; an outcome marker records the outcome the Lair accepted after those checks.
@@ -228,19 +212,30 @@ Fields and seams only. Each slice builds the code.
 
 ## Lifecycle
 
-Each tick runs in this order, each step only as far as invariant Path inputs lets its path run:
+Start runs once, in this order:
 
-1. Probe the path inputs and read the halt file (Halt read).
-2. Reconcile every Lair issue under invariants Claim state and Markers and labels (Reconcile).
+1. Check that `flock` is on `PATH`, before any write.
+2. Create the state root and `lock` when absent, the only writes before the lock is held (invariant Lock scope).
+3. Take the lock.
+4. Create `control/`, mode 0700, when absent.
+5. Create `marker.key` by exclusive create, mode 0600, when absent; then read it.
+6. Read the viewer login once: the Lair's login of the counting rule under Contracts and seams.
+
+Any step that fails refuses start, and the Lair exits non-zero.
+
+Each tick then runs in this order, every guard under invariant Unavailable reads:
+
+1. Read the halt file.
+2. Reconcile every Lair issue under invariants Claim state and Markers and labels.
 3. The stages other slices own: run end, the merge lane, park answers.
-4. Evaluate candidates and claim at most one (Candidate evaluation, Scan, and Claim writes and spawn).
+4. Evaluate candidates and claim at most one.
 
 The claim sequence, for one candidate:
 
 1. Take the snapshot. Check admission (ADR-0045 decision 10 and its amendment; the PRD Admission criterion), including that the issue holds no open claim (invariant Claim state).
 2. Run the readiness check on the snapshot. Only a pass goes on.
 3. Generate the claim nonce and scan id, capture the text, and compute `body_sha256`.
-4. Run the scanner session. A clean token goes on. A suspect or malformed verdict hands the issue off: a handoff marker, then the `lair:handoff` label, with no other label changed. A scan error leaves the issue unclaimed, with no new label and stage `scan` in the queue report.
+4. Run the scanner session. Launching it is an action, not a read: a scan directory that cannot be created or a scanner session that cannot start is a scan error. A clean token goes on. A suspect or malformed verdict hands the issue off: a handoff marker, then the `lair:handoff` label, with no other label changed. A scan error leaves the issue unclaimed, with no new label and stage `scan` in the queue report.
 5. Take every claim input again, as Snapshot under Contracts and seams defines them: the snapshot over its whole field list and the trunk commit fetched again. When any field of any claim input differs from the first take, the attempt ends with no write; the next tick evaluates the issue again.
 6. Write the claim marker.
 7. Add `lair:claimed`, then add `readiness:implementation`, then remove `readiness:ready`.
@@ -257,7 +252,7 @@ The reconciler applies invariants Claim state and Markers and labels, with these
 
 The halt and the breaker:
 
-- With the halt file present, what the tick still runs is invariant Path inputs. A halt that appears after the claim marker is written takes effect from the next tick, and that claim completes.
+- With the halt file present, the tick evaluates no candidate; reconcile, the stages of step 3 under their owners' rules, and the queue report still run. A halt that appears after the claim marker is written takes effect from the next tick, and that claim completes.
 - After each outcome marker, the breaker reads the counting outcome markers of this session's ended runs, ordered by `ended_at`, from the latest re-arm on. Three consecutive `failed`, `crashed` or `timed-out` outcomes write the halt file with cause `breaker` and the three runs. A `parked` outcome is skipped and does not end a streak; any other outcome, `complete`, `blocked` or `stalled`, ends it. The Lair's first tick and every tick that finds a halt file gone after it was present start a new window.
 
 ## Existing-path coverage
@@ -279,19 +274,19 @@ The halt and the breaker:
 | GitHub write failure mid-sequence | A claim, run-end or handoff write without positive proof of success. | The sequence stops at that write and spawns nothing. The next tick moves the partial state forward: the reconciler under invariants Claim state and Markers and labels, or run end for a result file still unconsumed. |
 | Claim stopped partway, or orphaned claim | An orphan under invariant Claim state. | Ended under invariant Claim state, with the `crashed` stage under Lifecycle. A `crashed` outcome marker counts toward the breaker. |
 | Lock already held | `flock` cannot take `lock`: another controller runs in this lock scope (invariant Lock scope). | The second Lair prints `lock held`, exits non-zero and changes nothing beyond the idempotent writes of invariant Lock scope. |
-| Start input missing | An input of the Start row of invariant Path inputs is unavailable: `flock` is not on `PATH`, checked before any write; the state root or `lock` cannot be created or opened; or `key` is unavailable once the lock is held. | The Lair refuses to start and changes nothing beyond the idempotent writes of invariant Lock scope. |
+| Start input missing | A step of Start under Lifecycle fails: `flock` is not on `PATH`, or a read or create the step makes is unavailable (invariant Unavailable reads). | The Lair refuses to start and exits non-zero. |
 | Issue changed during evaluation | Any claim input differs on the re-take before the claim marker (claim sequence under Lifecycle). | No write; the issue is evaluated again next tick. |
 | Stale design, or an epic | The readiness check fails, or the issue carries `type:epic`. | Not claimed and given no new label. Reported with its stage and reason codes. |
 | Readiness check error | A non-zero exit, a malformed result, or no result within 60 seconds. | Not claimed, no new label, reported with stage `check-error`. |
 | Scan suspect or malformed | The verdict file holds the suspect form or any non-clean content. | Handoff marker, then `lair:handoff`. No strain starts. |
-| Scan error | No verdict file within 300 seconds, or the session failed to start. | Not claimed, no new label, reported with stage `scan`. Three consecutive scan errors in a session write the halt file with cause `scanner-error`. |
+| Scan error | No verdict file within 300 seconds, a scan directory that cannot be created, or a scanner session that cannot start. | Not claimed, no new label, reported with stage `scan`. Three consecutive scan errors in a session write the halt file with cause `scanner-error`. |
 | Park record breaks the text rule | The park record's `key` fails its pattern, or its question slot breaks the slot's limits (invariant Lair-written text). | Handled under invariant Lair-written text. |
-| Invalid marker | A candidate fails the counting rule. | Halt file with cause `marker-invalid`; the issue is not claimed. |
+| Invalid marker | The verifier returns `invalid` for a candidate. | Halt file with cause `marker-invalid`; the issue is not claimed. |
 | Missing marker | A marker the cache recorded this session is gone, or the `lair:claimed` case of invariant Markers and labels. | Halt file with cause `marker-missing`. An orphan among these issues is still ended under invariant Claim state. |
-| Key missing, replaced or unreadable | A new key was created, so earlier markers carry another `kid`; or `marker.key` cannot be read, so `key` is unavailable (invariant Path inputs). | A new key: each earlier marker the Lair reads is invalid, so the Lair halts with `marker-invalid`, and the user restores the key or clears the issues by hand. An unreadable key: the paths that list `key` are skipped under invariant Path inputs, and the next tick probes again. |
+| Key missing, replaced or unreadable | A new key was created, so earlier markers carry another `kid`; or `marker.key` cannot be read. | A new key: each earlier marker the Lair reads is invalid, so the Lair halts with `marker-invalid`, and the user restores the key or clears the issues by hand. An unreadable key: the verifier returns `unavailable`, under invariant Unavailable reads. |
 | Second Lair on another machine or account | Its markers carry another `kid`, or another login. It runs in another lock scope (invariant Lock scope). | Another `kid` halts this Lair with `marker-invalid`. Another login's comments are not candidates, and its `lair:claimed` without a counting claim marker halts this Lair with `marker-missing`. Beyond that, invariant Lock scope applies. |
-| Halt file present | Halt read finds an entry at `control/halt`, and `halt-clear` is taken again at the claim (invariant Path inputs). | No candidate snapshot, scan or claim. Reconcile and the queue report still run, because their inputs remain. |
-| State root unreadable | The state root or its `control/` cannot be read, so `control` and every input built on it are unavailable (invariant Path inputs). | The terminal queue report only, with `halted: state-root`. No reconcile and no halt-file write. The next tick probes again. |
+| Halt file present | The halt read finds an entry at `control/halt`, at tick start or on the re-take at the claim. | No candidate snapshot, scan or claim. Reconcile and the queue report still run, since their guards do not use the halt read (invariant Unavailable reads). |
+| State root unreadable | The state root or its `control/` cannot be read (invariant Unavailable reads). | The terminal queue report gives `halted: state-root`. |
 | Circuit breaker trip | Three consecutive counted outcomes in the current window. | Halt file with cause `breaker` and the runs; only the user deleting it re-arms the Lair. |
 
 ## Decisions
@@ -305,7 +300,9 @@ A decision that is not ADR-worthy names the [P20](../../engineering-principles.m
 - **Invariant Markers and labels governs how labels follow markers and when the reconciler leaves an issue alone.** Implements ADR-0045 decisions 2, 11 and 16. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **Invariant Lock scope governs the single-instance lock.** Implements ADR-0045 decision 2 (B3-11). Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **Invariant Lair-written text, applied by one renderer that builds every string the Lair writes; the queue report gives a stage and reason codes per failure.** Implements ADR-0045 decision 10 and replaces the solution design's queue report contents (B3-19). Not ADR-worthy: fails P20's hard-to-reverse condition.
-- **Invariant Path inputs governs when each controller path runs and what an unavailable input skips.** Implements ADR-0045 decision 17. Not ADR-worthy: fails P20's hard-to-reverse condition.
+- **Invariant Unavailable reads: a guard that uses an unavailable read does not fire, and every controller read goes through one recording library.** Implements ADR-0045 decision 17. Not ADR-worthy: fails P20's hard-to-reverse condition.
+- **Start creates `control/` and `marker.key` under the lock, the key by exclusive create, reads the viewer login once, and refuses start when any step fails.** Implements ADR-0045 decision 2 and the signed-marker answer. Not ADR-worthy: fails P20's hard-to-reverse condition.
+- **The verifier returns `counts`, `invalid` or `unavailable`, and only `invalid` or a complete read with no counting marker fails toward stopping.** Implements ADR-0045 decision 17. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **HMAC-SHA256 with one local key per repository, and a `kid` in every marker.** Implements the signed-marker answer. Not ADR-worthy: fails P20's hard-to-reverse condition, since the `v` field allows a second scheme.
 - **The state root lives outside every checkout and worktree.** Implements ADR-0045 decision 17's halt file and the signed-marker answer. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **Every marker reader fails toward stopping, and an invalid or missing marker halts the Lair.** Implements ADR-0045 decision 17. Not ADR-worthy: fails P20's hard-to-reverse condition.
@@ -347,16 +344,16 @@ None of these changes is applied in this pull request.
 
 The tests are the PRD's [Testing Decisions](../../prds/autonomous-ready-issue-loop.md#testing-decisions); this section adds the claim-integrity cases and where they live. All run on recorded GitHub states, with no live GitHub, and fixtures live under `tests/lair/`.
 
-- **`tools/test_lair_markers.sh`.** Sign then verify; and one failing case per counting check: another login, `viewerDidAuthor` false, a non-null `lastEditedAt`, a missing `lastEditedAt` key, a CRLF first line, a bad signature, another `kid`, a marker copied to another issue or repository, an outcome marker whose nonce has no counting claim marker. An outsider's sentinel comment is ignored and halts nothing. Identical markers count once.
+- **`tools/test_lair_markers.sh`.** Sign then verify; and one failing case per counting check: another login, `viewerDidAuthor` false, a non-null `lastEditedAt`, a missing `lastEditedAt` key, a CRLF first line, a bad signature, another `kid`, a marker copied to another issue or repository, an outcome marker whose nonce has no counting claim marker. An outsider's sentinel comment is ignored and halts nothing. Identical markers count once. An unavailable key yields `unavailable`, never `invalid`.
 - **`tools/test_lair_claim.sh`.**
   - Write order, and the reconciler's result for a stop after each write, including a lost response.
   - The lock held twice, and `flock` missing.
   - A tmux or strain child still alive after the controller is killed does not stop a new controller taking the lock, and no launched child holds the lock descriptor.
   - The re-take, generated from the field list of Snapshot under Contracts and seams: one case per field, plus one each for the trunk commit, the permission read, the `kid` and the halt file. In each case the input changes between the first take and the re-take, and no claim marker is written. A field added to the Snapshot list adds a case.
   - The halt file present at tick start, appearing before the claim marker, and appearing after it.
-  - The path-input matrix, iterating the table of invariant Path inputs: each input of each row made unavailable in turn. That path does not run, no path whose row does not list the input loses it, and nothing reads as `marker-invalid` or halts by cause.
-  - An unreadable state root: no reconcile, no attempt to write the halt file, the terminal report reads `halted: state-root`, and the first tick after the state root is restored reconciles.
-  - An unreadable key: no verifier path runs, and nothing reads as `marker-invalid`.
+  - The unavailable-read test, generated from each guard's read trace that the library recorded on a clean run: each recorded read is made unavailable in turn. Every guard whose trace holds that read makes no write and raises no halt, `marker-invalid` or failed-check verdict, and every other guard's result equals the clean run. No table of expected skips exists.
+  - A lint that fails any controller script reaching GitHub, tmux, the trunk fetch or the state root other than through the library.
+  - Start: the first start creates `marker.key` with mode 0600, a second start reads it, and any failing step refuses start.
   - The breaker: three counted outcomes trip it and write the halt file with its cause; parks are skipped; a `complete`, `blocked` or `stalled` outcome ends a streak; another session's outcomes are ignored; a run ended with no counting outcome marker counts; a removed halt file starts a new window.
   - `body_sha256` vectors: CRLF, null body, empty body, trailing newline, a title edit only.
   - Check error, check timeout, the per-tick cap, and the cached failed fingerprint.
@@ -375,8 +372,8 @@ The build order of the solution design stands. This design adds two seams: #630'
 | --- | --- | --- |
 | #604 | The scanner session reuses the strain launch and per-session settings; strain settings keep the state root out of reach. | ADR-0045 decisions 3, 4, 5 and 10; ADR-0007; ADR-0010; ADR-0017 |
 | #605 | The merge lane reads `body_sha256` and the nonce only from a counting claim marker. | ADR-0045 decisions 10 and 12; ADR-0044 |
-| #608 | The claim sequence, snapshot, scanner session, signed markers, reconciler and sweep, lock, halt file, queue report, state root and path-input gate. | ADR-0045 decisions 2, 10, 16 and 17, the 2026-11-21 admission amendment and the proposed decision 17 amendment; ADR-0007; ADR-0019; ADR-0026; ADR-0032 |
-| #609 | Park markers are signed, the park record's `key` and question slot are validated under invariant Lair-written text before the marker is posted, answers count only against a counting park marker, and a parked issue keeps `lair:claimed`. | ADR-0045 decisions 7, 11 and 16 |
+| #608 | The claim sequence, snapshot, scanner session, signed markers, reconciler and sweep, lock, halt file, queue report, state root, start sequence, and the read library and its lint. | ADR-0045 decisions 2, 10, 16 and 17, the 2026-11-21 admission amendment and the proposed decision 17 amendment; ADR-0007; ADR-0019; ADR-0026; ADR-0032 |
+| #609 | Park markers are signed, the park record's `key` and question slot are validated under invariant Lair-written text before the marker is posted, answers count only against a counting park marker read through the verifier, an `unavailable` result admits nothing that tick and never reads as no counting marker, and a parked issue keeps `lair:claimed`. | ADR-0045 decisions 7, 11 and 16 |
 | #611 | The breaker's session window and halt-file write; the digest reads counting outcome markers. | ADR-0045 decisions 14 and 17 |
 | #612 | Parallel strains keep one lock and at most one claim per tick. | ADR-0045 decisions 12 and 15; ADR-0007 |
 
