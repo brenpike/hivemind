@@ -6,7 +6,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 0
+rounds: 1
 clean_round: false
 ---
 
@@ -35,14 +35,31 @@ Review rule:
 
 ## Rounds
 
-No round of the restarted review has run yet. Its round 1 covers the whole documents.
+### Round 1
+
+- **Date:** 2026-11-22.
+- **Reviewed commit:** `7ac4387dff0d7e46d07650e20abc55b532aa55be`.
+- **Scope:** the whole PRD, solution design and ADR-0045, with the part designs read as the text they supersede.
+- **Planner pass:** reviewer `hivemind:cerebrate`, a fresh read-only pass with `Memory context: none`, covering every angle. Model: `claude-opus-5-5`. It raised 11 findings, R1-1 to R1-11: 0 critical, 0 high, 4 medium and 7 low.
+- **Local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`. Model: the tool's own default (ADR-0042 decision 7), from another vendor than the planner pass's. The tool returned 0 findings in the diff. It dropped 1 item outside the diff, the merge lane's breaker list under Lifecycle "Stage 4: halt and circuit breaker", which Seams between the part designs, item 4, already replaces by its explicit override. The pass's reviewer agent added one note, C1-1, low.
+- **Result:** 0 critical, 0 high, 4 medium and 8 low, all new. The user approved R1-2 option A, R1-8 and R1-3 with "Go" on 2026-11-22 (Decisions asked, Restarted round 1 questions); the other findings take the recommended fix, each listed for veto. Every finding is disposed below, so none is open. The round raised new findings, so it is not clean, and a confirming round follows.
 
 ## Findings
 
-No finding of the restarted review is recorded yet.
-
 | ID | Round | Angle | Severity | Disposition | Note |
 | --- | --- | --- | --- | --- | --- |
+| R1-1 | 1 | B | medium | fixed | The Crash and Stall rows and the Lifecycle run-end bullet sent a pull request to `lair:review` by strain launch's rows alone, against Seams items 2 and 9. Fixed: solution design, Failure modes, the Crash and Stall rows, a delivery run's route narrowed by Seams item 9 and a remediation run under the merge lane's "Fix-up run lost in flight" with the claim end stopping every merge (Seams item 2); Lifecycle, the "every run end and exit" bullet names Seams items 2 and 9. |
+| R1-2 | 1 | A | medium | fixed | The decision digest had no State and ownership row, and as a local item GitHub cannot give again it conflicted with ADR-0045 decision 2 and its 2026-11-21 amendment. Fixed per the user's approval of option A: solution design, State and ownership, the digest row at `control/digest/<session-id>.txt` and the intro sentence; Component "Decision digest and circuit breaker", the Decisions bullet, the Verification strategy case and #611's ADRs cell; [ADR-0045](../../adr/0045-lair-software-factory.md), the amendment of 2026-11-22, "the decision digest is a local item GitHub cannot give again"; `CONTEXT.md`, the **Lair** entry. The digest sits under `control/`, so #646's containment requirement covers it. |
+| R1-3 | 1 | A | medium | fixed | The release-train decisions ADR-0045 decision 15 keeps for the user were deferred to #606 with no issue to settle them before #606 is built. Fixed per the user's approval: #647, Lair design: release-train decisions, filed as a part of epic #603; solution design, Seam order states that #647 natively blocks #606, and its pending issue edits add that link; Component "Release-train versioning mode" and the release-train Decisions bullet follow. |
+| R1-4 | 1 | A | medium | fixed | Nothing said how #646's design joins this design or freezes. Fixed: solution design, the opening paragraphs and Seams item 6, #646's design joins as a fourth part design through a dated Amendments entry once its own review passes, linked from item 6 and added to the Part designs column of #604, #608 and #612, then frozen; this record's Residuals scope names it. |
+| R1-5 | 1 | A | low | fixed | Existing-path coverage and Component "Unattended autonomy level" said a missing marker means today's behavior, though a launch file with no marker fails closed. Fixed: solution design, both places, citing strain launch, Contracts and seams, "Marker check". |
+| R1-6 | 1 | B | low | fixed | The Budget overrun row recorded an agent-call cap end as `timed-out`. Fixed: solution design, Failure modes, Budget overrun, the wall-clock budget gives `timed-out` and the agent-call cap the run's own `failed` result with cause `agent_budget`, recorded as `failed`. |
+| R1-7 | 1 | A | low | fixed | Seams item 1 did not map strain launch's remediation `claim_nonce` onto claim integrity's payload. Fixed: solution design, Seams item 1, that `claim_nonce` is `run`, and the marker's `nonce` is that of the claim whose run-end marker recorded the pull request. |
+| R1-8 | 1 | A | low | fixed | The PRD Post-PR feedback criterion said "exactly one remediation run" on review findings only, against the merge lane's CI-red rule (Tier A Q9), its halt rule (Tier A Q10) and the one remediation per pull request of strain launch's round-5 answer A. Fixed per the user's approval: the PRD, Acceptance Criteria, Post-PR feedback. |
+| R1-9 | 1 | B | low | fixed | Trust boundaries and the Labels row omitted review comments as a channel and the user's label holds. Fixed: solution design, Trust boundaries, the channel bullet; State and ownership, the Labels row, the user may add `lair:review` or remove `lair:claimed` as a hold, the holds the merge lane's Trust boundaries name. |
+| R1-10 | 1 | A | low | fixed | The glossary's **Strain** entry tied every strain to a brood-plan, and its **Park** entry did not name the third park's handoff (ADR-0045 decision 7). Fixed: `CONTEXT.md`, the **Strain** and **Park** entries. |
+| R1-11 | 1 | A | low | fixed | The restarted review's IDs collided with the integration review's in this record and the solution design. Fixed: this record, History's Integration round headings, the Integration review note on IDs, the lead-ins of the integration rounds' calls under Decisions taken and the Decisions asked texts; solution design, the integration review citations in Seams item 6, Decisions and Amendments. |
+| C1-1 | 1 | review | low | fixed | Seams item 4 did not name the merge lane's Failure modes rows "Invalid result" and "Failed fix-up run", whose breaker clauses it replaces for invalid results. Fixed: solution design, Seams item 4. |
 
 ## Decisions taken, listed for veto
 
@@ -83,7 +100,7 @@ The parent design's own calls, listed for veto under A3-12:
 | The release-train decisions are deferred with full scope to #606, so #606 and #612 are not ready until a dated Amendments entry settles them | no | no | no | no |
 | #608's admission needs the readiness check from #615, recorded in Seam order and left for the maintainer to link | no | no | no | no |
 
-Round 1's calls, each in the solution design:
+Integration round 1's calls, each in the solution design:
 
 | Decision | Scope change | ADR amendment | Trust, credential or merge path | Irreversible |
 | --- | --- | --- | --- | --- |
@@ -106,7 +123,7 @@ Round 1's calls, each in the solution design:
 | R1-29: the PRD Labels criterion names `lair:handoff`, `lair:failed` and `lair:review`; `lair:claimed` stays outside it | no: wording only; the criterion keeps its meaning | no | no | no |
 | R1-28: the **Lair** and **Park** entries in `CONTEXT.md` | no | no | no | no |
 
-Round 2's calls, each the reviewer's recommended fix, taken under the user's direction "Take recs" of 2026-11-22 (Decisions asked):
+Integration round 2's calls, each the reviewer's recommended fix, taken under the user's direction "Take recs" of 2026-11-22 (Decisions asked):
 
 | Decision | Scope change | ADR amendment | Trust, credential or merge path | Irreversible |
 | --- | --- | --- | --- | --- |
@@ -126,7 +143,7 @@ Round 2's calls, each the reviewer's recommended fix, taken under the user's dir
 | R2-13: this record's Residuals names the part-design edit with no Amendments entry | no | no | no | no |
 | R2-14: Rounds names each pass's model by its id | no | no | no | no |
 
-Round 3's calls, each the reviewer's recommended fix, taken under the user's reply "Take recs" of 2026-11-22 (Decisions asked, Round 3 questions):
+Integration round 3's calls, each the reviewer's recommended fix, taken under the user's reply "Take recs" of 2026-11-22 (Decisions asked, Round 3 questions):
 
 | Decision | Scope change | ADR amendment | Trust, credential or merge path | Irreversible |
 | --- | --- | --- | --- | --- |
@@ -141,16 +158,35 @@ Round 3's calls, each the reviewer's recommended fix, taken under the user's rep
 | The integration review is kept inside the existing `## History: 2026-11-22` section, under headings named "Integration review", so every heading stays unique | no | no | no | no |
 | The containment rows R1-1, R1-2, R1-5, R1-12, R2-1 and C2-1 keep their dispositions with a note naming the split, since History keeps the rows and a high is only `fixed` or `rejected` | no | no | no | no |
 
+Restarted round 1's calls, each the recommended fix of a finding not asked of the user; R1-2, R1-3 and R1-8 were asked (Decisions asked, Restarted round 1 questions):
+
+| Decision | Scope change | ADR amendment | Trust, credential or merge path | Irreversible |
+| --- | --- | --- | --- | --- |
+| R1-1, Failure modes Crash and Stall rows and the Lifecycle run-end bullet: a delivery run's `lair:review` route is narrowed by Seams item 9, and a remediation run follows the merge lane's "Fix-up run lost in flight", its claim end stopping every merge (Seams item 2) | no | no | no: it names the routes Seams items 2 and 9 already set; no merge gate changes | no |
+| R1-4, the opening paragraphs and Seams item 6: #646's design joins as a fourth part design through a dated Amendments entry once its own review passes, then frozen | no: #646 is already a part design of the same epic | no | no | no |
+| R1-5, Component "Unattended autonomy level" and Existing-path coverage: a launch file with no marker fails closed | no | no | no: it names strain launch's existing "Marker check" | no |
+| R1-6, Failure modes Budget overrun: the agent-call cap ends the run with its own `failed` result, cause `agent_budget`, never `timed-out` | no | no | no | no |
+| R1-7, Seams item 1: strain launch's remediation `claim_nonce` is `run`, and the marker's `nonce` is the claim's whose run-end marker recorded the pull request | no | no | no: claim integrity's signing and counting rules are unchanged | no |
+| R1-9, Trust boundaries and the Labels row: review comments reach a remediation strain through the author filter, scanned before use; the user may add `lair:review` or remove `lair:claimed` as a hold | no | no | no: it names channels and holds strain launch and the merge lane already decided | no |
+| R1-10, `CONTEXT.md`: the **Strain** entry names the Lair strain outside any brood-plan, and the **Park** entry the third park's handoff | no | no | no | no |
+| R1-11: the integration review's IDs and rounds are cited as "integration"; History's round headings read "Integration round" | no | no | no | no |
+| C1-1, Seams item 4: the breaker clauses of the merge lane's Failure modes rows "Invalid result" and "Failed fix-up run" are replaced for invalid results | no | no: it follows the ADR-0045 amendment of 2026-11-22, "the circuit breaker counts invalid results" | no | no |
+| R1-2 follow-on: the **Lair** entry in `CONTEXT.md` names the decision digest beside the key | no | no: it cites the asked ADR-0045 amendment of 2026-11-22 to decision 2 | no | no |
+
 ## Decisions asked
 
-- **Round 1 questions.** Tier A, asked after this design's review round 1. The user answered "1A 2A 3A" on 2026-11-22.
+- **Restarted round 1 questions.** Tier A, asked after this restarted review's round 1. The user answered "Go" on 2026-11-22.
+  - The question: "Approve these three changes? (1) R1-2, option A: widen ADR-0045's 2026-11-21 amendment to decision 2 with a dated amendment that names the decision digest file beside the marker key as a local item GitHub cannot give again. (2) R1-8: change the PRD's Post-PR feedback criterion to 'Review findings or a red CI result on an open Lair pull request start at most one remediation run for it, and none while the Lair is halted.' (3) R1-3: open the issue 'Lair design: release-train decisions' as a native blocker on #606, to settle the fragment format, release cadence and release trigger."
+  - Answer: "Go". Applied: the ADR-0045 amendment of 2026-11-22, "the decision digest is a local item GitHub cannot give again", with the digest row under the solution design's State and ownership; the PRD's Post-PR feedback criterion; and #647, filed on 2026-11-22, with the solution design's Seam order and issue edits naming its native link on #606.
+
+- **Round 1 questions.** Tier A, asked after this design's integration review round 1. The user answered "1A 2A 3A" on 2026-11-22.
   - Q1 (R1-1, R1-2, R1-5, R1-12), containment. Answer A: #604 builds per-platform containment. On Linux, the strain sandbox that hides the Lair's processes also hides `control/` and every tmux socket, and the Lair's own window runs on its own tmux server no strain can reach. On macOS, a `sandbox-exec` profile denies `control/` and the Lair's tmux sockets. A #608 preflight probe `sandbox` makes the Lair claim nothing when containment cannot be confirmed, stopping with `strain_env_preflight`, probe `sandbox`. The merge lane's cache moves under `control/`. Strain launch's "tmux global environment" residual does not apply under containment. #604's probe cases, on each supported platform: from inside a strain, `tmux -S <socket> list-sessions` and `new-window` fail for each Lair socket, and Bash cannot read `control/marker.key`, append to `control/halt` or delete it.
   - Q2 (R1-18), docs pull requests and the auto tier. Answer A: `docs/prds/`, `docs/initiatives/` and `docs/adr/` go into the auto-tier script's built-in floor, built by #605, so ADR-0046's "A docs pull request never takes the Lair's auto tier (#623)" holds in every consumer project. #623's overlap with #608, the readiness-check call at claim, is recorded in Seam order with who builds it.
   - Q3 (R1-17, R1-20, R1-22), issue-body edits. Answer A: the edits are made after the clean round, before the pull request leaves draft: #604's stale acceptance criteria; #606's Dependencies gaining #605, with the native link; and the `## Design` blocks of #604 to #612. The solution design's Seam order states this obligation. The overlord makes these edits; they are still to be made.
 
-- **Round 2 direction.** The user directed "Take recs" on 2026-11-22: each round 2 finding takes its reviewer's recommended fix, and each such call is listed under Decisions taken, listed for veto. This answers the always-ask screens of C2-1 and R2-1, which narrow a strain's reach.
+- **Round 2 direction.** The user directed "Take recs" on 2026-11-22: each integration round 2 finding takes its reviewer's recommended fix, and each such call is listed under Decisions taken, listed for veto. This answers the always-ask screens of C2-1 and R2-1, which narrow a strain's reach.
 
-- **Round 3 questions.** Tier A, asked after this design's review round 3, which reached the 3-round cap. The user replied "Take recs" on 2026-11-22, taking the recommended option of each.
+- **Round 3 questions.** Tier A, asked after this design's integration review round 3, which reached the 3-round cap. The user replied "Take recs" on 2026-11-22, taking the recommended option of each.
   - Q1 (R3-1 to R3-4, R3-6 and C3-1), "How should the review proceed?" Options: A, "split strain containment into its own part design under a new issue with its own review; item 6 goes back to what the three part designs approved and points at the new design; fix the other round-3 findings here, naming invalid results in the PRD and ADR-0045; restart this PR's review at round 1 with current rounds moved to History" (recommended); B, "drop cross-strain isolation claims, keep strain launch's residual"; C, "raise the cap, run round 4". Answer A: #646, Lair design: strain containment, is filed and blocks #604, #608 and #612; the PRD Stop controls criterion and the ADR-0045 amendment of 2026-11-22, "the circuit breaker counts invalid results", name `invalid-result`; this review restarts at round 1.
   - Q2, "Record round 3 and push the branch now, keeping the PR as a draft?" Answer: yes.
 
@@ -171,7 +207,7 @@ Round 3's calls, each the reviewer's recommended fix, taken under the user's rep
 ## Residuals
 
 - **A part-design edit with no Amendments entry stales no stamp.**
-  - Scope: an edit to [strain launch](strain-launch-design.md), the [merge lane](merge-lane-design.md) or [claim integrity](claim-integrity-design.md) that lands with no dated entry under the solution design's Amendments.
+  - Scope: an edit to [strain launch](strain-launch-design.md), the [merge lane](merge-lane-design.md), [claim integrity](claim-integrity-design.md), or #646's design once it joins as a fourth part design (solution design, opening paragraphs), that lands with no dated entry under the solution design's Amendments.
   - Ground: the stamp path allowlist (idea-to-ready design, Contracts and seams, "Slice design section format") admits no other file of this folder than the solution design and this record, so no part design can be stamped.
   - Bounded impact: a docs pull request never takes the Lair's auto tier (solution design, Component "Merge lane and auto tier"). The bound is the reviewer of the part-design pull request, when there is one, who sees the edit in its diff; a pull request that edits only a part design leaves this record unchanged. With `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a Bot approval with no human review, the residual the idea-to-ready design records under D24.
   - Recorded: here, and under Reviewed documents.
@@ -361,11 +397,11 @@ Round 3 did not converge under the 3-round cap. The user was asked to choose: sp
 
 ### Integration review
 
-The review of the integrated design under #633, rounds 1 to 3 of 2026-11-22, kept as it stood after round 3. Its front matter then held `verdict` `fail`, every open count 0, `rounds` 3 and `clean_round` `false`. Round 3 reached the 3-round cap without converging on strain containment, and the user split containment into its own part design, #646, Lair design: strain containment (Decisions asked, Round 3 questions). The containment rows R1-1, R1-2, R1-5, R1-12, R2-1 and C2-1 keep their dispositions, each with a note naming the split: R3-1 is fixed by removing the claims they added from this design, and #646 designs the mechanism.
+The review of the integrated design under #633, rounds 1 to 3 of 2026-11-22, kept as it stood after round 3. Its front matter then held `verdict` `fail`, every open count 0, `rounds` 3 and `clean_round` `false`. Round 3 reached the 3-round cap without converging on strain containment, and the user split containment into its own part design, #646, Lair design: strain containment (Decisions asked, Round 3 questions). The containment rows R1-1, R1-2, R1-5, R1-12, R2-1 and C2-1 keep their dispositions, each with a note naming the split: R3-1 is fixed by removing the claims they added from this design, and #646 designs the mechanism. The integration review's finding IDs are cited as "integration R1-n"; the restarted review's IDs start again at R1-1.
 
 ### Integration review rounds
 
-#### Round 1
+#### Integration round 1
 
 - **Date:** 2026-11-22.
 - **Reviewed commit:** `9d5438ea2d82d379bedf134c3a13a595f946a7be`.
@@ -374,7 +410,7 @@ The review of the integrated design under #633, rounds 1 to 3 of 2026-11-22, kep
 - **Local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`. Model: the tool's own default (ADR-0042 decision 7), from another vendor than the planner pass's. It raised 1 finding, C1-1, high, a duplicate of R1-3.
 - **Result:** 5 high, 18 medium and 9 low, all new. The user answered the three questions under Decisions asked "1A 2A 3A". Every finding is disposed below, so none is open. The round raised new findings, so it is not clean, and a confirming round follows.
 
-#### Round 2
+#### Integration round 2
 
 - **Date:** 2026-11-22.
 - **Reviewed commit:** `1495f726d708fa35ba94a456edc3450edd8cea18`.
@@ -383,7 +419,7 @@ The review of the integrated design under #633, rounds 1 to 3 of 2026-11-22, kep
 - **Local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`. Model: the tool's own default (ADR-0042 decision 7), from another vendor than the planner pass's. It raised 1 finding, C2-1, high.
 - **Result:** 2 high, 5 medium and 8 low, all new. The planner pass confirmed four of round 1's decisions listed for veto as valid: no ADR-0045 amendment for macOS, because the `sandbox-exec` profile denies `control/` and the tmux sockets but does not hide the Lair's processes, so the 2026-11-22 macOS process-reach residual holds as written; the merge lane's start-marker kind (`fixup-checks` or `fixup-review`) is not carried; a `not-launched` remediation end routes the pull request to `lair:review`, and the one remediation is spent once its start marker lands (its writes since set by R2-3); and the record keeps `stamps: []` until it passes (ADR-0046 decision 6 and decision 7). The user directed "Take recs" on 2026-11-22, so each finding takes its reviewer's recommended fix (Decisions asked). Every finding is disposed below, so none is open, and no high is deferred. The round raised new findings, so it is not clean, and round 3, the last under the cap, follows.
 
-#### Round 3
+#### Integration round 3
 
 - **Date:** 2026-11-22.
 - **Reviewed commit:** `4d9cc08beb4b60f09141925af7de8e1ab04db8e4`.

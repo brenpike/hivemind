@@ -64,7 +64,7 @@ GitHub is the Lair's state and dashboard. The user steers through labels, park a
   - Only the Lair merges. A strain runs with the merge settings empty and with settings that deny the merge, label and issue-edit commands. A prompt-injected strain that runs with the user's GitHub rights stays a named residual.
   - While the Lair runs one issue at a time, it claims nothing while a non-draft Lair pull request is open.
   - A pull request merges unattended only when the script-computed auto tier and the ADR-0044 merge rules both pass. Any other Lair pull request is marked for batch review.
-- **Post-PR feedback.** Review findings on an open Lair pull request start exactly one remediation run for it.
+- **Post-PR feedback.** Review findings or a red CI result on an open Lair pull request start at most one remediation run for it, and none while the Lair is halted.
 - **Stop controls.**
   - Setting the halt switch stops new claims within one tick, and strains in flight finish.
   - Unsetting auto-merge stops merges from the next tick.

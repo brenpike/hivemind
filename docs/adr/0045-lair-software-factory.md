@@ -145,3 +145,7 @@ This amends decision 17 (Stop controls). Besides the circuit breaker, these caus
 ## Amendment 2026-11-22: the circuit breaker counts invalid results
 
 This amends decision 17 (Stop controls). The circuit breaker also counts an `invalid-result` outcome, a run that ended with no valid result, as a failure, beside failed, crashed, stalled and timed-out ones. The user took this on 2026-11-22, answer A to Q1 after design review round 3 of the Lair's solution design. Status remains accepted.
+
+## Amendment 2026-11-22: the decision digest is a local item GitHub cannot give again
+
+This amends decision 2 (Three layers) and widens its 2026-11-21 amendment, the marker key is the one local file the Lair cannot rebuild. Beside the marker key, the decision digest of decision 14 is a local item GitHub cannot give again. At each run end, before clean-up removes the run's result file, the Lair appends the run's decisions to its session's digest file under its state root, and it never reads the file back; the user alone reads it. Every other local file stays a cache the Lair can rebuild, a control input such as the halt file of decision 17, or a transient hand-off. The user took this on 2026-11-22, answer A to finding R1-2 of the restarted design review round 1 of the Lair's solution design. Status remains accepted.

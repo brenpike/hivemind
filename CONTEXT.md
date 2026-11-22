@@ -344,7 +344,7 @@ The cerebrate's output artifact when work decomposes into multiple independent s
 _Avoid_: multi-plan (which means sequential PRs, not parallel), meta-plan
 
 **Strain**:
-One independent unit of work within a brood-plan, assigned to a single child overlord session. Each strain has its own worktree, branch, pipeline execution, and PR.
+One independent unit of work within a brood-plan, assigned to a single child overlord session. Each strain has its own worktree, branch, pipeline execution, and PR. A Lair strain is started by the **Lair** per claim, or per **Lair Pull Request** as its remediation strain, outside any brood-plan; a remediation strain works on its pull request's branch.
 _Avoid_: stream, task (too generic), work item, lane
 
 **Brood Manifest**:
@@ -352,7 +352,7 @@ The per-brood JSON file at `.hivemind/broods/<brood-id>/manifest.json` (schema `
 _Avoid_: brood config, brood state, registry
 
 **Lair**:
-The Software Factory: a deterministic controller, with no model in it, that runs in a long-lived tmux window and reconciles GitHub each tick. It claims **Ready Issues**, starts one strain per claimed issue (an interactive session in its own worktree running standard-delivery in unattended mode) and at most one remediation strain per **Lair Pull Request**, on review feedback or a red CI result, reads each strain's result, owns the issue's labels, and is the only merger of its pull requests. GitHub holds its state; its local files are a rebuildable cache, except the key that signs its marker comments (ADR-0045 amendment of 2026-11-21 to decision 2). For its strains it owns lifecycle, merge order and version coordination (ADR-0045).
+The Software Factory: a deterministic controller, with no model in it, that runs in a long-lived tmux window and reconciles GitHub each tick. It claims **Ready Issues**, starts one strain per claimed issue (an interactive session in its own worktree running standard-delivery in unattended mode) and at most one remediation strain per **Lair Pull Request**, on review feedback or a red CI result, reads each strain's result, owns the issue's labels, and is the only merger of its pull requests. GitHub holds its state; its local files are a rebuildable cache, except the key that signs its marker comments and its decision digest (ADR-0045 amendments of 2026-11-21 and 2026-11-22 to decision 2). For its strains it owns lifecycle, merge order and version coordination (ADR-0045).
 _Alias_: Software Factory
 _Avoid_: loop, autopilot, scheduler, daemon, Overmind
 
@@ -361,7 +361,7 @@ A pull request the **Lair** recorded on its claimed issue after checking a strai
 _Avoid_: strain PR, factory PR
 
 **Park**:
-The unattended-mode outcome for a stop a run may not take itself: the run ends without asking, pushes its branch when it has commits, and reports a typed park. An answerable park (a decision or a fact) puts its question on the issue and moves it to `readiness:needs-decision`; a user with write access answers on the issue, and the answer re-enters as a settled decision when the issue is re-admitted. An approval park (a destructive fix, an external effect, injection-suspect content) hands the issue off for an interactive run. Distinct from the triage label `readiness:parked`, which means shelved.
+The unattended-mode outcome for a stop a run may not take itself: the run ends without asking, pushes its branch when it has commits, and reports a typed park. An answerable park (a decision or a fact) puts its question on the issue and moves it to `readiness:needs-decision`, unless it is the issue's third park, which hands the issue off; a user with write access answers on the issue, and the answer re-enters as a settled decision when the issue is re-admitted. An approval park (a destructive fix, an external effect, injection-suspect content) hands the issue off for an interactive run. Distinct from the triage label `readiness:parked`, which means shelved.
 _Avoid_: pause, block, hold, escalate
 
 ### Pipeline & Artifacts
