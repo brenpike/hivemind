@@ -59,13 +59,17 @@ A strong recommendation with a clean gate is taken and listed for veto. A real s
 - **Lair admission.** The Lair never claims an epic, and never claims an issue that fails the check at claim time. A failing issue stays unclaimed and is named in the tick's queue report, with no new label.
 - **Solution design.** Every initiative's solution design holds the template sections: context and code truth, components, state and ownership, contracts and seams, trust boundaries, lifecycle, existing-path coverage, failure modes, decisions, verification strategy, seam order, open questions, amendments. Each decision names its ADR, or the ADR condition it fails.
 - **Design review.**
-  - It runs on fresh read-only reviewers that did not write the design, in two parallel passes by angle (code truth, governance and ADR conflicts, existing-path coverage; failure modes, trust and injection, testability), then a confirming round.
+  - It runs on fresh read-only reviewers that did not write the design. Each round is one pass covering every angle: code truth, governance and ADR conflicts, existing-path coverage, failure modes, trust and injection, testability.
+  - When the design touches a trust boundary, credentials or the merge path, one pass by the configured local review tool is added. With no tool configured, that pass is skipped and the record says so.
+  - The confirming round reviews only the change since the previous round and the fixes to open findings, not the whole design again.
+  - The reviewer's model is configurable. A maintainer with Fable can use it for the full pass; a model the maintainer cannot reach falls back to the default, and the record names the model each pass used.
   - It exits only with zero open critical or high findings and one round with no new ones, capped at three rounds. Non-convergence reaches the maintainer as a signal to split the initiative.
   - Every finding gets exactly one disposition, and mediums follow the existing defer-or-record rules.
 - **Review record.** The record stamps the exact versions of the PRD and solution design it reviewed. Any later edit makes it stale until a review of the change restores it. The record ships in the same docs pull request, so trunk never holds an unreviewed design.
 - **Design decisions.** A strong recommendation inside the PRD's scope with a clean gate is taken and listed in the record for veto. A change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible are always asked.
 - **Council.**
   - Takes a decision brief and returns one with a recommendation, its strength, the reasoning, the dissent and each member's angle and model.
+  - Each member's model is configurable, with the same fallback: a model the maintainer cannot reach falls back to the default, and the brief names the model each member used.
   - Callable from the design stages and from standard-delivery mid-run through the same contract.
   - The convening rule is data, with a per-run cap. Hard stops and promotion-gate trips are never sent to the council.
   - A strong result with a clean gate is taken and journaled. A split, or an always-ask call, is asked in an interactive run and parks in an unattended run, carrying the dissent either way.
@@ -89,7 +93,7 @@ A strong recommendation with a clean gate is taken and listed for veto. A real s
 - **The track is decided by a script-readable fact:** a native parent epic, plus the human-confirmed type and effort labels.
 - **Design artifacts:** the PRD stays where PRDs live today. Each initiative's solution design and review record live together in a per-initiative docs folder. ADRs stay global and numbered.
 - **Design review uses fresh planner passes, not a new agent.** The review record is the contract: stamped versions, verdict, open counts, rounds, findings with dispositions, decisions taken and asked.
-- **No dedicated different-model design pass in v1.** The docs pull request already passes local review and the bot review. The record names each pass's reviewer, so one can be added later without a schema change.
+- **A second model is used only when configured, never required.** The cross-model design pass reuses the configured local review tool, and Fable is an opt-in reviewer or council member model. Neither Codex nor Fable is required. The record names each pass's reviewer and model.
 - **The council is one decision service with two callers.**
   - Its contract is the existing decision brief, extended with strength, dissent and per-member provenance.
   - The convening rule is a new consult action in the autonomy table, decided as data.
