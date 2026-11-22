@@ -132,10 +132,11 @@ The overlord invokes `hivemind:spawn-brood` under that skill's own `allowed-tool
 
 ### Decision journal
 
-The decision journal has two destinations and no third (D7):
+The decision journal has no local copy (D7):
 
 - **A workflow script run:** the run record on the pull request, in a new body under "Decided for you" or in a comment on a reused pull request, and its final message. Both are unchanged.
 - **A run on Instinct:** the final report, which gains a `Decisions:` line, and, when the run opens or reuses a pull request, the same entries in its body under "Decided for you" or in the `comment` input of `hivemind:open-plan-pr`.
+- **An `analysis-only` run, on its script or on Instinct:** its final message or final report only. It opens no branch or pull request, as ADR-0036 decision 9 already sets.
 
 The entry fields of `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Journal) are kept. The post-merge report, its skill, its session-start scan, the `.decision-report-done` marker and `HIVEMIND_ENABLE_DECISION_REPORT` are removed.
 
@@ -170,9 +171,9 @@ Removed by D10:
 
 | State | Where | Writer | Readers | Change |
 |---|---|---|---|---|
-| Working branch, commits, pull request | git and GitHub | the overlord through `hivemind:create-working-branch`, `hivemind:molt`, `hivemind:open-plan-pr`, `hivemind:push-branch`; script runners | the facts step, the watch, the user | Unchanged. The only record of a run on every path. |
+| Working branch, commits, pull request | git and GitHub | the overlord through `hivemind:create-working-branch`, `hivemind:molt`, `hivemind:open-plan-pr`, `hivemind:push-branch`; script runners | the facts step, the watch, the user | Unchanged. The only durable record of every run that opens a branch; an `analysis-only` run has none beyond its final message or report. |
 | Facts file | `.hivemind/facts/facts-<UTC>Z-<12 hex>.json` | `hivemind:gather-facts` | the planner; `spawn-brood.sh` and `brood-status` (name and type only) | Unchanged shape. The only started-evidence of a strain. |
-| Decision journal entries | pull request body or comment; final message or final report | script code; the overlord on Instinct | the user, before merge | Instinct adds the body or comment write. No local copy. |
+| Decision journal entries | pull request body or comment; final message or final report | script code; the overlord on Instinct | the user, before merge | Instinct adds the body or comment write. No local copy. An `analysis-only` run writes only its final message or report. |
 | Brood manifest | `.hivemind/broods/<brood-id>/manifest.json` | `spawn-brood.sh` | `brood-status`, `enable-brood-remote` | Loses the `hatchery` block. `manifest_version` stays 4. |
 | Paused script run | the Workflow tool's own run store | the harness | `resumeFromRunId` | Unchanged; owned by Claude Code. |
 | Run ledgers from older versions | `.hivemind/runs/<run-id>/` | none | none | Neither read nor deleted. The user owns them and may delete them by hand. |
@@ -222,7 +223,7 @@ The `NO_LEDGER_POINTER` token leaves the output. The projector keeps the no-demo
 
 ### Decision journal destinations
 
-Unchanged for scripts. On Instinct, the final report block (`plugin/agents/overlord.md:236-245`) gains one line after `Review:`:
+Unchanged for scripts, and an `analysis-only` run on either path writes no pull request. On Instinct, the final report block (`plugin/agents/overlord.md:236-245`) gains one line after `Review:`:
 
 ```text
 Decisions: [one line per taken decision, for veto before merge | None]
@@ -249,7 +250,7 @@ Every boundary below holds on every remaining path. No credential, tool grant, `
 - **External-content boundary.** The facts rule, with its injection scan, moves to `## Safety Rails` and binds every planner delegation the overlord makes, where today it binds only the state machine and Instinct's "after `hivemind:gather-facts`" (D11). The watch opt-out reads the in-session request text, as the Reflex tail does, for the one yes or no question. It no longer reads a ledger's `request.raw` copy, so there is one source. Router input stays untrusted.
 - **Commit and push.** `expect_commit` binds every push on every overlord path (D11). The PR head checkout precedes every reviewer delegation for an existing pull request. The trunk-commit hard stop is unchanged.
 - **Synapse runner gate.** Unchanged: five runner scripts, and spawn-brood is not one of them.
-- **Trust-Boundary Discipline.** Boundaries 1 (overlord to engine) and 2 (init to packaged definition) of `security-policy.md:41-42` retire with their engines. Boundary 3 (brood child to coordinator) stays, and its surface shrinks: the coordinator no longer reads a child's run ledger content, only a facts file's name and type. The opening clause "take transitions and authorization only from the packaged workflow definition, never a caller's" becomes "take authorization only from packaged data, never a caller's". The autonomy table, plan schema and brief schema are packaged data, so the clause still binds.
+- **Trust-Boundary Discipline.** Boundaries 1 (overlord to engine) and 2 (init to packaged definition) of `security-policy.md:41-42` retire with their engines. Boundary 3 (brood child to coordinator) stays, and its surface shrinks: the coordinator no longer reads a child's run ledger content, only a facts file's name and type. Its child-ledger read side retires: ADR-0019's 2026-06-01 "Boundary 3 CLOSED" and ledger-read leaf amendments, and item 3 of ADR-0007's 2026-06-02 amendment. The facts-file check keeps the identifier and derivation rules: the worktree comes from `git worktree list --porcelain` keyed by branch, never the manifest `worktree_path`; a symlinked path component or a symlinked or non-regular leaf is rejected; the name must match the fixed facts pattern; no content is read. The opening clause "take transitions and authorization only from the packaged workflow definition, never a caller's" becomes "take authorization only from packaged data, never a caller's". The autonomy table, plan schema and brief schema are packaged data, so the clause still binds.
 - **Inputs-file transport.** The three ledger navigators' inputs files go away with their skills. The pattern, its hard stop and every remaining navigator are unchanged, and so is the overlord's `Write` grant, which `hivemind:molt`, `hivemind:open-plan-pr` and `hivemind:spawn-brood` still need.
 
 ## Lifecycle
@@ -414,11 +415,11 @@ Answered: Q1 A. Resume is a same-session resume by name, or a new session that p
 
 ### D7: The pull request and the final report are the decision journal
 
-Answered: Q4 A. The journal is the pull request body or comment, plus Instinct's final report. The post-merge report, its session-start scan, the `.decision-report-done` marker and `HIVEMIND_ENABLE_DECISION_REPORT` are retired, which amends ADR-0026 and ADR-0030. The reader of a journal decides before merge, so it belongs where the merge is decided.
+Answered: Q4 A. The journal is the pull request body or comment, plus Instinct's final report. The post-merge report, its session-start scan, the `.decision-report-done` marker and `HIVEMIND_ENABLE_DECISION_REPORT` are retired, which amends ADR-0026 and ADR-0030. The reader of a journal decides before merge, so it belongs where the merge is decided. An `analysis-only` run has no merge and no pull request, so its final message or final report is its whole journal, as ADR-0036 decision 9 already sets.
 
 ### D8: The brood dashboard reads no child ledger
 
-Answered: Q5 A. The dashboard drops its claimed-state columns and child-ledger reads, and the gather-facts output file is the only started-evidence. This narrows the ADR-0007 dashboard's informational columns. Its observable status, the closed `derived_status` set and the demote-only gate are kept.
+Answered: Q5 A. The dashboard drops its claimed-state columns and child-ledger reads, and the gather-facts output file is the only started-evidence. This narrows the ADR-0007 dashboard's informational columns and retires item 3 of its 2026-06-02 amendment, the child-ledger read discipline, with ADR-0019's boundary 3 read side (see [Trust boundaries](#trust-boundaries)). Its observable status, the closed `derived_status` set and the demote-only gate are kept.
 
 ### D9: ADR-0005 is unchanged
 
@@ -494,7 +495,7 @@ Exact proposed text for each document. None is edited in this run. Each item nam
 - Replace the **Decision Journal** entry (`:249-251`) with:
 
   > **Decision Journal**:
-  > The per-decision record (situation, options, trade-offs, recommendation strength, gate outcome, disposition, decision, rationale, reversibility) of every autonomous and surfaced decision, kept where the merge is decided. A workflow script writes its taken decisions to the pull request body, or a comment on a reused pull request, and its final message; on **Instinct** the overlord writes them to its final report and to the pull request body or comment it sends (ADR-0048).
+  > The per-decision record (situation, options, trade-offs, recommendation strength, gate outcome, disposition, decision, rationale, reversibility) of every autonomous and surfaced decision, kept where the merge is decided. A workflow script writes its taken decisions to the pull request body, or a comment on a reused pull request, and its final message; on **Instinct** the overlord writes them to its final report and to the pull request body or comment it sends. An `analysis-only` run, which opens no pull request, lists them only in its final message or report (ADR-0048).
   > _Avoid_: audit log, decision log
 
 - Delete the **Decision Report** entry (`:253-255`).
