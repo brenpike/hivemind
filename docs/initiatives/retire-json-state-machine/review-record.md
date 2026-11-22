@@ -10,15 +10,15 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 1
+rounds: 2
 clean_round: false
 ---
 
 # Design review record: Retire the JSON state machine
 
-The design review has completed one round and has not passed. Round 2 is not complete until its fresh cerebrate confirming pass runs. Every finding is fixed, and the user has answered Tier A question Q7 on D11. No round has been clean, so `clean_round` is `false`.
+The design review has completed two rounds and has not passed. Every finding is fixed, and the user has answered Tier A questions Q7 on D11 and Q8 on D12. No round has been clean, so `clean_round` is `false`. Round 3 is next and is the last round under the three-round cap (ADR-0046 decision 6).
 
-No PRD exists for this initiative. `docs/prds/retire-json-state-machine.md` is needed before any slice can pass the readiness check (ADR-0046 decision 3), so it is written before slicing. The stamps are the blobs at commit `aa9342a244b13150eb141b42ac566611b6b5f268`, the commit round 1 reviewed; a record with `verdict` `fail` keeps its stamps, and only the passing record re-stamps, to the commit its clean pass reviewed.
+The passing record stamps the solution design and ADR-0048. No PRD exists; `docs/prds/retire-json-state-machine.md` is needed before any slice can pass the readiness check. The stamps are the blobs at commit `aa9342a244b13150eb141b42ac566611b6b5f268`, the commit round 1 reviewed; a record with `verdict` `fail` keeps its stamps, and only the passing record re-stamps, to the commit its clean pass reviewed.
 
 ## Reviewed documents
 
@@ -44,14 +44,14 @@ The overlord also made five consistency edits after the round, listed here for t
 
 ### Round 2
 
-A confirming round, not yet complete. Neither reviewer wrote the design. It covers the change since `aa9342a2` and round 1's fixes.
+A confirming round. Neither reviewer wrote the design. It covers the change since `aa9342a2` and round 1's fixes.
 
 An earlier cerebrate pass at commit `63ff83f2b93b5533981da5b795d3f44d51d269c3`, first recorded here as "Round 2", is an incomplete pass. Its local review tool pass did not run with it, though the design touches trust boundaries (ADR-0046 decision 6), so it yields no round. The user answered A on this question: that pass does not count as a round. Its findings, R2-01 to R2-05, were raised before round 2 and fixed in `2c9a26cd`; they are attributed to round 2 in the Findings table, keeping their IDs.
 
 - Local review tool pass: preset `codex-plugin` (`HIVEMIND_LOCAL_REVIEWER` unset), model the tool's own. Review base `2c9a26cd61227bc3bb2c4fdbfa0bedd6b8c29948`. It ran through the local reviewer's fix loop, which may commit fixes, and returned two findings, recorded as R2-T1 and R2-T2. Both are fixed.
-- Reviewer `hivemind:cerebrate`, model `opus`, `Memory context: none`: pending. A fresh, read-only confirming pass still to run over the change since `aa9342a2`, after the tool pass, so it reviews the tool pass's fixes.
+- Reviewer `hivemind:cerebrate`, model `opus`, `Memory context: none`. A fresh, read-only confirming pass over the change since `aa9342a2` and the fixes, run after the tool pass, so it reviewed the tool pass's fixes. It reviewed commit `316261f898f1e8b16ad8b03526adf9da537f9c55` and raised R2-C01 to R2-C03.
 
-The incomplete cerebrate pass raised five findings, R2-01 to R2-05. Three are medium (R2-01 to R2-03) and two are low (R2-04, R2-05). The tool pass raised R2-T1 (high) and R2-T2 (medium). After the fixes, none is open. Round 1's fixes R1-01 to R1-05, R1-09, R1-11 and R1-12 close their findings; R1-10 was correct, and its `:87` edit exposed R2-03. The verdict is `fail`, so `clean_round` is `false`.
+The incomplete cerebrate pass raised five findings, R2-01 to R2-05. Three are medium (R2-01 to R2-03) and two are low (R2-04, R2-05). The tool pass raised R2-T1 (high) and R2-T2 (medium). The confirming cerebrate pass raised R2-C01 (medium), R2-C02 (medium) and R2-C03 (low). After the fixes, none is open. Round 1's fixes R1-01 to R1-05, R1-09, R1-11 and R1-12 close their findings; R1-10 was correct, and its `:87` edit exposed R2-03. Round 2 is not clean, so `clean_round` is `false`: its tool pass raised findings, and a round is clean only when every completed pass of it raises no new finding (ADR-0046 decision 6). The verdict is `fail`.
 
 ## Findings
 
@@ -72,12 +72,15 @@ The incomplete cerebrate pass raised five findings, R2-01 to R2-05. Three are me
 | R1-T1 | 1 | review | high | fixed | Local review tool pass: the same defect as R1-01, fixed by it. |
 | R1-T2 | 1 | review | medium | fixed | Local review tool pass: partly the same defect as R1-05, fixed by it. |
 | R2-01 | 2 | confirm | medium | fixed | R1-08's fix declared ADR-0026 inert, an unasked amendment of an accepted ADR (ADR-0044, ADR-0045 and ADR-0046 amend ADR-0026 for remaining paths, and the design keeps its Promotion Gate). ADR-0048 decision 8 and the Decisions taken row now say only that the clause is history and is not amended. |
-| R2-02 | 2 | confirm | medium | fixed | The S5 "No retired reference" check could not pass: `next-wave` matched kept text, and `.hivemind/runs/.` matched the CHECK 16 canary glob. The check now lists `next-wave.sh`, `hivemind:next-wave` and `skills/next-wave`, drops the `.hivemind/runs/.` prefix and states why, and Existing-path coverage gains a row for the canary. |
+| R2-02 | 2 | confirm | medium | fixed | The S5 "No retired reference" check could not pass: `next-wave` matched kept text, and `.hivemind/runs/.` matched the CHECK 16 canary glob. The check now lists `next-wave.sh`, `hivemind:next-wave` and `skills/next-wave`, and Existing-path coverage gains a row for the canary. The check now keys on D10's removal list (R2-C01). |
 | R2-03 | 2 | confirm | medium | fixed | The Components bullet on `overlord.md:29` kept the third sentence while the proposed fallback text deleted the last two. Both now agree: the fallback replaces the second sentence, and the third loses only "first checks out the PR's head branch, then". |
 | R2-04 | 2 | confirm | low | fixed | R1-06's fix was applied only partly: "such an item", the destructive-fix row of Failure modes, the S5 check bullet and the seed order rows still used the narrower reading. Each now names the items D12 names, read at its broadest, and S1 to S4 link D12. |
 | R2-05 | 2 | confirm | low | fixed | The record departed from ADR-0046 decisions 6 to 8: it held no stamps on a failing record, did not name each pass's model or tool, pointed to the design for the decisions taken, and did not record the local review tool findings. It now stamps the commit round 1 reviewed, names the models and the tool, lists each taken decision, and records R1-T1 and R1-T2. The design's line 3 follows. |
 | R2-T1 | 2 | review | high | fixed | Destructive gate did not cover security-policy guards the design removes; D12 now points to the gate's categories read at their broadest, with no list of its own (commit 7752569892380c6f1949f9f468769729080d4c83). |
 | R2-T2 | 2 | review | medium | fixed | Round 2 was counted without its trust-boundary tool pass; answered A by the user: that pass yields no round. |
+| R2-C01 | 2 | confirm | medium | fixed | The S5 "No retired reference" check carried an identifier list that contradicted the CHECK 16 canary row, and the grant sites in `settings-merge.sh`, `tools/test_shared_libs.sh` and README `:66`, `:76` were missed. The check now carries no list of its own and keys on D10's removal list; the canary and `test_shared_libs.sh` rows no longer claim a live navigator keeps the `.hivemind/runs/.` prefix; README `:66` and `:76` gain items. |
+| R2-C02 | 2 | confirm | medium | fixed | D12's enforcement path did not exist for planned slice work: the destructive-fix gate covers review fixes only, and a drone running an assigned deletion step does not stop. Answered: Q8 A. D12 now states the rule once: the user confirms each covered item in the main session before the slice's run starts. Every other site points to D12. |
+| R2-C03 | 2 | confirm | low | fixed | The round-count question was missing from the record's Decisions asked. It and Q8 are now listed. |
 
 ## Decisions taken, listed for veto
 
@@ -87,7 +90,6 @@ Each decision has its always-ask screen: an answer to each of the four always-as
 |---|---|---|---|---|
 | Round 1 fix R1-08: a clause that scopes an ADR to the current engine is history under ADR-0048 decision 8, so it is not amended. Taken by the overlord as a strong in-scope recommendation. | no | no: it states that no clause is amended | no | no |
 | D9: ADR-0005 is unchanged. Taken by the design, listed for veto in the design. | no | no | no | no |
-| D12: Engine test deletion needs the user's confirmation. Taken by the design, listed for veto in the design. | no | no | no: it applies a gate and changes none | no |
 | D13: waves.js keeps its parity fixtures as frozen expectations. Taken by the design, listed for veto in the design. | no | no | no | no |
 | D15: The manifest keeps version 4 without the hatchery block. Taken by the design, listed for veto in the design. | no | no | no: the manifest's validated fields and its readers' gates are unchanged | no |
 | D16: The Reflex heading is kept. Taken by the design, listed for veto in the design. | no | no | no | no |
@@ -95,8 +97,10 @@ Each decision has its always-ask screen: an answer to each of the four always-as
 | D18: Exit-reason routing coverage moves to the overlord contract test. Taken by the design, listed for veto in the design. | no | no | no | no |
 | D19: Stamped documents change only through their own re-review. Taken by the design, listed for veto in the design. | no | no | no | no |
 | Sequencing the tool pass before the cerebrate pass in each round from round 2 on, so the cerebrate pass reviews the tool pass's fixes (overlord). | no | no | no | no |
+| Each rule stated once at its owner; other sites point to it (closure of the D12 and S5-check recurrence) (overlord). | no | no | no | no |
+| Passing record stamps the design and ADR-0048 only, per the task; PRD needed before readiness (overlord). | no | no | no | no |
 
-D11 is answered (Q7 A), and D14 is answered (Q1 A); neither is a taken decision.
+D11 is answered (Q7 A), D12 is answered (Q8 A), and D14 is answered (Q1 A); none is a taken decision.
 
 ## Decisions asked
 
@@ -104,3 +108,5 @@ D11 is answered (Q7 A), and D14 is answered (Q1 A); neither is a taken decision.
 - ADR-0048 decision 8, the amendment rule. After local review the user chose A: a clause of an accepted ADR that relies on a removed item or run ledger field now relies on its replacement, or lapses where the design names none. A clause that only mentions the state machine as history is not amended.
 - ADR-0036 decisions 9 and 10. After a later local review the user decided they stand as written. The design's Decision journal and State and ownership sections follow them.
 - Q7, D11, Tier A. Answered: Q7 A. Move only two rules, the facts and injection-scan rule and the PR head rule, to `## Safety Rails`. Drop the `expect_commit` sentence, since the skills' input gates own it.
+- Q8, D12's confirmation point. Answered: A (user): the user confirms each covered deletion before that slice's run starts.
+- The round count, after round 2's local review tool pass. Answered: A. The cerebrate pass at `63ff83f2` yields no round, since its trust-boundary tool pass did not run with it; its findings R2-01 to R2-05 keep their IDs and are attributed to round 2.

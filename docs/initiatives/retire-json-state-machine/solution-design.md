@@ -1,6 +1,6 @@
 # Solution design: Retire the JSON state machine
 
-This is the HOW for #635, part of #409 (workflow engine reimagining). It retires the JSON workflow state machine so one engine remains: the workflow scripts, with Instinct and Reflex beside them. ADR-0048 records the decisions that are hard to reverse. The design review record is `review-record.md` in this folder. It stamps the commit round 1 reviewed until a review passes; the passing record must also stamp the PRD, which does not exist yet (ADR-0046 decision 7).
+This is the HOW for #635, part of #409 (workflow engine reimagining). It retires the JSON workflow state machine so one engine remains: the workflow scripts, with Instinct and Reflex beside them. ADR-0048 records the decisions that are hard to reverse. The design review record is `review-record.md` in this folder. It stamps the commit round 1 reviewed until a review passes; The passing record stamps this design and ADR-0048. No PRD exists; `docs/prds/retire-json-state-machine.md` is needed before any slice can pass the readiness check.
 
 It works in a consumer project with only the plugin installed. Every capability beyond the plugin, such as the Workflow tool, CI, a validation suite, a local review tool or tmux for a brood, is optional, detected and given a stated fallback (`docs/engineering-principles.md` P26). Nothing here adds a required capability: a session without the Workflow tool runs every request on Instinct.
 
@@ -271,7 +271,7 @@ When Instinct opens a pull request, `hivemind:open-plan-pr`'s `body` holds the s
 Every boundary below holds on every remaining path. No credential, tool grant, `allowed-tools` entry, hook or permission rule is added; the overlord's frontmatter `tools:` list is unchanged apart from its comment.
 
 - **Strain-approval gate.** Brood dispatch runs only on Instinct, in the main session, and `hivemind:spawn-brood` runs only after the user approves the normalized strain text (Tier A, `decision-autonomy.md:16`). The other two controls of Brood Spawn Bypass-Mode Mitigation are unchanged: the data-boundary preamble in `task.md`, and the `base` allowlist. The state machine's `brood_confirm` gate was the same approval, so dispatch loses no gate. A Lair strain's approval is #608's admission and scan, unchanged here.
-- **Destructive-fix gate.** It rides every delegation per `## Parallel Delegation Safety` (unchanged) on all three Instinct paths and on brood dispatch. Reviewers apply it, and scripts carry approvals as today. The retirement itself passes through it: each deletion or narrowing a slice makes that the gate covers passes it (D12).
+- **Destructive-fix gate.** It rides every delegation per `## Parallel Delegation Safety` (unchanged) on all three Instinct paths and on brood dispatch. Reviewers apply it, and scripts carry approvals as today. The retirement's own deletions are covered by D12.
 - **External-content boundary.** The facts rule, with its injection scan, moves to `## Safety Rails` and binds every planner delegation the overlord makes, where today it binds only the state machine and Instinct's "after `hivemind:gather-facts`" (D11). The watch opt-out reads the in-session request text, as the Reflex tail does, for the one yes or no question. It no longer reads a ledger's `request.raw` copy, so there is one source. Router input stays untrusted.
 - **Commit and push.** `expect_commit` binds every push on every overlord path, through the input gates of `hivemind:open-plan-pr` and `hivemind:push-branch` (D11). The PR head checkout precedes every reviewer delegation for an existing pull request. The trunk-commit hard stop is unchanged.
 - **Synapse runner gate.** Unchanged: five runner scripts, and spawn-brood is not one of them.
@@ -371,9 +371,9 @@ One row per current path, with its effect and the slice (Seam order) that makes 
 | `tools/validate_workflows.sh`, `tests/workflow-defs/` | Deleted. | S5 |
 | `tests/workflows/golden-*.json` and the WORKFLOW-FIXTURES check of `tools/policy_check.sh:6158-6192` | Fixtures citing a definition are deleted; fixtures citing live prose are kept and re-pointed. | S5 |
 | `tools/policy_check.sh` CHECK 15 | The `plugin/workflows/*.json` arm and its zero-count finding go. | S5 |
-| `tools/policy_check.sh:3934`, `:3981` (CHECK 16 canary) | The canary glob `.hivemind/runs/.record-inputs-*.json` names a deleted navigator's inputs file and becomes a live navigator's inputs glob that no other canary case names; every canary case stays. | S5 |
+| `tools/policy_check.sh:3934`, `:3981` (CHECK 16 canary) | The canary cases that name `.hivemind/runs/.record-inputs-*.json` go with the deleted navigator, or switch to a live navigator's inputs glob; every other canary case stays. | S5 |
 | `tools/validate.sh` | Map entries and suite names of the deleted paths go; `--self-test` still passes. | S5 |
-| `tools/test_shared_libs.sh` | Cases of the deleted functions go. | S5 |
+| `tools/test_shared_libs.sh` | Cases of the deleted functions go; the seed-hive template case (`:2871-2904`) drops the three `.hivemind/runs/.` inputs-file grants, as `settings-merge.sh:390-392` does. | S5 |
 | `tools/test_brood_compat.sh`, `tests/brood/child-ledger-present.json` | Child-ledger cases and the fixture go; facts-only cases added. | S2, S3 |
 | `tools/test_rc_brood.sh` | Fixture manifests drop the `hatchery` block, and one keeps it to prove it is ignored. | S2 |
 | `tools/test_script_bootstrap.sh` | Rows of the deleted scripts go. | S5 |
@@ -410,8 +410,8 @@ One row per current path, with its effect and the slice (Seam order) that makes 
 | A request fits no catalog entry | `analysis-only` or `standard-delivery` by whether it asks for a change, else `ambiguous` and asked. | S1 |
 | `HIVEMIND_ENABLE_DECISION_REPORT` is still set | Nothing reads it; README says it is retired. | S4 |
 | An overlord slice overruns its prose budget | S1 and S2 only delete overlord text. S4 adds the re-homed rules and Instinct paths in the same change that deletes four sections, so it shrinks. Any overrun is asked as a budget raise (Tier A), never raised silently. | S1, S2, S4 |
-| A change to `waves.js` alters a wave | The frozen expectations fail. Changing an expectation is a test edit that the review sees; weakening one is DESTRUCTIVE-CAT 3. | S5 |
-| A slice deletes or narrows an item the destructive-fix gate covers without confirmation | Its delegations return Blocked at the destructive-fix gate, read at its broadest (D12), and nothing is deleted or narrowed until the user confirms each item. | S1-S5 |
+| A change to `waves.js` alters a wave | The frozen expectations fail. Changing an expectation is a test edit that the review sees; weakening one is covered by D12. | S5 |
+| A slice deletes or narrows an item D12 covers, unconfirmed | The slice's run does not start until the user confirms each item (D12). | S1-S5 |
 | A path under a deleted tree is left behind | `tools/validate.sh` maps it nowhere, so `--changed` escalates to the full suite (FAIL-CLOSED), and `build_workflows.mjs --check` fails on a leftover in `plugin/workflows/`. | S5 |
 | A slice edits a stamped document of another initiative | That record goes stale and its slices fail `record_stale`. No retirement slice edits one; each change lands through that initiative's own re-review (D19). | none |
 | A brood child on Instinct asks an Ask Set question | It waits in its session, which stays alive and reachable through its `attach:` line, or through remote control when enabled, as a child on the state machine did. Unattended handling is #607's. | S2 |
@@ -494,7 +494,7 @@ Answered: Q7 A. Two rules live only in text this design deletes, and each moves 
 
 ### D12: Engine test deletion needs the user's confirmation
 
-Taken, listed for veto. Every deletion or narrowing a slice makes that falls in a category of `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Destructive Fix Confirmation Gate), read at its broadest, passes that gate as a remediation fix would, and needs the user's confirmation of each item before it lands. The gate's categories, not a list here, decide what is covered, so a governance clause such as a Trust-Boundary Discipline boundary is covered as a test or guard is. Retiring a subject does not exempt anything of it from the gate. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); it applies a gate and changes none; reversible.
+Answered: Q8 A. Every deletion or narrowing a slice makes that falls in a category of `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Destructive Fix Confirmation Gate), read at its broadest, governance clauses included, needs the user's confirmation of that item, as that gate's explicit approval, before the slice's run starts. A drone applies the gate only to review fixes, so no delegation asks it; the confirmation happens in the main session before the run.
 
 ### D13: waves.js keeps its parity fixtures as frozen expectations
 
@@ -584,6 +584,8 @@ Two named sentences carry the user-facing decision-list and record facts.
 - `:22` (S5): `- **jq**: required by the facts and git scripts (`hivemind:gather-facts`, `hivemind:molt`, `hivemind:open-plan-pr`), the brood scripts and `hivemind:seed-hive``
 - `:23` (S4): `- Claude Code CLI. When Claude Code's Workflow tool is available, analysis requests, delivery requests and an escalated PR review run as workflow scripts, and a delivery request can also run on Instinct. Otherwise every request runs on Instinct (see [Scripts and Instinct](#scripts-and-instinct)).`
 - `:61` (S4): delete the `.hivemind/runs/` bullet, and add after the list: `Earlier versions also wrote run ledgers to `.hivemind/runs/`. This version neither reads nor deletes them; you can delete that folder by hand.`
+- `:66` (S5): replace "`.hivemind/seed-inputs-<token>.json`, `.hivemind/runs/.init-inputs-<token>.json`, and the molt" with "`.hivemind/seed-inputs-<token>.json` and the molt".
+- `:76` (S5): delete "`Edit(.hivemind/runs/.init-inputs-*.json)`, `Edit(.hivemind/runs/.record-inputs-*.json)`, `Edit(.hivemind/runs/.markfb-inputs-*.json)`, ".
 - `:111` (S4): delete the `"HIVEMIND_ENABLE_DECISION_REPORT": "1",` line.
 - `:123` (S4): delete the row, and add after the table: `` `HIVEMIND_ENABLE_DECISION_REPORT` is retired: nothing reads it, and a value left in your settings has no effect. ``
 - `:138` (S4): replace "The launch is then refused with no prompt and falls back: `analysis-only` and `pr-feedback-remediation` to the state machine, and `standard-delivery` to Instinct (see [Two engines](#two-engines))." with "The launch is then refused with no prompt and runs on Instinct (see [Scripts and Instinct](#scripts-and-instinct))."
@@ -739,18 +741,18 @@ Each slice runs this repository's own gate, `bash tools/validate.sh --changed`. 
   - `tests/policy/safety-default-pr-watch.json` pins the in-session signal.
   - `safety-proactive-recurrence-routing.json` pins `### Proactive Zoom-Out Marker` and its overlord citer.
   - `safety-decision-autonomy.json` and `safety-ask-set.json` drop the resume bullet and the report trigger.
-  - `safety-decision-report-toggle.json` is deleted with its rule. It is a test deletion, so DESTRUCTIVE-CAT 3 is named and confirmed.
+  - `safety-decision-report-toggle.json` is deleted with its rule. D12 covers it.
   - `tests/workflow-scripts/governance-section-refs.test.mjs` passes with no citation of a deleted heading.
   - CHECK 18 passes with the overlord's entry in `tests/policy/prose-byte-budget.json` lowered to its measured size, and the `plugin/governance/decision-autonomy.md` entry lowered the same way.
 - **S5 Engine removal:**
-  - **No retired reference.** A new check in `tests/workflow-scripts/overlord-contract.test.mjs` scans every file under `plugin/` and `tools/`, and `.claude/settings.json`, and fails on any retired identifier: `init-run-ledger`, `record-state-result`, `mark-intent-fallback`, `next-wave.sh`, `hivemind:next-wave`, `skills/next-wave`, `decision-report`, `run-ledger-schema`, `ledger-engine-io`, `ledger-project`, `hatchery.ledger` and the six definition file names, and on any `workflows/<id>.json` path or any `.json` read under `plugin/workflows/`. The `.hivemind/runs/.` prefix is not in the identifier list, because the CHECK 16 canary glob of `tools/policy_check.sh` keeps it as a live navigator's inputs glob; `.hivemind/runs` stays covered by the overlord's absence check above. The existing `route-workflow reads no workflow file` test stays.
+  - **No retired reference.** A new check in `tests/workflow-scripts/overlord-contract.test.mjs` fails on any file under `plugin/`, `tools/` or `.claude/settings.json` that names an item D10 removes, other than a line the Existing-path coverage table keeps. The existing `route-workflow reads no workflow file` test stays.
   - **Generated scripts only.** `tools/build_workflows.mjs --check` fails on any non-generated entry, and `build.test.mjs:466-471` is inverted to assert that a `.json` there fails, naming it.
   - **waves.js parity fixtures.** `waves.test.mjs` passes against `tests/next-wave/expected/`, with every fixture, override, mutation and seeded-corpus case of today. The expectation files are produced by `next-wave.sh` in a commit before its deletion, and the slice's review checks that that commit's test run passed.
   - **Autonomy table.** `data.test.mjs` asserts that every `resolved_at` site starts with a workflow id that has a script, and that the four rows are absent. The rebuilt scripts pass `node tools/build_workflows.mjs --check`.
   - **Suites.** `tools/validate.sh --self-test` passes with no map entry or suite name for a deleted path. `tools/validate.sh --all` passes.
   - **CHECK 15.** It runs its `plugin/**/*.md` arm with no zero-count finding for `plugin/workflows/*.json`.
   - **Overlord budget.** The overlord budget is lowered again if the slice shrinks the file further, and every deleted file's budget entry is removed.
-  - **Destructive-fix confirmation.** Each deletion or narrowing the destructive-fix gate covers, read at its broadest, the Trust-Boundary Discipline clauses included, is put to the gate, and the slice's run confirms each with the user before it lands (D12).
+  - **Destructive-fix confirmation.** The slice's review checks the user's confirmation of each item D12 covers (D12).
 
 ## Seam order
 
