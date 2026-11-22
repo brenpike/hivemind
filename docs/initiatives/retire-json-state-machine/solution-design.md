@@ -160,7 +160,7 @@ Removed by D10, which names each item's replacement:
 - `tools/build_workflows.mjs --check` fails on any entry of `plugin/workflows/` that is not a generated `.js` with a source directory, so the folder holds only generated scripts (D10).
 - `tools/validate.sh` loses the map entries and suites of the deleted paths.
 - CHECK 15 keeps its `plugin/**/*.md` arm and loses its `plugin/workflows/*.json` arm.
-- The reviewer `exit_reason` coverage that `validate_workflows.sh` checked against the definitions moves to `tests/workflow-scripts/overlord-contract.test.mjs` (D18).
+- The reviewer `exit_reason` coverage that `validate_workflows.sh` checked against the definitions moves, for both producers, to a workflow-scripts test (D18).
 
 ## State and ownership
 
@@ -372,7 +372,7 @@ One row per current path, with its effect and the slice (Seam order) that makes 
 | `tests/workflows/golden-*.json` and the WORKFLOW-FIXTURES check of `tools/policy_check.sh:6158-6192` | Fixtures citing a definition are deleted; fixtures citing live prose are kept and re-pointed. | S5 |
 | `tools/policy_check.sh` CHECK 15 | The `plugin/workflows/*.json` arm and its zero-count finding go. | S5 |
 | `tools/policy_check.sh:3934`, `:3981` (CHECK 16 canary) | The canary cases that name `.hivemind/runs/.record-inputs-*.json` go with the deleted navigator, or switch to a live navigator's inputs glob; every other canary case stays. | S5 |
-| `tools/validate.sh` | Map entries and suite names of the deleted paths go; `--self-test` still passes. | S5 |
+| `tools/validate.sh` | Map entries and suite names of the deleted paths go. | S5 |
 | `tools/test_shared_libs.sh` | Cases of the deleted functions go; the seed-hive template case (`:2871-2904`) drops the three `.hivemind/runs/.` inputs-file grants, as `settings-merge.sh:390-392` does. | S5 |
 | `tools/test_brood_compat.sh`, `tests/brood/child-ledger-present.json` | Child-ledger cases and the fixture go; facts-only cases added. | S2, S3 |
 | `tools/test_rc_brood.sh` | Fixture manifests drop the `hatchery` block, and one keeps it to prove it is ignored. | S2 |
@@ -384,7 +384,7 @@ One row per current path, with its effect and the slice (Seam order) that makes 
 | `tests/workflow-scripts/data.test.mjs:127` | Inverted: every site is a script site. | S5 |
 | `tests/workflow-scripts/waves.test.mjs` | Compares against `tests/next-wave/expected/`. | S5 |
 | `tests/workflow-scripts/state-machine-questions.test.mjs` | Deleted. | S5 |
-| `tests/workflow-scripts/overlord-contract.test.mjs` | State-machine pins go; new pins per Verification strategy. | S1, S2, S4, S5 |
+| `tests/workflow-scripts/overlord-contract.test.mjs` | State-machine pins go; each slice adds the pins its Verification strategy item needs. | S1, S2, S4, S5 |
 | `tests/workflow-scripts/route-catalog.test.mjs` | Pins the four entries and the no-fit rule. | S1 |
 | `tests/policy/*.json` naming deleted text | Each pin moves to the re-homed text, or goes with its deleted rule. | S4, S5 |
 | `tests/policy/prose-byte-budget.json` | Overlord lowered; deleted files' entries go. | S4, S5 |
@@ -412,13 +412,13 @@ One row per current path, with its effect and the slice (Seam order) that makes 
 | An overlord slice overruns its prose budget | S1 and S2 only delete overlord text. S4 adds the re-homed rules and Instinct paths in the same change that deletes four sections, so it shrinks. Any overrun is asked as a budget raise (Tier A), never raised silently. | S1, S2, S4 |
 | A change to `waves.js` alters a wave | The frozen expectations fail. Changing an expectation is a test edit that the review sees; weakening one is covered by D12. | S5 |
 | A slice deletes or narrows an item D12 covers, unconfirmed | The slice's run does not start until the user confirms each item (D12). | S1-S5 |
-| A path under a deleted tree is left behind | `tools/validate.sh` maps it nowhere, so `--changed` escalates to the full suite (FAIL-CLOSED), and `build_workflows.mjs --check` fails on a leftover in `plugin/workflows/`. | S5 |
+| A path under a deleted tree is left behind | `tools/validate.sh` maps it nowhere, so `--changed` escalates to the full suite (FAIL-CLOSED). | S5 |
 | A slice edits a stamped document of another initiative | That record goes stale and its slices fail `record_stale`. No retirement slice edits one; each change lands through that initiative's own re-review (D19). | none |
 | A brood child on Instinct asks an Ask Set question | It waits in its session, which stays alive and reachable through its `attach:` line, or through remote control when enabled, as a child on the state machine did. Unattended handling is #607's. | S2 |
 
 ## Decisions
 
-The user answered Q1 A to Q6 A before design review round 1. Separately, after local review, the user accepted the amendment rule that ADR-0048 decision 8 records: a clause of an accepted ADR that relies on an item of D10 or on a run ledger field now relies on the replacement D10 or [Run ledger fields](#run-ledger-fields) names for it, or lapses where they name none. The rule reaches only a clause that relies on a removed item, never text that mentions the state machine as history. Every effect this design has on an ADR comes through decision 8, so no decision below lists ADR clauses of its own. No decision below changes the meaning of a clause that relies on no removed item; where a design sentence would, the design changes and the clause stands. A decision the design takes itself names its always-ask screen (ADR-0046 decision 8): a change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible.
+The user answered Q1 A to Q6 A before design review round 1. Separately, after local review, the user accepted the amendment rule that ADR-0048 decision 8 records: a clause of an accepted ADR that relies on an item of D10 or on a run ledger field now relies on the replacement D10 or [Run ledger fields](#run-ledger-fields) names for it, or lapses where they name none. The rule reaches only a clause that relies on a removed item, never text that mentions the state machine as history. Every effect this design has on an ADR comes through decision 8, so no decision below lists ADR clauses of its own. No decision below changes the meaning of a clause that relies on no removed item; where a design sentence would, the design changes and the clause stands. A decision the design takes itself carries its design-decision screen (ADR-0046 decision 8, as amended 2026-11-22): a strong recommendation is taken and listed for veto whatever it touches, and only a weak or absent recommendation, or an action irreversible now (Promotion Gate clause 1, applied to the action taken now), is asked. The review record lists each taken decision with its recommendation strength and what it touches.
 
 ### D1: Retire the JSON state machine
 
@@ -456,7 +456,7 @@ Answered: Q5 A. The dashboard drops its claimed-state columns and child-ledger r
 
 ### D9: ADR-0005 is unchanged
 
-Taken, listed for veto. Brood dispatch on Instinct runs in the main session, where the overlord holds the Agent tool. `hivemind:spawn-brood` starts separate sessions, not subagents. No workflow script or subagent gains a spawn, so the constraint ADR-0005 records still holds as written. Always-ask screen: no PRD exists, so no scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary, credential or merge-path change; reversible.
+Taken, listed for veto. Brood dispatch on Instinct runs in the main session, where the overlord holds the Agent tool. `hivemind:spawn-brood` starts separate sessions, not subagents. No workflow script or subagent gains a spawn, so the constraint ADR-0005 records still holds as written. Screen: strong recommendation; no action irreversible now.
 
 ### D10: The removal list
 
@@ -477,7 +477,7 @@ Answered: Q1 A, with the items D5, D7, D8 and D15 remove. Removed, each with its
 - the post-merge decision report, `hivemind:decision-report`, its session-start scan, the `.decision-report-done` marker and `HIVEMIND_ENABLE_DECISION_REPORT` (D7): the pre-merge list of Decision journal;
 - the brood dashboard's claimed-state columns (D8): its observed status column;
 - spawn-brood's `hatchery` input and the manifest's `hatchery` block (D15): none; `run.suggested_id` stays the strain's lineage key;
-- the engine tests and fixtures: the `waves.js` frozen expectations (D13), the `exit_reason` pins (D18) and the overlord contract pins of Verification strategy; the rest, none;
+- the engine tests and fixtures: the `waves.js` frozen expectations (D13), the reviewer `exit_reason` coverage (D18) and the checks Verification strategy says each slice builds; the rest, none;
 - the `tools/validate.sh` map entries: none, since a path left behind escalates to the full suite (FAIL-CLOSED);
 - CHECK 15's `plugin/workflows/*.json` arm: `tools/build_workflows.mjs --check`, below.
 
@@ -498,7 +498,7 @@ Answered: Q8 A. Every deletion or narrowing a slice makes that falls in a catego
 
 ### D13: waves.js keeps its parity fixtures as frozen expectations
 
-Taken, listed for veto. `waves.js`'s oracle, `next-wave.sh`, is deleted, so its outputs are captured once into `tests/next-wave/expected/` before the deletion, in the same slice, and the fixtures stay. The test keeps every case it checks today except other seeds. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change; reversible.
+Taken, listed for veto. `waves.js`'s oracle, `next-wave.sh`, is deleted, so its outputs are captured once into `tests/next-wave/expected/` before the deletion, in the same slice, and the fixtures stay. The test keeps every case it checks today except other seeds. Screen: strong recommendation; no action irreversible now.
 
 ### D14: The autonomy table keeps only script sites
 
@@ -506,23 +506,23 @@ Answered: Q1 A, as the autonomy table part of the removal list. The four rows no
 
 ### D15: The manifest keeps version 4 without the hatchery block
 
-Taken, listed for veto. No reader reads the `hatchery` block, so dropping it changes nothing a reader sees. A version bump would make old and new manifests read differently for no gain. A caller-supplied `hatchery` input is ignored, as other script-owned fields are. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change: the manifest's validated fields and its readers' gates are unchanged; reversible.
+Taken, listed for veto. No reader reads the `hatchery` block, so dropping it changes nothing a reader sees. A version bump would make old and new manifests read differently for no gain. A caller-supplied `hatchery` input is ignored, as other script-owned fields are. Screen: strong recommendation; no action irreversible now.
 
 ### D16: The Reflex heading is kept
 
-Taken, listed for veto. `## Reflex (Ledger-Skip)` is cited by heading text in `CONTEXT.md`, README and `web/`, and a Reflex still keeps no run ledger. Renaming it would churn every citation for no behavior. Only its body drops "and the run ledger". Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change; reversible.
+Taken, listed for veto. `## Reflex (Ledger-Skip)` is cited by heading text in `CONTEXT.md`, README and `web/`, and a Reflex still keeps no run ledger. Renaming it would churn every citation for no behavior. Only its body drops "and the run ledger". Screen: strong recommendation; no action irreversible now.
 
 ### D17: The proactive zoom-out marker rides the cluster payload
 
-Taken, listed for veto. `recurrence_origin: "proactive"` was written to a run ledger event so the forced zoom-out could be told from a reviewer-returned cluster (`plugin/governance/remediation-doctrine.md:178-190`). With no ledger, the overlord puts the same key and value in the cluster payload it forwards to `hivemind:cerebrate`, and in the decision the run lists. The section heading becomes `### Proactive Zoom-Out Marker`, and its citers in `plugin/agents/overlord.md` and `tests/policy/safety-proactive-recurrence-routing.json` change in the same slice. The forced zoom-out's exception in the remediation-plan rule is unchanged, and the trip call stays judgment as ADR-0025 places it. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change; reversible.
+Taken, listed for veto. `recurrence_origin: "proactive"` was written to a run ledger event so the forced zoom-out could be told from a reviewer-returned cluster (`plugin/governance/remediation-doctrine.md:178-190`). With no ledger, the overlord puts the same key and value in the cluster payload it forwards to `hivemind:cerebrate`, and in the decision the run lists. The section heading becomes `### Proactive Zoom-Out Marker`, and its citers in `plugin/agents/overlord.md` and `tests/policy/safety-proactive-recurrence-routing.json` change in the same slice. The forced zoom-out's exception in the remediation-plan rule is unchanged, and the trip call stays judgment as ADR-0025 places it. Screen: strong recommendation; no action irreversible now.
 
-### D18: Exit-reason routing coverage moves to the overlord contract test
+### D18: Exit-reason routing coverage moves to a workflow-scripts test
 
-Taken, listed for veto. The producer contract of `tools/validate_workflows.sh:96-150` checked that every reviewer `exit_reason` had a route in a definition. With the definitions gone, `tests/workflow-scripts/overlord-contract.test.mjs` reads the outcome list of `hivemind:github-review-loop` from its SKILL.md and fails unless every outcome is one the overlord routes, named in `## Review Remediation Posture` or `## Engine`, or one that only ends the watch with its report. The scripts' own `exit_reason` tests are unchanged. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change; reversible.
+Taken, listed for veto. The reviewer `exit_reason` coverage of `tools/validate_workflows.sh` (producer contract, `:96-150`) moves to a workflow-scripts test, for both producers: `hivemind:github-review-loop` and the fix pass of `hivemind:github-reviewer`, which Instinct's post-PR remediation runs. The slice designs the test. The scripts' own `exit_reason` tests are unchanged. Screen: strong recommendation; no action irreversible now.
 
 ### D19: Stamped documents change only through their own re-review
 
-Taken, listed for veto. Text in another initiative's stamped document is changed only by that initiative's own re-review and re-stamp (ADR-0046 decision 6, Review fix), never in a retirement slice. Editing it in a retirement slice would make its record stale and fail every slice of it. This applies to the Lair designs, ADR-0045, the Idea to Ready design and ADR-0046. ADR-0048 decision 8 already reaches a clause of ADR-0045 or ADR-0046 that relies on a removed item; its wording changes only through that re-review, as a dated note that points to ADR-0048 decision 8. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change; reversible.
+Taken, listed for veto. Text in another initiative's stamped document is changed only by that initiative's own re-review and re-stamp (ADR-0046 decision 6, Review fix), never in a retirement slice. Editing it in a retirement slice would make its record stale and fail every slice of it. This applies to the Lair designs, ADR-0045, the Idea to Ready design and ADR-0046. ADR-0048 decision 8 already reaches a clause of ADR-0045 or ADR-0046 that relies on a removed item; its wording changes only through that re-review, as a dated note that points to ADR-0048 decision 8. Screen: strong recommendation; no action irreversible now.
 
 ### Changes to shared documents
 
@@ -714,45 +714,30 @@ Two named sentences carry the user-facing decision-list and record facts.
 
 ## Verification strategy
 
-Each slice runs this repository's own gate, `bash tools/validate.sh --changed`. The suite registrations below are this repository's own; the plugin requires none of them in a consumer project. Every coverage check reads its names from their owner, never from a list kept in the check or in this design: an item D10 removes from D10's removal list, an agent's or skill's outcomes from its Output Contract. A name added at the owner is checked without editing the check. Per slice:
+Each slice runs this repository's own gate, `bash tools/validate.sh --changed`; the plugin requires none of it in a consumer project. This section states what each slice must prove and names no check file, name list, scan path or test mechanism: each slice's own design and review builds its checks. Each slice's review checks the user's confirmation of each item D12 covers that the slice makes (D12). Per slice:
 
-- **S1 Router without the exploratory path:**
-  - `tests/workflow-scripts/route-catalog.test.mjs` pins exactly four catalog entries, the outcomes `selected`, `ambiguous` and `blocked`, the no-fit rule, and no `exploratory` text.
-  - `overlord-contract.test.mjs` pins that `plugin/agents/overlord.md` names no `exploratory` outcome.
+- **S1 Router without the exploratory path:** the router catalog holds exactly four entries and the outcomes `selected`, `ambiguous` and `blocked`, states the no-fit rule and holds no `exploratory` text. `plugin/agents/overlord.md` names no `exploratory` outcome.
 - **S2 Brood dispatch on Instinct:**
-  - `overlord-contract.test.mjs` pins `## Brood Execution`: dispatch on Instinct, the approval before `hivemind:spawn-brood`, a declined approval spawning nothing, and no `user_gate` or `spawn_brood` state text.
-  - `tests/policy/safety-ask-set.json` keeps the brood strain approval pin.
-  - `tools/test_brood_compat.sh`: a manifest has no `hatchery` block; a caller `hatchery` input is ignored; turn-start verification passes on a facts file and fails on a child run ledger alone.
-  - `tools/test_rc_brood.sh` reads a manifest with and without the block.
-  - `tests/policy/safety-synapse-gate.json` still pins five runner scripts.
+  - `## Brood Execution` states dispatch on Instinct, the approval before `hivemind:spawn-brood` and a declined approval spawning nothing, with no `user_gate` or `spawn_brood` state text. The brood strain approval stays an Ask Set item, and the synapse runner gate still holds five scripts.
+  - A manifest has no `hatchery` block, a caller `hatchery` input is ignored, and a manifest with the block still reads.
+  - Turn-start verification passes on a facts file and fails on a child run ledger alone.
 - **S3 Brood dashboard without child ledgers:**
-  - `tools/test_brood_compat.sh` and `tools/test_shared_libs.sh`: the collect output is `brood-status-collect/2` with no `workflow_state` or `run_status`.
+  - The collect output is `brood-status-collect/2` with no `workflow_state` or `run_status`.
   - An alive child with no facts file is `starting`; with one, `running`; a dead child derives from its observables; a strain with no `run.suggested_id` is not demoted.
   - A child run ledger in a worktree changes nothing in the output.
 - **S4 Overlord on one engine:**
-  - `overlord-contract.test.mjs` pins:
-    - the one fallback paragraph with its level clause first, naming all three workflows;
-    - the two re-homed rules in `## Safety Rails`;
-    - the Instinct analysis and post-PR remediation paths;
-    - the `Decisions:` final report line;
-    - `### Stop Conditions` names no journal destination of its own and cites `plugin/governance/decision-autonomy.md` (Decision Journal), and that governance text names that a run with no pull request lists its decisions in its final message or report and keeps no decision journal;
-    - the absence from `plugin/agents/overlord.md` of every overlord section and skill D10 removes, read from D10's items, and of `.hivemind/runs` and `request.raw`.
-  - The D18 `exit_reason` pins.
-  - `tests/policy/safety-default-pr-watch.json` pins the in-session signal.
-  - `safety-proactive-recurrence-routing.json` pins `### Proactive Zoom-Out Marker` and its overlord citer.
-  - `safety-decision-autonomy.json` and `safety-ask-set.json` drop the resume bullet and the report trigger.
-  - `safety-decision-report-toggle.json` is deleted with its rule. D12 covers it.
-  - `tests/workflow-scripts/governance-section-refs.test.mjs` passes with no citation of a deleted heading.
-  - CHECK 18 passes with the overlord's entry in `tests/policy/prose-byte-budget.json` lowered to its measured size, and the `plugin/governance/decision-autonomy.md` entry lowered the same way.
+  - `plugin/agents/overlord.md` holds none of the sections and skills D10 removes, and the two re-homed rules (D11) are in `## Safety Rails`.
+  - The one fallback paragraph has its level clause first and names all three workflows. The Instinct analysis and post-PR remediation paths and the `Decisions:` final report line are present.
+  - `### Stop Conditions` names no journal destination of its own and cites `plugin/governance/decision-autonomy.md` (Decision Journal), and that governance text says a run with no pull request lists its decisions in its final message or report and keeps no decision journal.
+  - Reviewer outcomes: every `exit_reason` `hivemind:github-review-loop` can return, and every `exit_reason` of `hivemind:github-reviewer`'s fix pass that Instinct's post-PR remediation runs, is either routed by the overlord or ends the watch or pass with its report. The coverage `tools/validate_workflows.sh` checked moves to a test the slice names in its own design (D18).
+  - The default post-PR watch reads the in-session signal. `### Proactive Zoom-Out Marker` and its overlord citer agree. The Ask Set and the autonomy governance lose the resume bullet and the report trigger, and the decision-report toggle rule goes with its pin (D12 covers it).
+  - No citation of a deleted heading remains, and the overlord's and `plugin/governance/decision-autonomy.md`'s prose budgets are lowered to their measured size.
 - **S5 Engine removal:**
-  - **No retired reference.** A new check in `tests/workflow-scripts/overlord-contract.test.mjs` fails on any reference, in `plugin/`, `tools/` and every path the Existing-path coverage table names, to an item D10 removes, other than a line that table or Changes to shared documents keeps; its names come from D10's items, per the rule above. The existing `route-workflow reads no workflow file` test stays.
-  - **Generated scripts only.** `tools/build_workflows.mjs --check` fails on any non-generated entry, and `build.test.mjs:466-471` is inverted to assert that a `.json` there fails, naming it.
-  - **waves.js parity fixtures.** `waves.test.mjs` passes against `tests/next-wave/expected/`, with every fixture, override, mutation and seeded-corpus case of today. The expectation files are produced by `next-wave.sh` in a commit before its deletion, and the slice's review checks that that commit's test run passed.
-  - **Autonomy table.** `data.test.mjs` asserts that every `resolved_at` site starts with a workflow id that has a script, and that the four rows are absent. The rebuilt scripts pass `node tools/build_workflows.mjs --check`.
-  - **Suites.** `tools/validate.sh --self-test` passes with no map entry or suite name for a deleted path. `tools/validate.sh --all` passes.
-  - **CHECK 15.** It runs its `plugin/**/*.md` arm with no zero-count finding for `plugin/workflows/*.json`.
-  - **Overlord budget.** The overlord budget is lowered again if the slice shrinks the file further, and every deleted file's budget entry is removed.
-  - **Destructive-fix confirmation.** The slice's review checks the user's confirmation of each item D12 covers (D12).
+  - No live reference to an item D10 removes remains in what the slice changes, apart from text a later re-review owns (D19) and text that pins an absence.
+  - `plugin/workflows/` holds only generated scripts, and the rebuilt scripts match their sources.
+  - `waves.js` matches `tests/next-wave/expected/` on every fixture, override, mutation and seeded-corpus case of today. The expectation files come from `next-wave.sh` in a commit before its deletion, and the slice's review checks that that commit's test run passed.
+  - Every `resolved_at` site of the autonomy table starts with a workflow id that has a script, and the four rows are gone.
+  - The validation suite passes with no map entry, suite or budget entry for a deleted path, and the overlord budget is lowered again if the slice shrinks the file further.
 
 ## Seam order
 
@@ -763,7 +748,7 @@ Slices start in this order; a slice waits on its blockers. No slice is cut and n
 | S1 Router without the exploratory path | none | Workflow router; Router output contract; Request lifecycle; Failure modes; D5: Exploratory intent session removed; D12: Engine test deletion needs the user's confirmation |
 | S2 Brood dispatch on Instinct | none | Brood dispatch on Instinct; spawn-brood; spawn-brood inputs and manifest; Brood dispatch lifecycle; Lair seams; Trust boundaries; Failure modes; D4: Brood dispatch runs on Instinct; D9: ADR-0005 is unchanged; D15: The manifest keeps version 4 without the hatchery block; D12: Engine test deletion needs the user's confirmation |
 | S3 Brood dashboard without child ledgers | none | brood-status; brood-status collect output; State and ownership; Failure modes; D8: The brood dashboard reads no child ledger; D12: Engine test deletion needs the user's confirmation |
-| S4 Overlord on one engine | S1, S2 | Overlord engine section; Overlord safety rails; Instinct paths; Decision journal; Launch and fallback contract; Level check seam; Decision journal destinations; Lair seams; Trust boundaries; State and ownership; Run ledger fields; Fallback lifecycle; Resume lifecycle; Upgrade lifecycle; Failure modes; D2: One fallback for every refused or blocked launch; D3: Instinct gains read-only analysis and post-PR remediation; D6: Resume on start has one path; D7: The pull request is the decision journal; D11: Two rules re-homed in the safety rails; D16: The Reflex heading is kept; D17: The proactive zoom-out marker rides the cluster payload; D18: Exit-reason routing coverage moves to the overlord contract test; D12: Engine test deletion needs the user's confirmation |
+| S4 Overlord on one engine | S1, S2 | Overlord engine section; Overlord safety rails; Instinct paths; Decision journal; Launch and fallback contract; Level check seam; Decision journal destinations; Lair seams; Trust boundaries; State and ownership; Run ledger fields; Fallback lifecycle; Resume lifecycle; Upgrade lifecycle; Failure modes; D2: One fallback for every refused or blocked launch; D3: Instinct gains read-only analysis and post-PR remediation; D6: Resume on start has one path; D7: The pull request is the decision journal; D11: Two rules re-homed in the safety rails; D16: The Reflex heading is kept; D17: The proactive zoom-out marker rides the cluster payload; D18: Exit-reason routing coverage moves to a workflow-scripts test; D12: Engine test deletion needs the user's confirmation |
 | S5 Engine removal | S1, S2, S3, S4 | Removed components; Autonomy table; Waves rule home; Validation tooling; Waves expectation files; State and ownership; Run ledger fields; Trust boundaries; Failure modes; D1: Retire the JSON state machine; D10: The removal list; D12: Engine test deletion needs the user's confirmation; D13: waves.js keeps its parity fixtures as frozen expectations; D14: The autonomy table keeps only script sites |
 
 S4 waits on S1 and S2 so that, when it deletes `## Workflow State Execution` and `## Resume On Start`, no path still enters the state machine. Engine removal is last: it deletes what no remaining path reaches. The shared-document items of Changes to shared documents land in the slice each names. The Lair, ADR-0045, Idea to Ready and ADR-0046 items land in their own initiatives' re-reviews (D19), which this design neither schedules nor blocks on.
