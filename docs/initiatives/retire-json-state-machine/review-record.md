@@ -62,9 +62,18 @@ Two passes over the design as it stood after round 2. Neither reviewer wrote the
 
 The round raised 6 findings, so it is not clean and the verdict is `fail`. The round is the cap. The user answered A to the cap question, with a strong recommendation: narrow, do not split. The design's Verification strategy now states what each slice must prove and names no check file, name list, scan path or test mechanism; each slice's own design and review builds the checks. D18 keeps only the decision, and D12 stays the one statement of the confirmation rule, which the Verification strategy adds once before its per-slice list. Every round-3 finding is fixed by that narrowing. The overlord also conformed each design decision's screen to ADR-0046 decision 8 as amended 2026-11-22 (the gate reads Promotion Gate clause 1 only, applied to the action taken now), and restructured the taken-decisions table below to carry each decision's recommendation strength and what it touches.
 
+Diminishing-returns advisory: signals: recurrence on the Verification strategy's coverage checks, which R1-07, R2-02 and R2-C01 fixed and R3-T1, R3-01 and R3-02 found again; answer A (user), given to the round-3 cap question: narrow the claim and hand the checks to each slice's own design (ADR-0046 decision 6).
+
 ### Round 4
 
-One-time exception approved by the user for this initiative only (answer A to the cap question). The three-round cap stays the general rule. Round 4 is pending: a local review tool pass first, then a cerebrate confirming pass, both over the change since `c094d278`. It is recorded here like the Idea to Ready design's round-4 exception (`docs/initiatives/idea-to-ready/review-record.md`, D31 and Q9), and it does not change `rounds` until it runs.
+One-time exception approved by the user for this initiative only (answer A to the cap question). The three-round cap stays the general rule. It is recorded here like the Idea to Ready design's round-4 exception (`docs/initiatives/idea-to-ready/review-record.md`, D31 and Q9): it does not change `rounds`, which stays 3, as that round 4 did not (answer Q11 A there), so a passing record still meets the pass rule's `rounds` of 2 to 3 (ADR-0046 decision 7).
+
+Two passes over the change since `c094d278` and round 3's fixes. Neither reviewer wrote the design.
+
+- Local review tool pass: preset `codex-plugin` (`HIVEMIND_LOCAL_REVIEWER` unset), the tool's own model. Review base `d2dada8bb6665488edd9f50ca762013fb93123e3`, 1 iteration. It was clean and returned no findings.
+- Reviewer `hivemind:cerebrate`, model `opus`, `Memory context: none`. A fresh, read-only confirming pass over the change since `c094d278` and round 3's fixes. It reviewed commit `d2dada8bb6665488edd9f50ca762013fb93123e3`. On the design and ADR-0048 it raised no findings. On this record it raised R4-01 (medium) and R4-02 (low). Both touch only the record and are fixed in this commit.
+
+A record-only closing check follows: one fresh cerebrate pass (model `opus`, `Memory context: none`) over this record change only, as the Idea to Ready record's round-4 confirming checks did. It is pending. `rounds` stays 3.
 
 ## Findings
 
@@ -100,6 +109,8 @@ One-time exception approved by the user for this initiative only (answer A to th
 | R3-02 | 3 | confirm | medium | fixed | The S5 scan covered paths the slice cannot clean (stamped Lair documents, ADR-0045, test sources that pin an absence, gitignored `.hivemind/runs/`), and some scanned paths never run the check at the PR gate. Fixed by the narrowing: the S5 requirement covers what the slice changes, apart from text a later re-review owns (D19) and text that pins an absence. |
 | R3-03 | 3 | confirm | medium | fixed | The rule named an Output Contract that `hivemind:github-review-loop` does not have (its outcomes are under `## Terminal report`); D18's "ends the watch" escape had no source; the `hivemind:github-reviewer` fix-pass coverage (`validate_workflows.sh:121`, via `github_reviewer_fix`) moved nowhere, so the claim that the `:163` coverage moves was false for it. Fixed by the narrowing: the reviewer-outcomes requirement and D18 cover both producers and name no source section. |
 | R3-04 | 3 | confirm | low | fixed | D12's review backstop sat under S5 only, though D12 binds S1 to S5. Fixed by the narrowing: Verification strategy states it once before the per-slice list, and the S5-only bullet is deleted. |
+| R4-01 | 4 | confirm | medium | fixed | The record said round 4 does not change `rounds` until it runs, which contradicts the Idea to Ready round-4 exception it cites (that round 4 left `rounds` unchanged, answer Q11 A). The Round 4 entry now says `rounds` stays 3, so a passing record still meets the pass rule's `rounds` of 2 to 3 (ADR-0046 decision 7). |
+| R4-02 | 4 | confirm | low | fixed | The record held no diminishing-returns advisory for round 3, and it said the cap question was asked under ADR-0046 decision 8. Round 3 now carries the advisory, and the cap question is recorded as asked under the three-round cap of decision 6. |
 
 ## Decisions taken, listed for veto
 
@@ -118,7 +129,7 @@ Each decision carries its recommendation strength and what it touches, per ADR-0
 | ADR-0048 decision 8, the amendment rule. | strong; asked before #649, user chose it | ADR amendment |
 | ADR-0036 decisions 9 and 10 stand as written. | strong; asked before #649, user chose it | none |
 | The round count after round 2's tool pass: the pass at `63ff83f2` yields no round. | strong; asked before #649, user chose it | none |
-| The round-3 cap: narrow the Verification strategy, then one round 4 over that change only, a one-time exception for this initiative. | strong; asked under the task's cap rule, user chose it | none |
+| The round-3 cap: narrow the Verification strategy, then one round 4 over that change only, a one-time exception for this initiative. | strong; asked under ADR-0046 decision 6's three-round cap, user chose it | none |
 | R1-08: a clause that scopes an ADR to the current engine is history under ADR-0048 decision 8, so it is not amended (overlord). | Strong | none |
 | D9: ADR-0005 is unchanged (design). | Strong | none |
 | D13: waves.js keeps its parity fixtures as frozen expectations (design). | Strong | none |
@@ -131,6 +142,7 @@ Each decision carries its recommendation strength and what it touches, per ADR-0
 | Each rule stated once at its owner; other sites point to it (overlord). | Strong | none |
 | Passing record stamps the design and ADR-0048 only; PRD needed before readiness (overlord). | Strong | none |
 | The round-3 narrowing's wording, and each design decision's screen conformed to ADR-0046 decision 8 as amended (overlord). | Strong | none |
+| Close round 4 with one record-only confirming check, since round 4's design and ADR passes found nothing and its two findings touched only the record (overlord). | strong | none (review procedure only; reversible, the PR stays a draft) |
 
 D11 is answered (Q7 A), D12 is answered (Q8 A), and D14 is answered (Q1 A); none is a taken decision.
 
@@ -142,4 +154,4 @@ D11 is answered (Q7 A), D12 is answered (Q8 A), and D14 is answered (Q1 A); none
 - Q7, D11, Tier A. Answered: Q7 A. Move only two rules, the facts and injection-scan rule and the PR head rule, to `## Safety Rails`. Drop the `expect_commit` sentence, since the skills' input gates own it.
 - Q8, D12's confirmation point. Answered: A (user): the user confirms each covered deletion before that slice's run starts.
 - The round count, after round 2's local review tool pass. Answered: A. The cerebrate pass at `63ff83f2` yields no round, since its trust-boundary tool pass did not run with it; its findings R2-01 to R2-05 keep their IDs and are attributed to round 2.
-- The round-3 cap. Answered: A (user, strong recommendation). Narrow the design's Verification strategy to what each slice must prove, with no check file, name list, scan path or test mechanism; then run one round 4 over that change only, a one-time exception to the three-round cap for this initiative, recorded like the Idea to Ready design's D31 (Q9). Asked under amended ADR-0046 decision 8 because the task's cap rule stops at round 3.
+- The round-3 cap. Answered: A (user, strong recommendation). Narrow the design's Verification strategy to what each slice must prove, with no check file, name list, scan path or test mechanism; then run one round 4 over that change only, a one-time exception to the three-round cap for this initiative, recorded like the Idea to Ready design's D31 (Q9). Asked because the three-round cap of ADR-0046 decision 6 stops the review after round 3 and reaches the maintainer; the diminishing-returns check of the same decision fired after round 3 (Round 3).
