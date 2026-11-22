@@ -30,7 +30,7 @@
  *   PLANNER_ESCALATION_ROUTING_KIND and ROOT_CLUSTER_ROUTING_KIND, and the
  *   data constants PLAN_SCHEMA, BRIEF_SCHEMA and AUTONOMY_TABLE. The
  *   workflow functions it reads: buildPlanAcceptanceBrief,
- *   buildRemediationPlanBrief, buildTrunkStaleBrief, buildExternalEffectBrief,
+ *   buildRemediationPlanBrief, buildRepeatPinned, buildTrunkStaleBrief, buildExternalEffectBrief,
  *   listOutsidePaths and markOutsideLimits (briefs.js), applyApprovalChoices
  *   (approvals.js), stopDelivery and pauseDelivery (record.js) and
  *   runScopeStep (scope.js). Every workflow whose code calls these
@@ -582,13 +582,14 @@ async function runPlanningPass(run, facts, passScope, replan) {
       return stopDelivery([{ problem: 'Workflow defect: the ' + resettled.kind + ' question came back after a reply settled it, so ' + RUN_NAME + ' stopped.', terminal: true, nextAction: 'report' }], run, [], true);
     }
     const lead = describePlanLine(planResult.plan);
+    const pinned = buildRepeatPinned(resolution, planResult.plan, run, replan);
     const round = run.answerLog.length + 1;
     const reply = takeNextReply(run, round);
     if (reply === undefined) {
-      return { result: pauseDelivery(resolution, run, lead) };
+      return { result: pauseDelivery(resolution, run, lead, pinned) };
     }
     phase('Revise');
-    const questions = lead + '\n\n' + renderQuestions(resolution.asks);
+    const questions = [lead].concat(pinned ?? [], renderQuestions(resolution.asks)).join('\n\n');
     shownAsks = resolution.asks;
     shownResult = planResult;
     shownEntry = { question: questions, labels: listShownLabels(shownAsks), reply: reply };

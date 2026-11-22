@@ -21,14 +21,15 @@
  *   askTails(asks, run, lead, pinned)  {result}, the pause, or {answer:
  *          {question, reply}} once the user replied.
  *   askTail(ask, run, lead, pinned)  askTails([ask], run, lead, pinned).
- *   replanFromTailAsk(ask, run)  the pause, or {replan} once the user
- *          replied.
+ *   replanFromTailAsk(ask, run, pinned)  the pause, or {replan} once the
+ *          user replied; pinned goes to askTail.
  *   buildReplyReplan(asked)  the {replan} of a reply to what asked names,
  *          also returned by stopDelivery (lib/record.js).
  *   buildUndecidedAsk  the ask, for kind, brief and run, of a question
  *          decide() must never take.
- *   resolveTailDecision(kind, brief, run)  {} when decide() takes it, else
- *          what replanFromTailAsk returns.
+ *   resolveTailDecision(kind, brief, run, pinned)  {} when decide() takes
+ *          it, else what replanFromTailAsk returns with pinned, the must-read
+ *          text of the ask or undefined.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -88,8 +89,8 @@ function askTail(ask, run, lead, pinned) {
   return askTails([ask], run, lead, pinned);
 }
 
-function replanFromTailAsk(ask, run) {
-  const asked = askTail(ask, run);
+function replanFromTailAsk(ask, run, pinned) {
+  const asked = askTail(ask, run, undefined, pinned);
   if (asked.answer === undefined) {
     return asked;
   }
@@ -114,11 +115,11 @@ function buildUndecidedAsk(kind, brief, run) {
   return resolution.asks[0];
 }
 
-function resolveTailDecision(kind, brief, run) {
+function resolveTailDecision(kind, brief, run, pinned) {
   const resolution = { asks: [], taken: [], reversibleEffects: [] };
   if (resolveDecision(kind, brief, undefined, run, resolution) === 'take') {
     acceptResolution(resolution, run);
     return {};
   }
-  return replanFromTailAsk(resolution.asks[0], run);
+  return replanFromTailAsk(resolution.asks[0], run, pinned);
 }

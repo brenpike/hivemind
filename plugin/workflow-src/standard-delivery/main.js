@@ -105,7 +105,10 @@
  *   unshownBriefText() (lib/plan.js) in each field no message shows, so the
  *   bundle carries no text the user never reads, and the diminishing
  *   returns, escalation and root cluster problems embed no reviewer free
- *   text, only a short finding id and counts.
+ *   text, only a short finding id and counts. The reviewer's hypothesized_root
+ *   and open finding titles of a repeated root cluster, and of a repeating
+ *   remediation plan, reach the user only as the encoded pinned text of the
+ *   pause (buildFindingsData, lib/briefs.js), whole and never in a brief.
  *   No message cuts an agent value: a value is bounded at its source schema
  *   and shown whole, or it is not shown. Every local review string a
  *   message shows has a bound in REVIEW_SCHEMA, written by the reviewer for
@@ -147,7 +150,9 @@
  *   run.answerLog, its rounds and resume_args never hold a decision.
  *   run.open, the open findings of the last usable review, and run.waits,
  *   the waits for an outside service the run made, start [] and 0
- *   (review.js waitForService). run.reviewSkip, the skip_reason of a
+ *   (review.js waitForService). run.repeatClusterAsked starts false and
+ *   becomes true when the repeated root cluster question is asked, once a
+ *   run (review.js requestReviewReplan). run.reviewSkip, the skip_reason of a
  *   skipped local review, is unset until routeLocalReview (review.js) sets
  *   it.
  *   run.approvals starts [] and changes only through applyApprovalChoices
@@ -470,6 +475,7 @@ function createRunState(launch) {
     pass: 0,
     replans: 0,
     reviewReplans: 0,
+    repeatClusterAsked: false,
     branchSwitches: 0,
     versionAnswer: undefined,
     factsStem: undefined,

@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [10.1.1] - 2026-11-22
+
+### Changed
+
+- The overlord adds its own one-paragraph diagnosis, the recurring finding and the cheapest way out, read from the run's journal, after it relays a question that repeats an earlier escalation.
+
+### Fixed
+
+- The repeated root-cluster question in standard-delivery, and the `repeats_surface` remediation plan question in standard-delivery and pr-feedback-remediation, now show the open finding titles and the reviewer's hypothesized root as data.
+- Option B now reads "Change approach: remove or narrow the decision that creates these findings, rather than changing how the findings are answered.", and choosing it tells the planner the plan must remove or narrow that decision.
+- A run asks the repeated-cluster question at most once. The next repeated cluster opens a draft pull request, reason "Local review returned root-cluster-suspected on the same class after a change of approach", naming the open finding titles. Before, a repeated cluster skipped the review-replan cap and was bounded only by the 3-replan limit, each a full planning pass.
+
 ## [10.1.0] - 2026-11-20
 
 ### Added

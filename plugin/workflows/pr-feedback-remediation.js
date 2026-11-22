@@ -692,7 +692,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '03f579844abce360';
+const BUILD_ID = 'eb68ae84dfd8ec65';
 
 function supportedSchemaKeywords(){
 return[
@@ -3034,13 +3034,14 @@ if(resettled!==undefined){
 return stopDelivery([{problem:'Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.',terminal:true,nextAction:'report'}],run,[],true);
 }
 const lead=describePlanLine(planResult.plan);
+const pinned=buildRepeatPinned(resolution,planResult.plan,run,replan);
 const round=run.answerLog.length+1;
 const reply=takeNextReply(run,round);
 if(reply===undefined){
-return{result:pauseDelivery(resolution,run,lead)};
+return{result:pauseDelivery(resolution,run,lead,pinned)};
 }
 phase('Revise');
-const questions=lead+'\n\n'+renderQuestions(resolution.asks);
+const questions=[lead].concat(pinned??[],renderQuestions(resolution.asks)).join('\n\n');
 shownAsks=resolution.asks;
 shownResult=planResult;
 shownEntry={question:questions,labels:listShownLabels(shownAsks),reply:reply};
@@ -3188,11 +3189,32 @@ verbatim:plan.summary
 };
 }
 function buildApproachChoice(){
-const summaries=['Keep patching this class.','Change approach.','Stop and ship what closes.'];
+const summaries=['Keep patching this class.','Change approach: remove or narrow the decision that creates these findings, rather than changing how the findings are answered.','Stop and ship what closes.'];
 return{
 options:summaries.map((summary,index)=>buildBriefOption(optionLabel(index),summary)),
 recommendation:{option_id:optionLabel(1),strength:'strong',why:'Patching has not closed this class.'}
 };
+}
+function maxFindingsDataLength(){
+return 1800;
+}
+function buildFindingsData(root,findings){
+const lines=root===undefined?[]:['Root: '+encodeUntrustedText(root)];
+let used=lines.join('\n').length;
+for(const finding of findings){
+const line='Finding: '+encodeUntrustedText(finding.title);
+used+=line.length+1;
+if(used>maxFindingsDataLength()){
+lines.push('...');
+break;
+}
+lines.push(line);
+}
+return lines.length===0?undefined:lines.join('\n');
+}
+function buildRepeatPinned(resolution,plan,run,replan){
+const isRepeatAsk=resolution.asks.some((ask)=>ask.kind===REMEDIATION_PLAN_ACCEPTANCE_KIND)&&plan.remediation_gate.repeats_surface;
+return isRepeatAsk?buildFindingsData(replan?.review?.hypothesized_root,run.open):undefined;
 }
 function buildRemediationPlanBrief(plan){
 const remediationGate=plan.remediation_gate;
@@ -3460,8 +3482,8 @@ return{answer:{question:question,reply:reply}};
 function askTail(ask,run,lead,pinned){
 return askTails([ask],run,lead,pinned);
 }
-function replanFromTailAsk(ask,run){
-const asked=askTail(ask,run);
+function replanFromTailAsk(ask,run,pinned){
+const asked=askTail(ask,run,undefined,pinned);
 if(asked.answer===undefined){
 return asked;
 }
@@ -3477,13 +3499,13 @@ throw new Error('buildUndecidedAsk: decide() took '+kind);
 }
 return resolution.asks[0];
 }
-function resolveTailDecision(kind,brief,run){
+function resolveTailDecision(kind,brief,run,pinned){
 const resolution={asks:[],taken:[],reversibleEffects:[]};
 if(resolveDecision(kind,brief,undefined,run,resolution)==='take'){
 acceptResolution(resolution,run);
 return{};
 }
-return replanFromTailAsk(resolution.asks[0],run);
+return replanFromTailAsk(resolution.asks[0],run,pinned);
 }
 
 function renderReversibleEffects(effects){
