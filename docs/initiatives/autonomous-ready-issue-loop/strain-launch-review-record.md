@@ -3,10 +3,10 @@ stamps: []
 verdict: pending
 open_counts:
   critical: 0
-  high: 0
-  medium: 0
-  low: 0
-rounds: 4
+  high: 1
+  medium: 1
+  low: 1
+rounds: 5
 clean_round: null
 ---
 
@@ -14,7 +14,7 @@ clean_round: null
 
 This record covers the design review of issue #630, the strain launch and containment part of the Lair, epic #603. Only the [strain launch design](strain-launch-design.md) is stamped. Its stamp's blob is `git rev-parse HEAD:docs/initiatives/autonomous-ready-issue-loop/strain-launch-design.md`, and the stamp is written last. The [PRD](../../prds/autonomous-ready-issue-loop.md), [ADR-0045](../../adr/0045-lair-software-factory.md) and the parent [solution design](solution-design.md) are reviewed, not stamped.
 
-The review exits only when zero critical or high findings are open and one round raises no new findings. It runs at most 3 rounds. On 2026-11-22 the user authorized one more round beyond that cap (Round 3, Decisions asked). Round 4 ran under that authorization. On 2026-11-22 the user authorized one confirming round 5 (Round 4, Decisions asked).
+The review exits only when zero critical or high findings are open and one round raises no new findings. It runs at most 3 rounds. On 2026-11-22 the user authorized one more round beyond that cap (Round 3, Decisions asked). Round 4 ran under that authorization. On 2026-11-22 the user authorized one confirming round 5 (Round 4, Decisions asked). Round 5 ran under that authorization.
 
 Round 1 ran under the original procedure: two parallel, fresh, read-only `hivemind:cerebrate` passes (A and B), model opus, effort xhigh, each with "Memory context: none". Its IDs stay `L1-A<n>` and `L1-B<n>`.
 
@@ -237,6 +237,33 @@ Three consecutive rounds' fixes to the remediation repeat guard (L2-C3, then L3-
 | --- | --- | --- | --- | --- | --- | --- |
 | L4-T1 | high | `dc7d0d2621fe560ec5b896d23ffd2989eb96d9f06992bf54dc36651333b5a473` | Thread comments are keyed by node `id` only. An edit that adds a finding keeps the id, so no key is new: no dispatch and no `lair:review`. This contradicts the design's claim that a finding edited in after a completed remediation gets a strain. | design `:141`, `:200-203` | Fetch the thread comment's `lastEditedAt` into the key, or fail closed to `lair:review` when edit identity cannot be established. Add a test where a dispatched thread comment is edited and becomes actionable again. | fixed by construction: finding keys are removed. The dispatch marker records the head only, and actionable feedback on a head whose remediation has ended, an edited thread comment included, routes the pull request to `lair:review`, so no edit passes silently. Design Components > Remediation strain launch ("Repeat guard", "Closed by construction"), Failure modes ("Repeat remediation dispatch"), Decisions and Verification strategy (`tools/test_lair_tick.sh` repeat guard cases) |
 | L4-T2 | high | `1cbd9c8b369cefd999988b9ec6802a722b081244066a662d40e3e114ef1474e7` | `statusCheckRollup` is a paged connection. The design has no exhaustive pagination, no `pageInfo` check and no overflow rule, so a failed check past the page is silently missing from the current key set. | design `:205` | Paginate `statusCheckRollup.contexts` and validate `pageInfo`. Route to `lair:review` without dispatch when the complete set cannot be fetched within a bound. Add multi-page and pagination-failure tests. | fixed by construction: the `statusCheckRollup` read and its key set are removed, so no paged connection feeds the repeat guard. The guard compares the head with the heads the dispatch markers record; whether a head has a failed check comes from the Lair's pull request read, an assumption on the seam with #610 and #631. Design Components > Remediation strain launch ("Repeat guard"), Contracts and seams ("Seam with #610 and #631") and Decisions |
+
+## Round 5
+
+- **Date:** 2026-11-22.
+- **Kind:** confirming round, authorized by the user (answer A, 2026-11-22; Round 4, Decisions asked). It reviewed only the diff `1d1ef1ae..f61ed0d3` and the fixes to the L4 findings.
+- **Design reviewed:** blob `1ce6acc77f076f2cd9ed901bb35806f953f121c6` at commit `f61ed0d3b46da4145c20a63b819e3aa1405cf292`.
+- **Cerebrate pass:** one fresh read-only `hivemind:cerebrate` pass, effort medium, "Memory context: none".
+- **Tool pass:** one pass through `plugin/skills/adaptation-cycle/scripts/run-review.sh` with the `codex-plugin` preset and `--base 1d1ef1ae`. Verdict `needs-attention`, one high finding. The raw output was read from the run's scratch file and is not committed.
+
+**Fix check.** The cerebrate pass judged L4-T1, L4-T2 and L4-C1 to L4-C4 all closed by the design text.
+
+Round 5 is not clean: it raised new findings (see the tables). Round 5 ends with an open high finding. Per the user's answers, the run stopped and asked the user.
+
+No finding is dispositioned yet. Each is open, and no user answer to this round is recorded.
+
+### Cerebrate pass
+
+| ID | Severity | Section | Finding | Evidence | Proposed fix | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L5-C1 | medium | Remediation strain launch "Repeat guard"; Decisions | The design says the per-head guard "matches the parent design's rule for a red CI result". That is false. The parent counts per pull request: a second red result on any head goes to `lair:review`. The per-head guard re-dispatches on each new red head. The parent CI red row is not listed as replaced, so two live documents disagree. There is no per-pull-request cap: a remediation that keeps pushing red fixes gets one strain per push, and the circuit breaker counts only crash, stall and budget ends. | `solution-design.md:157`, `:179` | Reword the claim and list the parent CI red row as replaced, or add a per-pull-request cap. | open |
+| L5-C2 | low | Strain launch and settings > Environment preflight; Verification strategy | The unparsable preflight result branch (design `:94`, `:122`) has no test (design `:161`). | Design text only | Add a `tools/test_lair_tick.sh` case: a malformed result with this run's nonce gives cause `strain_env_preflight`, probe `session`. | open |
+
+### Tool pass
+
+| ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L5-T1 | high | `f016b331e5e0c3d2cd1d8d292c3d451e6e1440c29a8540cac2bc048f8c81b09a` | The per-head guard needs a reader that classifies new actionable, author-trusted feedback on a dispatched head. The design assumes #610 and #631 provide it. Trunk `pr-change-detect-poll.sh` only detects changes (ids and counts), and unchanged `fetch-normalize.sh` applies the author filter only under a verified strain marker. No grounded path exists: a second finding can be missed, or benign activity misrouted. | design `:202-207`, `:310-314` | Specify and assign an exhaustive Lair-side read that fetches and classifies current review feedback, applies the same Bot and write-permission author policy, and fails closed to `lair:review` on fetch, pagination, permission or classification failure. Name its implementation changes and add controller tests for handled feedback, a second finding on the same head, untrusted authors and reader failure. | open |
 
 ## Sources
 
