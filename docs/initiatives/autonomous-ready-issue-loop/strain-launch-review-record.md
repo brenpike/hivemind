@@ -3,10 +3,10 @@ stamps: []
 verdict: pending
 open_counts:
   critical: 0
-  high: 0
-  medium: 0
-  low: 0
-rounds: 7
+  high: 1
+  medium: 1
+  low: 3
+rounds: 8
 clean_round: null
 ---
 
@@ -14,7 +14,7 @@ clean_round: null
 
 This record covers the design review of issue #630, the strain launch and containment part of the Lair, epic #603. Only the [strain launch design](strain-launch-design.md) is stamped. Its stamp's blob is `git rev-parse HEAD:docs/initiatives/autonomous-ready-issue-loop/strain-launch-design.md`, and the stamp is written last. The [PRD](../../prds/autonomous-ready-issue-loop.md), [ADR-0045](../../adr/0045-lair-software-factory.md) and the parent [solution design](solution-design.md) are reviewed, not stamped.
 
-The review exits only when zero critical or high findings are open and one round raises no new findings. It runs at most 3 rounds. On 2026-11-22 the user authorized one more round beyond that cap (Round 3, Decisions asked). Round 4 ran under that authorization. On 2026-11-22 the user authorized one confirming round 5 (Round 4, Decisions asked). Round 5 ran under that authorization. Round 6 ran after the user's answer to the round 5 question, and round 7 after the user's answer to the round 6 question (Decisions asked).
+The review exits only when zero critical or high findings are open and one round raises no new findings. It runs at most 3 rounds. On 2026-11-22 the user authorized one more round beyond that cap (Round 3, Decisions asked). Round 4 ran under that authorization. On 2026-11-22 the user authorized one confirming round 5 (Round 4, Decisions asked). Round 5 ran under that authorization. Round 6 ran after the user's answer to the round 5 question, round 7 after the user's answer to the round 6 question, and round 8 after the user's answer to the round 7 question (Decisions asked).
 
 Round 1 ran under the original procedure: two parallel, fresh, read-only `hivemind:cerebrate` passes (A and B), model opus, effort xhigh, each with "Memory context: none". Its IDs stay `L1-A<n>` and `L1-B<n>`.
 
@@ -340,6 +340,33 @@ Round 7 is not clean: it raised new findings (see the tables). All seven are ope
 | ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
 | --- | --- | --- | --- | --- | --- | --- |
 | L7-T1 | medium | `8d0b127486e05ec4582b6bf4063483be4cbada58a8ea220dca5d650f74b6c3ab` | Confidence 0.98. A null check rollup bypasses the CI wait. Dispatch waits only for `PENDING` or `EXPECTED`, and `merge-approved.sh` treats a null rollup as `skipped:no-checks`. Before CI registers its first check, a seed change dispatches at once, and a later failing check cannot join the strain. | design text (CI wait); `merge-approved.sh` null-rollup handling | Treat a null or no-checks rollup as pending within the 30-minute window. Test a seed change with a null rollup, then `PENDING`, then `FAILURE`. | fixed: a null rollup, which `merge-approved.sh` reads as `skipped:no-checks`, counts as pending within the same 30-minute wait. Design Context and code truth, Components > Remediation strain launch ("The one dispatch", "The cost"), Failure modes ("Change while checks are pending"), Decisions, Seam order (#610) and Verification strategy (`tools/test_lair_tick.sh`: a seed change with a null rollup, then `PENDING`, then `FAILURE` gives one dispatch that sees the failure; a rollup that stays null dispatches at the 30-minute mark) |
+
+## Round 8
+
+- **Date:** 2026-11-22.
+- **Kind:** confirming round, per the user's procedure change. It reviewed only the diff `d5e89cc1..418070cb` and the fixes to the L7 findings.
+- **Design reviewed:** blob `00500b948808c434f652db92fa957c63c846cf47` at commit `418070cb7cf5137ff2b05fc1ab16ef2622294150`.
+- **Cerebrate pass:** one fresh read-only `hivemind:cerebrate` pass covering both angles, effort medium, "Memory context: none".
+- **Tool pass:** one pass through `plugin/skills/adaptation-cycle/scripts/run-review.sh` with the `codex-plugin` preset and `--base d5e89cc1`, because the design touches trust and the merge path. The raw output was read from the run's scratch file and is not committed.
+
+**Fix check.** L7-T1, L7-C2, L7-C3, L7-C5 and L7-C6 are closed. L7-C1 and L7-C4 are closed in intent with residual defects, carried as L8-C1 and L8-T1 (L7-C1) and L8-C2 (L7-C4). All `merge-approved.sh` citations (lines 31, 129, 303 to 304 and 362) were verified. The detector seed carries no `isDraft`, so the pass raised no finding on it.
+
+Round 8 is not clean: it raised new findings (see the tables). All five are open, with 1 high, 1 medium and 3 low.
+
+### Cerebrate pass
+
+| ID | Severity | Section | Finding | Evidence | Proposed fix | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L8-C1 | medium | Remediation strain launch ("The delivery baseline"); Decisions | The no-baseline rule's only stated reason is the parked draft. A blocked or failed delivery has no re-claim, and its pull request is usually not a draft, so it either merges unattended or holds the merge lane for good (parent line 51). | `solution-design.md:51` | Limit "no dispatch and no route" to a parked result. A blocked or failed result with `pr` set routes to `lair:review` when its outcome is written. Update the row, "The delivery baseline", the Decisions bullet and the tests. | open |
+| L8-C2 | low | Remediation strain launch ("A deferred write is not a budget overrun or an orphan"); Failure modes ("Budget overrun") | The deferred-write exemption hinges on the Lair having read the result, which a restarted Lair does not know. After a restart past 6 hours the budget rule may apply first and mark a complete run `lair:failed`. | Design text only | Base the exemption on state that survives a restart (a valid result file for this nonce and no outcome in the marker), or read results before applying the budget rule. Add a test for a restart past 6 hours. | open |
+| L8-C3 | low | Remediation strain launch ("The one dispatch"); Failure modes ("CI red") | Both put the feedback cut-off at the dispatch. It is the fix pass's read of the pull request, as "The cost" says. | Design text only | Reword both. | open |
+| L8-C4 | low | Opening list of replaced parent parts; Failure modes intro | The opening list says the design replaces the parent's Orphaned claim row, but the Failure modes intro (design line about 388) does not name it. The opening list also cites "One write, deferred on failure", but the rule lives in "A deferred write is not a budget overrun or an orphan". | Design text only | Align both. | open |
+
+### Tool pass
+
+| ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L8-T1 | high | `99d0ad90b34ef72ceef4178471006e20078c78dc9bd655062f59dd01bd8a5bb6` | Confidence 0.96. A pull request with no delivery baseline can still enter the merge lane. Parked, blocked and failed results get no baseline and "no dispatch and no route", but the merge lane's skip list does not include "no delivery baseline". A non-draft pull request from a failed delivery can merge if its gates pass. | design text (merge lane skip list; "The delivery baseline") | The merge lane skips every Lair pull request with no delivery baseline until a complete re-claim writes one or a terminal rule routes it. Test a non-draft, green, approved pull request. | open |
 
 ## Sources
 
