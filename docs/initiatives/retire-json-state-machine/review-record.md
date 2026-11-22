@@ -16,7 +16,7 @@ clean_round: false
 
 # Design review record: Retire the JSON state machine
 
-The design review has completed three rounds and has not passed. Every finding is fixed, and the user has answered Tier A questions Q7 on D11 and Q8 on D12, and the round-3 cap question. No round has been clean, so `clean_round` is `false`. Round 3 was the last round under the three-round cap (ADR-0046 decision 6). The user answered A to the cap question: narrow the design's Verification strategy, then run one round 4 over that change only, a one-time exception for this initiative. The three-round cap stays the general rule.
+The design review has completed three rounds and has not passed. Review stopped after round 4 on the user's answer A to the diminishing-returns advisory. The verdict is `fail`, and every finding is fixed. The user has answered Tier A questions Q7 on D11 and Q8 on D12, the round-3 cap question and the close of round 4. No round has been clean, so `clean_round` is `false`. Round 3 was the last round under the three-round cap (ADR-0046 decision 6). The user answered A to the cap question: narrow the design's Verification strategy, then run one round 4 over that change only, a one-time exception for this initiative. The three-round cap stays the general rule. Both round-4 passes at `d2dada8bb6665488edd9f50ca762013fb93123e3` drew no finding on the solution design or ADR-0048. The pull request merges on the user's approval, as a user-approved exception to the rule that a record with a failed verdict does not merge.
 
 The passing record stamps the solution design and ADR-0048. No PRD exists; `docs/prds/retire-json-state-machine.md` is needed before any slice can pass the readiness check. The stamps are the blobs at commit `aa9342a244b13150eb141b42ac566611b6b5f268`, the commit round 1 reviewed; a record with `verdict` `fail` keeps its stamps, and only the passing record re-stamps, to the commit its clean pass reviewed.
 
@@ -73,7 +73,9 @@ Two passes over the change since `c094d278` and round 3's fixes. Neither reviewe
 - Local review tool pass: preset `codex-plugin` (`HIVEMIND_LOCAL_REVIEWER` unset), the tool's own model. Review base `d2dada8bb6665488edd9f50ca762013fb93123e3`, 1 iteration. It was clean and returned no findings.
 - Reviewer `hivemind:cerebrate`, model `opus`, `Memory context: none`. A fresh, read-only confirming pass over the change since `c094d278` and round 3's fixes. It reviewed commit `d2dada8bb6665488edd9f50ca762013fb93123e3`. On the design and ADR-0048 it raised no findings. On this record it raised R4-01 (medium) and R4-02 (low). Both touch only the record and are fixed in this commit.
 
-A record-only closing check follows: one fresh cerebrate pass (model `opus`, `Memory context: none`) over this record change only, as the Idea to Ready record's round-4 confirming checks did. It is pending. `rounds` stays 3.
+A record-only closing check followed: one fresh cerebrate pass (model `opus`, `Memory context: none`) over this record change at `53e71f6892dfb33a18acbdcf6fd914c87849edc8`, with no local review tool pass, so under the round-count answer (Round 2) it yields no round. It confirmed R4-01 and R4-02 fixed and raised R4-C01 and R4-C02 on the record only. `rounds` stays 3.
+
+Diminishing-returns advisory: signals: recurrence on the record's conformance to ADR-0046 decisions 6 to 8, which R2-05 and R2-C03 fixed and R4-02 and R4-C02 found again; severity and reach trending down, from two highs on the design in round 3 to none on the design or ADR-0048 in round 4 and one medium and one low on the record only; answer A (user): stop reviewing. The record keeps `verdict` `fail` with every finding fixed; the solution design and ADR-0048 drew no finding in either round-4 pass at `d2dada8bb6665488edd9f50ca762013fb93123e3`. The pull request merges on the user's approval as a user-approved exception to the rule that a record with a failed verdict does not merge.
 
 ## Findings
 
@@ -111,6 +113,8 @@ A record-only closing check follows: one fresh cerebrate pass (model `opus`, `Me
 | R3-04 | 3 | confirm | low | fixed | D12's review backstop sat under S5 only, though D12 binds S1 to S5. Fixed by the narrowing: Verification strategy states it once before the per-slice list, and the S5-only bullet is deleted. |
 | R4-01 | 4 | confirm | medium | fixed | The record said round 4 does not change `rounds` until it runs, which contradicts the Idea to Ready round-4 exception it cites (that round 4 left `rounds` unchanged, answer Q11 A). The Round 4 entry now says `rounds` stays 3, so a passing record still meets the pass rule's `rounds` of 2 to 3 (ADR-0046 decision 7). |
 | R4-02 | 4 | confirm | low | fixed | The record held no diminishing-returns advisory for round 3, and it said the cap question was asked under ADR-0046 decision 8. Round 3 now carries the advisory, and the cap question is recorded as asked under the three-round cap of decision 6. |
+| R4-C01 | 4 | confirm | medium | fixed | The closing-check sentence claimed it ran as the Idea to Ready record's round-4 confirming checks did, but those each ran a cerebrate pass and a tool pass; a cerebrate pass without its tool pass yields no round. The sentence is corrected: the check yields no round. |
+| R4-C02 | 4 | confirm | low | fixed | The record held no diminishing-returns advisory after round 4, and the next step was recorded as taken, not asked. The advisory is recorded and asked; answer A (user): stop reviewing. |
 
 ## Decisions taken, listed for veto
 
@@ -142,7 +146,6 @@ Each decision carries its recommendation strength and what it touches, per ADR-0
 | Each rule stated once at its owner; other sites point to it (overlord). | Strong | none |
 | Passing record stamps the design and ADR-0048 only; PRD needed before readiness (overlord). | Strong | none |
 | The round-3 narrowing's wording, and each design decision's screen conformed to ADR-0046 decision 8 as amended (overlord). | Strong | none |
-| Close round 4 with one record-only confirming check, since round 4's design and ADR passes found nothing and its two findings touched only the record (overlord). | strong | none (review procedure only; reversible, the PR stays a draft) |
 
 D11 is answered (Q7 A), D12 is answered (Q8 A), and D14 is answered (Q1 A); none is a taken decision.
 
@@ -155,3 +158,4 @@ D11 is answered (Q7 A), D12 is answered (Q8 A), and D14 is answered (Q1 A); none
 - Q8, D12's confirmation point. Answered: A (user): the user confirms each covered deletion before that slice's run starts.
 - The round count, after round 2's local review tool pass. Answered: A. The cerebrate pass at `63ff83f2` yields no round, since its trust-boundary tool pass did not run with it; its findings R2-01 to R2-05 keep their IDs and are attributed to round 2.
 - The round-3 cap. Answered: A (user, strong recommendation). Narrow the design's Verification strategy to what each slice must prove, with no check file, name list, scan path or test mechanism; then run one round 4 over that change only, a one-time exception to the three-round cap for this initiative, recorded like the Idea to Ready design's D31 (Q9). Asked because the three-round cap of ADR-0046 decision 6 stops the review after round 3 and reaches the maintainer; the diminishing-returns check of the same decision fired after round 3 (Round 3).
+- The close of round 4. Answered: A (user), strong recommendation: stop reviewing; the record stays `fail` with every finding fixed, and the pull request merges on the user's approval as an exception to the failed-verdict rule. Asked because the diminishing-returns check of ADR-0046 decision 6 fired after round 4 (Round 4).
