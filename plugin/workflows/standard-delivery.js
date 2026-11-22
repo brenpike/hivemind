@@ -696,7 +696,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '979e4594f2aabbc2';
+const BUILD_ID = 'ae0c035bd3ed43b9';
 
 function supportedSchemaKeywords(){
 return[
@@ -3681,24 +3681,22 @@ if(isBadStop||!askReasons().includes(ask.reason)){
 throw new Error('pauseDelivery: ask '+ask.kind+' '+ask.reason);
 }
 }
+function planPause(resolution,run,lead,pinned){
+const questions={text:renderQuestions(resolution.asks)};
+if(resolution.asks.some((ask)=>ask.exact===true||hasDestructiveOption(ask))){
+questions.whole=true;
+}
+const pause={resumeArgs:buildResumeArgs(run.answerLog.map((entry)=>entry.reply),BUILD_ID),blocks:[buildLeadBlock(lead,pinned===undefined?maxBlockedLeadLength():maxPinnedLeadLength()),...listPinnedBlocks(pinned),questions]};
+pause.stop=!canCarry(pause.resumeArgs)?'reply_size':canShowWhole(pause)?undefined:'exact_text_size';
+return pause;
+}
 function pauseDelivery(resolution,run,lead,pinned){
 resolution.asks.forEach(checkPauseAsk);
-const resumeArgs=buildResumeArgs(run.answerLog.map((entry)=>entry.reply),BUILD_ID);
-if(!canCarry(resumeArgs)){
-return finishOpenQuestions(resolution,'reply_size',run,pinned);
-}
-const questionsBlock={text:renderQuestions(resolution.asks)};
-if(resolution.asks.some((ask)=>ask.exact===true||hasDestructiveOption(ask))){
-questionsBlock.whole=true;
-}
-const blocks=[buildLeadBlock(lead,pinned===undefined?maxBlockedLeadLength():maxPinnedLeadLength()),...listPinnedBlocks(pinned),questionsBlock];
-if(!canShowWhole({resumeArgs:resumeArgs,blocks:blocks})){
-return finishOpenQuestions(resolution,'exact_text_size',run,pinned);
-}
-return pauseForUser({resumeArgs:resumeArgs,blocks:blocks});
+const pause=planPause(resolution,run,lead,pinned);
+return pause.stop?finishOpenQuestions(resolution,pause.stop,run,pinned):pauseForUser(pause);
 }
 function fitPinned(resolution,run,lead,pinned){
-return pinned!==undefined&&pauseDelivery(resolution,run,lead,pinned).needs_user?pinned:undefined;
+return pinned!==undefined&&!planPause(resolution,run,lead,pinned).stop?pinned:undefined;
 }
 function describeStopLead(causes,endLines){
 return buildStopBlocks(causes).filter((block)=>block.whole!==true).map((block)=>block.text).concat(endLines).join('\n');

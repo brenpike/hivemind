@@ -119,10 +119,12 @@
  *           recommendation is never taken. The askTail lead is
  *           the cause problems in buildStopBlocks order, then the end
  *           lines, one per line.
- *   fitPinned(resolution, run, lead, pinned)  pinned when pauseDelivery of
- *           the same arguments pauses, else undefined: a caller whose pinned
- *           text is optional (the repeated-cluster and repeats_surface asks)
- *           passes it through here, so it never ends a pause blocked.
+ *   fitPinned(resolution, run, lead, pinned)  pinned when planPause, the
+ *           pause pauseDelivery builds for the same arguments, has no stop
+ *           (canCarry and canShowWhole hold), else undefined: a caller whose
+ *           pinned text is optional (the repeated-cluster and repeats_surface
+ *           asks) passes it through here, so it never ends a pause blocked.
+ *           It calls no pause or finish function, so it never throws.
  *   finishOpenQuestions  finishDeliveryBlocked over one cause, the fixed
  *           lead with next action answer, with the open questions as its
  *           end line, its pinned passed on and the round's taken decisions
@@ -384,32 +386,38 @@ function checkPauseAsk(ask) {
   }
 }
 
+/**
+ * Returns the pause of resolution, run, lead and pinned as {resumeArgs,
+ * blocks, stop}: stop is reply_size when resumeArgs cannot be carried,
+ * exact_text_size when the whole blocks do not fit, else undefined. It builds
+ * no result and throws on no text.
+ */
+function planPause(resolution, run, lead, pinned) {
+  const questions = { text: renderQuestions(resolution.asks) };
+  if (resolution.asks.some((ask) => ask.exact === true || hasDestructiveOption(ask))) {
+    questions.whole = true;
+  }
+  const pause = { resumeArgs: buildResumeArgs(run.answerLog.map((entry) => entry.reply), BUILD_ID), blocks: [buildLeadBlock(lead, pinned === undefined ? maxBlockedLeadLength() : maxPinnedLeadLength()), ...listPinnedBlocks(pinned), questions] };
+  pause.stop = !canCarry(pause.resumeArgs) ? 'reply_size' : canShowWhole(pause) ? undefined : 'exact_text_size';
+  return pause;
+}
+
 function pauseDelivery(resolution, run, lead, pinned) {
   resolution.asks.forEach(checkPauseAsk);
-  const resumeArgs = buildResumeArgs(run.answerLog.map((entry) => entry.reply), BUILD_ID);
-  if (!canCarry(resumeArgs)) {
-    return finishOpenQuestions(resolution, 'reply_size', run, pinned);
-  }
-  const questionsBlock = { text: renderQuestions(resolution.asks) };
-  if (resolution.asks.some((ask) => ask.exact === true || hasDestructiveOption(ask))) {
-    questionsBlock.whole = true;
-  }
-  const blocks = [buildLeadBlock(lead, pinned === undefined ? maxBlockedLeadLength() : maxPinnedLeadLength()), ...listPinnedBlocks(pinned), questionsBlock];
-  if (!canShowWhole({ resumeArgs: resumeArgs, blocks: blocks })) {
-    return finishOpenQuestions(resolution, 'exact_text_size', run, pinned);
-  }
-  return pauseForUser({ resumeArgs: resumeArgs, blocks: blocks });
+  const pause = planPause(resolution, run, lead, pinned);
+  return pause.stop ? finishOpenQuestions(resolution, pause.stop, run, pinned) : pauseForUser(pause);
 }
 
 /**
- * Returns pinned when pauseDelivery of resolution, run, lead and pinned
- * pauses, else undefined. A caller whose pinned text is optional passes it
- * through here, so that text is never the reason a pause ends blocked. A
- * pinned text within maxFindingsDataLength() shows whole in the blocked
- * end that probe builds, so the probe does not throw.
+ * Returns pinned when the pause of resolution, run, lead and pinned carries
+ * its replies and shows every whole block, else undefined. A caller whose
+ * pinned text is optional passes it through here, so that text is never the
+ * reason a pause ends blocked. It reads the stop of planPause, the same
+ * pause pauseDelivery builds, and builds no result, so no text, whatever
+ * characters it holds, makes it throw.
  */
 function fitPinned(resolution, run, lead, pinned) {
-  return pinned !== undefined && pauseDelivery(resolution, run, lead, pinned).needs_user ? pinned : undefined;
+  return pinned !== undefined && !planPause(resolution, run, lead, pinned).stop ? pinned : undefined;
 }
 
 function describeStopLead(causes, endLines) {

@@ -3366,8 +3366,9 @@ const ROW_TESTS = {
       assert.ok(!run.result.message.includes('OUTSIDE_ZQ') && !run.result.message.includes('LIMITS_REASON_ZQ'), run.result.message);
     });
     test('reply_size and exact_text_size are the only open question stops', () => {
-      const stops = [...moduleSource.matchAll(/finishOpenQuestions\([^,]+, '([a-z_]+)'/g)].map((match) => match[1]);
+      const stops = [...moduleSource.match(/pause\.stop = [^\n]+/)[0].matchAll(/'([a-z_]+)'/g)].map((match) => match[1]);
       assert.deepEqual(stops, ['reply_size', 'exact_text_size']);
+      assert.deepEqual([...moduleSource.matchAll(/ \? finishOpenQuestions\([^,]+, ([^,]+),/g)].map((match) => match[1]), ['pause.stop']);
       assert.ok(!moduleSource.includes('before_pr') && !moduleSource.includes('pause_limit'));
     });
     test('a pause with no effect ask is not whole: questions too long for the notice are cut as before', async () => {
@@ -10072,10 +10073,10 @@ const ROW_TESTS = {
     function listCallSites(pattern) {
       return [...builtCode.matchAll(pattern)].filter((match) => !/function\s+$/.test(builtCode.slice(Math.max(0, match.index - 16), match.index))).map((match) => findEnclosingFunction(builtCode, match.index));
     }
-    test('the built script pauses only through pauseDelivery, which only askTails, runPlanningPass and the probe fitPinned call, waits only through waitForService, an ask is pushed only in resolveDecision, and needs_user true is set only in lib/result.js', () => {
+    test('the built script pauses only through pauseDelivery, which only askTails and runPlanningPass call, waits only through waitForService, an ask is pushed only in resolveDecision, and needs_user true is set only in lib/result.js', () => {
       assert.deepEqual(listCallSites(/\bpauseForUser\(/g), ['pauseDelivery']);
       assert.deepEqual(listCallSites(/\bpauseForRetry\(/g), ['waitForService']);
-      assert.deepEqual(listCallSites(/\bpauseDelivery\(/g).sort(), ['askTails', 'fitPinned', 'runPlanningPass']);
+      assert.deepEqual(listCallSites(/\bpauseDelivery\(/g).sort(), ['askTails', 'runPlanningPass']);
       assert.deepEqual(listCallSites(/\basks\.push\(/g), ['resolveDecision']);
       const resultSource = readText(join(sourceDir, '../lib/result.js'));
       const resultFunctions = [...resultSource.matchAll(/^function (\w+)\(/gm)].map((match) => match[1]);
@@ -10609,7 +10610,7 @@ const ROW_TESTS = {
       assert.equal(blocked.needs_user, false);
       assert.ok(blocked.message.includes(main.renderStopIntro('reply_size')) && !blocked.message.includes(main.renderStopIntro('exact_text_size')), blocked.message);
     });
-    test('pinned text that the pause cannot show whole is left out: fitPinned returns it only when pauseDelivery pauses, and resolveTailDecision asks the question without it where askTail ends blocked exact_text_size', () => {
+    test('pinned text that the pause cannot show whole is left out: fitPinned returns it only when canCarry and canShowWhole hold for the pause, and resolveTailDecision asks the question without it where askTail ends blocked exact_text_size', () => {
       const brief = repeatedBrief();
       const state = createReplannedState();
       state.answerLog.push({ question: 'Q', settled: [], reply: 'x'.repeat(findCarryLimit()) });
@@ -10629,6 +10630,45 @@ const ROW_TESTS = {
       state.pendingReply = 'B';
       const replied = main.resolveTailDecision(brief.kind, brief, state, tooLong);
       assert.ok(replied.replan !== undefined && !state.answerLog.at(-1).question.includes('zzz'), state.answerLog.at(-1).question);
+    });
+    test('fitPinned builds no pause: its built body names no pause or finish function, and pinned text dense in &, < and > within the line limit never throws and is left out when it cannot be shown whole', () => {
+      const probeBody = builtSource.slice(builtSource.indexOf('function planPause('), builtSource.indexOf('function pauseDelivery(')) + builtSource.slice(builtSource.indexOf('function fitPinned('), builtSource.indexOf('function describeStopLead('));
+      assert.ok(probeBody.includes('canCarry(') && probeBody.includes('canShowWhole(') && probeBody.includes('planPause('));
+      assert.ok(!/\b(?:pauseDelivery|pauseForUser|finish\w*|assertWithinBudget|fitPause)\(/.test(probeBody), probeBody);
+      const brief = repeatedBrief();
+      for (const char of ['&', '<', '>']) {
+        const state = createReplannedState();
+        const ask = main.buildUndecidedAsk(brief.kind, brief, state);
+        const resolution = { asks: [ask], taken: [] };
+        const dense = main.buildFindingsData(char.repeat(1790), []);
+        assert.ok(dense !== undefined && dense.length <= main.maxFindingsDataLength(), char);
+        const lead = main.describeTailLead(state);
+        let fitted;
+        assert.doesNotThrow(() => { fitted = main.fitPinned(resolution, state, lead, dense); }, char);
+        const asked = main.resolveTailDecision(brief.kind, brief, state, dense);
+        assert.equal(asked.result.needs_user, true, char + ' ' + asked.result.message);
+        assert.ok(asked.result.message.includes('**Q1. '), asked.result.message);
+        assert.equal(asked.result.message.includes(dense), fitted !== undefined, char);
+        if (char === '&') {
+          assert.equal(fitted, undefined);
+        }
+      }
+    });
+    test('with the replies near the canCarry limit the question still pauses asking when its pinned text is dense in &, and fitPinned returns undefined without throwing once the replies cannot be carried', () => {
+      const brief = repeatedBrief();
+      const limit = findCarryLimit();
+      const dense = main.buildFindingsData('&'.repeat(1790), []);
+      for (const size of [limit - 40, limit]) {
+        const state = createReplannedState();
+        state.answerLog.push({ question: 'Q', settled: [], reply: 'x'.repeat(size) });
+        const asked = main.resolveTailDecision(brief.kind, brief, state, dense);
+        assert.equal(asked.result.needs_user, true, size + ' ' + asked.result.message);
+        assert.ok(!asked.result.message.includes('&&&&') && asked.result.message.includes('**Q1. '), asked.result.message);
+      }
+      const state = createReplannedState();
+      state.answerLog.push({ question: 'Q', settled: [], reply: 'x'.repeat(limit + 1) });
+      const resolution = { asks: [main.buildUndecidedAsk(brief.kind, brief, state)], taken: [] };
+      assert.equal(main.fitPinned(resolution, state, main.describeTailLead(state), 'Root: "Fits."'), undefined);
     });
     test('a second repeated root cluster after the question was asked opens a draft pull request with that reason and the open finding titles in its body, and asks nothing', async () => {
       const reason = 'Local review returned root-cluster-suspected on the same class after a change of approach.';

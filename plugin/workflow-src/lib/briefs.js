@@ -185,7 +185,7 @@ function describeApproachChange(reply, brief) {
 }
 
 function maxFindingsDataLength() {
-  /* 1800 code units of encoded text: a BMP code point encodes to at most 6 and an astral one to 12, and each is escaped to 7 per 6 in the notice. */
+  /* A line-trimming hint of 1800 code units of encoded text, not the fit guarantee: the notice charges 5 per & and 4 per < or >, so fitPinned (lib/record.js) decides whether the pause shows it. */
   return 1800;
 }
 
