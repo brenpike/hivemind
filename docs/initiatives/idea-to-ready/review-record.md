@@ -3,28 +3,28 @@ stamps:
   - path: docs/prds/idea-to-ready.md
     blob: 87696cdd88a93ab24c9a08010d43e791e0b49d19
   - path: docs/initiatives/idea-to-ready/solution-design.md
-    blob: a989d15df52e0c7cbd4a1096ca81742ed019a2d5
+    blob: 3916ccd153458910d698f973452ee15a9f7561dd
   - path: docs/adr/0046-idea-to-ready-process.md
-    blob: 67de2aec17a527b1814eab45d1760c22277187ac
+    blob: 5dd73dc279c2350d07edfd56b4132b86fe614225
   - path: docs/adr/0047-abathur-council.md
-    blob: 3f67696b44ae45af42ae4cd2c5917c202082e3bb
+    blob: f26c68f5965192dc6fe52f368c7e33709b7f8f93
 verdict: fail
 open:
   critical: 0
   high: 0
   medium: 0
   low: 0
-rounds: 2
+rounds: 3
 clean_round: false
 ---
 
 # Design review record: Idea to Ready
 
-Round 2, the confirming round, ran and found new findings. Every finding is fixed on the docs branch. The record fails the pass rule on two counts: `verdict` is `fail` and `clean_round` is `false`.
+Round 3, the last round the cap allows, ran and found new findings. Every finding is fixed on the docs branch. The record fails the pass rule on two counts: `verdict` is `fail` and `clean_round` is `false`.
 
-Round 3 follows as the final confirming round the cap allows. If it finds anything new, the review stops and reaches the maintainer as a signal to split the initiative. The pull request stays a draft until this record passes and its stamps equal the documents at the pull request head.
+Round 4 is a one-time confirming round the user approved after round 3 (answer Q9 A, D31). It is added under Rounds as the D31 confirming round and does not change `rounds` (answer Q11 A). If it raises any new critical or high finding, the council work (#618, #624) splits out into its own initiative. Any other new finding stops the review and reaches the maintainer. The three-round cap stays the general rule. The pull request stays a draft until this record passes and its stamps equal the documents at the pull request head.
 
-The stamps are the blobs of commit `c81fd5e27ccb1c0627d8bbd049895dbc89914998`, read with `git rev-parse HEAD:<path>`. Any later edit to a stamped file makes this record stale until a review of the change re-stamps it. The design review skill's verify does not exist yet (#619), so this record is checked by hand.
+The stamps are the blobs of commit `cc65ed646ad8fe38ae8ca24fd3c8a54176509011`, read with `git rev-parse HEAD:<path>`. Any later edit to a stamped file makes this record stale until a review of the change re-stamps it. The design review skill's verify does not exist yet (#619), so this record is checked by hand.
 
 ## Reviewed documents
 
@@ -52,6 +52,15 @@ The confirming round. It ran as one pass per angle. Each pass was fresh and read
 - Angle B: reviewer `hivemind:cerebrate`, model opus (Claude Opus). Failure modes, trust and injection, testability.
 
 Angle A confirmed every round-1 finding fixed except A2, A13 and A14, which were partly or not fixed. Angle B confirmed every round-1 finding fixed except B15. Those four rows are reopened with Round 2. The round raised 21 new findings, R2A1 to R2A10 and R2B1 to R2B11.
+
+### Round 3
+
+The confirming round. It ran as one pass per angle. Each pass was fresh and read-only, ran with `Memory context: none`, and neither reviewer wrote the design.
+
+- Angle A: reviewer `hivemind:cerebrate`, model opus (Claude Opus). Code truth, governance and ADR conflicts, existing-path coverage.
+- Angle B: reviewer `hivemind:cerebrate`, model opus (Claude Opus). Failure modes, trust and injection, testability.
+
+Angle A confirmed every round-1 and round-2 finding fixed. It judged R2B3 fixed but found that its fix introduced R3A1. Angle B confirmed every round-1 and round-2 finding fixed except R2B3: the rule was written but not enforced, the validate step's failures were free text, and the fix round had no file scope. So R2B3 is reopened with Round 3. The round raised 17 new findings, R3A1 to R3A8 and R3B1 to R3B9.
 
 ## Findings
 
@@ -117,7 +126,7 @@ Local review reported no severity for d224e40e, 820000d7 and 0c9bd346. The sever
 | R2A10 | 2 | A | low | fixed | The glossary's Initiative Track definition was garbled. It is rewritten. |
 | R2B1 | 2 | B | high | fixed | The convening rule admitted sites that cannot act on a council result: the validation fix limit, review calls, a planner take with a different option and facts only the user holds. One structural fix, a forced zoom-out on the mid-delivery consult surface: only unmarked planner questions are consulted, in the async planning pass; every gate is a producer read; a switch plans again; an injection-suspect result is terminal (Consult step, D25, D26, D30). It also closes R2A1, R2A2, R2A4 and B15. |
 | R2B2 | 2 | B | high | fixed | An ADR-inclusion check on every record would break other initiatives' docs pull requests. Verify checks ADR inclusion only for records the pull request adds or edits; every other passing record gets stamp equality only (Review record body, D28). |
-| R2B3 | 2 | B | high | fixed | A fix round could re-stamp a record to clear verify. A verify failure now stops the run as blocked with no fix round, and no fix round edits a record (Review record front matter, Review record body, D28). |
+| R2B3 | 3 | B | high | fixed | Reopened in round 3: angle B found the stop still rested on the validate report and on prose. Closed by the record-integrity zoom-out: every commit except a standard-delivery wave refuses a review record in code, and the validate step reads verify's fixed line in code and stops blocked before any fix decision (Review record front matter, Review record body, D28). |
 | R2B4 | 2 | B | high | fixed | Docs-branch runs defaulted to a ready pull request and could add Closes lines. The guide launches every docs-branch run with `draft` true and no closable launch reference (Guide skill, Initiative stages, Failure modes). |
 | R2B5 | 2 | B | medium | fixed | CI mapped only `docs/initiatives/` to verify. #619 maps `docs/initiatives/`, `docs/prds/` and `docs/adr/` (Review record body, D28). |
 | R2B6 | 2 | B | medium | fixed | The design slug was not bound to the parent epic. It is the epic's seed marker slug, else `epic_marker_missing` (Slice design section format, Seed issue marker). |
@@ -126,6 +135,23 @@ Local review reported no severity for d224e40e, 820000d7 and 0c9bd346. The sever
 | R2B9 | 2 | B | low | fixed | The seed marker slug was not checked before `git` or `gh` use. It must match its pattern first, else the issue is ignored and named (Seed issue marker). |
 | R2B10 | 2 | B | low | fixed | The pass rule allowed open medium and low rows. A passing record needs every open count at 0 (Review record front matter, D6). |
 | R2B11 | 2 | B | low | fixed | No named test homes or `tools/validate.sh` suite registrations. Verification strategy names the test scripts, fixture folders and suites for #615, #619 and #621. |
+| R3A1 | 3 | A | medium | fixed | The validate step stopped "blocked" on a verify failure, against SD-25, SD-26 and the Validation Procedure, and no signal told verify failures apart. Closed by the record-integrity zoom-out: verify prints `record-verify-failed: <record path>`, and the validate step reads it in code (Review record body, D28). |
+| R3A2 | 3 | A | medium | fixed | Skills with an `Edit(.hivemind/...)` entry are discovered navigators, and council-member, the guide and the triage overlay were not covered. `hivemind:council-member` is the one council navigator, the guide invokes it, and the triage overlay is a `--overlay` JSON argument (Abathur council, Triage readiness gate, Existing-path coverage). |
+| R3A3 | 3 | A | low | fixed | The runner kernel in `_shared` routed only to `test_shared_libs`, and the `council-member.sh` suite was unnamed. `tools/validate.sh` routes `plugin/skills/_shared/runner-kernel.sh` and `council-member.sh` to `test_run_review` (Runner member brief mode). |
+| R3A4 | 3 | A | low | fixed | D20 counted `needs_user_fact` description bytes in the built scripts, but `projectSchema` drops descriptions. D20 now says the built scripts drop schema descriptions. |
+| R3A5 | 3 | A | low | fixed | `consult` at `balanced` had no effect, because the `planner_question` cell there is `surface`. D18 sets `skip` at `balanced`. |
+| R3A6 | 3 | A | low | fixed | ADR-0046 decision 7's Verify bullet lacked the delivered qualifier. Superseded by the record-integrity zoom-out: CI verify runs on every record the pull request adds or edits, whatever its design's status. |
+| R3A7 | 3 | A | low | fixed | The path allowlist lacked a PRD shape. The PRD path shape joins the allowlist (Slice design section format). |
+| R3A8 | 3 | A | low | fixed | Duplicate of R3B1, fixed by the same change. |
+| R3B1 | 3 | B | medium | fixed | A user-settled composed ask raised again raw in the same pass was convened again. A composed ask carries its raw question's key, a settled raw question resolves as answered, and within one pass a raw question raised again reuses its composed brief (Consult step). |
+| R3B2 | 3 | B | medium | fixed | "No member or Abathur text reaches a planner prompt" was false for asked composed briefs. Council text reaches a planner prompt only inside a question shown to the user: scanned, at most 200 characters each, encoded (Trust boundaries). |
+| R3B3 | 3 | B | medium | fixed | A failed or unusable opinion or Abathur scan had no stated behavior, and the design-stage scan was unnamed. A failed scan gives no council result. In the design stages the conductor classifies opinions and Abathur's output, and the review record and the confirming pass check it (Abathur council, Consult step, Design-decision rule). |
+| R3B4 | 3 | B | medium | fixed | Delivered designs were exempt from CI verify, and readiness never read delivered status. Closed by the record-integrity zoom-out: CI verify runs on every edited record, and a delivered design's slices fail `design_delivered` (Review record body, Readiness check output contract). |
+| R3B5 | 3 | B | medium | fixed | The verify-in-CI guarantees held only in repositories that wire it. Closed by the record-integrity zoom-out: they are scoped to those repositories, and every repository keeps the guide's verify, the readiness check and the commit refusal (Review record body, D28). |
+| R3B6 | 3 | B | low | fixed | Duplicate of R3A7, fixed by the same change. |
+| R3B7 | 3 | B | low | fixed | Two Synapse Runner Gate residual bullets needed widening. #618 widens Cross-script use to six scripts and the broken-hook seeded-rules bullet to the council inputs rule (Runner member brief mode). |
+| R3B8 | 3 | B | low | fixed | The triage overlay's inputs-file transport was unspecified. Duplicate in part of R3A2, fixed by the same change. |
+| R3B9 | 3 | B | low | fixed | The pass-rule clauses lacked one reason code each. Each clause has one reason code, and `record_open_blocking` is renamed `record_open` (Readiness check output contract). |
 
 ## Decisions taken, listed for veto
 
@@ -183,9 +209,25 @@ Each decision has its always-ask screen: an answer to each of the four always-as
 | Council code lives in `plugin/workflow-src/standard-delivery/council.js` | no | no | no | no |
 | D20's list covers `synapse.md` and the three built scripts | no | no | no | no |
 | Duplicates merged: R2A1 with R2B1, R2A4 with B15, R2B7 with A2 | no | no | no | no |
+| Consumer repositories rely on the guide's verify, the readiness check and the commit refusal; D28, ADR-0046 decision 7 and the auto-merge residual are scoped to repositories that wire verify in CI | no | no | No change: it states where the existing bound holds. | no |
+| The guide does not pass verify as a validation command | no | no | no | no |
+| The guide's verdict-fail-first step removed | no | no | no | no |
+| The github-reviewer's own fix commits are bound by a Validation Procedure rule and D24 | no | no | No change: its commit path is unchanged, a record edit is authoritative only through the human-reviewed merge (D24, answer Q5 A), and under auto-merge it falls inside the recorded residual. | no |
+| R3B1: a composed ask carries its raw question's key, reused within a pass | no | Within D21's approved amendment, narrowed by D30. | no | no |
+| R3B2: council text reaches a planner prompt only inside a shown question | no | no | States the existing exposure and widens none. | no |
+| R3B3: a failed scan gives no council result, and design-stage classification is checked by review | no | no | Narrows: unscanned council text is never used. | no |
+| D18: `skip` at `balanced` | no | no | no | no |
+| R3A7: the PRD path shape in the allowlist | no | no | no | no |
+| R3B9: one reason code per pass-rule clause, and `record_open_blocking` renamed `record_open` | no | no | no | no |
+| R3A2: `hivemind:council-member` is the one council navigator, and the guide invokes it | no | no | Narrows: the guide carries no inputs-file Edit entry. | no |
+| R3B8: the triage overlay is a `--overlay` JSON argument | no | no | Narrows: triage carries no inputs-file Edit entry. | no |
+| R3A3: the runner kernel and `council-member.sh` routed to `test_run_review` | no | no | no | no |
+| R3A4: D20 says the built scripts drop schema descriptions | no | no | no | no |
+| R3B7: two Synapse Runner Gate residual bullets widened | no | no | Within the asked D22 and D30, answers Q3 A and Q7 A: it states the exposure they add. | no |
+| Duplicates merged: R3A8 with R3B1, R3B6 with R3A7, R3B8 with R3A2 | no | no | no | no |
 | Every other finding fixed as recommended | no | no | The trust-boundary and merge-path fixes were asked (D22, D23, D24, D30). | no |
 
-The seeded `Edit(.hivemind/council-inputs-*.json)` rule was asked (Q7 A), so it has no taken row.
+The seeded `Edit(.hivemind/council-inputs-*.json)` rule was asked (Q7 A). The commit refusal, the code-read verify stop, CI verify on every record the pull request adds or edits and `design_delivered` were asked (Q10 A), and the round-4 count was asked (Q11 A). So none of them has a taken row.
 
 ## Decisions asked
 
@@ -198,6 +240,10 @@ The seeded `Edit(.hivemind/council-inputs-*.json)` rule was asked (Q7 A), so it 
   - Q6 A: the council weighs every weak or unanswered planner question not marked as needing a fact only the user holds. A strong result with a clean gate is taken. A switch plans again with the answer settled. A split is asked with each side's reasoning. Planners mark through one brief field, `needs_user_fact`.
   - Q7 A: #618 seeds `Edit(.hivemind/council-inputs-*.json)` through `settings-merge.sh`.
   - Q8 A: the round-2 remediation plan is accepted with the Q6 answer.
+- D28, record integrity enforced in code. Asked after design review round 3. The user's answer: Q10 A: every commit except a standard-delivery wave refuses a review record, the validate step reads verify's `record-verify-failed: <record path>` line in code and stops the run blocked before any fix decision, CI verify runs on every record the pull request adds or edits, and a delivered design's slices fail `design_delivered`.
+- D31, one-time fourth design review round. Asked after design review round 3. The user's answers:
+  - Q9 A: fix all round-3 findings, then run round 4 as a one-time confirming round; if it raises any new critical or high finding, the council work (#618, #624) splits out into its own initiative.
+  - Q11 A: round 4 is recorded under Rounds as the D31 confirming round, and `rounds` stays 3.
 
 ## Residuals
 
@@ -205,5 +251,5 @@ Auto-merge of a docs pull request, from finding B5:
 
 - Scope: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval and green checks with no human review of the design.
 - Ground: the user's decision of 2026-11-21 (answer Q5). It is outside the threat model as the maintainer's own opt-in under [ADR-0044](../../adr/0044-settled-approval-and-opt-in-auto-merge.md).
-- Bounded impact: verify in CI, which runs on every change under `docs/initiatives/`, `docs/prds/` and `docs/adr/`, keeps a merged record consistent and current, and #623 closes the Lair path. A wrong design is caught only by a later review.
+- Bounded impact: in a repository that wires verify in CI, verify keeps a merged record consistent and current. In any repository, every commit except a standard-delivery wave refuses a record, the guide runs verify before ready, the readiness check fails every slice of a stale or delivered design, and #623 closes the Lair path. A wrong design is caught only by a later review.
 - Recorded in [ADR-0046](../../adr/0046-idea-to-ready-process.md), Residuals.
