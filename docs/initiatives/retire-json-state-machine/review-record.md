@@ -10,26 +10,115 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 3
+rounds: 1
 clean_round: false
 ---
 
 # Design review record: Retire the JSON state machine
 
+This is a re-review. The PRD [`docs/prds/retire-json-state-machine.md`](../../prds/retire-json-state-machine.md) was written after the first review, so the review runs again over the PRD, the solution design and ADR-0048 (ADR-0046 decision 6, Re-review after an amendment). Rounds count from 1. No record of this initiative has passed, so round 1 covers the whole documents. The first review, its rounds, findings, advisories and one-time exceptions are kept unchanged under History: 2026-11-22 (first review).
+
+Round 1 raised 11 findings, and every one is fixed. The verdict is `fail`, `rounds` is 1 and `clean_round` is `false`. A confirming round follows.
+
+The stamps are unchanged: the blobs at commit `aa9342a244b13150eb141b42ac566611b6b5f268`, the commit the first review's round 1 reviewed. A record with `verdict` `fail` keeps its stamps (ADR-0046 decision 7). Only the passing record re-stamps, to the commit its clean pass reviewed, and it stamps the PRD, the solution design and ADR-0048.
+
+## Reviewed documents
+
+- [PRD: Retire the JSON state machine](../../prds/retire-json-state-machine.md)
+- [Solution design: Retire the JSON state machine](solution-design.md)
+- [ADR-0048](../../adr/0048-retire-json-state-machine.md): retire the JSON state machine
+
+## Rounds
+
+### Round 1
+
+The design touches trust boundaries, so the round has two passes. Neither reviewer wrote the documents.
+
+- Reviewer `hivemind:cerebrate`, model `opus`, `Memory context: none`. One fresh, read-only pass covering the whole PRD, solution design and ADR-0048, angles A and B. It reviewed commit `ec87d495dcd1079ce37bbd4c4dcd23254cb7be30` and raised R1-01 to R1-11.
+- Local review tool pass: pending. The overlord fills it in after the tool pass runs on the fixed commit.
+
+The cerebrate pass raised 11 findings. Five are medium (R1-01, R1-02, R1-04, R1-05, R1-06) and six are low (R1-03, R1-07 to R1-11). Each finding was checked against the repository before its fix, and none was rejected. After the fixes, none is open. The solution design records the fixes in one dated line under Amendments.
+
+## Findings
+
+| ID | Round | Angle | Severity | Disposition | Note |
+|---|---|---|---|---|---|
+| R1-01 | 1 | A | medium | fixed | The design's line 3 said the passing record stamps only the design and ADR-0048, but ADR-0046 decision 7 stamps the PRD too. Line 3 now says the passing record stamps the PRD, the design and ADR-0048. The taken decision that said otherwise is withdrawn. |
+| R1-02 | 1 | B | medium | fixed | The PRD's Removal criterion was repo-wide, so no slice could prove it. It now holds in the files each slice changes, as the design's S5 check does, and keeps both exceptions. |
+| R1-03 | 1 | A | low | fixed | Existing-path coverage missed the state names at `plugin/agents/cerebrate.md:234` and `:269` and the `question` user gate at `plugin/governance/decision-autonomy.md:78`. A cerebrate row is added, and the decision-autonomy row names `:78`. |
+| R1-04 | 1 | A | medium | fixed | S4 renames the marker heading and deletes the report trigger, but D17 named only two citers, and `run-ledger-schema.md` lives until S5. D17 now lists every citer in `plugin/` and `tests/`, the `run-ledger-schema.md` row gains an S4 edit, and the decision-autonomy row names `:91` and `:99`. |
+| R1-05 | 1 | B | medium | fixed | S1 removes the exploratory row from `web/functionality.html`, but `web/tests/dom-contract.test.ts:151-155` reads the workflow names from `plugin/workflows/*.json` until S5, so this repository's site test, run by its Pages workflow, would fail. The test change moves into S1. |
+| R1-06 | 1 | A | medium | fixed | The PRD said every run that reuses a pull request lists its decisions there; the design limits that to `hivemind:open-plan-pr`. The PRD's Solution, Decisions criteria and Implementation Decisions now carry the design's limit. |
+| R1-07 | 1 | B | low | fixed | The fallback said a refused `pr-feedback-remediation` launch takes the route the request asked for, but the launch after a watch escalation carries no request. Such a launch now takes the fix route and plans from the watch's escalation payload, in the fallback text, its escalation note and the Instinct path. |
+| R1-08 | 1 | A | low | fixed | The `tools/test_shared_libs.sh` row missed the S3 derive cases at `:1293-1330`, which pass `state.current` as started-evidence and test `NO_LEDGER_POINTER`. The row now names them under S3. |
+| R1-09 | 1 | A | low | fixed | After S2, step 2 of `## Workflow State Execution` would still send a selected `hatchery-dispatch` into the state machine. S2 now edits step 2, the coverage row and the S2 check say so, and the Seam order rationale for S4 is corrected. |
+| R1-10 | 1 | A | low | fixed | "Asks only Ask Set questions" left out the always-surface items of `### Stop Conditions`, such as the script-or-Instinct question and a prose budget raise. The PRD, the Instinct paths and the proposed README texts now say so, and the budget raise is no longer called a Tier A item. |
+| R1-11 | 1 | A | low | fixed | The waves expectations did not say what happens to the `waves.test.mjs:478-521` cases. They keep their literal expected results, checked against `waves.js`, and the oracle-only stderr checks at `:510-512` go with `next-wave.sh`, in the PRD, D13, Waves expectation files and the coverage row. |
+
+## Decisions taken, listed for veto
+
+Each decision carries its recommendation strength and what it touches, per ADR-0046 decision 8 as amended 2026-11-22: PRD scope or acceptance, an ADR amendment, a trust boundary, credential or merge path, or none. A decision the user answered shows its recommendation strength and that the user chose it.
+
+| Decision | Recommendation strength | Touches |
+|---|---|---|
+| Q1 A: retire the state machine (D1, D10). | strong; asked before #649, user chose it | ADR amendment (ADR-0018 superseded); trust boundary (Trust-Boundary Discipline boundaries 1 and 2 retire) |
+| Q2 A: one Instinct fallback for every refused or blocked launch (D2, D3). | strong; asked before #649, user chose it | ADR amendment (through ADR-0048 decision 8) |
+| Q3 A: brood dispatch runs on Instinct behind the strain-approval ask (D4). | strong; asked before #649, user chose it | Trust boundary (the strain-approval gate stays Tier A) |
+| Q4 A: retire the post-merge decision report, keep the pre-merge journal (D7). | strong; asked before #649, user chose it | ADR amendment (ADR-0030 report retired) |
+| Q5 A: the brood dashboard drops its claimed-state columns (D8). | strong; asked before #649, user chose it | ADR amendment (ADR-0007 dashboard columns); trust boundary (child-ledger read side retires) |
+| Q6 A: remove the exploratory workflow (D5). | strong; asked before #649, user chose it | none beyond ADR-0048 decision 8 |
+| Q7 A: re-home two rules in `## Safety Rails` (D11). | strong; asked before #649, user chose it | Trust boundary |
+| Q8 A: the user confirms each covered deletion before the slice's run starts (D12). | strong; asked before #649, user chose it | Trust boundary (Destructive Fix Confirmation Gate categories) |
+| ADR-0048 decision 8, the amendment rule. | strong; asked before #649, user chose it | ADR amendment |
+| ADR-0036 decisions 9 and 10 stand as written. | strong; asked before #649, user chose it | none |
+| The round count after round 2's tool pass: the pass at `63ff83f2` yields no round. | strong; asked before #649, user chose it | none |
+| The round-3 cap: narrow the Verification strategy, then one round 4 over that change only, a one-time exception for this initiative. | strong; asked under ADR-0046 decision 6's three-round cap, user chose it | none |
+| R1-08: a clause that scopes an ADR to the current engine is history under ADR-0048 decision 8, so it is not amended (overlord). | Strong | none |
+| D9: ADR-0005 is unchanged (design). | Strong | none |
+| D13: waves.js keeps its parity fixtures as frozen expectations (design). | Strong | none |
+| D15: The manifest keeps version 4 without the hatchery block (design). | Strong | none |
+| D16: The Reflex heading is kept (design). | Strong | none |
+| D17: The proactive zoom-out marker rides the cluster payload (design). | Strong | none |
+| D18: Exit-reason routing coverage moves to a workflow-scripts test, for both producers (design). | Strong | none |
+| D19: Stamped documents change only through their own re-review (design). | Strong | none |
+| Sequencing the tool pass before the cerebrate pass in each round from round 2 on (overlord). | Strong | none |
+| Each rule stated once at its owner; other sites point to it (overlord). | Strong | none |
+| The round-3 narrowing's wording, and each design decision's screen conformed to ADR-0046 decision 8 as amended (overlord). | Strong | none |
+| PRD written from the design with no new decision; the `hivemind:plan-to-prd` story-completeness and scope-boundary confirm gates taken, not asked (overlord). | Strong | PRD scope |
+
+D11 is answered (Q7 A), D12 is answered (Q8 A), and D14 is answered (Q1 A); none is a taken decision.
+
+Withdrawn at re-review round 1: "Passing record stamps the design and ADR-0048 only; PRD needed before readiness (overlord)." It conflicted with ADR-0046 decision 7 (R1-01). The passing record stamps the PRD, the solution design and ADR-0048.
+
+## Decisions asked
+
+- Q1 A to Q6 A, answered before round 1, rest ADR-0048 decisions 1 to 7: Q1 A retires the state machine; Q2 A gives every refused or blocked launch one Instinct fallback; Q3 A runs brood dispatch on Instinct behind the strain-approval ask; Q4 A retires the post-merge decision report and keeps the pre-merge journal; Q5 A drops the dashboard's claimed-state columns; Q6 A removes the exploratory workflow.
+- ADR-0048 decision 8, the amendment rule. After local review the user chose A: a clause of an accepted ADR that relies on a removed item or run ledger field now relies on its replacement, or lapses where the design names none. A clause that only mentions the state machine as history is not amended.
+- ADR-0036 decisions 9 and 10. After a later local review the user decided they stand as written. The design's Decision journal and State and ownership sections follow them.
+- Q7, D11, Tier A. Answered: Q7 A. Move only two rules, the facts and injection-scan rule and the PR head rule, to `## Safety Rails`. Drop the `expect_commit` sentence, since the skills' input gates own it.
+- Q8, D12's confirmation point. Answered: A (user): the user confirms each covered deletion before that slice's run starts.
+- The round count, after round 2's local review tool pass. Answered: A. The cerebrate pass at `63ff83f2` yields no round, since its trust-boundary tool pass did not run with it; its findings R2-01 to R2-05 keep their IDs and are attributed to round 2.
+- The round-3 cap. Answered: A (user, strong recommendation). Narrow the design's Verification strategy to what each slice must prove, with no check file, name list, scan path or test mechanism; then run one round 4 over that change only, a one-time exception to the three-round cap for this initiative, recorded like the Idea to Ready design's D31 (Q9). Asked because the three-round cap of ADR-0046 decision 6 stops the review after round 3 and reaches the maintainer; the diminishing-returns check of the same decision fired after round 3 (Round 3).
+- The close of round 4. Answered: A (user), strong recommendation: stop reviewing; the record stays `fail` with every finding fixed, and the pull request merges on the user's approval as an exception to the failed-verdict rule. Asked because the diminishing-returns check of ADR-0046 decision 6 fired after round 4 (Round 4).
+
+## History: 2026-11-22 (first review)
+
+The first review's record follows, unchanged apart from each heading one level down. Its stamps, verdict and counts are the front matter it then held: `verdict` `fail`, `rounds` 3, every open count 0 and `clean_round` `false`.
+
 The design review has completed three rounds and has not passed. Review stopped after round 4 on the user's answer A to the diminishing-returns advisory. The verdict is `fail`, and every finding is fixed. The user has answered Tier A questions Q7 on D11 and Q8 on D12, the round-3 cap question and the close of round 4. No round has been clean, so `clean_round` is `false`. Round 3 was the last round under the three-round cap (ADR-0046 decision 6). The user answered A to the cap question: narrow the design's Verification strategy, then run one round 4 over that change only, a one-time exception for this initiative. The three-round cap stays the general rule. Both round-4 passes at `d2dada8bb6665488edd9f50ca762013fb93123e3` drew no finding on the solution design or ADR-0048. The pull request merges on the user's approval, as a user-approved exception to the rule that a record with a failed verdict does not merge.
 
 The passing record stamps the solution design and ADR-0048. No PRD exists; `docs/prds/retire-json-state-machine.md` is needed before any slice can pass the readiness check. The stamps are the blobs at commit `aa9342a244b13150eb141b42ac566611b6b5f268`, the commit round 1 reviewed; a record with `verdict` `fail` keeps its stamps, and only the passing record re-stamps, to the commit its clean pass reviewed.
 
-## Reviewed documents
+### Reviewed documents
 
 - [Solution design: Retire the JSON state machine](solution-design.md)
 - [ADR-0048](../../adr/0048-retire-json-state-machine.md): retire the JSON state machine
 
 No PRD is reviewed, since none exists.
 
-## Rounds
+### Rounds
 
-### Round 1
+#### Round 1
 
 Two passes. Neither reviewer wrote the design. Both reviewed commit `aa9342a244b13150eb141b42ac566611b6b5f268`.
 
@@ -42,7 +131,7 @@ The round raised 12 findings, R1-01 to R1-12. Two are high (R1-01, R1-03), seven
 
 The overlord also made five consistency edits after the round, listed here for the user's veto: the D2 level-check wording; the phrase "live only in text this design deletes"; the ADR Considered options wording on the journal; the design's line 3 record status; the R1-10 `:30` wording.
 
-### Round 2
+#### Round 2
 
 A confirming round. Neither reviewer wrote the design. It covers the change since `aa9342a2` and round 1's fixes.
 
@@ -53,7 +142,7 @@ An earlier cerebrate pass at commit `63ff83f2b93b5533981da5b795d3f44d51d269c3`, 
 
 The incomplete cerebrate pass raised five findings, R2-01 to R2-05. Three are medium (R2-01 to R2-03) and two are low (R2-04, R2-05). The tool pass raised R2-T1 (high) and R2-T2 (medium). The confirming cerebrate pass raised R2-C01 (medium), R2-C02 (medium) and R2-C03 (low). After the fixes, none is open. Round 1's fixes R1-01 to R1-05, R1-09, R1-11 and R1-12 close their findings; R1-10 was correct, and its `:87` edit exposed R2-03. Round 2 is not clean, so `clean_round` is `false`: its tool pass raised findings, and a round is clean only when every completed pass of it raises no new finding (ADR-0046 decision 6). The verdict is `fail`.
 
-### Round 3
+#### Round 3
 
 Two passes over the design as it stood after round 2. Neither reviewer wrote the design.
 
@@ -64,7 +153,7 @@ The round raised 6 findings, so it is not clean and the verdict is `fail`. The r
 
 Diminishing-returns advisory: signals: recurrence on the Verification strategy's coverage checks, which R1-07, R2-02 and R2-C01 fixed and R3-T1, R3-01 and R3-02 found again; answer A (user), given to the round-3 cap question: narrow the claim and hand the checks to each slice's own design (ADR-0046 decision 6).
 
-### Round 4
+#### Round 4
 
 One-time exception approved by the user for this initiative only (answer A to the cap question). The three-round cap stays the general rule. It is recorded here like the Idea to Ready design's round-4 exception (`docs/initiatives/idea-to-ready/review-record.md`, D31 and Q9): it does not change `rounds`, which stays 3, as that round 4 did not (answer Q11 A there), so a passing record still meets the pass rule's `rounds` of 2 to 3 (ADR-0046 decision 7).
 
@@ -77,7 +166,7 @@ A record-only closing check followed: one fresh cerebrate pass (model `opus`, `M
 
 Diminishing-returns advisory: signals: recurrence on the record's conformance to ADR-0046 decisions 6 to 8, which R2-05 and R2-C03 fixed and R4-02 and R4-C02 found again; severity and reach trending down, from two highs on the design in round 3 to none on the design or ADR-0048 in round 4 and one medium and one low on the record only; answer A (user): stop reviewing. The record keeps `verdict` `fail` with every finding fixed; the solution design and ADR-0048 drew no finding in either round-4 pass at `d2dada8bb6665488edd9f50ca762013fb93123e3`. The pull request merges on the user's approval as a user-approved exception to the rule that a record with a failed verdict does not merge.
 
-## Findings
+### Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
 |---|---|---|---|---|---|
@@ -115,47 +204,3 @@ Diminishing-returns advisory: signals: recurrence on the record's conformance to
 | R4-02 | 4 | confirm | low | fixed | The record held no diminishing-returns advisory for round 3, and it said the cap question was asked under ADR-0046 decision 8. Round 3 now carries the advisory, and the cap question is recorded as asked under the three-round cap of decision 6. |
 | R4-C01 | 4 | confirm | medium | fixed | The closing-check sentence claimed it ran as the Idea to Ready record's round-4 confirming checks did, but those each ran a cerebrate pass and a tool pass; a cerebrate pass without its tool pass yields no round. The sentence is corrected: the check yields no round. |
 | R4-C02 | 4 | confirm | low | fixed | The record held no diminishing-returns advisory after round 4, and the next step was recorded as taken, not asked. The advisory is recorded and asked; answer A (user): stop reviewing. |
-
-## Decisions taken, listed for veto
-
-Each decision carries its recommendation strength and what it touches, per ADR-0046 decision 8 as amended 2026-11-22: PRD scope or acceptance, an ADR amendment, a trust boundary, credential or merge path, or none. A decision the user answered shows its recommendation strength and that the user chose it.
-
-| Decision | Recommendation strength | Touches |
-|---|---|---|
-| Q1 A: retire the state machine (D1, D10). | strong; asked before #649, user chose it | ADR amendment (ADR-0018 superseded); trust boundary (Trust-Boundary Discipline boundaries 1 and 2 retire) |
-| Q2 A: one Instinct fallback for every refused or blocked launch (D2, D3). | strong; asked before #649, user chose it | ADR amendment (through ADR-0048 decision 8) |
-| Q3 A: brood dispatch runs on Instinct behind the strain-approval ask (D4). | strong; asked before #649, user chose it | Trust boundary (the strain-approval gate stays Tier A) |
-| Q4 A: retire the post-merge decision report, keep the pre-merge journal (D7). | strong; asked before #649, user chose it | ADR amendment (ADR-0030 report retired) |
-| Q5 A: the brood dashboard drops its claimed-state columns (D8). | strong; asked before #649, user chose it | ADR amendment (ADR-0007 dashboard columns); trust boundary (child-ledger read side retires) |
-| Q6 A: remove the exploratory workflow (D5). | strong; asked before #649, user chose it | none beyond ADR-0048 decision 8 |
-| Q7 A: re-home two rules in `## Safety Rails` (D11). | strong; asked before #649, user chose it | Trust boundary |
-| Q8 A: the user confirms each covered deletion before the slice's run starts (D12). | strong; asked before #649, user chose it | Trust boundary (Destructive Fix Confirmation Gate categories) |
-| ADR-0048 decision 8, the amendment rule. | strong; asked before #649, user chose it | ADR amendment |
-| ADR-0036 decisions 9 and 10 stand as written. | strong; asked before #649, user chose it | none |
-| The round count after round 2's tool pass: the pass at `63ff83f2` yields no round. | strong; asked before #649, user chose it | none |
-| The round-3 cap: narrow the Verification strategy, then one round 4 over that change only, a one-time exception for this initiative. | strong; asked under ADR-0046 decision 6's three-round cap, user chose it | none |
-| R1-08: a clause that scopes an ADR to the current engine is history under ADR-0048 decision 8, so it is not amended (overlord). | Strong | none |
-| D9: ADR-0005 is unchanged (design). | Strong | none |
-| D13: waves.js keeps its parity fixtures as frozen expectations (design). | Strong | none |
-| D15: The manifest keeps version 4 without the hatchery block (design). | Strong | none |
-| D16: The Reflex heading is kept (design). | Strong | none |
-| D17: The proactive zoom-out marker rides the cluster payload (design). | Strong | none |
-| D18: Exit-reason routing coverage moves to a workflow-scripts test, for both producers (design). | Strong | none |
-| D19: Stamped documents change only through their own re-review (design). | Strong | none |
-| Sequencing the tool pass before the cerebrate pass in each round from round 2 on (overlord). | Strong | none |
-| Each rule stated once at its owner; other sites point to it (overlord). | Strong | none |
-| Passing record stamps the design and ADR-0048 only; PRD needed before readiness (overlord). | Strong | none |
-| The round-3 narrowing's wording, and each design decision's screen conformed to ADR-0046 decision 8 as amended (overlord). | Strong | none |
-
-D11 is answered (Q7 A), D12 is answered (Q8 A), and D14 is answered (Q1 A); none is a taken decision.
-
-## Decisions asked
-
-- Q1 A to Q6 A, answered before round 1, rest ADR-0048 decisions 1 to 7: Q1 A retires the state machine; Q2 A gives every refused or blocked launch one Instinct fallback; Q3 A runs brood dispatch on Instinct behind the strain-approval ask; Q4 A retires the post-merge decision report and keeps the pre-merge journal; Q5 A drops the dashboard's claimed-state columns; Q6 A removes the exploratory workflow.
-- ADR-0048 decision 8, the amendment rule. After local review the user chose A: a clause of an accepted ADR that relies on a removed item or run ledger field now relies on its replacement, or lapses where the design names none. A clause that only mentions the state machine as history is not amended.
-- ADR-0036 decisions 9 and 10. After a later local review the user decided they stand as written. The design's Decision journal and State and ownership sections follow them.
-- Q7, D11, Tier A. Answered: Q7 A. Move only two rules, the facts and injection-scan rule and the PR head rule, to `## Safety Rails`. Drop the `expect_commit` sentence, since the skills' input gates own it.
-- Q8, D12's confirmation point. Answered: A (user): the user confirms each covered deletion before that slice's run starts.
-- The round count, after round 2's local review tool pass. Answered: A. The cerebrate pass at `63ff83f2` yields no round, since its trust-boundary tool pass did not run with it; its findings R2-01 to R2-05 keep their IDs and are attributed to round 2.
-- The round-3 cap. Answered: A (user, strong recommendation). Narrow the design's Verification strategy to what each slice must prove, with no check file, name list, scan path or test mechanism; then run one round 4 over that change only, a one-time exception to the three-round cap for this initiative, recorded like the Idea to Ready design's D31 (Q9). Asked because the three-round cap of ADR-0046 decision 6 stops the review after round 3 and reaches the maintainer; the diminishing-returns check of the same decision fired after round 3 (Round 3).
-- The close of round 4. Answered: A (user), strong recommendation: stop reviewing; the record stays `fail` with every finding fixed, and the pull request merges on the user's approval as an exception to the failed-verdict rule. Asked because the diminishing-returns check of ADR-0046 decision 6 fired after round 4 (Round 4).

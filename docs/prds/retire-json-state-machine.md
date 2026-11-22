@@ -16,7 +16,7 @@ One engine remains: the workflow scripts, with Instinct and Reflex beside them. 
 - **Instinct covers every workflow without a script.** Besides delivery, it runs a read-only analysis, a post-PR remediation and brood dispatch. Brood dispatch spawns nothing until the user approves the strain text.
 - **The exploratory workflow is removed.** A request no workflow fits routes to `analysis-only`, `standard-delivery` or `ambiguous`.
 - **Resume reads git and GitHub.** A run is recorded by its working branch, commits and pull request. No session-start scan runs.
-- **The pull request is the decision journal.** A run lists the decisions it took in its final message or report, and on its pull request when it opens or reuses one. The post-merge decision report is retired.
+- **The pull request is the decision journal.** A run lists the decisions it took in its final message or report. A run that opens a pull request, or pushes to one through `hivemind:open-plan-pr`, also lists them there. The post-merge decision report is retired.
 - **The brood dashboard reads no child run ledger.** It drops its claimed-state columns, and the facts file is a child's only started-evidence.
 - **Two safety rules move into the overlord's safety rails**, so they bind every path the overlord drives.
 
@@ -59,7 +59,7 @@ It works in a consumer project with only the plugin installed. Nothing adds a re
 - **Instinct paths.**
   - A read-only analysis relays its result as the final report and opens no branch, commit or pull request.
   - A post-PR remediation checks out the PR head first, then runs the watch or one fix pass. An escalation plans, runs its waves with one checkpoint commit each, validates, and pushes on the existing pull request. It opens no new pull request.
-  - Every path asks only Ask Set questions and takes every other with its recommendation.
+  - Every path asks only what `### Stop Conditions` surfaces: the Ask Set and its listed always-surface items. It takes every other question with its recommendation.
 - **Brood dispatch.**
   - It is entered when the router selects `hatchery-dispatch` or an Instinct plan returns delivery `brood`.
   - Spawning happens only after the user approves the normalized strain text. A declined approval spawns nothing. The approval stays a Tier A Ask Set item.
@@ -76,17 +76,18 @@ It works in a consumer project with only the plugin installed. Nothing adds a re
   - When the PR head branch cannot be resolved or checked out, the run stops blocked before any reviewer.
 - **Decisions.**
   - The Instinct final report has a `Decisions:` line.
-  - A run that opens a pull request lists its decisions under "Decided for you" in its body. A run that reuses one lists them in a comment.
+  - A run that opens a pull request, or pushes to one through `hivemind:open-plan-pr`, lists the decisions there; any other run lists them only in its final message or report.
+  - A run that opens a pull request lists its decisions under "Decided for you" in its body. A run that pushes to an existing one through `hivemind:open-plan-pr` lists them in a comment.
   - A run with no pull request lists its decisions in its final message or report and keeps no decision journal.
   - The overlord's stop conditions name no journal destination of their own and cite the autonomy governance's Decision Journal.
   - The post-merge decision report, its skill, its session-start scan, its marker and `HIVEMIND_ENABLE_DECISION_REPORT` are gone.
 - **Resume.** No session-start scan runs. The resume or version-skew question leaves the Ask Set. Run ledgers from older versions are neither read nor deleted.
 - **Post-PR watch.** The default post-PR watch reads the in-session request text. A run that does not watch names the span of the request it relied on in its final report.
 - **Reviewer outcomes.** Every `exit_reason` the GitHub Review Loop can return, and every `exit_reason` of the GitHub-Reviewer fix pass that Instinct runs, is routed by the overlord or ends the watch or pass with its report, and a workflow-scripts test covers it.
-- **Proactive zoom-out.** The proactive zoom-out marker rides the cluster payload, and its governance heading and its overlord citer agree.
+- **Proactive zoom-out.** The proactive zoom-out marker rides the cluster payload, and its governance heading and every citer of it agree.
 - **Autonomy table.** Every remaining site starts with a workflow id that has a script. The four rows no script resolves are gone.
-- **Waves.** The script wave rule matches its frozen expectations on every fixture, override, mutation and seeded-corpus case checked today. The expectations come from the old wave oracle in a commit before its deletion whose test run passed.
-- **Removal.** No live reference to a removed item remains, apart from text a later re-review owns and text that pins an absence. No citation of a deleted heading remains.
+- **Waves.** The script wave rule matches its frozen expectations on every fixture, override, mutation and seeded-corpus case checked today. The expectations come from the old wave oracle in a commit before its deletion whose test run passed. The `waves.test.mjs:478-521` cases, ids with a line feed, hostile ids, and ids of 64, 65 and 5000 characters, keep their literal expected results, checked against the script wave rule. Their checks of the oracle's error output at `:510-512` go with the oracle.
+- **Removal.** No live reference to a removed item remains in the files each slice changes, apart from text a later re-review owns and text that pins an absence. No citation of a deleted heading remains.
 - **Validation and budgets.** The repository's full validation suite passes, with no map entry, suite or budget entry for a deleted path. The overlord's prose budget shrinks. The overlord's and the autonomy governance's budgets are lowered to their measured size.
 - **Confirmation.** Each slice's review checks the user's confirmation of each item in a destructive-fix category that the slice deletes or narrows.
 
@@ -99,7 +100,7 @@ It works in a consumer project with only the plugin installed. Nothing adds a re
 - **Router contract.** Outcomes are `selected`, `ambiguous` and `blocked`. The catalog keeps four entries, and `hatchery-dispatch` names a workflow with no script. The router reads no file.
 - **Run record rule.** A run is recorded by the working branch, commits and pull request it opens, and a new session recovers from them. A run that opens no branch and pull request keeps no run record and starts over. A brood dispatch is recorded by its brood manifest. No run keeps a run ledger.
 - **Resume has one path.** In the same session, a paused script run resumes by name. In a new session, the request is given again and the planner plans what is left from fresh facts on the branch.
-- **The pull request is the decision journal.** A run that opens or reuses a pull request lists each taken decision there and in its final message or report, one line each, as the scripts already write them. A run with no pull request lists its decisions in its final message or report and keeps no journal. ADR-0036 decisions 9 and 10 stand as written. No local copy exists.
+- **The pull request is the decision journal.** A run that opens a pull request, or pushes to one through `hivemind:open-plan-pr`, lists the decisions there; any other run lists them only in its final message or report. A run that lists them on a pull request also lists them in its final message or report, one line each, as the scripts already write them. A run with no pull request keeps no journal. ADR-0036 decisions 9 and 10 stand as written. No local copy exists.
 - **The dashboard reads no child ledger.** The facts file is a child's only started-evidence. The dashboard reads its name and type only, never its content. `derived_status` keeps its closed set, and the started-evidence gate only demotes, never promotes, and never hides a dead session.
 - **The brood manifest keeps version 4 without the `hatchery` block.** No reader reads the block, so dropping it changes nothing a reader sees. `run.suggested_id` stays the strain's lineage key.
 - **Two rules re-homed in the safety rails.** Gather-facts with its injection scan before every planner delegation, and the PR head checkout before any reviewer. The gated-commit rule is not restated: the input gates of `hivemind:open-plan-pr` and `hivemind:push-branch` refuse a push without `expect_commit`.
@@ -154,6 +155,6 @@ It works in a consumer project with only the plugin installed. Nothing adds a re
 - **Residual: no decision review after merge.** Each taken decision is listed on the pull request before any merge. A merge the user does not make, under `HIVEMIND_AUTO_MERGE` (ADR-0044) or by the Lair (ADR-0045 decision 12), can land first; a veto is then a revert. For a Lair strain, the digest of ADR-0045 decision 14 stays the veto channel.
 - **Residual: a brood child's Ask Set question waits.** A child on Instinct that reaches one waits in its own session, reachable through its `attach:` line or remote control when enabled, as a child on the state machine did.
 - **Upgrade effects.** `HIVEMIND_ENABLE_DECISION_REPORT` left in settings has no effect. A `Workflow(hivemind:<id>)` deny entry now sends any workflow to Instinct. A brood spawned before the upgrade shows only the observed status column.
-- **Prose budget.** An overlord change that overruns its prose budget is asked as a budget raise, a Tier A item, never raised silently.
+- **Prose budget.** An overlord change that overruns its prose budget is asked as a budget raise, an always-surface item of the overlord's `### Stop Conditions`, never raised silently.
 - **Shared documents.** The glossary, README, CLAUDE.md, the maintainer references and the website change as the solution design's Changes to shared documents says. The glossary retires Run Ledger, Workflow Definition, Exploratory Intent Session, Transition Engine, Run Ownership, Intent-Driven Fallback and Decision Report.
 - **Open questions:** None.
