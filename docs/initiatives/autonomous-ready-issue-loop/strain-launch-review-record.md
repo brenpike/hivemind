@@ -50,7 +50,7 @@ The round 3 findings come from the parent [review record](review-record.md). #63
 | --- | --- | --- | --- |
 | A3-1 | high | Lair-written settings do not keep merge keys out of strains. | fixed: Components > Strain launch and settings, and Contracts and seams > Strain settings and Strain environment, for the user, project and local scopes; a managed merge key stays the named residual "managed settings" under Trust boundaries > Strain containment |
 | A3-4 | high | There is no contract for the strain's launch inputs or for carrying parked, branch, head and decisions out of the run result. | fixed: Components > Launch inputs, and Contracts and seams > Launch file and Strain result |
-| A3-5 | high | Re-claim and remediation contradict the detached spawn and the brood-child fresh-branch rule. | fixed: Components > Start points, where the strain's push is the one authority on a moved branch: Lair mode of `push-branch.sh` and the engine's mapping of its refusal to `start_moved`; and the Failure modes rows "Start moved", "Moved head before a re-claim launch" and "Moved head before a remediation launch" |
+| A3-5 | high | Re-claim and remediation contradict the detached spawn and the brood-child fresh-branch rule. | fixed: Components > Start points, where the remote compares the pre-image at the write: Lair mode of `push-branch.sh` pushes with a lease pinned to the pre-image the Lair captured, after an ancestry check, and the engine maps its fixed blocker line to `start_moved`; and the Failure modes rows "Start moved", "Moved head before a re-claim launch" and "Moved head before a remediation launch" |
 | A3-6 | high | Governance the strain overlord loads still tells it to ask, and no slice owns the edits. | fixed: Components > Unattended governance edits |
 | A3-7 | high | The facts step re-reads referenced issues and outsider comments live. | fixed: Components > Launch inputs ("Facts come only from the captured issue text") |
 | B3-2 | high | The strain's model derives launch inputs from the issue text, and the facts step re-reads GitHub live. | fixed: Components > Launch inputs |
@@ -74,7 +74,7 @@ A3-11 is not owned by #630. The design's Seam order meets it for this scope: eac
 - The parent [review record](review-record.md): the round 3 findings, their severities and the three-way split.
 - Issue #630: the findings it owns and its acceptance criteria.
 - The [strain launch design](strain-launch-design.md): the sections each disposition names.
-- The local review root-cluster report on the design's start-point paragraph: local review iterations 1, 3 and 4 each found a branch move that fell after a start check.
+- The local review root-cluster report on the design's start-point paragraph: local review iterations 1, 3 and 4 each found a branch move that fell after a start check, and a fourth finding showed that a plain push accepts a move the strain absorbed, such as a move it fetched and merged during the run.
 
 ## Decisions taken (listed for veto)
 
@@ -83,10 +83,11 @@ A3-11 is not owned by #630. The design's Seam order meets it for this scope: eac
 - B3-20 is split into the two parts #630 owns, each with its own disposition.
 - Each owned finding is dispositioned before round 1, so `open_counts` starts at zero. Round 1 checks each disposition.
 - This record keeps the parent record's keys and disposition vocabulary.
-- The start-move class is fixed by making the strain's push the one authority on a moved branch, through Lair mode of `push-branch.sh`. The overlord's head recheck after the switch is removed (Components > Start points).
+- The start-move class is fixed by changing the push's key from fast-forward acceptance to the remote branch's pre-image, the commit the run started from, which the remote compares at the write. The overlord's head recheck after the switch is removed (Components > Start points).
+- Lair mode of `push-branch.sh` pushes with a lease pinned to the start commit, `--force-with-lease=refs/heads/<b>:<pre-image>`, with an empty value on a first claim, after an ancestry check so the push never rewrites the branch. This reverses the design's earlier wording that a strain's push is never forced. Taken under `plugin/governance/decision-autonomy.md` (Tier B — Auto-Decide and Journal): a strong recommendation with a clean gate, and reversible.
 - A refused first-claim push goes to `lair:failed`, counted toward the circuit breaker (Failure modes, row "Start moved").
-- No deny rule on force flags is added (Trust boundaries > Strain containment).
-- No mid-run poll of the remote branch is designed. The wasted run time of a strain whose branch moved mid-run is a recorded residual in Components > Start points. The run took option A of Q1, a strong recommendation.
+- No deny rule on force flags is added: the workflow's lease is pinned to a value the Lair captured, and a push a strain runs by hand stays inside the named residual (Trust boundaries > Strain containment).
+- No mid-run poll of the remote branch is designed: only the pinned-lease push sees a move made during the run. The wasted run time of a strain whose branch moved mid-run is a recorded residual in Components > Start points. The run took option A of Q1, a strong recommendation.
 
 ## Decisions asked
 
@@ -96,5 +97,7 @@ The user was asked four always-ask (Tier A) questions and answered each with opt
 - Reword PRD line 64 to what the settings deliver, with an injected strain as a named residual.
 - Reword ADR-0045 decision 3 to name the start points for a first claim, a re-claim and a remediation.
 - Local review finding f26808d3 on the remediation author filter: keep the in-scope Bot exception as trusted. Changes 4 and 5 of the design propose the matching PRD line 62 and ADR-0045 decision 11 wording.
+
+On 2026-11-21 the user chose "change approach" when local review reported the root cluster on the design's start-point construct: the push is keyed on the remote branch's pre-image instead of another patch to the fast-forward rule.
 
 The design's section Decisions > Changes to shared documents holds each rewording as exact proposed text. A later integration issue applies them. None is applied in this pull request.
