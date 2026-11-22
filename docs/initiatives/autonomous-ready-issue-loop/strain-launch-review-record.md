@@ -4,9 +4,9 @@ verdict: pending
 open_counts:
   critical: 0
   high: 0
-  medium: 0
-  low: 0
-rounds: 9
+  medium: 2
+  low: 1
+rounds: 10
 clean_round: null
 ---
 
@@ -14,7 +14,7 @@ clean_round: null
 
 This record covers the design review of issue #630, the strain launch and containment part of the Lair, epic #603. Only the [strain launch design](strain-launch-design.md) is stamped. Its stamp's blob is `git rev-parse HEAD:docs/initiatives/autonomous-ready-issue-loop/strain-launch-design.md`, and the stamp is written last. The [PRD](../../prds/autonomous-ready-issue-loop.md), [ADR-0045](../../adr/0045-lair-software-factory.md) and the parent [solution design](solution-design.md) are reviewed, not stamped.
 
-The review exits only when zero critical or high findings are open and one round raises no new findings. It runs at most 3 rounds. On 2026-11-22 the user authorized one more round beyond that cap (Round 3, Decisions asked). Round 4 ran under that authorization. On 2026-11-22 the user authorized one confirming round 5 (Round 4, Decisions asked). Round 5 ran under that authorization. Round 6 ran after the user's answer to the round 5 question, round 7 after the user's answer to the round 6 question, and round 8 after the user's answer to the round 7 question (Decisions asked). Round 9 follows the user's answer to the round 8 question and is the final round under that answer's stop rule (Decisions asked).
+The review exits only when zero critical or high findings are open and one round raises no new findings. It runs at most 3 rounds. On 2026-11-22 the user authorized one more round beyond that cap (Round 3, Decisions asked). Round 4 ran under that authorization. On 2026-11-22 the user authorized one confirming round 5 (Round 4, Decisions asked). Round 5 ran under that authorization. Round 6 ran after the user's answer to the round 5 question, round 7 after the user's answer to the round 6 question, and round 8 after the user's answer to the round 7 question (Decisions asked). Round 9 follows the user's answer to the round 8 question and is the final round under that answer's stop rule (Decisions asked). Round 10 followed the user's answer A on 2026-11-22 to "How do you want to get it out of draft?" (Decisions asked): one small confirming round at effort medium on the fix diff.
 
 Round 1 ran under the original procedure: two parallel, fresh, read-only `hivemind:cerebrate` passes (A and B), model opus, effort xhigh, each with "Memory context: none". Its IDs stay `L1-A<n>` and `L1-B<n>`.
 
@@ -408,6 +408,32 @@ No clean round exists, so the design is not stamped, and the user reviews the dr
 | --- | --- | --- | --- | --- | --- | --- |
 | L9-T1 | high | `7b1d603249d15cced01248e9cae6b4bc911956473f045c93328113e1906b0cf6` | Confidence 0.97. An outcome and label partial failure can allow an unattended merge. The outcome write and the `lair:review` label are separate GitHub writes. If the label write fails, the merge lane (its skip list lacks a `blocked` or `failed` outcome and a failed route) can merge a non-draft, approved, green pull request, because `merge-approved.sh` does not gate on the delivery outcome. | design text (merge lane skip list; outcome and label writes); `merge-approved.sh` gates | Treat routing as retryable persisted work. The merge lane skips the pull request until the label is observed. Test with the first label write failing. | fixed (unreviewed, by the user's decision): merge safety no longer depends on the label. A `blocked` or `failed` outcome fails the merge lane's positive condition, so the pull request never merges, label or not; the route is best-effort and retried on later ticks until the label is observed, and a route due after a `complete` remediation keeps the merge lane off the pull request until its label is observed. Design Components > Remediation strain launch ("The delivery baseline", "Tick order"), Contracts and seams > Assumptions about #631, Failure modes ("A delivery result other than `complete` names a pull request"), Decisions and Verification strategy (`tools/test_lair_tick.sh`: a `blocked` or `failed` outcome whose label write fails: no merge, label retried next tick) |
 
+## Round 10
+
+- **Date:** 2026-11-22.
+- **Kind:** confirming round, authorized by the user's answer A to "How do you want to get it out of draft?" (Decisions asked), after the round 9 stop rule. It reviewed only the diff `cd57f50c..431ba477` and the fixes to L9-C1 and L9-T1.
+- **Design reviewed:** blob `b678ba7e7a443c59366ecf140cb084c2968c7bec` at commit `431ba4778786269c4682287a80d0a88ffedd5c34`.
+- **Cerebrate pass:** one fresh read-only `hivemind:cerebrate` pass covering both angles, effort medium, "Memory context: none".
+- **Tool pass:** one pass through `plugin/skills/adaptation-cycle/scripts/run-review.sh` with the `codex-plugin` preset and `--base cd57f50c`, because the design touches trust and the merge path. Verdict `approve`, no findings. The raw output was read from the run's scratch file and is not committed.
+
+**Fix check.** L9-C1 is closed for merge safety: the merge lane's positive condition keeps a crashed, stalled or timed-out delivery's pull request from merging. L9-T1 is closed for the case it named, an outcome whose label write fails.
+
+Round 10 is not clean: it raised new findings (see the table). All three are open, with 2 medium and 1 low. None is a merge-safety hole in the case a round 9 finding named. L10-C1 risks a lost notification, not a merge. L10-C2 can let the merge lane merge a pull request that should have gone to a human, bounded by a green rollup and settled threads.
+
+No fix has been made. The verdict stays `pending`, no stamp is written, `clean_round` stays `null` and PR #637 stays a draft.
+
+### Cerebrate pass
+
+| ID | Severity | Section | Finding | Evidence | Proposed fix | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L10-C1 | medium | Failure modes (Crash, Stall, Invalid result, Budget overrun); Lifecycle step 5 | The route for a crash, stall, invalid result or timeout finds the pull request through the branch checked out in the worktree. Lifecycle step 5 removes the worktree and the local ref once the outcome is written, so the "retried until observed" route cannot be retried after a first failed label write or lookup. The risk is a lost notification, not a merge. | Design text only | Look up the branch and the open pull request before the outcome write, and store `branch` and `pr` (or none found) in the claim marker in the same write. Defer the write when the lookup fails. A retry reads `pr` from the marker. Add tests. | open |
+| L10-C2 | medium | Remediation strain launch ("The delivery baseline", "Tick order"); Contracts and seams > Assumptions about #631; Decisions | "A route to `lair:review` due, label not yet observed" is computed fresh each tick and never stored. If the label write fails and the trigger goes away (a red check re-run to green, a comment deleted), the skip lifts while the positive condition holds, and the merge lane can merge a pull request that should have gone to a human. Bounded by a green rollup and settled threads. | Design text only | Latch `route_due` in the dispatch marker before the label write. Add "no `route_due` recorded" to the positive condition, the #631 assumption and Decisions. Add a test. | open |
+| L10-C3 | low | Remediation strain launch ("The delivery baseline"); Contracts and seams > Assumptions about #631 | The rule is keyed on "its claim marker" but never ties a pull request to a marker or defines which pull requests are Lair pull requests. A crashed run's pull request with no stored `pr` could be read as not a Lair pull request. | Design text only | State positively that the Lair merges only a pull request that a claim marker names as the `pr` of a `complete` result, never any other. Add a test. | open |
+
+### Tool pass
+
+Verdict `approve`, no findings.
+
 ## Sources
 
 - The parent [review record](review-record.md): the round 3 findings, their severities and the three-way split.
@@ -559,5 +585,13 @@ After design review round 9, the user asked whether the review had reached dimin
 - B: leave both as recorded residuals for #631.
 
 The user answered "A" on 2026-11-22: "One rule covers both: the merge lane only merges a Lair PR whose run ended `complete`; anything else waits for a human. It's simpler than the current skip list and probably shortens it. Fails safe: if in doubt, a human merges." It authorizes the fix without a review round (Round 9). It changes no ADR-0045 or PRD text.
+
+After design review round 9, the user was asked one more always-ask (Tier A) question (round-9 Q2) on 2026-11-22: "How do you want to get it out of draft?" The options:
+
+- A: one small confirming round 10 at effort medium on the fix diff. Clean: stamp the design, set the verdict to `pass` and take the pull request out of draft.
+- B: accept the fix on the user's say-so, with no further review.
+- C: leave it a draft.
+
+The user answered "A" on 2026-11-22. The answer authorizes round 10 after the round 9 stop rule (Round 10). It changes no ADR-0045 or PRD text.
 
 The design's section Decisions > Changes to shared documents holds each rewording as exact proposed text. A later integration issue applies them. None is applied in this pull request.
