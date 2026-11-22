@@ -3,10 +3,10 @@ stamps: []
 verdict: pending
 open_counts:
   critical: 0
-  high: 0
-  medium: 0
-  low: 0
-rounds: 2
+  high: 1
+  medium: 2
+  low: 3
+rounds: 3
 clean_round: null
 ---
 
@@ -171,6 +171,34 @@ Line numbers marked "design" refer to the reviewed blob `cb1aec32`.
 | --- | --- | --- | --- | --- | --- | --- |
 | L2-T1 | high | `6d238bbd8cfb229f496c0c27fc1e59eac7c2211470c000c2ece91f5d7b6a9ae5` | A compromised strain can forge the result that authorizes downstream merge handling, since it holds the user's credentials and can rewrite same-user files. | design `:289` | Keep result authority outside the strain identity, with an authenticated engine output or a MAC, and re-evaluate every merge gate. | rejected: a repeat of recorded user decisions. On 2026-11-21 the user answered A to reword ADR-0045 decision 4 and PRD line 64, so a prompt-injected strain is a named residual and a separate restricted identity is declined for now (Decisions asked, first two bullets; design changes 1, 2 and 9). Re-evaluating merge gates belongs to #631 (design Contracts and seams > Assumptions about #631) |
 | L2-T2 | high | `2b0d92463ef1010f8e0f4e8ee05ad2f1d422257fcf8a4374ca13ba45d04ea4dd` | Admin installation does not make Bot-authored review text trustworthy; a Bot can relay attacker-controlled text. | design `:181-184` | Treat Bot and CI bodies as untrusted regardless of installation, or admit only structured fields. | rejected: a repeat of a recorded user decision. On 2026-11-21 the user answered A to keep the in-scope Bot exception, with admin-installed apps trusted (Decisions asked, fourth bullet, local review finding f26808d3; design changes 4 and 5). Every text is still scanned (design Components > Remediation strain launch, "Scanning") |
+
+## Round 3
+
+- **Date:** 2026-11-22.
+- **Kind:** confirming round, per the user's procedure change. It reviewed only the diff `bde2ddf2..939f3e11` and the fixes to the L2 findings.
+- **Design reviewed:** blob `356514739167fb7744873e8c9884fe7d4b3636b6` at commit `939f3e11676cb32d3b3824fcec3f0f8eb8a1d32b`.
+- **Cerebrate pass:** one fresh read-only `hivemind:cerebrate` pass, effort medium, "Memory context: none".
+- **Tool pass:** one pass through `plugin/skills/adaptation-cycle/scripts/run-review.sh` with the `codex-plugin` preset and `--base bde2ddf2`. Verdict `needs-attention`, one high finding. The raw output was read from the run's scratch file and is not committed.
+
+**Fix check.** The cerebrate pass judged L2-C1 to L2-C10 all closed by the design text.
+
+Round 3 is not clean: it raised new findings, all open (see the tables). Round 3 is the last round the 3-round cap allows and ends with an open high finding, so the exit rule is not met. Per the task rule, the run stopped and asked the user (Tier A). No answer is recorded yet.
+
+### Cerebrate pass
+
+| ID | Severity | Section | Finding | Evidence | Proposed fix | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L3-C1 | medium | Contracts and seams > Strain result; Strain result and liveness | The strain result schema allows null `level`, `branch`, `head`, `gates` and `decisions` only when no engine record exists. A verified run can end with a record before `level`, `branch` and `head` exist (a first-claim `launch_mismatch`, an early `agent_budget` or a block), so those records fail the schema. What `lair-result.sh` does with a schema-failing record is unstated. | Design text only | Decide nullability per field. `gates` and `decisions` are non-null whenever a record exists. State the output of `lair-result.sh` for a schema-failing record. Add a `tools/test_lair_strain.sh` case. | open |
+| L3-C2 | medium | Strain launch and settings > Environment preflight; Contracts and seams > Strain environment | The preflight applies the `env -i` list to the Lair's own environment, but strains get their values from the tmux server's environment, which the design says differs. The preflight can pass while every strain fails. | Design text only | Run the probes through the same tmux server (a throwaway session), or build the probe environment from `tmux show-environment -g`. Add a `tools/test_lair_tick.sh` case. | open |
+| L3-C3 | low | Strain launch and settings > Environment preflight | `run-review.sh` has no dry-run mode, so the probe's work tree, base and pass criterion are undefined, and the probe is a real paid review. | `run-review.sh:10-17`, `:3-6`, `:49` | Define the probe as `run-review.sh --base <fetched trunk commit>` in a clean scratch worktree detached at that commit (empty diff), or add a named probe mode with its own test. State the pass criterion. | open |
+| L3-C4 | low | Start points "Handling by start kind"; Remediation strain launch "Its claim" | An edited comment keeps its node id, so findings added by an edit never dispatch. The overflow sentinel has id `null`. The "current finding keys" set is undefined. | `fetch-normalize.sh:101-102`; `fix-history-classify.jq:51`; `fetch-normalize.sh:97-98`; `fix-history-classify.jq:162-167` | Define the current set as the actionable and followup-after-fix records after the author filter. Key a top-level or review record on `id` and `last_edited_at`, and the sentinel on `thread_id`. Add tests. | open |
+| L3-C5 | low | Start points "Start configuration check" | `git merge-base A B` without `--all` prints one base even for a criss-cross history, so "no single merge base" cannot be detected as written. | Design text only | Use `git merge-base --all` and refuse unless it prints exactly one commit. A non-zero exit refuses. | open |
+
+### Tool pass
+
+| ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L3-T1 | high | `06470f63005f8f74649b54d825339d8ea7514523c3069a7f1cf727588288c524` | The repeat guard keys a failed CI check by `name` only. GitHub check names are not unique across apps, suites or runs, so a second distinct failing check with the same name on one head counts as already dispatched: no remediation runs and the pull request is not routed to `lair:review`. The loss is silent. | design `:128` | Key on a unique check identity carried by `fetch-normalize.sh` (app or check-suite identity plus check-run id, or a node id). A collision fails closed to `lair:review`. Add cases to `tools/test_lair_tick.sh` and `tools/test_fetch_normalize.sh`. | open |
 
 ## Sources
 
