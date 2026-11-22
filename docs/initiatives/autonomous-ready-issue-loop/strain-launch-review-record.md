@@ -3,7 +3,7 @@ stamps: []
 verdict: pending
 open_counts:
   critical: 0
-  high: 2
+  high: 0
   medium: 0
   low: 0
 rounds: 9
@@ -386,21 +386,27 @@ Round 8 is not clean: it raised new findings (see the tables). All five were ope
 
 Round 9 is not clean: it raised new findings (see the tables). Both are open and both are high.
 
-**Stop rule applied.** Round 9 raised 2 high findings. Under the user's round-8 answer A, the review stops here: the verdict stays `pending`, no stamp is written, `clean_round` stays `null` and PR #637 stays a draft for the user. No remediation runs after round 9.
+**Stop rule applied.** Round 9 raised 2 high findings. Under the user's round-8 answer A, the review stops here: the verdict stays `pending`, no stamp is written, `clean_round` stays `null` and PR #637 stays a draft for the user. No review round runs after round 9.
 
 **Suggested fix for both findings.** The two findings share one fix, closed by construction: the merge lane skips every Lair pull request whose claim marker holds no delivery baseline, plus a route to `lair:review` on every non-complete end (crash, invalid result, stall, 6-hour budget, and a failed label write retried as persisted work). Tests cover a crash and a budget kill after a pull request opens, and a first label write that fails.
+
+**User's answer after round 9.** The user asked whether the review had reached diminishing returns. The run's assessment: the review rounds are at diminishing returns, but these two findings are worth fixing, because one fail-safe rule closes both. The user was asked "Want the one-rule fix (A), or record them as residuals (B)?" and chose A on 2026-11-22 (Decisions asked): apply the one rule, "the merge lane only merges a Lair PR whose run ended `complete`; anything else waits for a human", and run no round 10. It changes no ADR-0045 or PRD text.
+
+**Remediation after round 9.** L9-C1 and L9-T1 share the one fix. The merge lane may act on a Lair pull request only when its claim marker records a `complete` delivery or re-claim outcome with its delivery baseline written, and, if a remediation was dispatched, its dispatch marker records a `complete` outcome with its end baseline written; every other Lair pull request waits for a human. The rule replaces the run-added skips. The per-tick skips the rule does not cover stay: a dispatch due or waiting, a remediation running and a failed read on that tick. The run added one more, a route to `lair:review` due whose label is not yet observed, because a route after a `complete` remediation leaves the positive condition true (Decisions taken). The `lair:review` route is best-effort and retried until the label is observed. A crashed, stalled or timed-out delivery routes the open pull request on the claim's branch to `lair:review`. The fix is not reviewed, by the user's decision. The design's Amendments section has the matching entry.
+
+No clean round exists, so the design is not stamped, and the user reviews the draft.
 
 ### Cerebrate pass
 
 | ID | Severity | Section | Finding | Evidence | Proposed fix | State |
 | --- | --- | --- | --- | --- | --- | --- |
-| L9-C1 | high | Remediation strain launch ("The delivery baseline", "Tick order"); Failure modes (Crash, Stall, Budget overrun) | A delivery strain that opens its pull request and then crashes, returns an invalid result, stalls or hits the 6-hour budget has no baseline, is not parked and has no result `pr` to route on. It is not on the merge lane's skip list, so a non-draft, green, Bot-approved pull request from a failed run merges unattended. This is the L8-T1 hole. | Design text only | Closed by construction: (1) the merge lane skips every Lair pull request whose claim marker holds no delivery baseline; (2) route the open pull request on the claim's branch to `lair:review` on crash, invalid result, stall or timeout (the Crash, Stall and Budget overrun rows, and the #631 assumption); (3) tests for a crash and a budget kill after a pull request opens, and for a failed label write. | open |
+| L9-C1 | high | Remediation strain launch ("The delivery baseline", "Tick order"); Failure modes (Crash, Stall, Budget overrun) | A delivery strain that opens its pull request and then crashes, returns an invalid result, stalls or hits the 6-hour budget has no baseline, is not parked and has no result `pr` to route on. It is not on the merge lane's skip list, so a non-draft, green, Bot-approved pull request from a failed run merges unattended. This is the L8-T1 hole. | Design text only | Closed by construction: (1) the merge lane skips every Lair pull request whose claim marker holds no delivery baseline; (2) route the open pull request on the claim's branch to `lair:review` on crash, invalid result, stall or timeout (the Crash, Stall and Budget overrun rows, and the #631 assumption); (3) tests for a crash and a budget kill after a pull request opens, and for a failed label write. | fixed (unreviewed, by the user's decision): the merge lane may act on a Lair pull request only when its delivery, and any remediation, ended `complete` with its baseline written, so a crash, invalid result, stall or timeout after the pull request opens never merges; the open pull request on the claim's branch routes to `lair:review`, best-effort. Design Components > Remediation strain launch ("The delivery baseline", "Tick order"), Contracts and seams > Assumptions about #631, Failure modes (Crash, Stall, Budget overrun), Decisions, Seam order (#608) and Verification strategy (`tools/test_lair_tick.sh`: a crash, and a budget kill, after a non-draft, green, approved pull request opens: no merge, routed) |
 
 ### Tool pass
 
 | ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
 | --- | --- | --- | --- | --- | --- | --- |
-| L9-T1 | high | `7b1d603249d15cced01248e9cae6b4bc911956473f045c93328113e1906b0cf6` | Confidence 0.97. An outcome and label partial failure can allow an unattended merge. The outcome write and the `lair:review` label are separate GitHub writes. If the label write fails, the merge lane (its skip list lacks a `blocked` or `failed` outcome and a failed route) can merge a non-draft, approved, green pull request, because `merge-approved.sh` does not gate on the delivery outcome. | design text (merge lane skip list; outcome and label writes); `merge-approved.sh` gates | Treat routing as retryable persisted work. The merge lane skips the pull request until the label is observed. Test with the first label write failing. | open |
+| L9-T1 | high | `7b1d603249d15cced01248e9cae6b4bc911956473f045c93328113e1906b0cf6` | Confidence 0.97. An outcome and label partial failure can allow an unattended merge. The outcome write and the `lair:review` label are separate GitHub writes. If the label write fails, the merge lane (its skip list lacks a `blocked` or `failed` outcome and a failed route) can merge a non-draft, approved, green pull request, because `merge-approved.sh` does not gate on the delivery outcome. | design text (merge lane skip list; outcome and label writes); `merge-approved.sh` gates | Treat routing as retryable persisted work. The merge lane skips the pull request until the label is observed. Test with the first label write failing. | fixed (unreviewed, by the user's decision): merge safety no longer depends on the label. A `blocked` or `failed` outcome fails the merge lane's positive condition, so the pull request never merges, label or not; the route is best-effort and retried on later ticks until the label is observed, and a route due after a `complete` remediation keeps the merge lane off the pull request until its label is observed. Design Components > Remediation strain launch ("The delivery baseline", "Tick order"), Contracts and seams > Assumptions about #631, Failure modes ("A delivery result other than `complete` names a pull request"), Decisions and Verification strategy (`tools/test_lair_tick.sh`: a `blocked` or `failed` outcome whose label write fails: no merge, label retried next tick) |
 
 ## Sources
 
@@ -499,6 +505,13 @@ Taken at the round 8 remediation, under the user's answer, each listed in the de
 - L8-T1 and L8-C1: "no baseline, no dispatch, no route" applies only to a parked result, and the merge lane skips a parked result's pull request with no delivery baseline until a `complete` re-claim writes one. A `blocked` or `failed` delivery result with `pr` set routes its pull request to `lair:review` when the outcome is written, with no baseline or snapshot, so the route is never deferred. Not chosen: no route for a blocked or failed delivery, whose pull request, usually not a draft, would merge unattended or hold the merge lane for good; a skip of every pull request with no baseline, which would hold a blocked or failed delivery's pull request with no route to a human.
 - L8-C2: the deferred-write exemption rests on a valid result file for the claim or dispatch nonce in the kept worktree with no outcome in the marker, and each tick reads the result files before it applies the budget rule. Not chosen: only reading results first, which leaves the exemption on a fact a restarted Lair does not hold.
 
+The L8-T1 and L8-C1 merge-lane skip above is superseded by the user's round 9 answer (Decisions asked): the merge lane's positive condition.
+
+Taken at the round 9 remediation, beyond the user's answer, each listed in the design's Decisions or Amendments:
+
+- L9-T1: the merge lane also skips, on a tick, a Lair pull request with a route to `lair:review` due whose label is not yet observed. A route after a `complete` remediation, for a new seed, a failed rollup or a new head, leaves the positive condition true, so without this skip a failed label write there could still merge. Not chosen: changing the user's positive condition itself.
+- L9-C1: the Lair finds a crashed, stalled or timed-out delivery's open pull request through the branch checked out in its worktree, which clean-up keeps until the outcome is written. Not chosen: a result `pr`, which such an end does not have.
+
 ## Decisions asked
 
 The user was asked four always-ask (Tier A) questions and answered each with option A on 2026-11-21:
@@ -539,5 +552,12 @@ At design review round 6, the user was asked one more always-ask (Tier A) questi
 At design review round 7, the user was asked one more always-ask (Tier A) question (round-7 Q1) on 2026-11-22, after L7-C3 found that the run-taken tick order trips the Promotion Gate's architectural blast-radius clause: "Should the Lair's remediation step run before the merge lane on each tick?" The user answered "A" on 2026-11-22: keep it. On each tick the remediation step runs first. The merge lane skips any Lair pull request that has a dispatch pending or waiting, a remediation running, an outcome not yet written, or a failed read on that tick. It is recorded as a replaced parent part, with the #631 assumption. It changes no ADR-0045 or PRD text.
 
 At design review round 8, the user was asked one more always-ask (Tier A) question (round-8 Q1) on 2026-11-22: "How should I finish?" The user answered "A" on 2026-11-22: "Fix all five. Run one final round 9 with a stop rule: if it finds no high or medium, record any lows as residuals, set verdict: pass, and take the PR out of draft. If it finds a high or medium, stop with the PR as a draft." The answer authorizes round 9 as the final round (Round 8). It changes no ADR-0045 or PRD text.
+
+After design review round 9, the user asked whether the review had reached diminishing returns, and was asked one more always-ask (Tier A) question (round-9 Q1) on 2026-11-22: "Want the one-rule fix (A), or record them as residuals (B)?" The options:
+
+- A: one rule covers both L9-C1 and L9-T1: the merge lane only merges a Lair pull request whose run ended `complete`, and anything else waits for a human. Apply it, and run no round 10.
+- B: leave both as recorded residuals for #631.
+
+The user answered "A" on 2026-11-22: "One rule covers both: the merge lane only merges a Lair PR whose run ended `complete`; anything else waits for a human. It's simpler than the current skip list and probably shortens it. Fails safe: if in doubt, a human merges." It authorizes the fix without a review round (Round 9). It changes no ADR-0045 or PRD text.
 
 The design's section Decisions > Changes to shared documents holds each rewording as exact proposed text. A later integration issue applies them. None is applied in this pull request.
