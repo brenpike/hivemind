@@ -1,6 +1,6 @@
 # Solution design: Idea to Ready
 
-This is the HOW for [docs/prds/idea-to-ready.md](../../prds/idea-to-ready.md), as merged in #626. It does not reopen the PRD. Epic #614 tracks the slices #615 to #624; #627 is this second by-hand pilot. ADRs: [ADR-0046](../../adr/0046-idea-to-ready-process.md) (the idea-to-ready process) and [ADR-0047](../../adr/0047-abathur-council.md) (the Abathur council). The design review record is [review-record.md](review-record.md) in this folder.
+This is the HOW for [docs/prds/idea-to-ready.md](../../prds/idea-to-ready.md), as merged in #626 and narrowed by this pull request, which moves the council to #638 (D32). It does not reopen the PRD. Epic #614 tracks the slices #615 to #624; #618 and #624 move to the council epic of #638. #627 is this second by-hand pilot. ADR: [ADR-0046](../../adr/0046-idea-to-ready-process.md) (the idea-to-ready process). The design review record is [review-record.md](review-record.md) in this folder.
 
 ## Context and code truth
 
@@ -14,45 +14,19 @@ Checked against main at commit `49787cc9`; line numbers are at that commit. Each
 - **triage-backlog** is user-only (`disable-model-invocation: true`), so no model, the guide included, can start it. It rates seven families (readiness, type, effort, moscow, priority, risk, difficulty). `readiness:ready` is a rubric judgment ("plan clear, no open questions") with no check behind it, and `readiness:blocked` means "would be ready but a dependency blocks it". `triage-ops.sh` has five subcommands: `ensure-labels`, `list-issues`, `apply-labels`, `deps-read`, `deps-add`. `list-issues` returns number, title, labels, body and node id, with no parent or sub-issue fields. `deps-add` writes native blocked-by edges behind the confirm gate. `triage-ops.sh` fails closed when a read's `pageInfo.hasNextPage` is true.
 - **Triage transport.** triage-backlog passes `apply-labels --targets` as a JSON argument (`plugin/skills/triage-backlog/SKILL.md:231`). Its `allowed-tools` hold no `Edit(.hivemind/` entry.
 - **decision-autonomy.md, Review Calls** says who decides a reviewer's question. A call is taken when the recommended option is reversible and not architectural (Promotion Gate clauses 1 and 2). It is asked when irreversible, architectural, at strength none, or when the table cell is `surface`. There is no rule for design decisions.
-- **Prose budgets.** Measured as CHECK 18 measures (bytes with CR stripped): `plugin/governance/decision-autonomy.md` is 12165 bytes of a 12173 budget (8 bytes free); `plugin/governance/remediation-doctrine.md` is 19901 of 19906 (5 bytes free); `plugin/governance/security-policy.md` is 24143 of 24145 (2 bytes free); `plugin/agents/synapse.md` is 1716 of 1727 (11 bytes free). `plugin/agents/overlord.md` (39038), `plugin/skills/triage-backlog/SKILL.md` (11952), `plugin/skills/prd-to-issues/SKILL.md` (14566) and `plugin/skills/adaptation-cycle/SKILL.md` (5421) are each exactly at their budget. The budgets live in `tests/policy/prose-byte-budget.json`.
-- **Built-script budgets.** Measured at the branch head, whose `plugin/` equals `49787cc9`: literal characters with `countProseCharacters`, exported by `tools/build_workflows.mjs`, against each script's entry in `tests/policy/prose-byte-budget.json`, and length as the string length of the file read as UTF-8 against `MAX_BUILT_SCRIPT_LENGTH`, 191000. `tools/build_workflows.mjs` enforces both.
+- **Prose budgets.** Measured as CHECK 18 measures (bytes with CR stripped): `plugin/governance/decision-autonomy.md` is 12165 bytes of a 12173 budget (8 bytes free); `plugin/governance/remediation-doctrine.md` is 19901 of 19906 (5 bytes free). `plugin/skills/triage-backlog/SKILL.md` (11952) and `plugin/skills/prd-to-issues/SKILL.md` (14566) are each exactly at their budget. The budgets live in `tests/policy/prose-byte-budget.json`.
+- **Built-script budgets.** Measured at the branch head, whose `plugin/` equals `49787cc9`: literal characters with `countProseCharacters`, exported by `tools/build_workflows.mjs`, against each script's entry in `tests/policy/prose-byte-budget.json`, and length as the string length of the file read as UTF-8 against `MAX_BUILT_SCRIPT_LENGTH`, 191000. `tools/build_workflows.mjs` enforces both. `WORKFLOW_APPROVAL_LIMIT`, 200000, is the length above which the Workflow approval dialog offers only No (`tools/build_workflows.mjs:273-283`), and `MAX_BUILT_SCRIPT_LENGTH` keeps a 9000-character margin below it.
   - `plugin/workflows/standard-delivery.js`: 41976 characters of string and template literals against its 42100 budget (124 free); 190836 characters long (164 free).
-  - `plugin/workflows/analysis-only.js`: 15552 against its 16050 budget (498 free); 64417 characters long (126583 free).
   - `plugin/workflows/pr-feedback-remediation.js`: 38053 against its 38200 budget (147 free); 176060 characters long (14940 free).
-- **decision-autonomy-table.json** is version 1, levels `high`, `balanced`, `low` (default `high`), 17 row kinds with cells `auto` or `surface`, and 6 hard stops, `injection_suspect` among them. It has no consult setting.
-- **Planner question cells.** The `planner_question` cells are `auto` at `high` and `surface` at `balanced` and `low` (`plugin/references/decision-autonomy-table.json:16`). `decide()` asks `table_surface` before any gate or strength check (`plugin/workflow-src/lib/decide.js:110`).
-- **The table projection.** `projectAutonomyTable` in `tools/build_workflows.mjs` keeps only `levels`, `default_level`, `hard_stops` and each row's `kind`, `high`, `balanced` and `low`. `tests/workflow-scripts/build.test.mjs` pins those keys, and `tests/workflow-scripts/data.test.mjs` requires an `auto` or `surface` cell per row per level.
-- **decide.js** returns only `ask` or `take`. Its check order is hard_stop, malformed_brief, recommendation_not_an_option, unknown_kind, table_surface, bad_cell, gate_irreversible, gate_architectural, gate_safety, no_recommendation. A weak recommendation is taken ([ADR-0036](../../adr/0036-analysis-only-first-workflow-on-script-engine.md) decision 6). There is no park.
-- **Levels.** `resolveLevel` maps an unknown level to `low`, and each workflow resolves the table's default level. The `unattended` level and the park arrive with Lair unattended mode (#607, ADR-0045 decision 6).
-- **The closed Ask Set.** `askReasons()` and `listReasons()` are closed lists ([ADR-0037](../../adr/0037-standard-delivery-on-script-engine.md), amendment for issue 549). `pauseDelivery` in `plugin/workflow-src/lib/record.js` refuses an ask whose reason is outside `askReasons()`, pinned by `tests/workflow-scripts/ask-set.test.mjs` and `tests/policy/safety-ask-set.json`.
-- **decide() call sites.** `decide()` is called directly in three places: `resolveDecision` in `plugin/workflow-src/lib/plan.js`, `hasDefectQuestion` in `plugin/workflow-src/lib/retry.js` (a planner-question check) and `plugin/workflow-src/analysis-only/main.js`. `plugin/workflow-src/lib/tails.js`, `plugin/workflow-src/standard-delivery/review.js` and pr-feedback-remediation reach it through `resolveDecision`.
-- **The planning pass.** `runPlanningPass` (`plugin/workflow-src/lib/plan.js:533`) is async, shared by `plugin/workflow-src/standard-delivery/main.js:490` and `plugin/workflow-src/pr-feedback-remediation/escalation.js:108`. It resolves planner questions through `resolvePlanAsks` (`plan.js:450`), which calls the synchronous `resolveDecision` (`plan.js:393`).
-- **Code-built asks.** `buildUndecidedAsk` (`plugin/workflow-src/lib/tails.js:109`) throws when `decide()` takes its brief. The validation fix limit (`plugin/workflow-src/lib/gates.js`), step stops, the version question and the review safety hold use it with code-built briefs.
-- **Review calls.** A review call resolves on a copy whose problem, option summaries and why read "Not shown." (`removeReviewerText`, `plugin/workflow-src/standard-delivery/review.js`). A taken call replies with the reviewer's own option (`takeReviewCall`).
-- **Injection-suspect is terminal.** `runPassScan` (`plugin/workflow-src/lib/runner.js:302`) ends the run with a terminal stop on an injection-suspect scan (SD-06). ADR-0037 keeps injection-suspect terminal.
-- **Strength and gate.** The brief schema says a strength `none` question is asked either way, and the local reviewer gives `none` when only the user holds the fact. `plugin/agents/cerebrate.md` (Questions and Replies) writes the plan assuming every raised recommendation. `decide()` checks the gate before `no_recommendation`, so a weak take or a `no_recommendation` ask has a clean gate and an `auto` cell.
-- **Settled answers.** `listAnswerEntries` (`plan.js:516`) puts one settled entry per launch decision, built by `buildAnswerEntry` (`plugin/workflow-src/lib/brief.js`), ahead of `run.answerLog`. The scope, plan, revise and review prompts carry them in an answers block whose data line calls settled only what an entry's settled labels name (SD-60, SD-67, SD-80). A decision never enters `run.answerLog`, its rounds or `resume_args`, whose answers are the replies of `run.answerLog` (`plugin/workflow-src/lib/record.js`).
-- **Question keys.** `questionKey` (`plugin/workflow-src/lib/plan.js:367`) keys an ask by kind, scope and the question as rendered, which shows the recommendation's why. `resolveDecision` checks `run.answeredKeys` only for an ask, never a take (`plan.js:393-411`).
-- **Replans.** A pass that returns `{replan: {reason}}`, the shape `buildReplyReplan` (`plugin/workflow-src/lib/tails.js:99`) builds for a reply, starts the next pass from the facts step (`runDelivery`, `plugin/workflow-src/standard-delivery/main.js:505`). `keepReplanReview` keeps a review the replan carries. A reply replan is outside `maxReplans()`. ADR-0037 invariant 3 starts every planning pass from fresh facts.
-- **Defect questions.** `pauseDelivery` refuses an ask whose reason is outside `askReasons()`. `hasDefectQuestion` (`plugin/workflow-src/lib/retry.js`) sends a planner question back to the planner when `decide()` gives it such a reason, such as `malformed_brief` for a beyond-request option that is not strong with trivial or small effort (SD-81).
-- **What a built script carries.** A built script carries only the functions and data constants its code reads, each data constant whole as projected. `AUTONOMY_TABLE` and `BRIEF_SCHEMA` are in all three built scripts, and so is `runnerValuePatterns` (`plugin/workflow-src/lib/facts.js`). The prose measure counts every string literal, data constants included.
-- **Schema projection.** `projectSchema` (`tools/build_workflows.mjs:245`) drops every title and description from `BRIEF_SCHEMA` in the built scripts.
-- **Parks.** ADR-0045 decision 7 parks a fact only the user holds as its own park.
-- **Shown decisions.** `isShownDecision` in `plugin/workflow-src/lib/record.js` shows the routine kinds `plan_acceptance`, `remediation_plan_acceptance` and `gate_rerun` only when they are listed.
-- **decision-brief-schema.json** carries `recommendation.strength` of `strong`, `weak` or `none`, and has no dissent or member provenance fields. Its `gate` is the producer's read of the recommended option only. Options carry `reversible`, `beyond_request` and an optional `destructive` list, but no gate of their own.
-- **standard-delivery** resolves every question through `decide()` and pauses through `pauseDelivery`; it has no cumulative pause cap. It stops on a dirty tree (`dirty_paths`, `plugin/workflow-src/lib/facts.js`). plan-interrogation and plan-to-prd hold no git grant and leave the files they write uncommitted.
-- **`resume_args`** is `{answers, build}` alone (`plugin/workflow-src/lib/args.js`).
+- **What a built script carries.** A built script carries only the functions and data constants its code reads. The prose measure counts every string literal, data constants included.
+- **standard-delivery** stops on a dirty tree (`dirty_paths`, `plugin/workflow-src/lib/facts.js`). plan-interrogation and plan-to-prd hold no git grant and leave the files they write uncommitted.
 - **Draft and closing lines.** The standard-delivery `draft` launch arg is absent, true or false, and absent means false (SD-48, `plugin/workflow-src/standard-delivery/contract.js:54`). The pull request body opens with one `Closes #N` line per `plan.closes` number (`renderClosingLines`, `plugin/workflow-src/lib/pr.js:198`), and each number must be a launch reference (`describeClosesProblem`, `plugin/workflow-src/lib/title.js:173`). `open-plan-pr.sh` leaves a reused pull request's title, body and draft state unchanged (`plugin/skills/open-plan-pr/scripts/open-plan-pr.sh:145`).
 - **Docs validation mapping.** `tools/validate.sh` maps `docs/adr/**` to `policy_check` only, and every other `docs/**` path except `docs/skill-authoring.md` to no suite (`tools/validate.sh:429`).
 - **Fix and post-PR commits.** `runValidateGate` (`plugin/workflow-src/lib/gates.js:477`) sends a failed validation to a `validation_remediation` decision (`gates.js:497`). `runFixRound` (`gates.js:420`) then commits the files the fix drone reports through `runCommitStep` (`plugin/workflow-src/lib/commit.js:180`). The validate drone's failures are its own text, under the schema description "Each failing command with its failure output." (`gates.js:217`). pr-feedback-remediation runs the same gate loop (PFR-23) and commits each wave through `runPlanWaves` (`plugin/workflow-src/lib/workers.js:234`, PFR-22), as standard-delivery does. `molt.sh` refuses a dirty path outside its file list. The github-reviewer validates per the Validation Procedure, returns blocked on a failure, and commits its own simple fixes with git (`plugin/agents/github-reviewer.md:76`). No code refuses a review record path today.
-- **The synapse agent** is the haiku runner that relays one committed script. The name Synapse is taken. The earlier council epic #440 (closed) used it for a bioform.
-- **The Synapse Runner Gate** (`plugin/hooks/synapse-gate.sh`; `plugin/governance/security-policy.md`, Synapse Runner Gate) admits five scripts: molt, gather-facts, create-working-branch, bump-type and open-plan-pr. `run-review.sh` is not one. The gate admits a script only at `skills/<name>/scripts/<name>.sh`. Synapse's Write is limited to `.hivemind/molt-inputs-<token>.json` and `.hivemind/pr-inputs-<token>.json`. The Input contract of `plugin/agents/synapse.md` carries `inputs_file` only for a commit or pull request. `runnerValuePatterns` allows `--inputs` only as a molt or pr inputs file. `hivemind_remove_inputs_file` in `plugin/skills/_shared/containment.sh` accepts kinds `molt` and `pr` only. `plugin/skills/_shared/settings-merge.sh` and `.claude/settings.json` seed `Edit(.hivemind/molt-inputs-*.json)` and `Edit(.hivemind/pr-inputs-*.json)`, held equal by `tests/policy/safety-navigator-transport-rules.json`.
-- **The tool-neutral review runner** `plugin/skills/adaptation-cycle/scripts/run-review.sh` reads `HIVEMIND_LOCAL_REVIEWER` (the `codex-plugin` preset or a JSON argv list run with no shell). Its prompt is fixed: an adversarial review of a branch diff against `--base`, checked against the findings schema. It cannot carry a decision brief today. The `codex-plugin` preset runs a fixed companion command with no prompt path. Per [ADR-0042](../../adr/0042-tool-neutral-local-review.md) decision 7, Hivemind never names a model.
-- **Test homes.** Runner cases live in `tools/test_run_review.sh`; `tests/run-review/` holds only a README. Subissue-ops cases are in `tools/test_subissue_ops.sh` with fixtures in `tests/prd-to-issues/`. Triage-ops cases are in `tools/test_triage_ops.sh` with `tests/triage-backlog/`. Gate cases are in `tools/test_synapse_gate.sh`.
-- **Runner test routing.** `tools/validate.sh` routes `test_run_review` by exact paths (`tools/validate.sh:972`). Any other `plugin/skills/_shared/*.sh` routes to `test_shared_libs` (`tools/validate.sh:592`), never to `test_run_review`.
+- **Test homes.** Subissue-ops cases are in `tools/test_subissue_ops.sh` with fixtures in `tests/prd-to-issues/`. Triage-ops cases are in `tools/test_triage_ops.sh` with `tests/triage-backlog/`.
 - **Navigator checks.** CHECK 14 and CHECK 16 (`tools/policy_check.sh:2283`, `tools/policy_check.sh:3368`) treat a skill whose `allowed-tools` hold an entry starting `- Edit(.hivemind/` as a discovered navigator. One of its scripts must source `containment.sh` in the direct form. `docs/skill-authoring.md` (Covered Navigators) must list it with its Edit glob, and a skill may carry only its own listed glob.
 - **cerebrate** is read-only by its `tools:` list (Read, Glob, Grep, LSP, web and claude-mem search). A delegation line `Memory context:` stops its memory search.
-- **The overlord's** Agent allowlist in `plugin/agents/overlord.md` holds general-purpose, hivemind:cerebrate, hivemind:drone, hivemind:changeling, hivemind:local-reviewer and hivemind:github-reviewer. Its Write grant covers only fixed-prefix inputs files under `.hivemind/`.
+- **The overlord's** Write grant in `plugin/agents/overlord.md` covers only fixed-prefix inputs files under `.hivemind/`.
 - **ADR-0045 decision 12** keeps any pull request touching a file in its protected-path list out of the auto tier.
 - **ADR-0045 decision 10** sets Lair admission: latest ready label from a user with write permission, title and body unedited since, no open blocked-by dependency. This design cites it only as "ADR-0045 decision 10, as amended by #625": #625 adds the epic exclusion and the readiness check at claim time. This design never stamps ADR-0045.
 - **Ready Issue** in `CONTEXT.md` requires no open blocked-by dependency. That rule stays: a slice may carry `readiness:ready` with open blockers, but it is a Ready Issue, and claimable, only once they close.
@@ -119,43 +93,19 @@ At claim time the Lair controller (#608) runs the readiness check against the tr
 
 #623, with the #625 amendment, adds `docs/prds/`, `docs/initiatives/` and `docs/adr/` to the Lair's protected-path list (ADR-0045 decision 12). So a pull request touching them never takes the auto tier.
 
-### Abathur council
-
-Two read-only agents: `abathur` and the council member `overseer` (#618). The caller launches two to four members in all: Overseer members, each with an angle and a model, plus one runner member only when `HIVEMIND_LOCAL_REVIEWER` is a JSON argv list. So a council with a runner member has at most three Overseers. Then it launches Abathur. Each member returns one opinion. Abathur weighs the opinions and returns only an option id among the input's, a strength and a why. The caller composes the council's brief, per Council brief contract. Abathur never picks the members it judges. In standard-delivery, opinions and Abathur's output are injection-scanned per Consult step. In the design stages the conductor classifies each opinion before launching Abathur, and Abathur's output before writing the design, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Injection-Suspect Classification), and asks a suspect one.
-
-In the main session the conductor launches them. #622 adds `hivemind:abathur` and `hivemind:overseer` to the overlord's Agent allowlist; its Write grant is unchanged (D23). For a runner member the main-session guide invokes `hivemind:council-member`, whose own skill grant holds the council script's Bash grant and the `Edit(.hivemind/council-inputs-*.json)` inputs-file entry (#618). The guide's grant holds neither, so the guide is not an inputs-file navigator (#622). In standard-delivery the workflow script launches the Claude members, and synapse runs the runner member's committed script (D22). Every member and Abathur delegation carries `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Delegation Data-Boundary Constraint).
-
-### Mid-delivery consult
-
-Inside standard-delivery the council weighs only planner questions, in `runPlanningPass` before `resolvePlanAsks`. So `decide()`, `resolveDecision` and `resolvePlanAsks` stay synchronous and unchanged. `decide()` gains no consult action and no consult-count input. `askReasons()` and `listReasons()` gain no council reason.
-
-- A question its planner marks `needs_user_fact` true, or leaves unmarked, is never convened.
-- A strong council result on the planner's own option is taken, journaled and shown in the pull request decisions.
-- A strong result on another option is taken only when the producer's gate read of that option is clean. It is journaled and shown, and the run plans again with it as a settled answer, so the plan that runs is built on it.
-- A split comes back with strength `none`. It asks `no_recommendation` with the dissent in an interactive run and parks in an unattended run (#607).
-- Never consulted: code-built briefs, every `buildUndecidedAsk` site (the validation fix limit among them), `review_question` and `high_severity_rejection` calls (Review Calls: no second agent judges), hard stops, `table_surface` and every gate trip.
-
-The code lives in `plugin/workflow-src/standard-delivery/council.js`. It reaches `runPlanningPass` as an optional argument that only standard-delivery's `main.js` passes, so pr-feedback-remediation never consults and bundles no `council.js` function.
-
 ### Design-decision rule
 
-An extension of Review Calls in `plugin/governance/decision-autonomy.md` for the design stages. A decision is taken when its recommendation is strong, it is inside the PRD's scope and its gate is clean.
+An extension of Review Calls in `plugin/governance/decision-autonomy.md` for the design stages. A decision is taken when its recommendation is strong, it is inside the PRD's scope and its gate is clean. A decision with a weak or absent recommendation is asked until the council initiative #638 ships (D32).
 
 A design decision's gate reads Promotion Gate clause 1, irreversible, and clause 3, safety-relevant. The always-ask list replaces clause 2. So a decision inside the PRD's scope that amends no accepted ADR does not trip it.
 
 These are always asked: a change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible.
 
-A design decision whose brief marks `needs_user_fact` true, or leaves it out, is asked and never sent to the council. An unmarked decision with a weak or absent recommendation goes to the council first:
-
-- A strong result on the producer's option with a clean gate is taken and listed for veto.
-- A strong result on another option is taken only after the conductor, as producer, reads that option's clauses 1 and 3 and its always-ask screen and finds them clean. The design is then written with that answer settled, and the decision is listed for veto.
-- A split is asked with the council's opinions, per Council brief contract.
-
-The design stages run no `decide()`. Take or ask is the conductor's judgment, checked by review. The review record lists each taken decision with its always-ask screen: an answer to each of the four always-ask items. The confirming pass checks every screen. A taken decision that should have been asked is a finding (#619). The review record lists each council-settled decision with the classification of its opinions and Abathur's output, and the confirming pass checks it (#619).
+The design stages run no `decide()`. Take or ask is the conductor's judgment, checked by review. The review record lists each taken decision with its always-ask screen: an answer to each of the four always-ask items. The confirming pass checks every screen. A taken decision that should have been asked is a finding (#619).
 
 ## State and ownership
 
-No progress state is stored anywhere. Every row below is ground truth in GitHub or git, except the interrogated plan, the consult count and the council answers, which live only in one session or run.
+No progress state is stored anywhere. Every row below is ground truth in GitHub or git, except the interrogated plan, which lives only in one session.
 
 | State | Home | Writer | Readers |
 |---|---|---|---|
@@ -168,9 +118,6 @@ No progress state is stored anywhere. Every row below is ground truth in GitHub 
 | Slices and blocked-by edges | GitHub sub-issues and issue dependencies | `hivemind:prd-to-issues` (sub-issues); triage `deps-add` (edges) | readiness check, handoff check, the Lair |
 | Rating labels | GitHub labels | triage only, behind its confirm gate | readiness check |
 | `readiness:ready` | GitHub label | a user with write permission, through triage (D29) | the handoff check, the Lair, under ADR-0045 decision 10, as amended by #625 |
-| Consult setting | the `council_consult` object of `plugin/references/decision-autonomy-table.json` | #624, by pull request | the Consult step, the conductor |
-| Consults used in a run | never stored: a script-local counter in the standard-delivery script, recomputed as a replay passes the same steps, so `resume_args` stays `{answers, build}`; in the design stages, the conductor's count per guide invocation | the Consult step; the conductor for its own count | the Consult step; the conductor for its own count |
-| Council answers in a run | never stored: a script-local list in the standard-delivery script, rebuilt as a replay passes the same steps, never in `run.answerLog` or `resume_args`; in the design stages, the design itself | the Consult step; the conductor | `listAnswerEntries`, for every later scope, plan, revise and review prompt; the review record's veto list |
 
 ## Contracts and seams
 
@@ -309,7 +256,7 @@ The body has these sections:
 - `## Reviewed documents`.
 - `## Rounds`, with one `### Round <n>` per round naming each pass's reviewer agent, model and angle.
 - `## Findings`.
-- `## Decisions taken, listed for veto`, each with its always-ask screen, and for a council-settled decision the classification of its opinions and Abathur's output.
+- `## Decisions taken, listed for veto`, each with its always-ask screen.
 - `## Decisions asked`, each with the user's answer.
 
 Findings is one Markdown table with the header `| ID | Round | Angle | Severity | Disposition | Note |` and one row per finding:
@@ -343,102 +290,13 @@ A verify failure is never fixed in place (#619):
 - `runCommitStep` (`plugin/workflow-src/lib/commit.js`) refuses, before any runner call, a commit whose file list holds a path matching `^docs/initiatives/[^/]+/review-record\.md$`, compared case-insensitively, as a terminal stop naming the path encoded. Only a wave commit of a workflow whose `main.js` declares record writes may carry one, and only standard-delivery's does, because the record step is a standard-delivery wave. Which wave writes it is the accepted plan's, and the record is authoritative only through the human-reviewed merge (D24). So no validation fix round, in either workflow, and no pr-feedback-remediation commit carries a record, even when the validate drone leaves verify's line out.
 - The guide then starts the re-review path.
 
-### Council brief contract
-
-Input: a planner question in standard-delivery, or a design decision brief, valid against `plugin/references/decision-brief-schema.json`. #618 adds two optional fields and no other:
-
-- `needs_user_fact`, a boolean. Its schema description tells every producer to set it true when the answer needs a fact only the user holds, and false otherwise.
-- the bounded `council` object.
-
-Options gain no gate, and existing briefs stay valid. Only a brief whose `needs_user_fact` is false is convened; true or absent never is.
-
-Member output: each member returns `{option_id, strength, why}`, with strength `strong`, `weak` or `none`.
-
-Abathur output: Abathur gets the input brief and the opinions as data. It returns only `{option_id, strength, why}`. `option_id` is one of the input's option ids, and strength is `strong` or `none`. A split is `none`. A `weak` strength, an unknown option id or any other shape means no council result.
-
-Composed output: the caller builds it. It is the input brief unchanged except `recommendation`, `gate` and `council`. Options, option ids, problem, criticality, assumptions and `needs_user_fact` never change.
-
-- Abathur strong on the input's recommended option: the recommendation is that option, strong, with Abathur's why. The gate is the input's.
-- Abathur strong on another option: the recommendation is that option, strong, with Abathur's why. The gate is the producer's gate read of that option: in standard-delivery a fresh planner call per Consult step, in the design stages the conductor's read. With no usable gate read, the recommendation is the input's with strength `none`, and the gate is the input's.
-- Abathur `none`: the recommendation is the input's with strength `none`, and the gate is the input's.
-- `members` has one entry per valid opinion. `id`, `angle` and `model` come from the caller's launch record. `option_id`, `strength` and `why` come from that member's output.
-- `dissent` has one entry per member whose `option_id` differs from the composed recommendation's option: `member_id`, `option_id`, `why`.
-
-No member or Abathur text reaches options, problem, criticality, assumptions or gate. A claimed model is ignored. `decide()` resolves every composed brief, so a gate trip asks.
-
-Bounds: `members` holds 2 to 4 items, counting a runner member, and `dissent` at most 4. Each `why` has maxLength 200, is described "Written for the user" and is rendered encoded as untrusted text. `id`, `angle` and `model` have maxLength 64. A result counts only with at least two members whose `model` values differ. #618 extends `tests/workflow-scripts/data.test.mjs` for them.
-
-### Runner member brief mode
-
-The runner member runs only when `HIVEMIND_LOCAL_REVIEWER` is a JSON argv list. The caller launches two to four members in all, so a council with a runner member has at most three Overseers. Unset or the `codex-plugin` preset means no runner member. The council then needs two Claude members on two Claude models. The runner member's `model` value is `runner:` plus the basename of argv[0]. That names the tool, never a model (ADR-0042 decision 7).
-
-It is a sixth script of the Synapse Runner Gate: `plugin/skills/council-member/scripts/council-member.sh`, with `plugin/skills/council-member/SKILL.md`. #618 edits:
-
-- `plugin/hooks/synapse-gate.sh`, `plugin/governance/security-policy.md` (Synapse Runner Gate), `tests/policy/safety-synapse-gate.json` and `tools/test_synapse_gate.sh`;
-- `plugin/agents/synapse.md`: its Input contract carries `inputs_file` also for a council opinion;
-- `plugin/skills/_shared/containment.sh`: `hivemind_remove_inputs_file` accepts kind `council`, with `tools/test_shared_libs.sh`;
-- `plugin/skills/_shared/settings-merge.sh` and `.claude/settings.json`: they seed `Edit(.hivemind/council-inputs-*.json)`, as the molt and pull request inputs-file rules are seeded (asked in design review round 2, answer Q7 A), with `tests/policy/safety-navigator-transport-rules.json` and `tools/test_seed_hive.sh`;
-- `plugin/governance/security-policy.md` (Synapse Runner Gate): two residual bullets widen, within answers Q3 A and Q7 A. Cross-script use widens to six scripts, including the run of the configured reviewer tool through `council-member.sh`. The broken-hook seeded-rules bullet widens to the `Edit(.hivemind/council-inputs-*.json)` rule;
-- `plugin/skills/council-member/SKILL.md` carries the `Edit(.hivemind/council-inputs-*.json)` entry, so `docs/skill-authoring.md` (Covered Navigators) gains a `hivemind:council-member` line with fixed path `.hivemind/council-inputs-<token>.json` and Edit glob `.hivemind/council-inputs-*.json`. `council-member.sh` sources `containment.sh` in the direct form and reads its inputs file only after `hivemind_assert_inputs_contained`;
-- `tools/validate.sh` routes `plugin/skills/_shared/runner-kernel.sh` and `plugin/skills/council-member/scripts/council-member.sh` to `test_run_review`, and `tools/test_run_review.sh` gains the brief-mode cases.
-
-#624 extends the `--inputs` pattern of `runnerValuePatterns` in `plugin/workflow-src/lib/facts.js` to the council inputs file.
-
-Synapse's Write allow gains one fixed inputs file, `.hivemind/council-inputs-<token>.json`. It is the only way the brief reaches the script, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern). The engine reaches the script through synapse. The main-session guide reaches it through `hivemind:council-member`.
-
-Per [docs/engineering-principles.md](../../engineering-principles.md) P9 it shares only the runner's kernel with `run-review.sh`. The kernel is:
-
-- the reviewer-setting read and argv check;
-- the no-shell argv run under `timeout -k 5 <deadline>`;
-- the before/after work-tree check, where any change blocks and discards the opinion;
-- the reply JSON extraction.
-
-The kernel moves to `plugin/skills/_shared/runner-kernel.sh`. Review mode's behavior and output do not change, and `tools/test_run_review.sh` stays green. `run-review.sh` still runs every local review (ADR-0042 decision 9).
-
-### Consult setting
-
-A top-level object `council_consult` in `plugin/references/decision-autonomy-table.json`, beside `rows` and never a row. It holds one value per level, `consult` or `skip`, and an integer `per_run_cap`. `rows` and `hard_stops` are unchanged, so no call site can pass it as a kind. A level's `consult` value has effect only where that level's `planner_question` cell is `auto`: elsewhere `decide()` asks `table_surface` first, so no planner question is convened.
-
-#624 extends `projectAutonomyTable` in `tools/build_workflows.mjs` to project it, and updates `tests/workflow-scripts/build.test.mjs` and `tests/workflow-scripts/data.test.mjs`. All three built scripts carry the projected table, so #624 regenerates each (D20). #624 sets the `unattended` value and lands after #607 adds that level (ADR-0045 decision 6). In the design stages the conductor reads the value at the table's `default_level`. It allows at most `per_run_cap` consults per guide invocation (#622).
-
-### Consult step
-
-Only standard-delivery runs the step. Its code is `plugin/workflow-src/standard-delivery/council.js`, passed to `runPlanningPass` as an optional fifth argument that only standard-delivery's `main.js` passes. `escalation.js` passes none, so pr-feedback-remediation never consults. `decide()`, `resolveDecision` and `resolvePlanAsks` are unchanged.
-
-1. The step runs once per new checked planner result, plan or revise, after any reply round is logged and rescoped and before `resolvePlanAsks`. A shown result restored when a reply settles the plan acceptance is not consulted again.
-2. It takes each planner question in order and nothing else. Every case Mid-delivery consult names as never consulted stays out.
-3. It reads the question through `resolveDecision`, with kind `planner_question` and the pass scope, on a scratch resolution, as `buildUndecidedAsk` does. So `decide()` gains no call site, and SD-29 holds.
-4. It convenes only when all of these hold; otherwise the question stays as it came:
-   - the question is not settled: its key, as `questionKey` builds it from kind `planner_question`, the pass scope and the question rendered alone, is not in `run.answeredKeys`;
-   - `needs_user_fact` is false;
-   - the read is a take of a `weak` recommendation or an ask with reason `no_recommendation`;
-   - `council_consult` at the run's level is `consult`;
-   - the run's consult count is below `per_run_cap`.
-
-   A settled question resolves as answered, neither convened nor taken, and is left out of the list `resolvePlanAsks` gets.
-5. The count rises by one per convened council, whether or not it returns a result.
-6. It launches the members in parallel, scans their opinions, launches Abathur and scans its output. A suspect scan ends the run with the terminal stop `runPassScan` returns for a suspect scan (ADR-0037: injection-suspect stays terminal). In an unattended run it is an approval park (ADR-0045 decision 7). The first read never stands. A scan that fails, times out or returns an unusable result gives no council result: the question stays as it came, and the attempt counts toward the cap.
-7. It composes per Council brief contract. When Abathur's option is not the planner's recommended option, the gate comes from a gate read: one fresh hivemind:cerebrate call whose prompt holds only the planner question, as data, and that option id, and whose result is the brief schema's gate object.
-8. It reads the composed brief through `resolveDecision` on a scratch resolution:
-   - A take on another option is listed in `run.taken` through `acceptResolution`, as `resolveTailDecision` (`plugin/workflow-src/lib/tails.js`) does. The council answer joins the run's council answers. `runPlanningPass` returns `{replan}` with a code-built reason, the shape `buildReplyReplan` builds. So the next pass starts from the facts step (ADR-0037 invariant 3), outside `maxReplans()` and bounded by `per_run_cap`, and the first result is never accepted.
-   - A reason outside `askReasons()`, such as `malformed_brief` for a beyond-request option, gives no council result.
-   - Any other result replaces the question with the composed brief, which `resolvePlanAsks` resolves: a take on the planner's option, or an ask with the dissent that parks in an unattended run (#607). `runPlanningPass` gives that composed ask its raw question's key, so a reply settles the raw question. Within a pass, a raw question raised again reuses its composed brief with no new council.
-   - With no council result, the question stays as it came.
-9. `listAnswerEntries` gives one settled entry per council answer, after the launch decision entries and before `run.answerLog`, built by `buildAnswerEntry`. Its question names the council and holds the planner's question as rendered; settled is its label; the reply is the council option's shown letter. No member or Abathur text enters it. A council answer never enters `run.answerLog`, its rounds, `resume_args`, `run.headRound` or the resume note. With no council answer, every prompt is byte for byte as before. SD-60, SD-67 and SD-80 add the council entries (#624). A composed ask the user answers enters `run.answerLog` like any shown question, so its council text reaches later prompts only inside that question.
-10. Member, scan, Abathur and gate-read prompts are built only from the brief, the option id and the run's fixed values, with labels from the pass and the count, so a resume replays them from cache. The count, the council answers and the composed briefs kept for reuse start empty on each launch and are rebuilt on replay. `resume_args` stays `{answers, build}` (`plugin/workflow-src/lib/args.js`).
-11. `askReasons()`, `listReasons()`, the check order, `pauseDelivery`'s guard, SD-29 and SD-82 are unchanged. So ADR-0037 is not amended.
-
-Every take a council causes matches the plan that runs. The planner plans assuming its own recommended option, and after a switch the plan that runs was planned with the answer settled. Whether a planner honors a settled answer is its judgment, for a council answer as for a user's (the `plugin/workflow-src/lib/plan.js` header).
-
 ## Trust boundaries
 
-- **External content stays data.** Issue bodies, PRD and design text, review findings, member opinions and Abathur's brief are data per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (External Content Boundary). The readiness check parses fixed shapes and literal heading text and never runs or evaluates content. Links pass the path allowlist before any git call. Reason codes carry line indexes, never issue text. JSON is built with `jq --arg`. The Lair queue report and parks show reason codes encoded as untrusted data, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Trust-Boundary Discipline). Slices: #615, #621, #623, #624.
+- **External content stays data.** Issue bodies, PRD and design text and review findings are data per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (External Content Boundary). The readiness check parses fixed shapes and literal heading text and never runs or evaluates content. Links pass the path allowlist before any git call. Reason codes carry line indexes, never issue text. JSON is built with `jq --arg`. The Lair queue report and parks show reason codes encoded as untrusted data, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Trust-Boundary Discipline). Slices: #615, #621, #623.
 - **Write permission authorizes the ready label.** The authorization is write permission on the latest `readiness:ready` labeled event, with the title and body unedited since (ADR-0045 decision 10, as amended by #625; D29). The handoff check verifies the same (#621), and the Lair keeps its check (#623). "Maintainer" names a role, and triage's confirm gate is a workflow step, not an authorization boundary. The guide and the Lair never apply the label. Slices: #620, #621, #623.
 - **Reviewers are fresh and read-only.** Review passes run on cerebrate, whose tool list holds no Bash, Write or Edit. `Memory context: none` keeps the writing session's memory from steering a reviewer. A pass that errors, times out or returns unparseable output yields no round. Slices: #619.
 - **Stamps bind the reviewed content.** The record ships in the same pull request as the design, so it passes the same local review and bot review. Trunk never holds an unreviewed design, and any later edit is detected by blob id. Authority is a human-reviewed merge (D24). Only the design review's record step writes or re-stamps a record. Verify runs before the pull request leaves draft and, where wired, in CI (D28). Every commit except a standard-delivery wave refuses a record in code. #623 keeps docs paths out of the Lair's auto tier. Recorded residual: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval with no human review of the design. It is recorded per the user's decision, on the ground that it is outside the threat model as the maintainer's own opt-in (ADR-0044). It is bounded: where verify runs in CI, it keeps a merged record consistent and current, and in any repository the commit refusal, the guide's verify before ready and the readiness check, which fails every slice of a stale or delivered design, hold (ADR-0046, Residuals). Slices: #615, #619, #622, #623.
-- **The council cannot widen authority.** Options, option ids, problem, criticality and assumptions never change. Every gate is a producer read: the input's for the producer's own option, and a fresh gate read for another, so no gate is council-written. `decide()` resolves every composed brief. Abathur writes only an option id among the input's, a strength and a why. A question marked `needs_user_fact` true, or left unmarked, is never convened. Council text reaches a planner prompt only inside a question shown to the user: a composed ask's Abathur why and dissent whys, each scanned before compose, at most 200 characters and rendered encoded as untrusted text, carried in the answers block as data. A council answer entry for a take is code-built and holds none. Member provenance comes from the caller's launch records. The `abathur` and `overseer` tools lists hold no Bash, Write, Edit or agent-launch tool, pinned by a safety fixture under `tests/policy/` (#618). The runner member runs under the kernel's no-shell argv run and before/after check. Opinions are scanned before Abathur, and Abathur's output before compose. A scan that fails gives no council result, so unscanned council text is never used. A suspect one is a terminal stop in standard-delivery and an approval park in an unattended run. In the design stages the conductor classifies each opinion and Abathur's output per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Injection-Suspect Classification) and asks a suspect one (Tier A injection-suspect). Slices: #618, #622, #624.
-- **Unattended runs never decide a split.** A split or always-ask call parks with the brief and dissent. Its text is encoded as untrusted data in the park record. Slices: #624, with #607.
-- **No new credential and no merge-path change.** Everything runs under the executing user's credentials, and `merge-approved.sh` is untouched. The two trust-boundary changes, a sixth runner-gate script and the overlord's two new agents, were asked (D22, D23). The seeded `Edit(.hivemind/council-inputs-*.json)` rule was asked (D30, answer Q7 A). The record refusal narrows only what a fix commit may carry; `merge-approved.sh` and the merge path are untouched. Slices: #618, #619, #622.
+- **No new credential and no merge-path change.** Everything runs under the executing user's credentials, and `merge-approved.sh` is untouched. The record refusal narrows only what a fix commit may carry; `merge-approved.sh` and the merge path are untouched. Slices: #619.
 
 ## Lifecycle
 
@@ -489,33 +347,16 @@ One row per existing path, with its effect and the slice that makes it. "Unchang
 | `plugin/skills/prd-to-issues/SKILL.md`, `plugin/skills/prd-to-issues/scripts/subissue-ops.sh` | Gain the `## Design` section, seed reuse through `ensure-parent --existing-number` with the seed marker line kept, and a carve-out of the "No file paths or code snippets" rule for Design links. Idempotency and the four existing sections are unchanged. | #617 |
 | `tools/test_subissue_ops.sh`, `tests/prd-to-issues/` | Gain the Design section and seed reuse cases. | #617 |
 | `plugin/skills/create-handoff/SKILL.md` | Unchanged. Its handoff is never stage evidence. | none |
-| `plugin/governance/decision-autonomy.md`, Review Calls and Tier A | Gains the design-decision rule and one consult-step sentence. The Tier A line "On the script engine, `decide()` asks only for" is unchanged. Each edit fits the byte budget by cutting. | #616, #624 |
+| `plugin/governance/decision-autonomy.md`, Review Calls and Tier A | Gains the design-decision rule. The Tier A line "On the script engine, `decide()` asks only for" is unchanged. The edit fits the byte budget by cutting. | #616 |
 | `plugin/governance/remediation-doctrine.md` | No edit planned; the design review skill cites Defer-with-Scope and Recorded Residual. | none |
-| `plugin/references/decision-autonomy-table.json` | Gains the top-level `council_consult` object. Rows and hard stops are unchanged. | #624 |
-| `tools/build_workflows.mjs` | `projectAutonomyTable` projects `council_consult`. | #624 |
-| `tests/workflow-scripts/build.test.mjs`, `tests/workflow-scripts/data.test.mjs` | Pin the projected keys and the setting's values; check the optional `needs_user_fact` boolean and the bounded council fields written for the user. | #618, #624 |
-| `plugin/references/decision-brief-schema.json` | Gains the optional `needs_user_fact` boolean and the bounded `council` object. Options gain no gate, existing briefs stay valid, and every built script regenerates. | #618 |
-| `plugin/workflow-src/lib/decide.js`, `tests/workflow-scripts/decide.test.mjs` | Unchanged. | none |
-| `plugin/workflow-src/lib/plan.js` | `runPlanningPass` takes an optional consult argument, awaited on each new checked planner result before `resolvePlanAsks`, and returns the consult's `{replan}` on a council switch. `listAnswerEntries` puts one settled entry per council answer after the launch decision entries. `runPlanningPass` also gives each composed ask its raw question's key. `resolveDecision` and `resolvePlanAsks` are unchanged. | #624 |
-| `plugin/workflow-src/lib/retry.js`, `plugin/workflow-src/lib/tails.js`, `plugin/workflow-src/lib/record.js` | Unchanged. `hasDefectQuestion` keeps `decide()` alone. Tail asks, `buildUndecidedAsk` and `buildReplyReplan` included, are never consulted, and the consult returns `{replan}` in `buildReplyReplan`'s shape. The `pauseDelivery` guard and `isShownDecision` are unchanged. | #624 |
-| `plugin/workflow-src/lib/args.js` | Unchanged; `resume_args` stays `{answers, build}`. | none |
-| `tests/policy/safety-ask-set.json`, `tests/workflow-scripts/ask-set.test.mjs` | Unchanged and green. | none |
-| `plugin/workflow-src/standard-delivery/` | Gains `council.js` (Consult step, gate read, compose). `main.js` passes the consult and the council settings, and its run state gains the script-local count and council answers. `contract.js` gains the council rows, and SD-60, SD-67 and SD-80 name the council answer entries. SD-29, SD-82 and the pause contract are unchanged. `main.js` declares that its waves may commit a review record, and `contract.js` SD-25 and SD-26 name the record stop and the fix-commit refusal (#619). | #619, #624 |
-| `plugin/workflow-src/analysis-only/`, `plugin/workflow-src/pr-feedback-remediation/` | Analysis-only source unchanged. pr-feedback-remediation's `main.js` declares that its waves commit no review record, and `contract.js` PFR-22 and PFR-23 name the refusal and the record stop (#619). `escalation.js` passes no consult argument, so neither workflow consults (#624). | #619, #624 |
-| `plugin/hooks/synapse-gate.sh`, `plugin/governance/security-policy.md` (Synapse Runner Gate), `tests/policy/safety-synapse-gate.json`, `tools/test_synapse_gate.sh` | Gain the sixth runner script, `plugin/skills/council-member/scripts/council-member.sh`, and synapse's `.hivemind/council-inputs-<token>.json` Write. Two residual bullets widen: Cross-script use to six scripts, including the configured reviewer tool's run through `council-member.sh`, and the broken-hook seeded-rules bullet to the `Edit(.hivemind/council-inputs-*.json)` rule. | #618 |
-| `plugin/agents/synapse.md` | Its Input contract carries `inputs_file` also for a council opinion. Its name is not reused. | #618 |
-| `plugin/skills/_shared/containment.sh`, `tools/test_shared_libs.sh` | `hivemind_remove_inputs_file` accepts kind `council`. | #618 |
-| `plugin/skills/_shared/settings-merge.sh`, `.claude/settings.json`, `tests/policy/safety-navigator-transport-rules.json`, `tools/test_seed_hive.sh` | Seed `Edit(.hivemind/council-inputs-*.json)` beside the molt and pull request inputs-file rules (asked, answer Q7 A). | #618 |
-| `plugin/skills/adaptation-cycle/scripts/run-review.sh`, `tools/test_run_review.sh` | The runner kernel moves to `plugin/skills/_shared/runner-kernel.sh`. Review mode is unchanged and its cases stay green; `tools/test_run_review.sh` gains the council-member brief-mode cases. | #618 |
-| `docs/skill-authoring.md`, Covered Navigators | Gains the `hivemind:council-member` line: fixed path `.hivemind/council-inputs-<token>.json`, Edit glob `.hivemind/council-inputs-*.json`, read-guard `hivemind_assert_inputs_contained` in `council-member.sh`, which sources `containment.sh` in the direct form. CHECK 14 and CHECK 16 of `tools/policy_check.sh` read it. The guide and triage-backlog carry no `Edit(.hivemind/` entry, so neither is a navigator. | #618, #620, #622 |
-| `plugin/agents/cerebrate.md` | Unchanged. Review passes use it with `Memory context: none`. When to set `needs_user_fact` is the field's schema description, and its answers rule reads a council answer entry by its settled labels. | #618, #624 |
-| `plugin/workflow-src/lib/brief.js` | Renders the bounded council fields encoded as untrusted text. `buildAnswerEntry` is unchanged. | #624 |
-| `plugin/workflow-src/lib/facts.js` | `runnerValuePatterns` allows `--inputs` as the council inputs file. | #624 |
-| `plugin/workflows/standard-delivery.js`, `plugin/workflows/analysis-only.js`, `plugin/workflows/pr-feedback-remediation.js` | Regenerated; their BUILD_IDs change, and each fits D20. | #618, #619, #624 |
-| `plugin/agents/overlord.md` | The Agent allowlist gains hivemind:abathur and hivemind:overseer. The Write grant is unchanged. | #622 |
+| `plugin/workflow-src/standard-delivery/` | `main.js` declares that its waves may commit a review record, and `contract.js` SD-25 and SD-26 name the record stop and the fix-commit refusal. | #619 |
+| `plugin/workflow-src/analysis-only/`, `plugin/workflow-src/pr-feedback-remediation/` | Analysis-only source unchanged. pr-feedback-remediation's `main.js` declares that its waves commit no review record, and `contract.js` PFR-22 and PFR-23 name the refusal and the record stop. | #619 |
+| `docs/skill-authoring.md`, Covered Navigators | Unchanged. CHECK 14 and CHECK 16 of `tools/policy_check.sh` read it. The guide and triage-backlog carry no `Edit(.hivemind/` entry, so neither is a navigator. | #620, #622 |
+| `plugin/agents/cerebrate.md` | Unchanged. Review passes use it with `Memory context: none`. | #619 |
+| `plugin/workflows/standard-delivery.js`, `plugin/workflows/analysis-only.js`, `plugin/workflows/pr-feedback-remediation.js` | `standard-delivery.js` and `pr-feedback-remediation.js` are regenerated by #619; their BUILD_IDs change, and each fits D20. `analysis-only.js` is unchanged, because #619 changes no function it bundles. | #619 |
 | `CONTEXT.md` | This pull request adds the initiative's terms and fixes the stale "planned" notes. | #627 |
 | `docs/adr/0045-lair-software-factory.md` | Not edited here; decision 10 is amended by #625. | #625 |
-| `tools/validate.sh` | Maps `docs/initiatives/`, `docs/prds/` and `docs/adr/` to the record verify suite, and registers the readiness check (#615), design review (#619) and stage derivation (#621) suites, and routes `plugin/skills/_shared/runner-kernel.sh` and `plugin/skills/council-member/scripts/council-member.sh` to `test_run_review` (#618). | #615, #618, #619, #621 |
+| `tools/validate.sh` | Maps `docs/initiatives/`, `docs/prds/` and `docs/adr/` to the record verify suite, and registers the readiness check (#615), design review (#619) and stage derivation (#621) suites. | #615, #619, #621 |
 | `plugin/workflow-src/lib/gates.js` | The validate step, shared with pr-feedback-remediation, reads verify's `record-verify-failed:` line from a failed validation in code and stops blocked, naming the record, before any `validation_remediation` decision. Its failures description asks for that line word for word. The fix-round commit refuses a review record. | #619 |
 | `plugin/workflow-src/lib/commit.js` | `runCommitStep` refuses a review record path before any runner call, a terminal stop naming it, except in a wave commit of a workflow whose `main.js` declares record writes. | #619 |
 | `plugin/governance/definitions.md`, Validation Procedure | Gains the record rule: each `record-verify-failed:` line of failure output is reported word for word, and no fix edits a review record. It fits its budget by cutting (D20). | #619 |
@@ -541,7 +382,7 @@ One row per existing path, with its effect and the slice that makes it. "Unchang
 | A design is marked delivered to escape verify | A record the pull request edits is verified whatever its design's status, and every slice of a delivered design fails `design_delivered`. | #615, #619 |
 | A repository wires no verify in CI | The guide's verify before `gh pr ready`, the readiness check and the commit refusal hold; a stale record fails every slice with `record_stale:<path>`. | #615, #619, #622 |
 | #625 merges first and changes ADR-0045 | No effect: this design cites only "ADR-0045 decision 10, as amended by #625" and never stamps ADR-0045. | #625 |
-| ADR number 0046 or 0047 is taken on main | Checked before the pull request opens and before it leaves draft; the ADR is renumbered and every link updated. | #627 |
+| ADR number 0046 is taken on main | Checked before the pull request opens and before it leaves draft; the ADR is renumbered and every link updated. | #627 |
 | A design review pass errors, times out or returns unparseable output | It gives no round and is re-run. | #619 |
 | A session is lost mid-review | The next session resumes from the record's rounds. | #619 |
 | Local review or a post-PR fix changes a stamped document | One confirming pass over the diff, then a re-stamp; the pass does not count toward the cap. A new finding makes it a re-review. | #619 |
@@ -559,22 +400,6 @@ One row per existing path, with its effect and the slice that makes it. "Unchang
 | Labels are applied after the check | The overlay checks the pending labels, and the post-apply re-check drops any issue that now fails. | #620 |
 | A slice passes with open blockers | It may be labeled ready; the Lair still claims it only when no blocked-by dependency is open. | #620, #623 |
 | The issue is edited between the check and the claim | The unedited check of ADR-0045 decision 10, as amended by #625, and the body hash captured at claim time stop it. | #623 |
-| A council member fails, times out or returns off schema | Abathur weighs the rest. With too few members on two models, or off-schema Abathur output, there is no council result, and the question is resolved as it came. The attempt counts toward the cap. | #618, #624 |
-| Abathur picks an option other than the producer's recommendation | The producer's gate read of that option decides. Clean: the take is journaled and the run plans again with it settled. A trip asks or parks. No usable read gives strength `none`, asked or parked. Options and option ids never change. | #618, #624 |
-| A composed brief `decide()` refuses as a defect | No council result; the question is resolved as it came. No ask outside the Ask Set reaches `pauseDelivery`. | #624 |
-| A member opinion or Abathur's output is injection-suspect | A terminal stop, as the pass scan gives; an approval park in an unattended run. The first result never stands. In the design stages it is asked. | #618, #622, #624 |
-| A member or Abathur scan fails, times out or returns an unusable result | No council result; the question is resolved as it came, and the attempt counts toward the cap. Unscanned council text is never used. | #624 |
-| A question needs a fact only the user holds | Marked `needs_user_fact` true, it is never convened and reaches the user as it would with no council. In the design stages the conductor asks it. | #618, #622, #624 |
-| A planner question leaves `needs_user_fact` out | Never convened; resolved as it came. | #624 |
-| A code-built brief, a `buildUndecidedAsk` site or a review call has no strong recommendation | Never consulted; resolved as today. `buildUndecidedAsk` never throws for it. | #624 |
-| A council splits on a weak or unanswered question | It asks `no_recommendation` with the dissent. | #624 |
-| A later plan raises a council-settled question again | It breaks the settled-answer rule as it would for a user's answer. It is resolved like any planner question under the cap, and every take is listed for veto. | #624 |
-| A user-settled composed ask's raw question is raised again in the same run | Answered by the raw question's key: never convened again and never taken. | #624 |
-| A member claims a model or provenance | Ignored; `id`, `angle` and `model` come from the caller's launch record. | #618 |
-| `HIVEMIND_LOCAL_REVIEWER` is unset or the `codex-plugin` preset | No runner member; the council needs two Claude members on two Claude models. | #618 |
-| The runner member changes the work tree | The before/after check blocks it, and its opinion is discarded. | #618 |
-| The per-run cap is reached | No consult; the question is resolved as it came. | #624 |
-| A council splits in an unattended run | Strength `none`, so `decide()` at the `unattended` level parks it, with the brief and dissent encoded as untrusted data. | #624 |
 | Two guide sessions work on one stage | The later one stops and re-derives the stage. | #621, #622 |
 | Stage evidence is ambiguous, such as two open docs pull requests | The guide reports it and asks; it never guesses a stage. | #621, #622 |
 | A seed-marked issue comes from a user without write permission, or a fork pull request uses `docs/<slug>` | Ignored and named in the report. | #621 |

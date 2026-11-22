@@ -1,6 +1,6 @@
 # Idea to Ready: two tracks, one readiness check and a reviewed design
 
-**Status:** accepted, 2026-11-21. Amends no accepted ADR. The guide is an orchestrator under [ADR-0013](0013-decoupled-leaf-pipeline-skills.md)'s carve-out. Lair admission is [ADR-0045](0045-lair-software-factory.md) decision 10, as amended by #625.
+**Status:** accepted, 2026-11-21. Amends two accepted ADRs. [ADR-0037](0037-standard-delivery-on-script-engine.md) decision 16 is narrowed: a failed validation whose failures carry a `record-verify-failed: ` line for a review record path stops the run blocked, with no fix round (asked after design review round 4, answer Q13 A). [ADR-0026](0026-decision-autonomy-and-post-merge-report.md) decision 2 is amended for design-stage decisions only: a decision with a weak recommendation or none is asked, never deferred, until the council initiative #638 ships (asked after design review round 4, answer Q16 A). The guide is an orchestrator under [ADR-0013](0013-decoupled-leaf-pipeline-skills.md)'s carve-out. Lair admission is [ADR-0045](0045-lair-software-factory.md) decision 10, as amended by #625.
 
 ## Context
 
@@ -8,7 +8,7 @@ The Lair (ADR-0045) delivers only Ready Issues, unattended. Today `readiness:rea
 
 There is also no guided path from an idea to a ready issue, and a half-finished initiative leaves no trace of where it stopped.
 
-The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../initiatives/idea-to-ready/solution-design.md) sets the HOW. This ADR records the process decisions from that design that are hard to reverse. The Abathur council is recorded separately in [ADR-0047](0047-abathur-council.md), so it can be amended alone.
+The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../initiatives/idea-to-ready/solution-design.md) sets the HOW. This ADR records the process decisions from that design that are hard to reverse. The Abathur council, first drafted with this design, moved to its own initiative, #638.
 
 ## Decision
 
@@ -44,8 +44,12 @@ The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../init
    - **Three-round cap:** a review that has not converged after round 3 stops and reaches the maintainer as a signal to split the initiative.
    - Every finding gets exactly one disposition: `fixed`, `rejected` with its reason, `deferred` or `recorded`. Critical and high findings are only `fixed` or `rejected`.
    - The record is rewritten after every round, and a lost session resumes from its rounds.
-   - **Review fix.** A review fix to a stamped document after exit gets one fresh confirming pass over the diff since the stamps before the re-stamp. That pass changes no `rounds` count and does not count toward the cap. A new finding makes it a re-review.
-   - **Re-review after an amendment.** Rounds count from 1, the front matter is replaced and the body history is appended.
+   - **Review fix.** Each round's fixes and its record rewrite land in one standard-delivery run, the record wave last. The run that writes `verdict` `pass` launches with local review off. A review fix to a stamped document after exit runs in this order:
+     1. The guide returns the pull request to draft.
+     2. One run lands the fix and a record wave that sets `verdict` to `fail`.
+     3. One fresh confirming pass runs over the diff since the stamps. It changes no `rounds` count and does not count toward the cap. A new finding makes it a re-review.
+     4. A record-only run with local review off re-stamps.
+   - **Re-review after an amendment.** Rounds count from 1 and the front matter is replaced. The earlier Rounds and Findings move under a dated History section. A re-review covers the whole documents when no record has passed.
 7. **Review record contract.** The record starts with fixed front matter, which is the only part the readiness check parses: `stamps` (each a `path` and a `blob`), `verdict`, `open` counts by severity, `rounds` and `clean_round`.
    - **Blob stamps.** Each `blob` is `git rev-parse HEAD:<path>` on the docs branch when the record is written, and matches `^[0-9a-f]{40}$` or `^[0-9a-f]{64}$`. Stamps must include the PRD, the solution design and every ADR its own docs pull request adds or edits, never an ADR it only cites.
    - **Pass.** The record passes when `verdict` is `pass`, every open count (critical, high, medium and low) is 0, `clean_round` is `true` and `rounds` is 2 to 3.
@@ -53,16 +57,13 @@ The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../init
    - **Staleness.** The record is stale when any stamped path's `git rev-parse <commit>:<path>` at the passed trunk commit differs from its blob, or the path is missing. A blob id is a content hash, so the merge method does not matter. Any edit to a stamped file makes the record stale until a review of the change re-stamps it.
    - **Verify.** The body holds a fixed Findings table. The design review skill's verify checks the front matter, the stamps and the table, and prints one `record-verify-failed: <record path>` line per failing record.
      - The guide runs it before the pull request leaves draft, in any repository.
-     - In a repository that wires it into CI, as this one does through `tools/validate.sh`, CI maps `docs/initiatives/`, `docs/prds/` and `docs/adr/` to it. Every record the pull request adds or edits gets every check, whether or not its design is delivered. Every other passing record whose design is not delivered gets stamp equality only. ADR inclusion is checked only for a record the pull request adds or edits.
-     - A verify failure is never fixed in place. The validate step reads verify's line in code and stops the run blocked, naming the record, before any fix decision, so no fix round runs.
-     - A repository with no verify in CI keeps the guide's verify, the readiness check and the commit refusal.
-   - **Authority.** A record is authoritative only through a human-reviewed merge. Only the design review's record step, a drone with exact file scope, writes or re-stamps it. Every commit except a standard-delivery wave, the record step's path, refuses a review record path in code, a terminal stop naming it, so no validation fix round and no pr-feedback-remediation commit carries one. #623, with the #625 amendment, adds `docs/prds/`, `docs/initiatives/` and `docs/adr/` to the Lair's protected-path list.
+     - In a repository that wires it into CI, as this one does through `tools/validate.sh`, CI maps `docs/initiatives/`, `docs/prds/` and `docs/adr/` to it. Every record the pull request adds or edits gets every check, whether or not its design is delivered. Every other passing record whose design is not delivered gets stamp equality only. Stamp equality is checked only for a record whose `verdict` is `pass`. ADR inclusion is checked only for a record the pull request adds or edits.
+     - A verify failure is never fixed in place. The validate step reads verify's line in code and stops the run blocked, naming the record, before any fix decision, so no fix round runs. This narrows ADR-0037 decision 16 (answer Q13 A).
+     - A repository with no verify in CI keeps the guide's verify, the readiness check and the fix-round commit refusal.
+   - **Authority.** A record is authoritative only through a human-reviewed merge. Only the design review's record step, a drone with exact file scope, writes or re-stamps it. `runCommitStep` refuses a review record path, compared case-insensitively, in every validation fix-round commit of standard-delivery and pr-feedback-remediation and in every pr-feedback-remediation wave commit, a terminal stop naming it. Only a standard-delivery wave, the record step's path, may carry one. Other commit paths are bound by prose (Residuals). #623, with the #625 amendment, adds `docs/prds/`, `docs/initiatives/` and `docs/adr/` to the Lair's protected-path list.
    - The record ships in the same pull request as the design, whose draft rule is decision 10.
 8. **Design-decision rule.** Review Calls in the autonomy governance gains a rule for the design stages. A decision with a strong recommendation inside the PRD's scope and a clean gate is taken and listed in the review record for veto. These are always asked: a change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible.
-   - A decision with a weak recommendation or none goes to the council first (ADR-0047). It is asked instead, never sent to the council, when its brief marks it as needing a fact only the user holds or leaves the mark out.
-   - A strong council result on the producer's option with a clean gate is taken and listed for veto.
-   - For a strong result on another option, the conductor, as producer, first reads that option's gate and always-ask screen. When both are clean, the design is written with that answer settled and listed for veto.
-   - A split is asked.
+   - A decision with a weak recommendation or none is asked, never deferred, until the council initiative #638 ships. This amends ADR-0026 decision 2 for design-stage decisions only (answer Q16 A).
    - A design decision's gate reads Promotion Gate clause 1, irreversible, and clause 3, safety-relevant. The always-ask list replaces clause 2.
    - The design stages run no `decide()`. Take or ask is the conductor's judgment. The review record lists each taken decision with its always-ask screen, which the confirming pass checks.
 9. **A delivered design is frozen.** When every slice is done, the solution design gains `**Status:** delivered` and an `## As-built deltas` section in one docs pull request, and is never maintained afterward. The truth then lives in code, ADRs, the glossary and governance. Stage derivation reads `**Status:** delivered` before record staleness, and a delivered design's record is never re-stamped. A design is delivered when the first non-blank line after its title is exactly `**Status:** delivered`. Its slices then fail the readiness check with `design_delivered`, and CI verify skips its unedited record.
@@ -73,7 +74,7 @@ The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../init
     - It is an orchestrator that owns the coupling, within ADR-0013's carve-out. It invokes the leaf skills by intent, and they stay uncoupled from each other.
     - No progress state or pointer is stored anywhere. The stage is a pure function of GitHub and git: the latest stage whose evidence exists. Evidence that does not resolve to one answer is reported as ambiguous and asked, never guessed.
     - It never applies `readiness:ready`. At the triage stage it sends the maintainer to `/hivemind:triage-backlog`, which is user-only.
-    - **Docs branch.** Before stage 2 writes any tracked file, it creates `docs/<slug>` from the fetched trunk. It commits the stage-2 and stage-3 outputs through `hivemind:molt`, so the tree is clean for stage 4. Every docs-branch standard-delivery run launches with draft true and no launch reference it could close. The first opens the draft pull request, and later runs reuse it. The pull request leaves draft only after verify passes at its head. A later push that changes a stamped path returns the pull request to draft.
+    - **Docs branch.** Before stage 2 writes any tracked file, it creates `docs/<slug>` from the fetched trunk. It commits the stage-2 and stage-3 outputs through `hivemind:molt`, so the tree is clean for stage 4. Every docs-branch standard-delivery run launches with draft true and no launch reference it could close. The first opens the draft pull request, and later runs reuse it. The pull request leaves draft only after verify passes at its head and the record passes the pass rule. Before launching a run on a docs pull request that is not a draft, the guide returns it to draft with `gh pr ready --undo`. A push the guide did not launch is caught by verify in CI where wired and by the readiness check.
     - The seed issue carries a fixed marker line, and its author has write permission. The marker slug must match `^[a-z0-9]+(-[a-z0-9]+)*$` before any git or `gh` use, else the issue is ignored and named. The epic keeps the marker. Epics created before the guide gain it in #615's delivery, which adds it by hand to epics #603 and #614 before the readiness check is first used to label any slice ready. Until then their slices fail `epic_marker_missing`.
     - Only same-repository pull request heads and authors with write permission count. Ignored issues and pull requests are named in the report.
     - **Concurrent sessions.** A non-fast-forward push or a second docs pull request stops the later session, which re-derives its stage.
@@ -94,7 +95,8 @@ The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../init
 - **Extending the interrogation skill's writer exception.** Not taken: a drone's exact file scope bounds each write with no new exception.
 - **The readiness check parses the record body.** Rejected: the check stays a fixed front-matter parser, and verify checks the body before ready and in CI.
 - **Each caller passes its own trunk ref.** Rejected: a stale local main would pass.
-- **Fix rounds kept off records by prose and agent reports.** Rejected: three review rounds found paths around it; the commit step refuses a record in code.
+- **Fix rounds kept off records by prose and agent reports.** Rejected: three review rounds found paths around it. The fix-round commit step refuses a record in code, and other commits stay prose-bound.
+- **Refusing a record path in `molt.sh`.** Not taken: any agent writing a molt inputs file could set the allowing flag, and the github-reviewer commits with git, so it grows the surface and leaves the same residual (asked after design review round 4, answer Q15 A).
 - **The guide passes verify as a validation command.** Rejected: a plan's validation commands are the planner's reading of the project's documented commands, so no code carries a guide-passed command to the validate step.
 
 ## Consequences
@@ -106,6 +108,7 @@ The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../init
 - The readiness check depends on #625 for Lair admission and on the Lair controller (#608) to run at claim time.
 - A docs pull request never takes the Lair's auto tier (#623).
 - A slice whose solution design is delivered fails the readiness check (`design_delivered`).
+- The council is not part of this process. A weak design decision is asked until #638 ships.
 
 ### Residuals
 
@@ -114,7 +117,16 @@ The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../init
 - **Auto-merge of a docs pull request.**
   - Scope: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval and green checks with no human review of the design.
   - Ground: the user's decision of 2026-11-21 (answer Q5). It is outside the threat model as the maintainer's own opt-in under [ADR-0044](0044-settled-approval-and-opt-in-auto-merge.md).
-  - Bounded impact: in a repository that wires verify in CI, verify keeps a merged record consistent and current. In any repository, every commit except a standard-delivery wave refuses a record, the guide runs verify before ready, the readiness check fails every slice of a stale or delivered design, and #623 closes the Lair path. A wrong design is caught only by a later review.
+  - Bounded impact: in a repository that wires verify in CI, verify keeps a merged record consistent and current. In any repository, the fix-round commit refusal holds, the guide runs verify before ready, the readiness check fails every slice of a stale or delivered design, and #623 closes the Lair path. A wrong design is caught only by a later review.
   - Source: design review round 1, finding B5, recorded in the [review record](../initiatives/idea-to-ready/review-record.md).
+- **Record commits outside the fix-round commit step.**
+  - Scope: four commit routes can carry a review record path with no code refusal:
+    - the overlord's Instinct fallback after a blocked run (`plugin/agents/overlord.md:37`, `:65-69`);
+    - the local reviewer's own molt fix commits in standard-delivery's review gate (`plugin/workflow-src/standard-delivery/review.js:28-36`, `:215`; `plugin/agents/local-reviewer.md:82-83`);
+    - the github-reviewer's git commits in the post-PR watch and pr-feedback-remediation (`plugin/agents/github-reviewer.md:76`; `plugin/workflow-src/pr-feedback-remediation/main.js:5`, `:95`);
+    - the guide's own molt commits.
+  - Ground: unclosable on this engine, because a model that writes a molt inputs file or runs git can carry any path. The user decided so (asked after design review round 4, answer Q15 A).
+  - Bounded impact: verify in CI where wired, the guide's verify before ready, and the readiness check failing every slice of a stale record. A re-stamp without review reaches trunk only through a human-reviewed merge (D24) or under the auto-merge residual.
+  - Source: design review round 4, findings R4A1 and R4B1.
 
-References: [docs/prds/idea-to-ready.md](../prds/idea-to-ready.md), [docs/initiatives/idea-to-ready/solution-design.md](../initiatives/idea-to-ready/solution-design.md), [ADR-0013](0013-decoupled-leaf-pipeline-skills.md), [ADR-0045](0045-lair-software-factory.md), [ADR-0047](0047-abathur-council.md).
+References: [docs/prds/idea-to-ready.md](../prds/idea-to-ready.md), [docs/initiatives/idea-to-ready/solution-design.md](../initiatives/idea-to-ready/solution-design.md), [ADR-0013](0013-decoupled-leaf-pipeline-skills.md), [ADR-0045](0045-lair-software-factory.md), [ADR-0026](0026-decision-autonomy-and-post-merge-report.md), [ADR-0037](0037-standard-delivery-on-script-engine.md), council initiative #638.
