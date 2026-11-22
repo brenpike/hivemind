@@ -354,7 +354,7 @@ Each round is one fresh read-only cerebrate pass with `Memory context: none`, co
 
 The record step rewrites the record after every round: `verdict` stays `fail` until exit, and `rounds`, the open counts and the Findings table stay current. Its stamps follow the stamp rule of Review record front matter. A lost session resumes from the record's rounds.
 
-This initiative's own review had one user-approved exception, D31, a fourth round. That exception is spent, and this initiative's re-review starts at round 1.
+This initiative's own review had two user-approved exceptions. D31 added a fourth round to the first review; it is spent, and the re-review started at round 1. D34 adds a fourth round to the re-review (asked after re-review round 3, answer Q23 A).
 
 ### Re-review and re-stamp
 
@@ -608,6 +608,10 @@ Asked after design review round 4, answers Q12 A and Q14 B. The council, slices 
 
 Asked in re-review round 1, answer Q19 A. A standard-delivery run the guide launched that fails or ends blocked returns to the guide, which re-derives the stage, with no Instinct takeover. This narrows ADR-0039 decision 4 for guide-launched runs. Taken and listed for veto: the mechanism. The overlord tells a guide-launched run by the marker line `hivemind-guide-run: <slug>` that opens its request, which only the guide writes, not by a new launch arg, which would change standard-delivery's launch contract, `readDeliveryLaunch` and its built script. It reads `references` only from line 2 of the request (RR2-2). Asked in re-review round 2, answer Q22 A: the round-2 remediation plan, which takes the fixed request layout and routes review findings to a guide run only as docs pull request comments under the pass scan (RR2-C1, RR2-2; Guide skill). A refused or blocked launch starts no run and still runs on Instinct under ADR-0039 decision 3. #622 edits `plugin/agents/overlord.md` (`## Engine`) and fits its budget by cutting (D20). ADR-0046.
 
+### D34: One-time fourth re-review round
+
+Asked after re-review round 3, answer Q23 A. Every round-3 finding was fixed, then round 4 of the re-review runs as one fresh confirming round covering every angle, with the local review tool pass, a one-time exception the user approved for this initiative only, recorded as D31 was. The three-round cap of Design review rounds stays the general rule, and the pass rule and the readiness check are unchanged. Round 4 is added under Rounds as the D34 confirming round and does not change `rounds`, as D31's round 4 did not (answer Q11 A). If it raises any new critical or high finding, the merge enforcement moves out to #619's own design, and this design narrows its claim to the guide's draft rule and the readiness check. No ADR: fails hard to reverse, because it is a one-time exception that changes no rule.
+
 ### Decisions moved to the council initiative
 
 Asked after design review round 4, answers Q12 A and Q14 B, these moved to #638. They are not decisions of this design, and their numbers are not reused.
@@ -681,3 +685,8 @@ After re-review round 2, main's PRD changes #640, #641, #642 and #643 merged int
 - The review procedure follows them: one pass per round covering every angle, conflicts with the project's documented principles included, the optional local review tool pass, confirming rounds over the change only, a configurable reviewer model (D6, D11), and findings landing before the next round.
 - A record with an open finding or a failed verdict cannot merge on the plugin's merge paths, with no CI merge gate (D28, answer Q21 A). Every capability beyond the plugin is optional, with a stated fallback (`docs/engineering-principles.md` P26).
 - Review findings reach a guide run only as docs pull request comments under the pass scan, and the request has a fixed layout (Guide skill, D33, answer Q22 A).
+
+After re-review round 3, asked after that round, answers Q23 A and Q24 A:
+
+- Merge mode checks, at the head a merge path would merge, every record that a changed PRD, solution design, ADR or record applies, with every check and the pass rule, and refuses a pull request it cannot read. `merge-approved.sh` fetches the head and base from origin to run it, which broadens the narrowing of ADR-0044's merge conditions (D28).
+- A one-time fourth round of the re-review follows (D34).
