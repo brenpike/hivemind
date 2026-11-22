@@ -30,6 +30,40 @@ This design builds on the following code, as it stands on trunk:
 
 ## Components
 
+### Design invariants
+
+Each invariant below is stated once, here. Every later section cites it by name, as "invariant Claim state", and never restates it.
+
+- **Claim state.**
+  - A Lair issue is an issue that carries a `lair:*` label or a counting claim marker (the user's 2026-11-21 sweep answer). A markerless Lair issue is one with no counting claim marker.
+  - An open claim is a counting claim marker with no counting outcome marker of its nonce.
+  - A live strain is a strain session for the nonce, or, for a markerless Lair issue, any strain session for the issue; or an unconsumed result file for the nonce.
+  - A Lair pull request is a pull request as #631 defines it, bound to the nonce.
+  - An orphan is a Lair issue with no live strain and no Lair pull request that is in `readiness:implementation` or holds an open claim.
+  - An orphan is marked failed and never returned to ready. An orphan holding an open claim gets an outcome marker `crashed`, then the `crashed` labels. A markerless orphan gets labels only: `lair:failed` added, `readiness:implementation` and `readiness:ready` removed.
+  - A non-Lair issue is never touched.
+  - This rule runs at start and on each tick. Halt tripwires stop new claims and never suppress this action.
+- **Markers and labels.**
+  - Counting markers decide which claim and which outcome exist; labels follow them.
+  - Each label pairs with a marker: `lair:claimed` with a counting claim marker; `lair:handoff` with a counting handoff marker, or with the counting park marker of an `approval` park or a third park; `lair:failed` and `lair:review` with a counting outcome marker under #631's mapping.
+  - The reconciler moves labels forward only. It skips repair when a `readiness:ready` labeled event is newer than the latest counting outcome marker: the Lair never applies `readiness:ready` (ADR-0045 decision 10), so that event is the user's re-admission (ADR-0045 decision 11), and admission decides what happens next.
+  - Only `lair:claimed` without a counting claim marker trips the halt `marker-missing`. Any other `lair:*` label without its marker is left alone and never claimed.
+- **Lock scope.**
+  - One controller runs per lock scope. A lock scope is one repository (the state root, keyed by the repository's GraphQL node id), one user account and one machine.
+  - Creating the state root and creating the lock file are the only writes before the lock is held, and both are idempotent.
+  - The Lair takes a non-blocking `flock` on `lock` before any other write and holds it for its whole life.
+  - The lock descriptor is never inherited. Every child the controller launches (tmux, strains, scanner sessions, helper scripts) starts with it closed, so a strain that outlives a crashed controller never holds the lock, and the kernel frees the lock when the controller exits.
+  - The lock covers the Lair's own GitHub writes, launches, key creation and halt-file writes. It does not cover the user's edits, triage, interactive sessions, the user's halt-file writes or deletion, or any other lock scope.
+  - Outside one lock scope, exclusivity is detect-and-halt by markers, never prevention. Two Lairs on one repository may both claim an issue and may fail each other's claims as orphans; that setup is unsupported.
+  - The re-read before the claim marker narrows an edit race. It is not mutual exclusion.
+- **Lair-written text.**
+  - Every string the Lair writes to GitHub, a terminal, a tmux pane or a scanner prompt is a fixed template, a token matching a validated pattern, or the one bounded slot.
+  - The slot is the park marker's question block: strain-authored data (question, options, recommendation), printable text only (no control, escape or bidi-override characters), at most 2000 bytes, inside a fenced block.
+  - No reader ever reads the slot's bytes. The Lair never prints them, and never puts them in a scanner prompt or a signed payload.
+  - Beyond the fields every marker carries, the signed park payload carries only `key` (pattern `^[a-z0-9][a-z0-9-]{0,63}$`) and `type`.
+  - A park record that breaks this rule is never posted; its handling is #631's result check.
+  - Claim, outcome and handoff marker text and the queue report have no slot.
+
 ### Lair state root
 
 One directory per repository, outside every checkout and worktree: `${XDG_STATE_HOME:-$HOME/.local/state}/hivemind/lair/<repo-key>/`, where `<repo-key>` is the first 32 hex digits of the SHA-256 of the repository's GraphQL node id. The Lair creates it with mode 0700 and prints its path on start. It holds:
