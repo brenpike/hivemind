@@ -1,0 +1,57 @@
+# Retire the JSON state machine: workflow scripts, Instinct and Reflex remain
+
+**Status:** accepted, 2026-11-22. Each amendment below was asked before design review round 1. [ADR-0018](0018-declarative-workflow-state-machine.md) is amended, and so are the state-machine clauses of [ADR-0019](0019-trust-boundary-discipline-ledger-engine.md), [ADR-0035](0035-one-script-per-workflow-engine.md), [ADR-0036](0036-analysis-only-first-workflow-on-script-engine.md), [ADR-0037](0037-standard-delivery-on-script-engine.md), [ADR-0039](0039-instinct-delivery-path.md) and [ADR-0040](0040-post-pr-flow-on-script-engine.md), by decisions 1 and 5 (answer Q1 A). The fallback changes by decision 2: every refused or blocked launch runs on Instinct after one level check, which amends ADR-0039 decision 3 (answer Q2 A). Brood dispatch runs on Instinct by decision 3 (answer Q3 A). The decision journal of [ADR-0026](0026-decision-autonomy-and-post-merge-report.md) moves to the pull request and the final report, and the post-merge report of ADR-0026 and [ADR-0030](0030-config-gated-post-merge-decision-report.md) is retired, by decision 6 (answer Q4 A). The claimed-state columns of the [ADR-0007](0007-fleet-children-unaware-coordinator-dashboard.md) dashboard are dropped by decision 7 (answer Q5 A). The exploratory workflow is removed by decision 4 (answer Q6 A). [ADR-0005](0005-agent-tool-unavailable-in-subagents.md) is unchanged ([D9](../initiatives/retire-json-state-machine/solution-design.md#d9-adr-0005-is-unchanged)).
+
+## Context
+
+Two engines run side by side with Instinct: the JSON workflow state machine with its run ledger (ADR-0018), and the workflow scripts (ADR-0035). Every change to the overlord, governance and the decision flow must account for both. The state machine still serves `pr-feedback-remediation` and `analysis-only` on a refused launch, `exploratory-intent-session`, `hatchery-dispatch` and resumed runs (ADR-0039 decision 3). Its fallback knows neither an unattended level nor a park, so it cannot serve the Lair ([ADR-0045](0045-lair-software-factory.md) decision 6).
+
+ADR-0039 decision 2 set this up: slice 5 of #409 retires the JSON state machine, not Instinct. This is that slice, issue #635. The [solution design](../initiatives/retire-json-state-machine/solution-design.md) sets the HOW and its slices. No PRD exists yet; `docs/prds/retire-json-state-machine.md` is written before any slice is cut. This ADR records the design's decisions that are hard to reverse. The rules themselves live in the design and, once delivered, in the overlord, governance and skills.
+
+## Decision
+
+1. **The JSON state machine is retired.** One engine remains, the workflow scripts, with Instinct and Reflex beside them. The JSON definitions, the run ledger skills, the overlord's state-machine sections and their tests and tooling are removed. See [D1](../initiatives/retire-json-state-machine/solution-design.md#d1-retire-the-json-state-machine) and [D10](../initiatives/retire-json-state-machine/solution-design.md#d10-the-removal-list).
+2. **One fallback for every refused or blocked launch.** A refused or blocked launch of any workflow continues on Instinct, on the path that matches its workflow. One level check comes first, and it is the only place a non-interactive level can end or park the run instead; #607 owns that level and its sentence. Started runs keep their rules. See [D2](../initiatives/retire-json-state-machine/solution-design.md#d2-one-fallback-for-every-refused-or-blocked-launch), [D3](../initiatives/retire-json-state-machine/solution-design.md#d3-instinct-gains-read-only-analysis-and-post-pr-remediation), [Launch and fallback contract](../initiatives/retire-json-state-machine/solution-design.md#launch-and-fallback-contract) and [Level check seam](../initiatives/retire-json-state-machine/solution-design.md#level-check-seam).
+3. **Brood dispatch runs on Instinct behind the strain-approval ask.** `hatchery-dispatch` has no script and runs on Instinct in the main session. `hivemind:spawn-brood` runs only after the user approves the normalized strain text, a Tier A ask. No synapse runner is added, and the hatchery ledger pointer is retired. See [D4](../initiatives/retire-json-state-machine/solution-design.md#d4-brood-dispatch-runs-on-instinct) and [Brood dispatch on Instinct](../initiatives/retire-json-state-machine/solution-design.md#brood-dispatch-on-instinct).
+4. **The exploratory workflow is removed.** `exploratory-intent-session` and the router's `exploratory` outcome go. See [D5](../initiatives/retire-json-state-machine/solution-design.md#d5-exploratory-intent-session-removed) and [Workflow router](../initiatives/retire-json-state-machine/solution-design.md#workflow-router).
+5. **Resume on start reads git and GitHub.** No session-start scan runs. A new session plans what is left from fresh facts on the branch, and a paused script run resumes by name in its own session. Run ledgers from older versions are neither read nor deleted. See [D6](../initiatives/retire-json-state-machine/solution-design.md#d6-resume-on-start-has-one-path) and [Resume lifecycle](../initiatives/retire-json-state-machine/solution-design.md#resume-lifecycle).
+6. **The pull request is the decision journal.** A run's taken decisions go to its pull request body or comment, and to its final message or Instinct's final report, where the merge is decided. The post-merge decision report, its skill, its session-start scan, its marker and `HIVEMIND_ENABLE_DECISION_REPORT` are retired. See [D7](../initiatives/retire-json-state-machine/solution-design.md#d7-the-pull-request-and-the-final-report-are-the-decision-journal) and [Decision journal](../initiatives/retire-json-state-machine/solution-design.md#decision-journal).
+7. **The brood dashboard drops its claimed-state columns.** It reads no child run ledger, and the gather-facts output file is a child's only started-evidence. Its observed status column stays. See [D8](../initiatives/retire-json-state-machine/solution-design.md#d8-the-brood-dashboard-reads-no-child-ledger) and [brood-status](../initiatives/retire-json-state-machine/solution-design.md#brood-status).
+
+## Considered options
+
+- **Keep the state machine as a permanent fallback.** Rejected: two engines stay, every change accounts for both, and the fallback still knows no unattended level or park (answer Q1 A).
+- **Stop on a refused launch.** Rejected: a project that denies a launch, or has no Workflow tool, could not run that workflow at all, and P26 requires a stated fallback (answer Q2 A).
+- **A `hatchery-dispatch` script, with `hivemind:spawn-brood` as a synapse runner.** Rejected: a script cannot hold the strain approval as a Tier A ask the way the main session does, and the synapse runner gate would grow (answer Q3 A).
+- **Keep the post-merge report, fed from the merged pull request.** Rejected: the reader of a journal decides before merge, so the report adds a second source after the decision (answer Q4 A).
+- **Keep the claimed columns, fed from pull request state.** Rejected: the observed status already reads the pull request, so the columns would repeat it (answer Q5 A).
+- **An Instinct mode or a script for the exploratory path.** Rejected: a request no workflow fits routes to `analysis-only`, `standard-delivery` or `ambiguous`, so a fourth runner adds a path with no request of its own (answer Q6 A).
+
+## Consequences
+
+- Every non-Reflex request runs a workflow script or Instinct. A session without the Workflow tool runs every request on Instinct.
+- A `Workflow(hivemind:<id>)` deny entry sends any workflow to Instinct.
+- #607 adds the unattended sentence in one place, the level check, and no other refused-launch path exists to miss.
+- Instinct carries the safety rules that lived only in the deleted state-machine sections, so they bind every path the overlord drives ([D11](../initiatives/retire-json-state-machine/solution-design.md#d11-three-rules-re-homed-in-the-safety-rails)).
+- The engine removal deletes tests and security-relevant guards, so its slice passes the destructive-fix gate item by item ([D12](../initiatives/retire-json-state-machine/solution-design.md#d12-engine-test-deletion-needs-the-users-confirmation)).
+- Text that other initiatives' stamped documents hold about the state machine changes only through their own re-review ([D19](../initiatives/retire-json-state-machine/solution-design.md#d19-stamped-documents-change-only-through-their-own-re-review)).
+
+### Residuals
+
+- **Run ledgers from older versions.**
+  - Scope: a run left `running` under `.hivemind/runs/` by an older version is not resumed, and the folder stays on disk.
+  - Ground: the branch, its commits and its pull request are the record (ADR-0037 decision 2), so no ledger read is needed to plan what is left.
+  - Bounded impact: giving the request again plans what is left from fresh facts. The user may delete the folder by hand.
+  - Source: solution design, Upgrade lifecycle and Failure modes.
+- **No decision review after merge.**
+  - Scope: a decision taken for the user is listed only before merge, on the pull request and in the final message or report.
+  - Ground: answer Q4 A.
+  - Bounded impact: every merge is still the user's, and each taken decision is listed for veto where the merge is decided.
+  - Source: solution design, D7.
+- **A brood child's Ask Set question waits.**
+  - Scope: a child on Instinct that reaches an Ask Set question waits in its own session.
+  - Ground: a child on the state machine waited the same way; unattended handling is #607's.
+  - Bounded impact: the session has remote control, and the dashboard shows it alive.
+  - Source: solution design, Failure modes.
+
+References: [docs/initiatives/retire-json-state-machine/solution-design.md](../initiatives/retire-json-state-machine/solution-design.md), [ADR-0005](0005-agent-tool-unavailable-in-subagents.md), [ADR-0007](0007-fleet-children-unaware-coordinator-dashboard.md), [ADR-0018](0018-declarative-workflow-state-machine.md), [ADR-0019](0019-trust-boundary-discipline-ledger-engine.md), [ADR-0026](0026-decision-autonomy-and-post-merge-report.md), [ADR-0030](0030-config-gated-post-merge-decision-report.md), [ADR-0035](0035-one-script-per-workflow-engine.md), [ADR-0036](0036-analysis-only-first-workflow-on-script-engine.md), [ADR-0037](0037-standard-delivery-on-script-engine.md), [ADR-0039](0039-instinct-delivery-path.md), [ADR-0040](0040-post-pr-flow-on-script-engine.md), [ADR-0045](0045-lair-software-factory.md), [ADR-0046](0046-idea-to-ready-process.md), issues #409, #607 and #635.
