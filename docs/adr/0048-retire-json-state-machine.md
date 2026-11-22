@@ -6,7 +6,7 @@
 
 Two engines run side by side with Instinct: the JSON workflow state machine with its run ledger (ADR-0018), and the workflow scripts ([ADR-0035](0035-one-script-per-workflow-engine.md)). Every change to the overlord, governance and the decision flow must account for both. The state machine still serves `pr-feedback-remediation` and `analysis-only` on a refused launch, `exploratory-intent-session`, `hatchery-dispatch` and resumed runs (ADR-0039 decision 3). Its fallback knows neither an unattended level nor a park, so it cannot serve the Lair ([ADR-0045](0045-lair-software-factory.md) decision 6).
 
-[ADR-0039](0039-instinct-delivery-path.md) decision 2 set this up: slice 5 of #409 retires the JSON state machine, not Instinct. This is that slice, issue #635. The [solution design](../initiatives/retire-json-state-machine/solution-design.md) sets the HOW and its slices. No PRD exists yet; `docs/prds/retire-json-state-machine.md` is written before any slice is cut. This ADR records the design's decisions that are hard to reverse. The rules themselves live in the design and, once delivered, in the overlord, governance and skills.
+[ADR-0039](0039-instinct-delivery-path.md) decision 2 set this up: slice 5 of #409 retires the JSON state machine, not Instinct. This is that slice, issue #635. The [solution design](../initiatives/retire-json-state-machine/solution-design.md) sets the HOW and its slices. The [PRD](../prds/retire-json-state-machine.md) states what the retirement delivers and is written before any slice is cut. This ADR records the design's decisions that are hard to reverse. The rules themselves live in the design and, once delivered, in the overlord, governance and skills.
 
 ## Decision
 
