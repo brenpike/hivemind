@@ -271,7 +271,7 @@ When Instinct opens a pull request, `hivemind:open-plan-pr`'s `body` holds the s
 Every boundary below holds on every remaining path. No credential, tool grant, `allowed-tools` entry, hook or permission rule is added; the overlord's frontmatter `tools:` list is unchanged apart from its comment.
 
 - **Strain-approval gate.** Brood dispatch runs only on Instinct, in the main session, and `hivemind:spawn-brood` runs only after the user approves the normalized strain text (Tier A, `decision-autonomy.md:16`). The other two controls of Brood Spawn Bypass-Mode Mitigation are unchanged: the data-boundary preamble in `task.md`, and the `base` allowlist. The state machine's `brood_confirm` gate was the same approval, so dispatch loses no gate. A Lair strain's approval is #608's admission and scan, unchanged here.
-- **Destructive-fix gate.** It rides every delegation per `## Parallel Delegation Safety` (unchanged) on all three Instinct paths and on brood dispatch. Reviewers apply it, and scripts carry approvals as today. The retirement itself passes through it: each slice that deletes or narrows an item D12 names passes the gate (D12).
+- **Destructive-fix gate.** It rides every delegation per `## Parallel Delegation Safety` (unchanged) on all three Instinct paths and on brood dispatch. Reviewers apply it, and scripts carry approvals as today. The retirement itself passes through it: each deletion or narrowing a slice makes that the gate covers passes it (D12).
 - **External-content boundary.** The facts rule, with its injection scan, moves to `## Safety Rails` and binds every planner delegation the overlord makes, where today it binds only the state machine and Instinct's "after `hivemind:gather-facts`" (D11). The watch opt-out reads the in-session request text, as the Reflex tail does, for the one yes or no question. It no longer reads a ledger's `request.raw` copy, so there is one source. Router input stays untrusted.
 - **Commit and push.** `expect_commit` binds every push on every overlord path, through the input gates of `hivemind:open-plan-pr` and `hivemind:push-branch` (D11). The PR head checkout precedes every reviewer delegation for an existing pull request. The trunk-commit hard stop is unchanged.
 - **Synapse runner gate.** Unchanged: five runner scripts, and spawn-brood is not one of them.
@@ -411,7 +411,7 @@ One row per current path, with its effect and the slice (Seam order) that makes 
 | `HIVEMIND_ENABLE_DECISION_REPORT` is still set | Nothing reads it; README says it is retired. | S4 |
 | An overlord slice overruns its prose budget | S1 and S2 only delete overlord text. S4 adds the re-homed rules and Instinct paths in the same change that deletes four sections, so it shrinks. Any overrun is asked as a budget raise (Tier A), never raised silently. | S1, S2, S4 |
 | A change to `waves.js` alters a wave | The frozen expectations fail. Changing an expectation is a test edit that the review sees; weakening one is DESTRUCTIVE-CAT 3. | S5 |
-| A slice deletes or narrows an item D12 names without confirmation | Its delegations return Blocked at the destructive-fix gate, read at its broadest (D12), and nothing is deleted or narrowed until the user confirms each item. | S1-S5 |
+| A slice deletes or narrows an item the destructive-fix gate covers without confirmation | Its delegations return Blocked at the destructive-fix gate, read at its broadest (D12), and nothing is deleted or narrowed until the user confirms each item. | S1-S5 |
 | A path under a deleted tree is left behind | `tools/validate.sh` maps it nowhere, so `--changed` escalates to the full suite (FAIL-CLOSED), and `build_workflows.mjs --check` fails on a leftover in `plugin/workflows/`. | S5 |
 | A slice edits a stamped document of another initiative | That record goes stale and its slices fail `record_stale`. No retirement slice edits one; each change lands through that initiative's own re-review (D19). | none |
 | A brood child on Instinct asks an Ask Set question | It waits in its session, which stays alive and reachable through its `attach:` line, or through remote control when enabled, as a child on the state machine did. Unattended handling is #607's. | S2 |
@@ -494,7 +494,7 @@ Answered: Q7 A. Two rules live only in text this design deletes, and each moves 
 
 ### D12: Engine test deletion needs the user's confirmation
 
-Taken, listed for veto. Every slice's deletion or narrowing of a test, test case, assertion, fixture, pin, suite map entry, check arm or ledger read guard passes `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Destructive Fix Confirmation Gate), read at its broadest, and needs the user's confirmation of each item before it lands. Retiring a subject does not exempt its tests from the gate. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); it applies a gate and changes none; reversible.
+Taken, listed for veto. Every deletion or narrowing a slice makes that falls in a category of `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Destructive Fix Confirmation Gate), read at its broadest, passes that gate as a remediation fix would, and needs the user's confirmation of each item before it lands. The gate's categories, not a list here, decide what is covered, so a governance clause such as a Trust-Boundary Discipline boundary is covered as a test or guard is. Retiring a subject does not exempt anything of it from the gate. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); it applies a gate and changes none; reversible.
 
 ### D13: waves.js keeps its parity fixtures as frozen expectations
 
@@ -750,7 +750,7 @@ Each slice runs this repository's own gate, `bash tools/validate.sh --changed`. 
   - **Suites.** `tools/validate.sh --self-test` passes with no map entry or suite name for a deleted path. `tools/validate.sh --all` passes.
   - **CHECK 15.** It runs its `plugin/**/*.md` arm with no zero-count finding for `plugin/workflows/*.json`.
   - **Overlord budget.** The overlord budget is lowered again if the slice shrinks the file further, and every deleted file's budget entry is removed.
-  - **Destructive-fix confirmation.** Each item D12 names is put to the destructive-fix gate, read at its broadest, and the slice's run confirms each with the user before it lands (D12).
+  - **Destructive-fix confirmation.** Each deletion or narrowing the destructive-fix gate covers, read at its broadest, the Trust-Boundary Discipline clauses included, is put to the gate, and the slice's run confirms each with the user before it lands (D12).
 
 ## Seam order
 
