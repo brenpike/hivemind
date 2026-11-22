@@ -1,6 +1,6 @@
 # Abathur council: one decision service for calls with no strong recommendation
 
-**Status:** accepted, 2026-11-21. Amends ADR-0026 decision 2 (for design-stage decisions and planner questions in standard-delivery, a weak or absent recommendation with a clean gate goes to the council before defer-or-record, unless it needs a fact only the user holds), ADR-0036 decision 6 (a weak planner question in standard-delivery goes to the council before it is taken: the consult runs ahead of an unchanged `decide()`, which stays the only place a decision is resolved) and ADR-0045 decision 7 (a planner question with no recommendation goes to the council before it parks, unless it needs a fact only the user holds). The user approved these amendments on 2026-11-21 and narrowed them to planner questions and design-stage decisions in design review round 2 (D30, answer Q6 A). None of the three ADR files is edited. It does not amend ADR-0037: `decide()`, `resolveDecision`, the Ask Set, list reasons and check order are unchanged, injection-suspect stays terminal, and a council re-plan enters planning through the facts step (ADR-0037 invariant 3). It does not amend ADR-0042 decision 9: `run-review.sh` still runs every local review.
+**Status:** accepted, 2026-11-21. Amends ADR-0026 decision 2 (for design-stage decisions and planner questions in standard-delivery, a weak or absent recommendation with a clean gate goes to the council before defer-or-record, unless it needs a fact only the user holds), ADR-0036 decision 6 (a weak planner question in standard-delivery goes to the council before it is taken: the consult runs ahead of an unchanged `decide()`, which stays the only place a decision is resolved) and ADR-0045 decision 7 (a planner question with no recommendation goes to the council before it parks, unless it needs a fact only the user holds). The user approved these amendments on 2026-11-21 and narrowed them to planner questions and design-stage decisions (D30; asked in design review round 2, answer Q6 A). None of the three ADR files is edited. It does not amend ADR-0037: `decide()`, `resolveDecision`, the Ask Set, list reasons and check order are unchanged, injection-suspect stays terminal, and a council re-plan enters planning through the facts step (ADR-0037 invariant 3). It does not amend ADR-0042 decision 9: `run-review.sh` still runs every local review.
 
 ## Context
 
@@ -45,11 +45,11 @@ The council absorbs and rescopes the council work of the earlier Abathur and Sco
    - A strong result on the producer's option is taken, journaled and shown in the pull request decisions.
    - A strong result on another option with a clean producer gate read is journaled and shown, and the run plans again with it settled, so the plan that runs is built on it. A gate trip asks, or parks in an unattended run.
    - A split or `none` asks `no_recommendation` with the dissent attached. In an unattended run it parks, carrying the brief and its dissent (#607).
-   - A question marked `needs_user_fact` true reaches the user as it would with no council.
+   - A question marked `needs_user_fact` true, or with the field absent, is never convened, so it reaches the user as it would with no council.
    - Every member and Abathur delegation carries `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Delegation Data-Boundary Constraint).
    - Member opinions are injection-scanned before Abathur, and Abathur's output before compose. A suspect one ends the run with the pass scan's terminal stop (ADR-0037), is an approval park in an unattended run (ADR-0045 decision 7), and is asked in the design stages. The first result never stands.
 8. **The member is named Overseer.** The member agent is `overseer`, because Synapse is now the runner agent. The judge is `abathur`.
-9. **Amendments of accepted ADRs.** With the user's approval, narrowed in design review round 2 (D30, answer Q6 A), the council weighs a planner question or design-stage decision with no strong recommendation before it is asked or parked:
+9. **Amendments of accepted ADRs.** With the user's approval, narrowed by D30 (asked in design review round 2, answer Q6 A), the council weighs a planner question or design-stage decision with no strong recommendation before it is asked or parked:
    - ADR-0026 decision 2: for design-stage decisions and planner questions in standard-delivery, a weak or absent recommendation with a clean gate goes to the council before defer-or-record, unless it needs a fact only the user holds.
    - ADR-0036 decision 6: a weak planner question in standard-delivery goes to the council before it is taken. The consult runs ahead of an unchanged `decide()`, which stays the only place a decision is resolved.
    - ADR-0045 decision 7: a planner question with no recommendation goes to the council before it parks, unless it needs a fact only the user holds.
@@ -67,7 +67,7 @@ The council absorbs and rescopes the council work of the earlier Abathur and Sco
 - **The consult setting as a table row.** Rejected: rows hold only auto or surface cells, and a call site could pass it as a kind.
 - **A runner member under the `codex-plugin` preset.** Rejected: the preset has no prompt path.
 - **Consulting inside `resolveDecision` at every call site.** Rejected: `resolveDecision` is synchronous, the validation fix limit throws on a take, and review calls admit no second agent.
-- **A council that may only confirm the producer's weak recommendation.** Rejected by the user in design review round 2 (Q6): it removes no stop.
+- **A council that may only confirm the producer's weak recommendation.** Rejected by the user (asked in design review round 2, answer Q6 A): it removes no stop.
 - **A per-option gate on every option.** Rejected: it is a second brief field where Q6 A adds one, and a gate read reads only the option the council picked.
 - **Taking a switched option without a re-plan.** Rejected: it journals a take the plan does not implement.
 - **A council answering a question whose `needs_user_fact` is absent.** Rejected: a producer that leaves the field out would let the council answer a fact only the user holds.

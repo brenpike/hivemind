@@ -40,7 +40,7 @@ The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../init
    - Round 1 is two parallel passes: angle A (code truth, governance and ADR conflicts, existing-path coverage) and angle B (failure modes, trust and injection, testability).
    - Findings are fixed on the docs branch. Each later round is one fresh confirming pass over both angles.
    - A pass that errors, times out or returns unparseable output yields no round and is re-run. Only a completed pass with an empty list of new findings makes a clean round.
-   - **Exit rule:** the review exits only with zero open critical or high findings and one clean round, so a passing review has two or three rounds.
+   - **Exit rule:** the review exits only with every open count (critical, high, medium and low) at 0 and one clean round, so a passing review has two or three rounds.
    - **Three-round cap:** a review that has not converged after round 3 stops and reaches the maintainer as a signal to split the initiative.
    - Every finding gets exactly one disposition: `fixed`, `rejected` with its reason, `deferred` or `recorded`. Critical and high findings are only `fixed` or `rejected`.
    - The record is rewritten after every round, and a lost session resumes from its rounds.
@@ -55,7 +55,7 @@ The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../init
      - ADR inclusion is checked only for a record the pull request adds or edits. Every other passing record gets stamp equality only.
      - CI maps `docs/initiatives/`, `docs/prds/` and `docs/adr/` to verify.
      - A verify failure is never fixed in place. The validate step reports it as blocked, so the run stops with that reason and runs no fix round. A validation fix round or a post-PR fix never edits a review record.
-   - **Authority.** A record is authoritative only through a human-reviewed merge. Only the design review's drone step writes or re-stamps it. The first run that edits a stamped document of a passing record begins with that record step setting `verdict` to `fail`. #623, with the #625 amendment, adds `docs/prds/`, `docs/initiatives/` and `docs/adr/` to the Lair's protected-path list.
+   - **Authority.** A record is authoritative only through a human-reviewed merge. Only the design review's record step, a drone with exact file scope, writes or re-stamps it. The first run that edits a stamped document of a passing record begins with that record step setting `verdict` to `fail`. #623, with the #625 amendment, adds `docs/prds/`, `docs/initiatives/` and `docs/adr/` to the Lair's protected-path list.
    - The record ships in the same pull request as the design, whose draft rule is decision 10.
 8. **Design-decision rule.** Review Calls in the autonomy governance gains a rule for the design stages. A decision with a strong recommendation inside the PRD's scope and a clean gate is taken and listed in the review record for veto. These are always asked: a change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible.
    - A decision with a weak recommendation or none goes to the council first (ADR-0047). It is asked instead, never sent to the council, when its brief marks it as needing a fact only the user holds or leaves the mark out.
@@ -76,7 +76,7 @@ The [PRD](../prds/idea-to-ready.md) sets the WHAT. The [solution design](../init
     - The seed issue carries a fixed marker line, and its author has write permission. The marker slug must match `^[a-z0-9]+(-[a-z0-9]+)*$` before any git or `gh` use, else the issue is ignored and named. The epic keeps the marker. Epics created before the guide gain it in #615's delivery, which adds it by hand to epics #603 and #614 before the readiness check is first used to label any slice ready. Until then their slices fail `epic_marker_missing`.
     - Only same-repository pull request heads and authors with write permission count. Ignored issues and pull requests are named in the report.
     - **Concurrent sessions.** A non-fast-forward push or a second docs pull request stops the later session, which re-derives its stage.
-11. **A drone with exact file scope writes design artifacts.** Solution designs, review records and design-stage ADRs are written by a drone with exact file scope, in a standard-delivery run on the docs branch. The design review's drone step is the only writer and re-stamper of review records. The writer exception of `hivemind:plan-interrogation` is not extended: it stays the glossary and ADR writer during interrogation only.
+11. **A drone with exact file scope writes design artifacts.** Solution designs, review records and design-stage ADRs are written by a drone with exact file scope, in a standard-delivery run on the docs branch. The design review's record step is the only writer and re-stamper of review records. The writer exception of `hivemind:plan-interrogation` is not extended: it stays the glossary and ADR writer during interrogation only.
 
 ## Considered options
 
