@@ -259,12 +259,12 @@ The outcome of a Tier-B decision — `did-now` (auto-executed), `deferred` (trac
 _Avoid_: status, resolution
 
 **Council**:
-The decision service for a choice with no strong recommendation, called from the design stages and, as a consult, from standard-delivery. The caller launches two or more **Overseer** members, each with an angle and a model, then Abathur, the read-only agent that weighs their opinions into one brief and keeps the dissent. Abathur never picks the members it judges. The caller composes the result brief from the input brief and Abathur's recommendation, so no member or Abathur can change a gate, and the decision step resolves it. A split comes back with no recommendation, so it is asked, or parks in an unattended run. Hard stops and **Promotion Gate** trips are never sent to the council (ADR-0047).
+The decision service for a choice with no strong recommendation, called from the design stages and, for a planner question, from standard-delivery. The caller launches two to four members, **Overseer** agents plus at most one runner member, each with an angle and a model, then Abathur, the read-only agent that weighs their opinions into one recommendation. The caller composes the result brief, which keeps the dissent; Abathur never picks the members it judges, and every gate stays the producer's own read. A question its producer marks as needing a fact only the user holds is never sent to it. A strong result on the producer's option with a clean gate is taken; a strong result on another option is taken only when the producer's gate read of it is clean, and the work is planned again with it settled; a split comes back with no recommendation, so it is asked, or parks in an unattended run. Hard stops and **Promotion Gate** trips are never sent to the council (ADR-0047).
 _Alias_: Abathur council
 _Avoid_: panel, jury, second opinion, consensus
 
 **Overseer**:
-A read-only **Council** member: one opinion on one call, from its assigned angle and model, which Abathur weighs. A council result counts only with at least two members on at least two models. One member may be a non-Claude reviewer run through the **Local Reviewer** setting, only when that setting is a JSON argv list; its identity names the tool, never a model. Named Overseer because **Synapse** is the runner agent (ADR-0047).
+A read-only **Council** member: one opinion on one call, from its assigned angle and model, which Abathur weighs. A council result counts only with at least two members on at least two models. A **Council** has two to four members, Overseers and, only when the **Local Reviewer** setting is a JSON argv list, one runner member, a non-Claude reviewer whose identity names the tool, never a model; with a runner member at most three are Overseers. Named Overseer because **Synapse** is the runner agent (ADR-0047).
 _Avoid_: Synapse (the runner agent), voter, juror
 
 ### Plugin Structure
@@ -405,7 +405,7 @@ The one deterministic check, shared by triage, the **Guide**'s handoff check and
 _Avoid_: readiness rating, quality gate, triage (which applies the labels)
 
 **Initiative Track**:
-The track of an issue with a native parent epic: an initiative slice. Features and any change to a public contract or governance semantics take it; their epic is the slices' native parent and never a slice itself: **PRD**, **Solution Design** and ADRs, **Design Review**, merged docs, slicing, triage, then the handoff check. A slice passes the **Readiness Check** only when its design section names a **Solution Design** whose **Review Record** passes and is not stale.
+The track of an issue with a native parent epic, an initiative slice. Features and any change to a public contract or governance semantics take it. Its epic is the slices' native parent and never a slice itself. Its stages are the **PRD**, **Solution Design** and ADRs, **Design Review**, merged docs, slicing, triage, then the handoff check. A slice passes the **Readiness Check** only when its design section names a **Solution Design** whose **Review Record** passes and is not stale.
 _Avoid_: feature track, full path, heavy track
 
 **Standalone Track**:
@@ -503,7 +503,7 @@ _Avoid_: degraded mode, manual mode, safe mode
 - The **Readiness Check** reads an issue's track, never judges it: a native parent epic puts it on the **Initiative Track**, else it is on the **Standalone Track** and must carry a **Spec Block**
 - Triage proposes `readiness:ready` only for an issue that passes the **Readiness Check**; the **Lair** re-runs the check at claim time and claims only a **Ready Issue**
 - The **Guide** (conductor) orchestrates `hivemind:plan-interrogation`, `hivemind:plan-to-prd`, the **Design Review** and `hivemind:prd-to-issues` by intent, and leaves `readiness:ready` to the maintainer through triage
-- A **Council** (Abathur council) has two or more **Overseer** members and one Abathur; the caller composes its brief and the decision step resolves it, so hard stops and **Promotion Gate** trips still ask, and a split is asked or parks
+- A **Council** (Abathur council) has two to four members, **Overseers** plus at most one runner member, and one Abathur; the caller composes its brief and the decision step resolves it, so hard stops and **Promotion Gate** trips still ask, a question that needs a fact only the user holds never reaches it, and a split is asked or parks
 
 - A **Workflow Router** selects exactly one **Workflow Definition** for a request, or routes to the **Exploratory Intent Session** when no concrete workflow matches; outside **Instinct**, the **Overlord** then executes that definition's states, advancing only via the **Transition Engine** and recording progress in the **Run Ledger**
 - A **Reflex** (trivial fast path) bypasses the **Workflow Router** and the **Run Ledger** entirely — the **Overlord** drives the short delivery tail by intent, just as it skips the **Cerebrate**
