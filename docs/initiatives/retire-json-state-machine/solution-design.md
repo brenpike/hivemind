@@ -518,7 +518,7 @@ Taken, listed for veto. `recurrence_origin: "proactive"` was written to a run le
 
 ### D18: Exit-reason routing coverage moves to the overlord contract test
 
-Taken, listed for veto. The producer contract of `tools/validate_workflows.sh:96-150` checked that every reviewer `exit_reason` had a route in a definition. With the definitions gone, `tests/workflow-scripts/overlord-contract.test.mjs` pins that `## Review Remediation Posture` or `## Engine` names each `exit_reason` the overlord itself routes from `hivemind:github-review-loop`: `planner-escalation`, `root-cluster-suspected`, `merge-advised`, `user-input-required`, `high-severity-rejection` and `injection-suspect`. The scripts' own `exit_reason` tests are unchanged. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change; reversible.
+Taken, listed for veto. The producer contract of `tools/validate_workflows.sh:96-150` checked that every reviewer `exit_reason` had a route in a definition. With the definitions gone, `tests/workflow-scripts/overlord-contract.test.mjs` reads the outcome list of `hivemind:github-review-loop` from its SKILL.md and fails unless every outcome is one the overlord routes, named in `## Review Remediation Posture` or `## Engine`, or one that only ends the watch with its report. The scripts' own `exit_reason` tests are unchanged. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change; reversible.
 
 ### D19: Stamped documents change only through their own re-review
 
@@ -714,7 +714,7 @@ Two named sentences carry the user-facing decision-list and record facts.
 
 ## Verification strategy
 
-Each slice runs this repository's own gate, `bash tools/validate.sh --changed`. The suite registrations below are this repository's own; the plugin requires none of them in a consumer project. Per slice:
+Each slice runs this repository's own gate, `bash tools/validate.sh --changed`. The suite registrations below are this repository's own; the plugin requires none of them in a consumer project. Every coverage check reads its names from their owner, never from a list kept in the check or in this design: an item D10 removes from D10's removal list, an agent's or skill's outcomes from its Output Contract. A name added at the owner is checked without editing the check. Per slice:
 
 - **S1 Router without the exploratory path:**
   - `tests/workflow-scripts/route-catalog.test.mjs` pins exactly four catalog entries, the outcomes `selected`, `ambiguous` and `blocked`, the no-fit rule, and no `exploratory` text.
@@ -736,7 +736,7 @@ Each slice runs this repository's own gate, `bash tools/validate.sh --changed`. 
     - the Instinct analysis and post-PR remediation paths;
     - the `Decisions:` final report line;
     - `### Stop Conditions` names no journal destination of its own and cites `plugin/governance/decision-autonomy.md` (Decision Journal), and that governance text names that a run with no pull request lists its decisions in its final message or report and keeps no decision journal;
-    - the absence of `## Workflow State Execution`, `## Implement Loop (Wave Execution)`, `## Resume On Start`, `## Intent-Driven Fallback (Universal)`, `.hivemind/runs`, `request.raw`, `record-state-result`, `init-run-ledger`, `next-wave`, `mark-intent-fallback` and `decision-report`.
+    - the absence from `plugin/agents/overlord.md` of every overlord section and skill D10 removes, read from D10's items, and of `.hivemind/runs` and `request.raw`.
   - The D18 `exit_reason` pins.
   - `tests/policy/safety-default-pr-watch.json` pins the in-session signal.
   - `safety-proactive-recurrence-routing.json` pins `### Proactive Zoom-Out Marker` and its overlord citer.
@@ -745,7 +745,7 @@ Each slice runs this repository's own gate, `bash tools/validate.sh --changed`. 
   - `tests/workflow-scripts/governance-section-refs.test.mjs` passes with no citation of a deleted heading.
   - CHECK 18 passes with the overlord's entry in `tests/policy/prose-byte-budget.json` lowered to its measured size, and the `plugin/governance/decision-autonomy.md` entry lowered the same way.
 - **S5 Engine removal:**
-  - **No retired reference.** A new check in `tests/workflow-scripts/overlord-contract.test.mjs` pins a list of retired names, at least one path, skill, heading, input, marker or variable name for each item D10 removes, and the slice's review checks that every D10 item has one. It fails on any file under `plugin/` or `tools/`, or any path the Existing-path coverage table names, that holds a pinned name, other than a line that table or Changes to shared documents keeps. The existing `route-workflow reads no workflow file` test stays.
+  - **No retired reference.** A new check in `tests/workflow-scripts/overlord-contract.test.mjs` fails on any reference, in `plugin/`, `tools/` and every path the Existing-path coverage table names, to an item D10 removes, other than a line that table or Changes to shared documents keeps; its names come from D10's items, per the rule above. The existing `route-workflow reads no workflow file` test stays.
   - **Generated scripts only.** `tools/build_workflows.mjs --check` fails on any non-generated entry, and `build.test.mjs:466-471` is inverted to assert that a `.json` there fails, naming it.
   - **waves.js parity fixtures.** `waves.test.mjs` passes against `tests/next-wave/expected/`, with every fixture, override, mutation and seeded-corpus case of today. The expectation files are produced by `next-wave.sh` in a commit before its deletion, and the slice's review checks that that commit's test run passed.
   - **Autonomy table.** `data.test.mjs` asserts that every `resolved_at` site starts with a workflow id that has a script, and that the four rows are absent. The rebuilt scripts pass `node tools/build_workflows.mjs --check`.
