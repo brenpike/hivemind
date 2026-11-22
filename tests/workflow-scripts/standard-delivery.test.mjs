@@ -10547,7 +10547,7 @@ const ROW_TESTS = {
       assert.equal(state.repeatClusterAsked, true);
     });
     test('the pinned text of a worst case cluster, 50 open findings of 300 characters and a 300 character root, shows each line whole, ends in three dots and still pauses', async () => {
-      for (const [char, rootChar] of [['A', 'y'], ['\u4e00', '\u00e9']]) {
+      for (const [char, rootChar] of [['A', 'y'], ['\u4e00', '\u{1F600}']]) {
         const open = Array.from({ length: 50 }, (_, index) => ({ finding_id: 'a'.repeat(8), title: String.fromCodePoint(char.codePointAt(0) + index).repeat(300) }));
         const root = rootChar.repeat(300);
         const pinned = main.buildFindingsData(root, open);
