@@ -3,9 +3,9 @@ stamps: []
 verdict: pending
 open_counts:
   critical: 0
-  high: 1
-  medium: 2
-  low: 3
+  high: 0
+  medium: 0
+  low: 0
 rounds: 3
 clean_round: null
 ---
@@ -14,7 +14,7 @@ clean_round: null
 
 This record covers the design review of issue #630, the strain launch and containment part of the Lair, epic #603. Only the [strain launch design](strain-launch-design.md) is stamped. Its stamp's blob is `git rev-parse HEAD:docs/initiatives/autonomous-ready-issue-loop/strain-launch-design.md`, and the stamp is written last. The [PRD](../../prds/autonomous-ready-issue-loop.md), [ADR-0045](../../adr/0045-lair-software-factory.md) and the parent [solution design](solution-design.md) are reviewed, not stamped.
 
-The review exits only when zero critical or high findings are open and one round raises no new findings. It runs at most 3 rounds.
+The review exits only when zero critical or high findings are open and one round raises no new findings. It runs at most 3 rounds. On 2026-11-22 the user authorized one more round beyond that cap (Round 3, Decisions asked).
 
 Round 1 ran under the original procedure: two parallel, fresh, read-only `hivemind:cerebrate` passes (A and B), model opus, effort xhigh, each with "Memory context: none". Its IDs stay `L1-A<n>` and `L1-B<n>`.
 
@@ -182,23 +182,27 @@ Line numbers marked "design" refer to the reviewed blob `cb1aec32`.
 
 **Fix check.** The cerebrate pass judged L2-C1 to L2-C10 all closed by the design text.
 
-Round 3 is not clean: it raised new findings, all open (see the tables). Round 3 is the last round the 3-round cap allows and ends with an open high finding, so the exit rule is not met. Per the task rule, the run stopped and asked the user (Tier A). No answer is recorded yet.
+Round 3 is not clean: it raised new findings (see the tables). Round 3 is the last round the 3-round cap allows and ended with an open high finding, so the exit rule was not met. Per the task rule, the run stopped and asked the user (Tier A).
+
+**Round 4 authorized beyond the cap.** On 2026-11-22 the user answered option A (Decisions asked): fix all six findings, then run one confirming round 4 at effort medium, with the cerebrate pass and the Codex tool pass, on that diff only. A clean round 4 stamps the design, sets the verdict to `pass` and leaves the pull request a draft. A round 4 that is not clean stops and asks the user.
+
+**Remediation after round 3.** Each finding was checked against trunk code. Every finding is fixed in the design; none is deferred, recorded or rejected. The State column holds the disposition, its reason and the closing section. The design's Amendments section has the matching entry.
 
 ### Cerebrate pass
 
 | ID | Severity | Section | Finding | Evidence | Proposed fix | State |
 | --- | --- | --- | --- | --- | --- | --- |
-| L3-C1 | medium | Contracts and seams > Strain result; Strain result and liveness | The strain result schema allows null `level`, `branch`, `head`, `gates` and `decisions` only when no engine record exists. A verified run can end with a record before `level`, `branch` and `head` exist (a first-claim `launch_mismatch`, an early `agent_budget` or a block), so those records fail the schema. What `lair-result.sh` does with a schema-failing record is unstated. | Design text only | Decide nullability per field. `gates` and `decisions` are non-null whenever a record exists. State the output of `lair-result.sh` for a schema-failing record. Add a `tools/test_lair_strain.sh` case. | open |
-| L3-C2 | medium | Strain launch and settings > Environment preflight; Contracts and seams > Strain environment | The preflight applies the `env -i` list to the Lair's own environment, but strains get their values from the tmux server's environment, which the design says differs. The preflight can pass while every strain fails. | Design text only | Run the probes through the same tmux server (a throwaway session), or build the probe environment from `tmux show-environment -g`. Add a `tools/test_lair_tick.sh` case. | open |
-| L3-C3 | low | Strain launch and settings > Environment preflight | `run-review.sh` has no dry-run mode, so the probe's work tree, base and pass criterion are undefined, and the probe is a real paid review. | `run-review.sh:10-17`, `:3-6`, `:49` | Define the probe as `run-review.sh --base <fetched trunk commit>` in a clean scratch worktree detached at that commit (empty diff), or add a named probe mode with its own test. State the pass criterion. | open |
-| L3-C4 | low | Start points "Handling by start kind"; Remediation strain launch "Its claim" | An edited comment keeps its node id, so findings added by an edit never dispatch. The overflow sentinel has id `null`. The "current finding keys" set is undefined. | `fetch-normalize.sh:101-102`; `fix-history-classify.jq:51`; `fetch-normalize.sh:97-98`; `fix-history-classify.jq:162-167` | Define the current set as the actionable and followup-after-fix records after the author filter. Key a top-level or review record on `id` and `last_edited_at`, and the sentinel on `thread_id`. Add tests. | open |
-| L3-C5 | low | Start points "Start configuration check" | `git merge-base A B` without `--all` prints one base even for a criss-cross history, so "no single merge base" cannot be detected as written. | Design text only | Use `git merge-base --all` and refuse unless it prints exactly one commit. A non-zero exit refuses. | open |
+| L3-C1 | medium | Contracts and seams > Strain result; Strain result and liveness | The strain result schema allows null `level`, `branch`, `head`, `gates` and `decisions` only when no engine record exists. A verified run can end with a record before `level`, `branch` and `head` exist (a first-claim `launch_mismatch`, an early `agent_budget` or a block), so those records fail the schema. What `lair-result.sh` does with a schema-failing record is unstated. | Design text only | Decide nullability per field. `gates` and `decisions` are non-null whenever a record exists. State the output of `lair-result.sh` for a schema-failing record. Add a `tools/test_lair_strain.sh` case. | fixed: nullability is per field; with a record, `gates` and `decisions` are lists, and `level`, `branch` and `head` may be null when the run ended before they existed; a schema-failing record gives `failed`, cause `no_engine_record`, `decisions` null. Contracts and seams > Strain result, Components > Strain result and liveness, Decisions and Verification strategy (`tools/test_lair_strain.sh` first-claim `launch_mismatch` and schema-failing cases) |
+| L3-C2 | medium | Strain launch and settings > Environment preflight; Contracts and seams > Strain environment | The preflight applies the `env -i` list to the Lair's own environment, but strains get their values from the tmux server's environment, which the design says differs. The preflight can pass while every strain fails. | Design text only | Run the probes through the same tmux server (a throwaway session), or build the probe environment from `tmux show-environment -g`. Add a `tools/test_lair_tick.sh` case. | fixed: the probes run in a throwaway tmux session on the strains' server, started with the strain's `env -i` command form, so names resolve from the server's environment. Components > Strain launch and settings ("Environment preflight"), State and ownership (preflight folder), Failure modes, Decisions, Seam order (#608) and Verification strategy (`tools/test_lair_tick.sh`: a name in the Lair's environment but not the server's fails its probe) |
+| L3-C3 | low | Strain launch and settings > Environment preflight | `run-review.sh` has no dry-run mode, so the probe's work tree, base and pass criterion are undefined, and the probe is a real paid review. | `run-review.sh:10-17`, `:3-6`, `:49` | Define the probe as `run-review.sh --base <fetched trunk commit>` in a clean scratch worktree detached at that commit (empty diff), or add a named probe mode with its own test. State the pass criterion. | fixed: the probe is `run-review.sh --base <fetched trunk commit>` in a clean scratch worktree detached at that commit, so the diff is empty; it passes on a review line or `skipped: no-reviewer`; it is stated as a real call of the review tool. Components > Strain launch and settings ("Environment preflight"), Context and code truth (`run-review.sh` facts), Decisions and Verification strategy (`tools/test_lair_tick.sh` and the headless check) |
+| L3-C4 | low | Start points "Handling by start kind"; Remediation strain launch "Its claim" | An edited comment keeps its node id, so findings added by an edit never dispatch. The overflow sentinel has id `null`. The "current finding keys" set is undefined. | `fetch-normalize.sh:101-102`; `fix-history-classify.jq:51`; `fetch-normalize.sh:97-98`; `fix-history-classify.jq:162-167` | Define the current set as the actionable and followup-after-fix records after the author filter. Key a top-level or review record on `id` and `last_edited_at`, and the sentinel on `thread_id`. Add tests. | fixed: the current set is the `actionable` and `followup-after-fix` records and the CI records from `fetch-normalize.sh` after the author filter; a `toplevel` or `review` record is keyed on `id` and `last_edited_at`, a thread comment on `id`, the sentinel on `thread_id`. Components > Remediation strain launch ("Finding keys"), Start points ("Handling by start kind"), Context and code truth, Decisions and Verification strategy (`tools/test_fetch_normalize.sh`, `tools/test_lair_tick.sh` edited-comment and sentinel cases) |
+| L3-C5 | low | Start points "Start configuration check" | `git merge-base A B` without `--all` prints one base even for a criss-cross history, so "no single merge base" cannot be detected as written. | Design text only | Use `git merge-base --all` and refuse unless it prints exactly one commit. A non-zero exit refuses. | fixed: the check runs `git merge-base --all` and refuses unless it exits 0 with exactly one commit. Components > Start points ("Start configuration check"), Failure modes, Decisions and Verification strategy (`tools/test_lair_tick.sh` criss-cross and non-zero cases) |
 
 ### Tool pass
 
 | ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
 | --- | --- | --- | --- | --- | --- | --- |
-| L3-T1 | high | `06470f63005f8f74649b54d825339d8ea7514523c3069a7f1cf727588288c524` | The repeat guard keys a failed CI check by `name` only. GitHub check names are not unique across apps, suites or runs, so a second distinct failing check with the same name on one head counts as already dispatched: no remediation runs and the pull request is not routed to `lair:review`. The loss is silent. | design `:128` | Key on a unique check identity carried by `fetch-normalize.sh` (app or check-suite identity plus check-run id, or a node id). A collision fails closed to `lair:review`. Add cases to `tools/test_lair_tick.sh` and `tools/test_fetch_normalize.sh`. | open |
+| L3-T1 | high | `06470f63005f8f74649b54d825339d8ea7514523c3069a7f1cf727588288c524` | The repeat guard keys a failed CI check by `name` only. GitHub check names are not unique across apps, suites or runs, so a second distinct failing check with the same name on one head counts as already dispatched: no remediation runs and the pull request is not routed to `lair:review`. The loss is silent. | design `:128` | Key on a unique check identity carried by `fetch-normalize.sh` (app or check-suite identity plus check-run id, or a node id). A collision fails closed to `lair:review`. Add cases to `tools/test_lair_tick.sh` and `tools/test_fetch_normalize.sh`. | fixed: a failed check is keyed on `check_id`, its GraphQL node id, which `fetch-normalize.sh` carries only after a named change: a Lair-only `--review-authors` flag that reads failed checks from the head commit's `statusCheckRollup`, since `gh pr checks --json` has no id field. A null or shared key routes to `lair:review`. Components > Remediation strain launch ("Check identity", "Finding keys"), Context and code truth, Existing-path coverage, Contracts and seams > Marker check, Failure modes ("A finding key is missing or shared"), Decisions, Seam order (#610) and Verification strategy (`tools/test_fetch_normalize.sh`; `tools/test_lair_tick.sh` two distinct failed checks with one name on one head) |
 
 ## Sources
 
@@ -250,6 +254,13 @@ Taken at the round 2 remediation, each listed in the design's Decisions:
 - L2-T1 rejected: a repeat of the user's 2026-11-21 answers A on ADR-0045 decision 4 and PRD line 64 (a prompt-injected strain is a named residual; a separate restricted identity is declined). Merge-gate re-evaluation belongs to #631.
 - L2-T2 rejected: a repeat of the user's 2026-11-21 answer A on local review finding f26808d3 (keep the in-scope Bot exception; admin-installed apps are trusted).
 
+Taken at the round 3 remediation, each listed in the design's Decisions:
+
+- L3-T1 and L3-C4: a failed check's key is its GraphQL node id (`check_id`), read through a Lair-only `--review-authors` flag of `fetch-normalize.sh` that reads failed checks from the head commit's `statusCheckRollup`; a missing or shared key routes to `lair:review`. Not chosen: the check `name`, which is not unique; a check-run database id with its app, which needs a REST read per check and does not cover a commit status; joining `gh pr checks` output to ids by name, which collides on the same name.
+- L3-C1: result fields are nullable per field, and a schema-failing engine record gives cause `no_engine_record`. Not chosen: a new cause for a schema-failing record, with the same effect as no record.
+- L3-C2: the preflight probes run in a throwaway tmux session on the strains' server. Not chosen: rebuilding the probe environment from `tmux show-environment -g`, a second copy of how tmux builds a session's environment.
+- L3-C3: the local review probe is a real `run-review.sh` call on an empty diff, one review per Lair session. Not chosen: a named probe mode in `run-review.sh`, a script mode and test for one caller.
+
 ## Decisions asked
 
 The user was asked four always-ask (Tier A) questions and answered each with option A on 2026-11-21:
@@ -266,5 +277,13 @@ At design review round 1 (L1-A8), the user was asked one more always-ask (Tier A
 On 2026-11-21 the user directed a change to the review procedure: "each review round runs ONE hivemind:cerebrate pass covering both angles, delegated with effort: high ... The confirming round reviews only the diff since the previous round and the fixes to open findings, with effort: medium." See "Procedure change" at the top of this record.
 
 At design review round 2 (L2-C9), the user was asked one more always-ask (Tier A) question on 2026-11-21 and answered option A on 2026-11-22: "PRD line 100 says 'the marker absent means today's behavior'. The round-1 fix makes the scripts fail closed instead ... Record a PRD change for this?" Change 10 of the design holds the proposed text: PRD line 100 gains "unless the worktree holds a Lair launch file". The `unpushed_work` queue report text gains the rescue step: delete the worktree's `.hivemind/lair/launch.json`, or push by hand.
+
+At design review round 3, the user was asked one more always-ask (Tier A) question on 2026-11-22: "The review's 3-round cap is spent with a high finding open. How should I finish?" The options:
+
+- A: one more round. Fix all 6 findings, then run one confirming round at effort medium, with the cerebrate pass and the Codex tool pass, on that diff only. Clean: stamp the design, set the verdict to `pass`, and leave the pull request a draft. Not clean: stop and ask.
+- B: fix the findings without review, and keep the pull request a draft.
+- C: stop now.
+
+The user answered "A" on 2026-11-22. The answer authorizes a round 4 beyond the 3-round cap (Round 3). It changes no ADR-0045 or PRD text.
 
 The design's section Decisions > Changes to shared documents holds each rewording as exact proposed text. A later integration issue applies them. None is applied in this pull request.
