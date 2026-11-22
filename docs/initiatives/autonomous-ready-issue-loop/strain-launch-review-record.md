@@ -3,10 +3,10 @@ stamps: []
 verdict: pending
 open_counts:
   critical: 0
-  high: 0
-  medium: 0
-  low: 0
-rounds: 5
+  high: 2
+  medium: 3
+  low: 2
+rounds: 6
 clean_round: null
 ---
 
@@ -266,6 +266,41 @@ Round 5 is not clean: it raised new findings (see the tables). Round 5 ends with
 | ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
 | --- | --- | --- | --- | --- | --- | --- |
 | L5-T1 | high | `f016b331e5e0c3d2cd1d8d292c3d451e6e1440c29a8540cac2bc048f8c81b09a` | The per-head guard needs a reader that classifies new actionable, author-trusted feedback on a dispatched head. The design assumes #610 and #631 provide it. Trunk `pr-change-detect-poll.sh` only detects changes (ids and counts), and unchanged `fetch-normalize.sh` applies the author filter only under a verified strain marker. No grounded path exists: a second finding can be missed, or benign activity misrouted. | design `:202-207`, `:310-314` | Specify and assign an exhaustive Lair-side read that fetches and classifies current review feedback, applies the same Bot and write-permission author policy, and fails closed to `lair:review` on fetch, pagination, permission or classification failure. Name its implementation changes and add controller tests for handled feedback, a second finding on the same head, untrusted authors and reader failure. | fixed by construction, from the user's answer A: no reader of actionable or author-trusted feedback is needed. A pull request gets one remediation strain; the Lair reads changes only through `pr-change-detect-poll.sh`, unchanged, in its `--snapshot` and `--check` modes with the filter `all`, plus the head and its check rollup, and after the remediation ends every change goes to `lair:review`. A detector error changes no state and retries; activity before a baseline is a recorded residual bounded by the merge lane's gates. Design Context and code truth, Components > Remediation strain launch ("One remediation strain per pull request"), Contracts and seams ("Seam with #610 and #631", the #631 and #632 assumptions), Existing-path coverage, Failure modes, Decisions and Verification strategy (`tools/test_lair_tick.sh` cases, including an untrusted author and detector errors; `tools/validate.sh` routes) |
+
+## Round 6
+
+- **Date:** 2026-11-22.
+- **Kind:** confirming round, per the user's procedure change. It reviewed only the diff `5ea01d06..6126b71b` and the fixes to the L5 findings.
+- **Design reviewed:** blob `85e17ceced3b6314cc804ceef888fcbbb3ce75b8` at commit `6126b71b278da8aa3c2048d048c3ad4e28ae523c`.
+- **Cerebrate pass:** one fresh read-only `hivemind:cerebrate` pass covering both angles, effort medium, "Memory context: none".
+- **Tool pass:** one pass through `plugin/skills/adaptation-cycle/scripts/run-review.sh` with the `codex-plugin` preset and `--base 5ea01d06`, because the design touches trust and the merge path. The raw output was read from the run's scratch file and is not committed.
+
+**Fix check.** Both passes judged L5-T1, L5-C1 and L5-C2 closed by the design text.
+
+Round 6 is not clean: it raised new findings (see the tables). All seven are open, with 2 high, 3 medium and 2 low.
+
+**Recurrence.** L6-T1, L6-C1 and L6-C2 sit on the same surface that reopened in rounds 2 to 5: remediation routing through the detector `pr-change-detect-poll.sh`. They recur after the structural fix of round 5 (one remediation strain per pull request).
+
+**Decision ids.** The cerebrate pass found no DEC-001 to DEC-005 ids in the design. It judged the two Tier B bullets in Decisions instead.
+
+Line numbers marked "design" refer to the reviewed blob `85e17cec`. Line numbers for `pr-change-detect-poll.sh` and `solution-design.md` refer to trunk.
+
+### Cerebrate pass
+
+| ID | Severity | Section | Finding | Evidence | Proposed fix | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L6-C1 | high | Remediation strain launch "One remediation strain per pull request"; Contracts and seams ("Seam with #610 and #631") | `--snapshot` requires an arm kind, `initial` or `re-arm`, and the design names none. With `initial`, `prev_approval` is cleared on every `--check`, so an approval present at the baseline prints `REVIEWER_APPROVED` forever and masks every change, since approval outranks the other outcomes. A `COMMENTED` Bot review with zero inline comments counts as an approval. | `pr-change-detect-poll.sh:131-134`, `:534-536` (arm kind); `:932-934` (`prev_approval` cleared on `--check`); `:488-493` (precedence); jq `is_review_approval` `:181-182` | Name `re-arm` for both baselines (delivery and end). Add tests with an approval present at either baseline. | open |
+| L6-C2 | medium | Remediation strain launch; Failure modes ("CI red", "Change after the remediation ended"); residual under Decisions | Even with `re-arm`, an approval that crosses after a baseline masks later changes. Before dispatch a CI failure never prints `CI_FAILED`, so the CI red row is wrong. Top-level comments and comment-only reviews are hidden. The recorded residual covers only activity before a baseline. | `pr-change-detect-poll.sh:488-493`; design Failure modes ("CI red") | Read the head's check rollup on every tick. Extend the residual to "activity after an approval crossed a baseline" and state its bound. Add tests. | open |
+| L6-C3 | medium | Remediation strain launch; Lifecycle (tick order); parent Failure modes | The parent tick works the merge lane before claim and dispatch, and its "Merge refused" row labels the pull request `lair:review`. On the tick review threads first appear, the merge lane labels `lair:review` and the remediation is unreachable. The same holds during a running remediation. The design states no order. | `solution-design.md:39`, `:156` | The merge lane skips a Lair pull request that is eligible for dispatch or has a running remediation. Evaluate dispatch first. Record the #631 assumption. Add tests. | open |
+| L6-C4 | medium | Remediation strain launch "One remediation strain per pull request"; Failure modes ("CI red") | Dispatch fires on the first change, usually while the head's checks are pending, so review feedback and a red CI result do not share the one strain as the design claims. An early non-actionable event spends the strain. | Design text only | Dispatch only when a trigger is present and no check is pending or queued, with a bounded wait. Add a test. Or reword the claim and record the cost as a Tier B decision. | open |
+| L6-C5 | low | Remediation strain launch ("One remediation strain per pull request"); Decisions (round 5 bullet) | Two claims are wrong against trunk: that the filter `automated` would leave out review-thread comments, and that `all` counts every author. The filter scopes only the review id token, the review part of `LATEST_EDIT` and the approval reads. Thread and issue comment tokens use self-exclusion only. Every mode excludes self. | `pr-change-detect-poll.sh:740-742`, `:835-851` (filter scope); `:738-739`, `:756-760` (comment tokens); jq `:171-172` (self exclusion) | Reword both claims. | open |
+| L6-C6 | low | Failure modes ("Detector failures") | The row leaves undefined whether a `SNAPSHOT_ERROR` defers the outcome record or records the outcome without a baseline. Nothing persists "baseline still owed". | Design text only | State one rule and pin it in the `SNAPSHOT_ERROR` test. | open |
+
+### Tool pass
+
+| ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L6-T1 | high | not supplied to the record | Confidence 0.99. Approval precedence suppresses every later change against the fixed baseline. In `pr-change-detect-poll.sh` approval outranks `CI_FAILED` and `CHANGED`, and `--check` never advances the seed, so once an approval crosses the baseline every later check prints `REVIEWER_APPROVED`. Later comments, comment-only reviews, edits and new CI failures are never routed to `lair:review`, and the merge gates do not read top-level comments or comment-only reviews. This contradicts design lines 207 and 214. | design `:207`, `:214`; `pr-change-detect-poll.sh` precedence | Change the precedence, or consume the approval into an advanced baseline that closes the race. Add a test where an approval appears and then a later comment or CI failure routes to `lair:review`. | open |
 
 ## Sources
 
