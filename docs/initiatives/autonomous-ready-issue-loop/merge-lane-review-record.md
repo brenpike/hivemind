@@ -6,7 +6,7 @@ open_counts:
   high: 0
   medium: 0
   low: 0
-rounds: 0
+rounds: 1
 clean_round: null
 ---
 
@@ -21,7 +21,7 @@ Each round runs two passes in parallel. Each pass is a fresh, read-only `hivemin
 - **Pass A:** code truth, governance and ADR conflicts, and existing-path coverage.
 - **Pass B:** failure modes, trust and injection, and testability.
 
-New finding IDs take the `M` prefix, then the round, the pass and the finding number: `M1-A2` is round 1, pass A, finding 2. No round has run yet.
+New finding IDs take the `M` prefix, then the round, the pass and the finding number: `M1-A2` is round 1, pass A, finding 2.
 
 ## Record keys
 
@@ -48,21 +48,75 @@ The findings come from round 3 of the [parent review record](review-record.md), 
 
 | ID | Severity | Finding | Overlaps | Disposition |
 | --- | --- | --- | --- | --- |
-| A3-2 | high | The tick runs `merge-approved.sh` outside the watch, dropping ADR-0044's settled-approval precondition, and the failure-mode row maps the script's results wrongly. | B3-5, B3-6 | fixed: merge-lane-design.md, Settle check, Routing table and Failure modes, under ADR-0044 decisions 17, 18 and 20 |
-| A3-3 | high | The controller has no defined source for the merge settings it reads each tick, so unsetting auto-merge may never stop merges. | B3-7 | fixed: merge-lane-design.md, Merge settings source and Lifecycle "Stage 4: halt and circuit breaker" |
-| B3-4 | high | Strain result fields (`pr`, `branch`, `head`) are trusted unchecked, and "Lair PR" is undefined. | | fixed: merge-lane-design.md, Lair pull request, Pinned head and Merge-lane step of the tick (late group) |
-| B3-5 | high | The tick's merge drops ADR-0044's settle period and does not tie the auto tier to the merged head. | A3-2 | fixed: merge-lane-design.md, Settle check, Pinned head and Expected-head argument |
+| A3-2 | high | The tick runs `merge-approved.sh` outside the watch, dropping ADR-0044's settled-approval precondition, and the failure-mode row maps the script's results wrongly. | B3-5, B3-6 | fixed: merge-lane-design.md, Settle check, Routing table and Failure modes, under ADR-0044 decisions 17, 18 and 20; completed in round 1 by M1-B3, M1-B4, M1-B5, M1-B13 and M1-B16 |
+| A3-3 | high | The controller has no defined source for the merge settings it reads each tick, so unsetting auto-merge may never stop merges. | B3-7 | fixed: merge-lane-design.md, Merge settings source, Merge environment and Lifecycle "Stage 4: halt and circuit breaker"; completed in round 1 by M1-A2, M1-B10 and M1-B15 |
+| B3-4 | high | Strain result fields (`pr`, `branch`, `head`) are trusted unchecked, and "Lair PR" is undefined. | | fixed: merge-lane-design.md, Lair pull request, Pinned head and Merge-lane step of the tick (late group); completed in round 1 by M1-A6, M1-B1, M1-B2 and M1-B8 |
+| B3-5 | high | The tick's merge drops ADR-0044's settle period and does not tie the auto tier to the merged head. | A3-2 | fixed: merge-lane-design.md, Settle check, Pinned head and Expected-head argument; completed in round 1 by M1-B4, M1-B5 and M1-B17 |
 | B3-6 | high | The merge-result failure-mode row maps `merge-approved.sh` results wrongly. | A3-2 | fixed: merge-lane-design.md, Routing table and Failure modes |
-| B3-7 | high | No defined source for merge settings in the tick. | A3-3 | fixed: merge-lane-design.md, Merge settings source |
-| B3-8 | high | Auto-tier inputs (protected-path list, local-review-skipped evidence, bump type) are undefined or untrusted. | A3-10 | fixed: merge-lane-design.md, Auto-tier script and Trust boundaries |
-| A3-10 | medium | Auto-tier inputs have no named source, and two can be forged by the strain. | B3-8 | fixed: merge-lane-design.md, Auto-tier script and Trust boundaries |
-| A3-8 | medium | Draft-PR and closed-unmerged states have no lifecycle exit. | | fixed: merge-lane-design.md, Exits (Draft, Closed unmerged) |
+| B3-7 | high | No defined source for merge settings in the tick. | A3-3 | fixed: merge-lane-design.md, Merge settings source and Merge environment; completed in round 1 by M1-A2, M1-B10 and M1-B15 |
+| B3-8 | high | Auto-tier inputs (protected-path list, local-review-skipped evidence, bump type) are undefined or untrusted. | A3-10 | fixed: merge-lane-design.md, Auto-tier script, Git and tool reads and Trust boundaries; completed in round 1 by M1-B1, M1-B11, M1-B12 and M1-B17 |
+| A3-10 | medium | Auto-tier inputs have no named source, and two can be forged by the strain. | B3-8 | fixed: merge-lane-design.md, Auto-tier script and Trust boundaries; completed in round 1 by M1-B1, M1-B11 and M1-B12 |
+| A3-8 | medium | Draft-PR and closed-unmerged states have no lifecycle exit. | | fixed: merge-lane-design.md, Exits (Draft, Closed unmerged, Claim withdrawn) and Write order; completed in round 1 by M1-B7 and M1-B8 |
 | B3-13 | medium | The run outcome to label mapping is incomplete (blocked, complete with no PR, invalid result). | | fixed: merge-lane-design.md, Run outcome to labels |
-| B3-14 | medium | Remediation strains leave no GitHub record, their parks have no path, and the halt does not cover them. | | fixed: merge-lane-design.md, Fix-up runs, Markers the merge lane writes, Run outcome to labels and Lifecycle "Stage 4: halt and circuit breaker" |
-| A3-13 | low | It is unclear whether `lair:review` goes on the issue or the pull request. | | fixed: merge-lane-design.md, Exits (Batch review: on the pull request, never the issue) and State and ownership |
-| A3-12 | medium | This scope's part: the no-merge-after-edit and CI-red calls should have been asked, and this scope's calls were not listed for veto. The session-scoped breaker call is not in this scope. | | fixed: merge-lane-design.md, Tier A answers (Q8, Q9) and Decided for you |
-| B3-20 | low | This scope's part: the merge-lane tests and their `tools/validate.sh` registration. The overlord prose, injection and halt tests and the halt file path are not in this scope. | | fixed: merge-lane-design.md, Verification strategy |
-| A3-11 | medium | This scope's part: the Seam order ADR lists for the slices the merge lane changes. | | fixed: merge-lane-design.md, Seam order |
+| B3-14 | medium | Remediation strains leave no GitHub record, their parks have no path, and the halt does not cover them. | | fixed: merge-lane-design.md, Fix-up runs, Markers the merge lane writes, Run outcome to labels and Lifecycle "Stage 4: halt and circuit breaker"; completed in round 1 by M1-A3, M1-B6, M1-B7 and M1-B9 |
+| A3-13 | low | It is unclear whether `lair:review` goes on the issue or the pull request. | | fixed: merge-lane-design.md, Exits (Batch review: on the issue and the pull request) and State and ownership; completed in round 1 by M1-A5 |
+| A3-12 | medium | This scope's part: the no-merge-after-edit and CI-red calls should have been asked, and this scope's calls were not listed for veto. The session-scoped breaker call is not in this scope. | | fixed: merge-lane-design.md, Tier A answers (Q8, Q9) and Decided for you; the veto list completed in round 1 by M1-A14 and the run's calls R1 to R13 |
+| B3-20 | low | This scope's part: the merge-lane tests and their `tools/validate.sh` registration. The overlord prose, injection and halt tests and the halt file path are not in this scope. | | fixed: merge-lane-design.md, Verification strategy; completed in round 1 by M1-A8, M1-A13, M1-B5 and M1-B14 |
+| A3-11 | medium | This scope's part: the Seam order ADR lists for the slices the merge lane changes. | | fixed: merge-lane-design.md, Seam order; completed in round 1 by M1-A1 and M1-A7 |
+
+## Round 1, 2026-11-21
+
+Two passes, run in parallel.
+
+- **Pass A reviewer:** a fresh read-only `hivemind:cerebrate` analysis delegation that did not write the design, with "Memory context: none".
+- **Pass A angle:** code truth, governance and ADR conflicts, existing-path coverage.
+- **Pass B reviewer:** the same kind as pass A.
+- **Pass B angle:** failure modes, trust and injection, testability.
+- **Reviewed:** merge-lane-design.md at blob `0177e805e2d91d69f12c5d64a62121d4fd8ef944`, with the PRD, ADR-0045, ADR-0044 as amended and solution-design.md as sources.
+
+Result: 0 critical, 3 high (all from pass B), 18 medium (7 from pass A, 11 from pass B) and 11 low (8 from pass A, 3 from pass B). All are new. Each is fixed in merge-lane-design.md, or in ADR-0044's 2026-11-21 amendment where named. The run's calls on the open choices, R1 to R13, are listed under Decisions taken.
+
+### Pass A findings
+
+| ID | Severity | Finding | Disposition |
+| --- | --- | --- | --- |
+| M1-A1 | medium | The tick is a second merge path, while `decision-autonomy.md` Tier A and its pinned fixture say only the watch merges, and no slice owns the change. | fixed: merge-lane-design.md, Existing-path coverage (The Tier A merge rule), Seam order (#605) and Changes to shared documents, item 5 (R12) |
+| M1-A2 | medium | `env -i` drops `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, `XDG_CONFIG_HOME` and the D-Bus keyring variables. | fixed: merge-lane-design.md, Merge environment (R6) |
+| M1-A3 | medium | A fix-up park was made not answerable and not counted toward the third-park handoff, against ADR-0045 decision 7, while the design claimed no ADR-0045 change. | fixed: merge-lane-design.md, Run outcome to labels, Failure modes (Parked fix-up run) and Decisions (R1) |
+| M1-A4 | medium | The review-finding fix-up cap (`fixup-cap`) sets what starts a fix-up run, which ADR-0045 decision 13 and the PRD leave to #610, and the opening's scope statement does not match. | fixed: merge-lane-design.md, opening, Fix-up runs (Seam note for #610) and Failure modes; the cap is dropped (R2) |
+| M1-A5 | medium | `lair:review` only on the pull request contradicts the PRD's Labels and Admission criteria, which put it on the issue. | fixed: merge-lane-design.md, Routing table, Exits, Run outcome to labels and State and ownership (R3) |
+| M1-A6 | medium | The run-end fields were added to #632's claim marker, whose contract this design does not own. | fixed: merge-lane-design.md, opening, State and ownership and Markers the merge lane writes (Run-end marker) (R8) |
+| M1-A7 | medium | The Seam order ADR lists are incomplete for #604, #605, #608 and #610. | fixed: merge-lane-design.md, Seam order |
+| M1-A8 | low | #605 depends on #608 and later slices (the script directory, the fix-up, halt and breaker cases) but builds first. | fixed: merge-lane-design.md, Merge-lane step of the tick (script directory), Verification strategy (cases added by the slices that build them) and Seam order |
+| M1-A9 | low | The empty-string merge keys in strain settings change ADR-0045 decision 4, so "No ADR-0045 change is needed" is too broad. | fixed: merge-lane-design.md, Assumptions about #630 and Decisions (R11) |
+| M1-A10 | low | The amendment says the one-line output contract is unchanged, while decision 19 adds `bad-expected-head` and a new `wait:head-moved` trigger. | fixed: ADR-0044, Amendment 2026-11-21, the paragraph of unchanged items |
+| M1-A11 | low | Wrong citations: the 3600-second wait under ADR-0029 decision 3, and "ADR-0044 decision 17, amending decisions 2 and 10". | fixed: merge-lane-design.md, Context and code truth, Decisions and Decided for you |
+| M1-A12 | low | The opening does not name the Lifecycle label bullets or the claim marker contract as superseded, and the Amendments pointer text misstates stage 3 and the exits. | fixed: merge-lane-design.md, opening and Changes to shared documents, item 2 |
+| M1-A13 | low | Verification has no case for a pull request body with a "Decided for you" list, and no owner for the no-merge-by-strain test. | fixed: merge-lane-design.md, Verification strategy |
+| M1-A14 | low | The CI-red rule fires only from the merge script's line, so it depends on the merge settings, and its trigger point is not listed for veto. | fixed: merge-lane-design.md, Fix-up runs (The CI-red rule) and Decided for you (R7) |
+| M1-A15 | low | The PRD Out of Scope bullet "Changing the ADR-0044 merge rules beyond the auto-tier precondition" conflicts with the amendment, and no change to it is recorded. | fixed: merge-lane-design.md, Changes to shared documents, item 6 (R13) |
+
+### Pass B findings
+
+| ID | Severity | Finding | Disposition |
+| --- | --- | --- | --- |
+| M1-B1 | high | The #630 assumption covers only the settings files and the cache; a strain can write the git common directory, `PATH` directories or the plugin scripts the tick runs, and the residual understates ADR-0045's. | fixed: merge-lane-design.md, Git and tool reads, Assumptions about #630 and Trust boundaries (R4) |
+| M1-B2 | high | A strain holds the user's credentials and the nonces, so it can forge markers unless #632's rule stops it, yet the design and the amendment treat recorded heads as unforgeable. | fixed: merge-lane-design.md, Assumptions about #632 and Trust boundaries (The pinned head, Residual: marker forgery); ADR-0044, Amendment 2026-11-21, Consequences (R5) |
+| M1-B3 | high | Tick reads have no fail-closed route, and the absence checks fail open on a failed or partial comment read. | fixed: merge-lane-design.md, Merge-lane step of the tick (steps 1, 2 and 9 and the fail-closed rule), Failure modes and Verification strategy |
+| M1-B4 | medium | A failed re-snapshot keeps the old `quiet_since`, so the settle check can settle early. | fixed: merge-lane-design.md, Settle check, Failure modes (Failed re-snapshot) and Verification strategy |
+| M1-B5 | medium | The poll and tier outputs are caught by catch-alls, so a malformed line can settle or reach the late group. | fixed: merge-lane-design.md, Settle check, Merge-lane step of the tick (step 9) and Verification strategy; `pr-change-detect-poll.sh` routes to the merge-lane suite, and `loop-state.sh` is no longer read after R2 |
+| M1-B6 | medium | An in-flight fix-up run is unbounded: no budget, stall or crash route ends it. | fixed: merge-lane-design.md, Fix-up runs, Failure modes (Fix-up run lost in flight, Start marker write failed) and Verification strategy |
+| M1-B7 | medium | Routes with several writes have no order or retry, and only open pull requests are iterated. | fixed: merge-lane-design.md, Write order, Lair pull request (the lane set), Failure modes and Verification strategy |
+| M1-B8 | medium | A pull request stays a Lair pull request after its claim ends, and a closed issue or a removed `lair:claimed` has no route. | fixed: merge-lane-design.md, Lair pull request and Exits (Closed unmerged, Claim withdrawn) |
+| M1-B9 | medium | A fix-up run can start for a pull request with a review marker. | fixed: merge-lane-design.md, Fix-up runs |
+| M1-B10 | medium | The clean environment does not prove which account `gh` acts as. | fixed: merge-lane-design.md, Merge environment and Merge-lane step of the tick (step 11) (R6) |
+| M1-B11 | medium | The protected-path floor misses nested and case-variant `CLAUDE.md`, `CLAUDE.local.md`, `.mcp.json` and `.claude` paths. | fixed: merge-lane-design.md, Auto-tier script (the list forms and the floor) and Verification strategy |
+| M1-B12 | medium | `.github/lair.json` has no strict schema, so a malformed list can declare no protected paths. | fixed: merge-lane-design.md, Auto-tier script (the schema) and Verification strategy |
+| M1-B13 | medium | The CI-red rule waits on the merge script's gate order and settings. | fixed: merge-lane-design.md, Merge-lane step of the tick (step 7) and Fix-up runs (The CI-red rule) (R7) |
+| M1-B14 | medium | Verification misses holds, skips, exits, settle results, delivery rows and the existing `args:six` case, and the late-group order test cannot see the settings and cache reads. | fixed: merge-lane-design.md, Verification strategy and Existing-path coverage |
+| M1-B15 | low | "Matches Claude Code's order" is false, and other settings sources are not ruled out. | fixed: merge-lane-design.md, Merge settings source |
+| M1-B16 | low | A hung child process stalls the tick. | fixed: merge-lane-design.md, Merge-lane step of the tick (child timeout) and Routing table (R10) |
+| M1-B17 | low | Several merges in one tick each use a stale trunk, and the trunk tip is not a late-group input. | fixed: merge-lane-design.md, Merge-lane step of the tick (one merge per tick, step 12) and Known limit (R9) |
 
 ## Sources
 
@@ -72,6 +126,7 @@ The findings come from round 3 of the [parent review record](review-record.md), 
 - [ADR-0044](../../adr/0044-settled-approval-and-opt-in-auto-merge.md), with its amendment of 2026-11-21, "the Lair controller runs the merge script (issue 631)", decisions 17 to 20.
 - The [solution design](solution-design.md).
 - Trunk commit `9cb44f94dc430a66a57383f9d26e7d6486d3ea14`, the base the design's Context and code truth section was read from.
+- Round 1: merge-lane-design.md at blob `0177e805e2d91d69f12c5d64a62121d4fd8ef944`, read directly by the two passes. The round-1 finding text above is as supplied in the remediation brief.
 
 ## Decisions taken (listed for veto)
 
@@ -79,37 +134,59 @@ The calls of the design, each also listed under its Decided for you or Decisions
 
 - The review marker is authoritative and final; the Lair never merges a pull request that has one, even if the label is removed.
 - Markers go on the claimed issue, never the pull request.
-- The review wait is 3600 seconds, the watch's `max_watch_duration` default, measured from the recording run's `ended_at`.
-- The routing rows: no checks, conflicts, a blocked merge and a refused merge go to batch review; a script error, malformed output and `merge-pending` wait, bounded by the review wait; `skipped:bad-setting` is handled like `off`.
+- The review wait is 3600 seconds, the watch's `max_watch_duration` default in `SKILL.md` (recorded in ADR-0029's Findings), measured from the recording run's `ended_at`.
+- The routing rows: no checks, conflicts, a blocked merge and a refused merge go to batch review; a script error, malformed output, a killed merge run and `merge-pending` wait, bounded by the review wait; `skipped:bad-setting` is handled like `off`.
 - `merge-pending` makes no second merge call for the same head while the cache marks it.
 - The head check goes first in `merge-approved.sh`, before gate 1.
-- The merge call pins only the head, and every input it does not pin is one class of known limit: each merge condition is exactly one of five kinds (pinned, derived from the pinned head's git objects, judged by `merge-approved.sh` on its own read, read by the tick in the late group, and Lair-owned state). The seconds between the late group's reads and the merge call are the merge gap; a finding that names a late-group input changing in that gap is a repeat. It extends ADR-0044 decision 15 by analogy and changes nothing in ADR-0044.
-- The late group is the last tick work before the merge call, in this order: the merge settings, the identity, the issue edit and the settle check, then the merge call and nothing else. The Lair pull request checks are one function, called when a result is recorded and again in the late group, which leaves out the head because the merge call pins it.
+- The merge call pins only the head, and every input it does not pin is one class of known limit: each merge condition is exactly one of five kinds (pinned, derived from git objects, judged by `merge-approved.sh` on its own read, read by the tick in the late group, and Lair-owned state). The seconds between the late group's reads and the merge call are the merge gap; a finding that names a late-group input changing in that gap is a repeat. It extends ADR-0044 decision 15 by analogy and changes nothing in ADR-0044.
+- The late group is the last tick work before the merge call, in this order: the merge settings, the credential login, the trunk tip, the identity, the issue edit and the settle check, then the merge call and nothing else. The Lair pull request checks are one function, called when a result is recorded and again in the late group, which leaves out the head because the merge call pins it.
 - No expected base, author or branch arguments for `merge-approved.sh`. Rejected: GitHub offers no merge call that pins those inputs, so the arguments would only narrow the merge gap, add script surface and amend ADR-0044 decision 19 beyond what the user approved.
 - `HIVEMIND_PR_REVIEWERS` comes from the same two user settings files as the merge keys, and the reviewer filter is `automated`.
-- The clean environment holds `PATH`, `HOME`, the `gh` auth variables when set, and the three merge keys.
 - The settle snapshots use the `re-arm` arm kind and are keyed by pull request and pinned head.
-- The trunk file is `.github/lair.json`, with `protected_paths` (exact paths or directory prefixes, no globs) and `version_files`; a missing or unparseable file sends every pull request to batch review.
-- The protected-path floor is `.github/`, `.claude/`, `CLAUDE.md`, `.mcp.json`, `.gitmodules` and `.gitattributes`.
+- The trunk file is `.github/lair.json`, with `protected_paths` and `version_files` under a strict schema; a missing, unparseable or malformed file sends every pull request to batch review.
 - A major bump is a rise in the major component of any declared version file; a missing, unparseable or lower value goes to batch review.
 - A fix-up head counts as reviewed only when the claim's local-review head is not null.
 - A fix-up head is recorded only when the previous recorded head is its ancestor.
 - The outcome mapping: `blocked`, `no-pr` and an invalid result give `lair:failed` and count toward the breaker; a pull request closed unmerged gives `lair:handoff` and does not count.
 - A complete run's draft pull request goes to batch review with reason `draft` and does not hold the lane.
-- A fix-up park goes to batch review; it is not answerable, not a `readiness:needs-decision` move, and not counted toward the third-park handoff.
-- The review-finding fix-up cap is the `loop-state.sh floor` value per pull request.
 - The test layout and suite names under Verification strategy.
-- No ADR-0045 change is needed; the design fills in ADR-0045 decisions 12, 13 and 17 and reverses none of them.
-- The solution-design.md Amendments pointer, the parent record's round-3 dispositions and the CONTEXT.md "Lair Pull Request" term are recorded under the design's Changes to shared documents and not applied.
+- The merge lane's own decisions need no ADR-0045 change; the design fills in ADR-0045 decisions 7, 12, 13 and 17 and reverses none of them. The strain settings' merge keys are #630's pending ADR-0045 and PRD question (A3-1).
+- The solution-design.md Amendments pointer, the parent record's round-3 dispositions, the CONTEXT.md "Lair Pull Request" term, the `decision-autonomy.md` Tier A merge bullet and the PRD Out of Scope bullet are recorded under the design's Changes to shared documents and not applied.
+- #605 fixes the Lair's script directory, `plugin/skills/lair/scripts/`; the fix-up, halt and breaker test cases are added by the slices that build them (M1-A8).
+- Every tick read fails closed: a failed or incomplete read means no merge and no label change that tick, and only the review wait may still route, from the markers (M1-B3).
+- A resetting settle result deletes the cache entry before the new snapshot, and only exactly one known line with exit 0 counts, for the poll and the auto tier alike (M1-B4, M1-B5).
+- A fix-up run is supervised from its start marker: the marker goes first, a failed write launches nothing, the budget and stall window run from `started_at`, and a lost run gets an end marker with outcome `crashed` (M1-B6).
+- The write order is marker, then labels, then an applied marker, each write idempotent and finished on later ticks (M1-B7).
+- A Lair pull request needs a live claim, an open issue and `lair:claimed`; a closed issue or a removed `lair:claimed` is the claim-withdrawn exit, and the closed-unmerged exit also writes a review marker (M1-B8).
+- No fix-up run starts for a pull request with a review marker (M1-B9).
+- The protected-path floor is the root `.github/` directory, any `.claude` path segment, and any file named `CLAUDE.md`, `CLAUDE.local.md`, `.mcp.json`, `.gitmodules` or `.gitattributes` at any depth, with ASCII case ignored; the list gains the `**/<name>` form (M1-B11).
+- `.github/lair.json` has a strict schema, and `[]` is the only way to declare no entries (M1-B12).
+- The tick reads only the two named settings files, and the queue report names the files read (M1-B15).
 
 The calls of this run:
 
 - This record reuses the parent record's keys and disposition vocabulary.
 - Only merge-lane-design.md is stamped. ADR-0044 is amended by this run but reviewed, not stamped, like the other sources.
 - A3-11, A3-12 and B3-20 are owned only in part; their other parts stay open in the parent record.
-- Every owned round-3 finding is dispositioned `fixed` by the design as written; the review rounds confirm or reopen each one.
+- Every owned round-3 finding is dispositioned `fixed` by the design as written; the review rounds confirm or reopen each one. Where a round-1 finding showed a fix held only in part, the disposition stays `fixed` and names the round-1 findings that completed it.
 - The seams with #630 and #632 are stated as assumptions in the design, and their files are not created.
-- Local review returned a root-cluster finding on the merge-lane tick's unpinned inputs. Root cause: the tick judged its merge conditions on its own reads, in a step list that grew one check per review round, while the merge call pins only the head, and the design never said which inputs the call can cover and which it never can. Class fix: every merge condition is keyed to one of five kinds by who reads it relative to the merge call, the tick's reads run in one late group with only the merge call after it, and the Lair pull request checks are one function used at recording and in the late group. The residual merge gap is recorded once as a class in merge-lane-design.md, Merge-lane step of the tick (Known limit) and Trust boundaries. Linked findings: `6cae4d438fcbd73fb76c1487beac991a3f98ae859ad5079fc9455024a74a23ed`, `b81db886da79ea26f3ece2cccdac1982ba7c77d628fc10391a295e0e7a20a4d2`, `ff9090699d221fd738ca76ed6b8d479146ba249d1eeb623d09eb7003d2ce1b41` and `bf472704b77555a397febc7472498d3c3e9e4d789170f336accca5151bef9024`. ADR-0044 is unchanged by this fix. The design review rounds have not run.
+- Local review returned a root-cluster finding on the merge-lane tick's unpinned inputs. Root cause: the tick judged its merge conditions on its own reads, in a step list that grew one check per review round, while the merge call pins only the head, and the design never said which inputs the call can cover and which it never can. Class fix: every merge condition is keyed to one of five kinds by who reads it relative to the merge call, the tick's reads run in one late group with only the merge call after it, and the Lair pull request checks are one function used at recording and in the late group. The residual merge gap is recorded once as a class in merge-lane-design.md, Merge-lane step of the tick (Known limit) and Trust boundaries. Linked findings: `6cae4d438fcbd73fb76c1487beac991a3f98ae859ad5079fc9455024a74a23ed`, `b81db886da79ea26f3ece2cccdac1982ba7c77d628fc10391a295e0e7a20a4d2`, `ff9090699d221fd738ca76ed6b8d479146ba249d1eeb623d09eb7003d2ce1b41` and `bf472704b77555a397febc7472498d3c3e9e4d789170f336accca5151bef9024`. ADR-0044 is unchanged by this fix.
+
+The calls on round 1's open choices, each dated 2026-11-21 and decided by the run, and each also listed under the design's Decided for you:
+
+- **R1** (M1-A3): a fix-up run's `decision` and `fact` parks are answerable on the issue and count toward the third-park handoff, under ADR-0045 decision 7. #609 handles them as a delivery run's park; the Lair first converts the pull request to a draft, so it belongs to its parked issue and does not hold the lane. The contrary text and the "no ADR-0045 change" claim are corrected.
+- **R2** (M1-A4): the review-finding fix-up cap, `fixup-cap`, is dropped. What starts a fix-up run on review findings stays with #610, per ADR-0045 decision 13 and the PRD's Post-PR feedback criterion. The unbounded review loop is a seam note for #610, not a merge-lane rule.
+- **R3** (M1-A5): `lair:review` goes on both the issue (PRD Labels and Admission) and the pull request (ADR-0045 decision 12).
+- **R4** (M1-B1): the #630 assumption is the property that no strain process can write what the tick reads or runs: the two user settings files, the Lair cache directory, the main checkout's git common directory (config, hooks, refs), the `PATH` directories and the plugin script directory. A worktree strain must write objects and refs, so hooks and config need a carve-out or a per-strain clone, which is #630's choice. The tick hardens itself apart from that: a Lair-owned bare repository, hooks and system and global config off, a fixed URL, the trunk id from this tick's `ls-remote`, and tools by absolute path. The residual is ADR-0045's prompt-injected strain, with its merge-lane consequences listed; the Lair pull request checks are not called a bound against a strain that reports values.
+- **R5** (M1-B2): an explicit #632 assumption that a process holding the user's GitHub credentials, the claim nonce and the run nonce cannot produce a marker that passes #632's rule; otherwise marker forgery is a named residual. The design's pinned-head line and ADR-0044's amendment consequence are conditional on it.
+- **R6** (M1-A2, M1-B10): the merge script and the settle check run in the Lair's own environment minus every `HIVEMIND_*` key, plus the keys read from the two settings files, so merge settings never come from the environment (Q4). Before every merge call, `gh api user` in that environment must report the Lair's own login; a mismatch is no merge with the reason `credential-mismatch`. The "authenticates as the Lair does" claim is dropped, and a test is added.
+- **R7** (M1-B13, M1-A14): the CI-red rule fires from the tick's own rollup read on the pinned head, or the settle check's `CI_FAILED`, whatever the merge settings, the approval and the gate order; `MERGE=wait:checks-failed` stays routed to it too. Q9's one fix-up run, then batch review, is unchanged.
+- **R8** (M1-A6): `pr`, `branch`, `head` and `local_review_head` move out of the claim marker into a run-end marker the merge lane owns. The lane reads `claim_nonce`, `claimed_at` and `body_sha256` from #632's claim marker and assumes only #632's author and nonce rule applies to its own markers too.
+- **R9** (M1-B17): at most one merge call per tick, and the trunk tip is re-resolved in the late group, with the auto tier run again when it moved.
+- **R10** (M1-B16): every merge-lane child process runs under a 300-second timeout; a killed merge run routes as `MERGE_ERROR`, and the next tick's state read decides whether it merged.
+- **R11** (M1-A9): the empty-string merge keys in strain settings are #630's pending ADR-0045 and PRD change (A3-1), not this design's; "no ADR-0045 change" covers only the merge lane's own decisions.
+- **R12** (M1-A1): #605 changes the Tier A merge bullet of `plugin/governance/decision-autonomy.md` to name the Lair tick's merge under ADR-0044 decision 17, updates `tests/policy/safety-auto-merge-after-approval.json`, and adds a structural check. The bullet text is recorded under Changes to shared documents and not applied.
+- **R13** (M1-A15): the PRD Out of Scope bullet "Changing the ADR-0044 merge rules beyond the auto-tier precondition" gains the Lair tick's merge path. It is a PRD change the user's Q1 and Q3 answers of 2026-11-21 already approved, recorded under Changes to shared documents and not applied.
 
 ## Decisions asked
 

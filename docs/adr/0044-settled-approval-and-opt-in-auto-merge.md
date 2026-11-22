@@ -82,10 +82,10 @@ The user approved these changes on 2026-11-21 for the Lair's one merge lane ([AD
 19. **An optional expected head.** Amends decisions 4 and 9. `merge-approved.sh` takes an optional sixth argument, the expected head. When the first read's head differs from it, the script prints `MERGE=wait:head-moved` and makes no merge call. Every merge call matches that head. The watch's five-argument call is unchanged.
 20. **The tick routes its own result.** Amends decision 10. The skill's routing binds the watch only. The tick routes each `MERGE=` line by the table in merge-lane-design.md.
 
-These stay unchanged: the gates, the `--admin` rule (decisions 3, 12 and 13), the one-line output contract, and the watch's own call and routing.
+These stay unchanged: the gates, the `--admin` rule (decisions 3, 12 and 13), the one-line form of the output contract, and the watch's own call and routing. Decision 19 adds the error reason `MERGE_ERROR=bad-expected-head` to that contract, and gives `MERGE=wait:head-moved` a second meaning: the head check before gate 1.
 
 The Consequences and Residuals read as follows for the tick:
 
 - A Lair merge needs no watch. The consequences that tie a merge to a clean watch, and to `HIVEMIND_SKIP_PR_WATCH`, bind the watch only.
 - The committed settings never reach the tick. The residual "Committed settings turn auto-merge on in brood worktrees" does not apply to a Lair merge.
-- A head no Lair run recorded never merges a Lair pull request. The residual "An unreviewed push by another account can merge" does not apply to a Lair merge.
+- A head no Lair run recorded never merges a Lair pull request, as long as no other process can write a marker that passes the Lair's marker rule (merge-lane-design.md, Assumptions about #632). Then the residual "An unreviewed push by another account can merge" does not apply to a Lair merge. Where that assumption does not hold, the residual applies.
