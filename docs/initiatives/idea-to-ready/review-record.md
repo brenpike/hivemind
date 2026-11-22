@@ -1,19 +1,19 @@
 ---
 stamps:
   - path: docs/prds/idea-to-ready.md
-    blob: a8d9fd9fb30ee65a19d5a11c1902178bd77f5899
+    blob: c76d18328baf3a6663b00231098eaf6e9f809b65
   - path: docs/initiatives/idea-to-ready/solution-design.md
-    blob: 6d7ada4576c641e116268d9ad0f8eb9f54c05e52
+    blob: cdf4af08adae0bd713828b7256578781dc38d36e
   - path: docs/adr/0046-idea-to-ready-process.md
-    blob: 3e3a5c191758ce1425a5627c108c3c57429be290
-verdict: fail
+    blob: 3a5bdea131e6526bf010ed9d32d44df42796c70a
+verdict: pass
 open:
   critical: 0
   high: 0
   medium: 0
   low: 0
 rounds: 3
-clean_round: false
+clean_round: true
 ---
 
 # Design review record: Idea to Ready
@@ -22,7 +22,7 @@ The first review, rounds 1 to 4, did not converge. After round 4 the user split 
 
 For a fresh re-review under Re-review and re-stamp of the solution design, the front matter was reset (`verdict`, `rounds`, the open counts and `clean_round`) and the stamps kept. The re-review starts at round 1 and covers the whole documents, because no record of this initiative has passed. The first review's Rounds and Findings are kept under History below.
 
-The stamps are the blobs at commit `92c9981f905531d8f4ba20040baf0cab2b855916`, the pull request head round 1 reviewed, read with `git rev-parse <commit>:<path>`, and equal those of commit `6fe5e03342397d06be7f722878ccc4e8fd755184`. Under the stamp rule of Review record front matter, a record with `verdict` `fail` keeps its stamps, and only the passing record re-stamps, to the commit its clean pass reviewed. Any later edit to a stamped file makes this record stale until a review of the change re-stamps it. The pull request stays a draft until the re-review passes. The design review skill's verify does not exist yet (#619), so this record is checked by hand.
+The stamps are the blobs at commit `d634e9f6b6a143d051bc7645057b44d0dd993585`, the commit the clean pass reviewed (Round 4 confirming checks, check C), read with `git rev-parse <commit>:<path>`. Under the stamp rule of Review record front matter, a record with `verdict` `fail` keeps its stamps, and only the passing record re-stamps, to the commit its clean pass reviewed. This record passes. Any later edit to a stamped file makes this record stale until a review of the change re-stamps it. The pull request may leave draft once verify passes at its head. The design review skill's verify does not exist yet (#619), so this record is checked by hand.
 
 ## Reviewed documents
 
@@ -90,9 +90,36 @@ The cerebrate pass confirmed all five round-3 findings fixed: RR3-C1 and RR3-1 t
 
 After the round the user answered Q25 A: as D34 set, merge-time enforcement on the plugin's merge paths leaves this design and is #619's own design question, with RR4-C1 and RR4-1 to RR4-3 as its input, superseding the merge-check parts of Q21 A, Q23 A and Q24 A. The guarantee narrows to the guide's draft rule and the readiness check (D28). The user also judged the remaining findings to be diminishing returns and directed that the design review check for diminishing returns after every round and raise it unprompted (D35).
 
-A final confirming round over the narrowing change follows. It reviews the diff since `94156faf` and does not change `rounds`. If it is clean, the record step re-stamps to the commit that round reviewed and sets `verdict` `pass` and `clean_round` `true`.
+Three confirming checks over the narrowing change followed, recorded under Round 4 confirming checks. None changes `rounds` (answer Q11 A). Checks A and B were not clean. Check C was clean, so the record step re-stamped to the commit it reviewed, `d634e9f6`, and set `verdict` `pass` and `clean_round` `true`.
 
 Diminishing-returns advisory: raised by the maintainer after round 4 (before D35 existed); signals: recurrence on the merge-check surface across rounds 2 to 4, severity trending to edge cases bounded by the readiness check; answer Q25 A (narrow and move merge-time enforcement to #619).
+
+### Round 4 confirming checks
+
+Check A, the D34 confirming round over the narrowing. Neither reviewer wrote the design.
+
+- Reviewer `hivemind:cerebrate`, model opus (Claude Opus), effort medium. One fresh, read-only pass with `Memory context: none`, covering every angle, over the diff since `94156faf9286efac684a5e468efd129f39688996`. It reviewed commit `be545476622e13014e66fbd9730081f8f6b83591` and found RRF-1 (medium), RRF-2 (medium) and RRF-3 (low).
+- Reviewer: the local review tool, the `codex-plugin` preset, run through `run-review.sh` against base `94156faf9286efac684a5e468efd129f39688996`. The tool names no model (ADR-0042 decision 7). It reviewed commit `be545476622e13014e66fbd9730081f8f6b83591` and found RRF-C1 (medium, finding_id `9ac5f15dd2842743193fb8ec3941ab7bda969993c7c65df4f28dffee52256ef3`).
+
+Check A is not clean.
+
+Diminishing-returns advisory: signals: severity medium and low only, findings are wording on text added in the previous change, no new risk; answer Q26 A (fix the four and run a narrow check on those edits).
+
+Check B, the narrow check of the four fixes. Neither reviewer wrote the design.
+
+- Reviewer `hivemind:cerebrate`, model opus (Claude Opus), effort medium. One fresh, read-only pass with `Memory context: none`, covering every angle, over the diff since `be545476622e13014e66fbd9730081f8f6b83591`. It reviewed commit `8b9bd06cf17ccd398efd139be1cc7826c606d086` and confirmed RRF-C1, RRF-1, RRF-2 and RRF-3 fixed, with no new finding.
+- Reviewer: the local review tool, the `codex-plugin` preset, run through `run-review.sh` against base `be545476622e13014e66fbd9730081f8f6b83591`. The tool names no model (ADR-0042 decision 7). It reviewed commit `8b9bd06cf17ccd398efd139be1cc7826c606d086` and found RRN-C1 (medium, finding_id `1312aa586f77adf5ac402f11eaf12e42defea26cba0567ae859f5c07e3a29971`): the draft rule was claimed for every plugin-controlled merge path, though `merge-approved.sh` can merge after ready.
+
+Check B is not clean.
+
+Diminishing-returns advisory: signals: the finding is on the sentence fixed in the previous check, medium wording, the risk already recorded; answer Q27 A (fix that sentence and run a one-sentence check).
+
+Check C, the one-sentence check. Neither reviewer wrote the design.
+
+- Reviewer `hivemind:cerebrate`, model opus (Claude Opus), effort medium. One fresh, read-only pass with `Memory context: none`, covering every angle, over the diff since `8b9bd06cf17ccd398efd139be1cc7826c606d086`. It reviewed commit `d634e9f6b6a143d051bc7645057b44d0dd993585` and confirmed RRN-C1 fixed, with no new finding.
+- Reviewer: the local review tool, the `codex-plugin` preset, run through `run-review.sh` against base `8b9bd06cf17ccd398efd139be1cc7826c606d086`. The tool names no model (ADR-0042 decision 7). It reviewed commit `d634e9f6b6a143d051bc7645057b44d0dd993585`. Its verdict was approve, with no findings.
+
+Check C is clean: it is this record's clean round. The record step re-stamped to `d634e9f6` and set `verdict` `pass`.
 
 ## Findings
 
@@ -126,6 +153,11 @@ Diminishing-returns advisory: raised by the maintainer after round 4 (before D35
 | RR4-1 | 4 | confirm | medium | deferred | `merge-approved.sh` fetched from `origin`, which nothing tied to the `<OWNER> <REPO>` it merges in, so a fork or foreign base could be checked in place of the real one. Deferred to #619, which now owns merge-time enforcement on the plugin's merge paths (answer Q25 A); this finding is its input. |
 | RR4-2 | 4 | confirm | low | deferred | Merge mode's exit-code contract was ambiguous for its callers. Deferred to #619, which now owns merge-time enforcement on the plugin's merge paths (answer Q25 A); this finding is its input. |
 | RR4-3 | 4 | confirm | low | deferred | A pull request that marks a design delivered skipped the merge check, because merge mode skipped a delivered design's unedited record. Deferred to #619, which now owns merge-time enforcement on the plugin's merge paths (answer Q25 A); this finding is its input. Every slice of a delivered design fails `design_delivered`. |
+| RRF-C1 | 4 | review | medium | fixed | Local review tool pass, finding_id `9ac5f15dd2842743193fb8ec3941ab7bda969993c7c65df4f28dffee52256ef3`: the design said the draft rule fully met the PRD's cannot-merge rule. D28 and ADR-0046 decision 7 now say it does not in full, and #619 delivers the full guarantee. |
+| RRF-1 | 4 | confirm | medium | fixed | D35 claimed to reuse the signals of `hivemind:detect-remediation-signals`. D35 now has its own signals, modeled on that skill, run whatever the severity. |
+| RRF-2 | 4 | confirm | medium | fixed | D35's options now stay within the disposition rule: a critical or high finding is only fixed or rejected. |
+| RRF-3 | 4 | confirm | low | fixed | Review record body now names the `Diminishing-returns advisory:` line under each round. |
+| RRN-C1 | 4 | review | medium | fixed | Local review tool pass, finding_id `1312aa586f77adf5ac402f11eaf12e42defea26cba0567ae859f5c07e3a29971`: the draft rule was claimed for every plugin-controlled merge path. It is now limited to while the pull request is a draft, with the merge after ready left to #619. |
 
 ## Decisions taken, listed for veto
 
@@ -200,6 +232,7 @@ Each decision has its always-ask screen: an answer to each of the four always-as
 | Verify is one shared library, `plugin/skills/_shared/record-verify.sh`, sourced by each caller's own script | no | no | no | no |
 | The P26 sweep (#642): CI, `tools/validate.sh`, the Codex plugin and Fable are each optional, with a stated fallback | No. #642 set P26 on main. | no | No change: the guide's verify before ready, the readiness check and the fix-round commit refusal hold in every repository. | no |
 | RR3-3 and RR3-4: the delivered-design exclusion in Review record body, and the glossary's passing-record ADR stamps | no | no | no | no |
+| D28 keeps two sentences after the new reach sentence that repeat its after-ready residual and the #619 clause; left as is, judged harmless by the clean check | no | no | no | no |
 
 Moved to #638 with the council, so no longer listed here: D12, D13, D14, D16, D18 and D18's `skip` at `balanced`, D25, D26, the A1 redesign, ADR-0042 decision 9 not amended, A15, R2A3, the switched-option gate, the `needs_user_fact` absent rule, the council switch re-plan, script-local council answers, the composed-brief defect, the `dissent` bound, `council.js`, the merges of A5 with B12, A6 with B13, R2A1 with R2B1, R2A4 with B15, R2B7 with A2, R3A8 with R3B1 and R3B8 with R3A2, R3B1, R3B2, R3B3, R3A2, R3A3, R3A4 and R3B7.
 
@@ -227,6 +260,9 @@ The commit refusal, the code-read verify stop, verify on every record the pull r
 - D33, guide-launched runs return to the guide. Asked in re-review round 1. The user's answer: Q19 A: a run the guide launched that fails or ends blocked returns to the guide, which re-derives the stage, with no Instinct takeover. This narrows ADR-0039 decision 4 for guide-launched runs, recorded in ADR-0046; #622 edits `plugin/agents/overlord.md` (`## Engine`) within D20.
 - D34, one-time fourth re-review round. Asked after re-review round 3. The user's answer: Q23 A: fix all four round-3 findings, then run round 4 of the re-review as a one-time confirming round, recorded like D31: it does not change `rounds`; if it raises any new critical or high finding, the merge enforcement moves out to #619's own design, and the design narrows its claim to the guide's draft rule and the readiness check. Q25 A, asked after re-review round 4: round 4 raised a new high finding, RR4-C1, so the merge enforcement moved out to #619 (D28), and one final confirming round over that change follows and does not change `rounds`.
 - D35, diminishing-returns check after every round. The user's directive after re-review round 4: "We should factor diminishing returns identification into our design review....I shouldn't have to ask specifically if we're at diminishing returns." After every round the review checks its findings for recurrence on an already-fixed surface, a downward severity trend while fixes add surface, and edge cases an existing safeguard bounds, and raises the advisory to the maintainer unprompted.
+- D35 advisories after the round-4 confirming checks. The user's answers:
+  - Q26 A, asked after the D34 confirming round: fix the four findings and run a narrow check on those edits.
+  - Q27 A, asked after the narrow check: fix the one sentence and run a one-sentence check.
 - Round-2 remediation plan. Asked in re-review round 2. The user's answer: Q22 A, the plan is accepted. Review findings reach a guide run only as docs pull request comments under the pass scan, the guide request has a fixed layout (RR2-C1, RR2-2; D33), stamp equality and ADR inclusion are checked only on a passing record (RR2-1; D28), and the Note shapes are defined (RR2-3).
 - Round-3 remediation plan. Asked after re-review round 3. The user's answer: Q24 A, the plan is accepted.
 
