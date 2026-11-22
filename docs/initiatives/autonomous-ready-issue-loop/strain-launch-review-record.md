@@ -3,10 +3,10 @@ stamps: []
 verdict: pending
 open_counts:
   critical: 0
-  high: 0
-  medium: 0
-  low: 0
-rounds: 3
+  high: 2
+  medium: 1
+  low: 3
+rounds: 4
 clean_round: null
 ---
 
@@ -14,7 +14,7 @@ clean_round: null
 
 This record covers the design review of issue #630, the strain launch and containment part of the Lair, epic #603. Only the [strain launch design](strain-launch-design.md) is stamped. Its stamp's blob is `git rev-parse HEAD:docs/initiatives/autonomous-ready-issue-loop/strain-launch-design.md`, and the stamp is written last. The [PRD](../../prds/autonomous-ready-issue-loop.md), [ADR-0045](../../adr/0045-lair-software-factory.md) and the parent [solution design](solution-design.md) are reviewed, not stamped.
 
-The review exits only when zero critical or high findings are open and one round raises no new findings. It runs at most 3 rounds. On 2026-11-22 the user authorized one more round beyond that cap (Round 3, Decisions asked).
+The review exits only when zero critical or high findings are open and one round raises no new findings. It runs at most 3 rounds. On 2026-11-22 the user authorized one more round beyond that cap (Round 3, Decisions asked). Round 4 ran under that authorization.
 
 Round 1 ran under the original procedure: two parallel, fresh, read-only `hivemind:cerebrate` passes (A and B), model opus, effort xhigh, each with "Memory context: none". Its IDs stay `L1-A<n>` and `L1-B<n>`.
 
@@ -203,6 +203,36 @@ Round 3 is not clean: it raised new findings (see the tables). Round 3 is the la
 | ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
 | --- | --- | --- | --- | --- | --- | --- |
 | L3-T1 | high | `06470f63005f8f74649b54d825339d8ea7514523c3069a7f1cf727588288c524` | The repeat guard keys a failed CI check by `name` only. GitHub check names are not unique across apps, suites or runs, so a second distinct failing check with the same name on one head counts as already dispatched: no remediation runs and the pull request is not routed to `lair:review`. The loss is silent. | design `:128` | Key on a unique check identity carried by `fetch-normalize.sh` (app or check-suite identity plus check-run id, or a node id). A collision fails closed to `lair:review`. Add cases to `tools/test_lair_tick.sh` and `tools/test_fetch_normalize.sh`. | fixed: a failed check is keyed on `check_id`, its GraphQL node id, which `fetch-normalize.sh` carries only after a named change: a Lair-only `--review-authors` flag that reads failed checks from the head commit's `statusCheckRollup`, since `gh pr checks --json` has no id field. A null or shared key routes to `lair:review`. Components > Remediation strain launch ("Check identity", "Finding keys"), Context and code truth, Existing-path coverage, Contracts and seams > Marker check, Failure modes ("A finding key is missing or shared"), Decisions, Seam order (#610) and Verification strategy (`tools/test_fetch_normalize.sh`; `tools/test_lair_tick.sh` two distinct failed checks with one name on one head) |
+
+## Round 4
+
+- **Date:** 2026-11-22.
+- **Kind:** confirming round, authorized by the user beyond the 3-round cap (answer A, 2026-11-22; Round 3, Decisions asked). It reviewed only the diff `25f15b6e..e6aac319` and the fixes to the L3 findings.
+- **Design reviewed:** blob `2e955b7e943f87f604ed60aa3a5130d93068eb93` at commit `e6aac3197aef57820458ac3370949069438b2702`.
+- **Cerebrate pass:** one fresh read-only `hivemind:cerebrate` pass, effort medium, "Memory context: none".
+- **Tool pass:** one pass through `plugin/skills/adaptation-cycle/scripts/run-review.sh` with the `codex-plugin` preset and `--base 25f15b6e`. Verdict `needs-attention`, two high findings. The raw output was read from the run's scratch file and is not committed.
+
+**Fix check.** The cerebrate pass judged L3-T1 and L3-C1 to L3-C5 all closed by the design text.
+
+Round 4 is not clean: it raised new findings (see the tables), all open. Round 4 ends with open high findings. Per the user's round-3 answer, the run stopped and asked the user.
+
+Three consecutive rounds' fixes to the remediation repeat guard (L2-C3, then L3-C4 and L3-T1, now L4-T1, L4-T2 and L4-C1) each opened a new hole on the same surface.
+
+### Cerebrate pass
+
+| ID | Severity | Section | Finding | Evidence | Proposed fix | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L4-C1 | medium | Remediation strain launch "Check identity"; Context and code truth | The raw `statusCheckRollup` includes superseded runs that `gh pr checks` drops. The design states no dedupe rule and no failed-state set, so a passed re-run's old failure dispatches a wasted strain. Page overflow is unhandled. | `fetch-normalize-core.sh:134`; `gh` `aggregate.go` `eliminateDuplicates` | State the failed-state set. Keep the latest run per suite and name and the latest `StatusContext` per context. Overflow goes to `lair:review`. Add tests. | open |
+| L4-C2 | low | Strain launch and settings > Environment preflight | When the Lair reads the preflight result is unstated and there is no deadline, so a hung probe blocks forever. | `run-review.sh:49-58` (up to about 570 s) | Wait for the session end or a fixed deadline above 600 s. A timeout kills the session and stops with a named cause. Add a test. | open |
+| L4-C3 | low | Strain launch and settings > Environment preflight | A stale preflight result file or scratch worktree from an earlier session can be read as a pass or break the worktree add. | Design text only | Clear both first. Echo a per-run nonce in the result. Add tests. | open |
+| L4-C4 | low | Existing-path coverage | The line says the author filter applies only with a verified marker, which contradicts the new `--review-authors` flag. | design `:350` | Reword the line. | open |
+
+### Tool pass
+
+| ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L4-T1 | high | `dc7d0d2621fe560ec5b896d23ffd2989eb96d9f06992bf54dc36651333b5a473` | Thread comments are keyed by node `id` only. An edit that adds a finding keeps the id, so no key is new: no dispatch and no `lair:review`. This contradicts the design's claim that a finding edited in after a completed remediation gets a strain. | design `:141`, `:200-203` | Fetch the thread comment's `lastEditedAt` into the key, or fail closed to `lair:review` when edit identity cannot be established. Add a test where a dispatched thread comment is edited and becomes actionable again. | open |
+| L4-T2 | high | `1cbd9c8b369cefd999988b9ec6802a722b081244066a662d40e3e114ef1474e7` | `statusCheckRollup` is a paged connection. The design has no exhaustive pagination, no `pageInfo` check and no overflow rule, so a failed check past the page is silently missing from the current key set. | design `:205` | Paginate `statusCheckRollup.contexts` and validate `pageInfo`. Route to `lair:review` without dispatch when the complete set cannot be fetched within a bound. Add multi-page and pagination-failure tests. | open |
 
 ## Sources
 
