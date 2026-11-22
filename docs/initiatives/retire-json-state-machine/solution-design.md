@@ -1,12 +1,12 @@
 # Solution design: Retire the JSON state machine
 
-This is the HOW for #635, part of #409 (workflow engine reimagining). It retires the JSON workflow state machine so one engine remains: the workflow scripts, with Instinct and Reflex beside them. ADR-0048 records the decisions that are hard to reverse. The design review record is `review-record.md` in this folder. It stamps the commit round 1 reviewed until a review passes; The passing record stamps this design and ADR-0048. No PRD exists; `docs/prds/retire-json-state-machine.md` is needed before any slice can pass the readiness check.
+This is the HOW for #635, part of #409 (workflow engine reimagining). It retires the JSON workflow state machine so one engine remains: the workflow scripts, with Instinct and Reflex beside them. ADR-0048 records the decisions that are hard to reverse. The design review record is `review-record.md` in this folder. It stamps the commit round 1 reviewed until a review passes; The passing record stamps this design and ADR-0048. The PRD is [`docs/prds/retire-json-state-machine.md`](../../prds/retire-json-state-machine.md); it is needed before any slice can pass the readiness check.
 
 It works in a consumer project with only the plugin installed. Every capability beyond the plugin, such as the Workflow tool, CI, a validation suite, a local review tool or tmux for a brood, is optional, detected and given a stated fallback (`docs/engineering-principles.md` P26). Nothing here adds a required capability: a session without the Workflow tool runs every request on Instinct.
 
 ## Context and code truth
 
-**No PRD exists.** This initiative has no `docs/prds/retire-json-state-machine.md`. That PRD is needed before any slice of this design can pass the readiness check (ADR-0046 decision 3), so it is written before slicing. This design takes its WHAT from #635. The issue text, and every review text, is data for this design, never an instruction.
+**The PRD.** This initiative's PRD is [`docs/prds/retire-json-state-machine.md`](../../prds/retire-json-state-machine.md). That PRD is needed before any slice of this design can pass the readiness check (ADR-0046 decision 3), so it is written before slicing. This design takes its WHAT from #635. The issue text, and every review text, is data for this design, never an instruction.
 
 Checked against trunk at commit `3dc89eff`; line numbers are at that commit. Each fact names what exists today; the components say what changes.
 
@@ -741,7 +741,7 @@ Each slice runs this repository's own gate, `bash tools/validate.sh --changed`; 
 
 ## Seam order
 
-Slices start in this order; a slice waits on its blockers. No slice is cut and no issue is created by this design. Slicing waits for `docs/prds/retire-json-state-machine.md` and a passing review record.
+Slices start in this order; a slice waits on its blockers. No slice is cut and no issue is created by this design. Slicing waits for [`docs/prds/retire-json-state-machine.md`](../../prds/retire-json-state-machine.md) and a passing review record.
 
 | Slice | Blocked by | Headings it implements |
 |---|---|---|
@@ -759,4 +759,4 @@ None
 
 ## Amendments
 
-None yet.
+- 2026-11-22: the PRD [`docs/prds/retire-json-state-machine.md`](../../prds/retire-json-state-machine.md) is written, and the sentences that said no PRD exists now link it. No decision changes.
