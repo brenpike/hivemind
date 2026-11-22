@@ -3,10 +3,10 @@ stamps: []
 verdict: pending
 open_counts:
   critical: 0
-  high: 0
+  high: 2
   medium: 0
   low: 0
-rounds: 8
+rounds: 9
 clean_round: null
 ---
 
@@ -357,6 +357,8 @@ Round 8 is not clean: it raised new findings (see the tables). All five were ope
 
 **Remediation after round 8.** Each finding was checked against the design text. L8-T1 and L8-C1 share one fix: "no baseline, no dispatch, no route" now applies only to a parked result, the merge lane skips a parked result's pull request with no delivery baseline until a `complete` re-claim writes one, and a `blocked` or `failed` delivery result with `pr` set routes its pull request to `lair:review` when the outcome is written. L8-C2, L8-C3 and L8-C4 are fixed in place. None is deferred, recorded or rejected. The State column holds the disposition and the closing section. The design's Amendments section has the matching entry.
 
+**Correction after round 9.** The claim above that no pull request without a baseline reaches a merge is false. Round 9 found that a delivery strain that opens its pull request and then crashes, returns an invalid result, stalls or hits the 6-hour budget leaves no baseline and no result `pr` to route on, so the L8-T1 hole stays open for those ends. See L9-C1 and L9-T1.
+
 ### Cerebrate pass
 
 | ID | Severity | Section | Finding | Evidence | Proposed fix | State |
@@ -371,6 +373,34 @@ Round 8 is not clean: it raised new findings (see the tables). All five were ope
 | ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
 | --- | --- | --- | --- | --- | --- | --- |
 | L8-T1 | high | `99d0ad90b34ef72ceef4178471006e20078c78dc9bd655062f59dd01bd8a5bb6` | Confidence 0.96. A pull request with no delivery baseline can still enter the merge lane. Parked, blocked and failed results get no baseline and "no dispatch and no route", but the merge lane's skip list does not include "no delivery baseline". A non-draft pull request from a failed delivery can merge if its gates pass. | design text (merge lane skip list; "The delivery baseline") | The merge lane skips every Lair pull request with no delivery baseline until a complete re-claim writes one or a terminal rule routes it. Test a non-draft, green, approved pull request. | fixed, with L8-C1: the merge lane skips a Lair pull request with a parked result and no delivery baseline until a `complete` re-claim writes one, and a `blocked` or `failed` delivery result with `pr` set routes its pull request to `lair:review` when the outcome is written, so no pull request without a baseline reaches a merge. Design Components > Remediation strain launch ("The delivery baseline", "Tick order"), Contracts and seams > Assumptions about #631, Failure modes, Decisions and Verification strategy (`tools/test_lair_tick.sh`: a parked draft gets no dispatch and no merge-lane action; a failed delivery with a non-draft, green, approved pull request routes to `lair:review` and never merges) |
+
+## Round 9
+
+- **Date:** 2026-11-22.
+- **Kind:** final confirming round, under the user's round-8 stop rule. It reviewed only the diff `915401db..2e0a41d7` and the fixes to the L8 findings.
+- **Design reviewed:** blob `5af99fb0804d3531dcfb021c3ae62be423896a20` at commit `2e0a41d711980d14a2ccdb70b1e45c86d2b7bd64`.
+- **Cerebrate pass:** one fresh read-only `hivemind:cerebrate` pass covering both angles, effort medium, "Memory context: none".
+- **Tool pass:** one pass through `plugin/skills/adaptation-cycle/scripts/run-review.sh` with the `codex-plugin` preset and `--base 915401db`, because the design touches trust and the merge path. The raw output was read from the run's scratch file and is not committed.
+
+**Fix check.** L8-C1, L8-C2, L8-C3 and L8-C4 are closed. L8-T1 is not fully closed: it is carried as L9-C1 and L9-T1. The round-8 remediation's claim that no pull request without a baseline reaches a merge is false (corrected in Round 8, "Correction after round 9").
+
+Round 9 is not clean: it raised new findings (see the tables). Both are open and both are high.
+
+**Stop rule applied.** Round 9 raised 2 high findings. Under the user's round-8 answer A, the review stops here: the verdict stays `pending`, no stamp is written, `clean_round` stays `null` and PR #637 stays a draft for the user. No remediation runs after round 9.
+
+**Suggested fix for both findings.** The two findings share one fix, closed by construction: the merge lane skips every Lair pull request whose claim marker holds no delivery baseline, plus a route to `lair:review` on every non-complete end (crash, invalid result, stall, 6-hour budget, and a failed label write retried as persisted work). Tests cover a crash and a budget kill after a pull request opens, and a first label write that fails.
+
+### Cerebrate pass
+
+| ID | Severity | Section | Finding | Evidence | Proposed fix | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L9-C1 | high | Remediation strain launch ("The delivery baseline", "Tick order"); Failure modes (Crash, Stall, Budget overrun) | A delivery strain that opens its pull request and then crashes, returns an invalid result, stalls or hits the 6-hour budget has no baseline, is not parked and has no result `pr` to route on. It is not on the merge lane's skip list, so a non-draft, green, Bot-approved pull request from a failed run merges unattended. This is the L8-T1 hole. | Design text only | Closed by construction: (1) the merge lane skips every Lair pull request whose claim marker holds no delivery baseline; (2) route the open pull request on the claim's branch to `lair:review` on crash, invalid result, stall or timeout (the Crash, Stall and Budget overrun rows, and the #631 assumption); (3) tests for a crash and a budget kill after a pull request opens, and for a failed label write. | open |
+
+### Tool pass
+
+| ID | Severity | Tool finding ID | Finding | Evidence | Tool recommendation | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| L9-T1 | high | `7b1d603249d15cced01248e9cae6b4bc911956473f045c93328113e1906b0cf6` | Confidence 0.97. An outcome and label partial failure can allow an unattended merge. The outcome write and the `lair:review` label are separate GitHub writes. If the label write fails, the merge lane (its skip list lacks a `blocked` or `failed` outcome and a failed route) can merge a non-draft, approved, green pull request, because `merge-approved.sh` does not gate on the delivery outcome. | design text (merge lane skip list; outcome and label writes); `merge-approved.sh` gates | Treat routing as retryable persisted work. The merge lane skips the pull request until the label is observed. Test with the first label write failing. | open |
 
 ## Sources
 
