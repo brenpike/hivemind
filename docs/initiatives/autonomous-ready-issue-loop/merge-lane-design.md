@@ -319,7 +319,8 @@ A decision that is not ADR-worthy names the [P20](../../engineering-principles.m
 - **The tick routes its own result by this design's table.** ADR-0044 decision 20, amending decision 10.
 - **Merge settings come only from the user's two settings files.** ADR-0044 decision 17. ADR-0045 decision 12's "re-reading `HIVEMIND_AUTO_MERGE` and `HIVEMIND_AUTO_MERGE_ADMIN` every tick" holds as written.
 - **The auto-tier inputs.** ADR-0045 decision 12. The input sources are not ADR-worthy: each fails P20's hard-to-reverse condition.
-- **A Lair pull request is one the Lair recorded after checking it.** ADR-0045 decision 12. Not ADR-worthy: fails P20's hard-to-reverse condition.
+- **A Lair pull request is one the Lair recorded after checking it.** ADR-0045 decision 12. The Lair rechecks it in the late group with the same function. Not ADR-worthy: fails P20's hard-to-reverse condition.
+- **The merge call pins only the head, and every other tick-read input is one class of known limit.** Decided by the run under `plugin/governance/decision-autonomy.md` (Review Calls), on a local-review root-cluster finding, 2026-11-21. Not ADR-worthy: fails P20's hard-to-reverse condition. It extends ADR-0044 decision 15 by analogy, from the script's own read to the tick's late group, and changes nothing in ADR-0044. See the Known limit under Merge-lane step of the tick.
 - **No merge after an issue edit.** Extends ADR-0045 decision 10. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **The CI-red rule: one fix-up run for failed checks, then batch review.** Extends ADR-0045 decision 13. Not ADR-worthy: fails P20's hard-to-reverse condition.
 - **The halt and breaker stop claims and fix-up runs; merges continue.** ADR-0045 decision 17 as written: the halt stops new claims, and unsetting auto-merge stops merges.
@@ -350,7 +351,8 @@ Each of these is listed for veto. None is ADR-worthy: each fails P20's hard-to-r
 - **The review wait is 3600 seconds**, the watch's `max_watch_duration` default (ADR-0029 decision 3), measured from the recording run's `ended_at`, so it survives a lost cache.
 - **The routing rows.** No checks, conflicts, a blocked merge and a refused merge go to batch review. A script error, malformed output and `merge-pending` wait, bounded by the review wait. `skipped:bad-setting` is handled like `off`.
 - **`merge-pending` makes no second merge call** for the same head while the cache marks it.
-- **The late group runs last**: the merge-settings read, the fresh identity read, the issue-edit check and the settle check, with only the merge call after them. The few seconds left between their reads and that call are the merge gap, a known limit (Merge-lane step of the tick), decided by the run on a local-review finding.
+- **The late group and its order.** The late group is the last tick work, in this order: the merge settings, the identity, the issue edit and the settle check, then the merge call and nothing else. The seconds between its reads and that call are the merge gap (Known limit, Merge-lane step of the tick).
+- **No expected base, author or branch arguments for `merge-approved.sh`.** Rejected: GitHub offers no merge call that pins those inputs, so the arguments would only narrow the merge gap and add script surface, and the issue text and the settle snapshot would still stay outside what the merge call pins (Known limit, Merge-lane step of the tick).
 - **The head check goes first** in `merge-approved.sh`, before gate 1, so a moved head never yields another gate line.
 - **`HIVEMIND_PR_REVIEWERS` comes from the same two user files** as the merge keys (ADR-0043 decision 2), and the reviewer filter is `automated`.
 - **The clean environment** holds `PATH`, `HOME`, the `gh` auth variables when set, and the three keys.
@@ -419,9 +421,8 @@ The tests follow the PRD's [Testing Decisions](../../prds/autonomous-ready-issue
   - Merge settings: the local file winning; the user file used alone; an empty local value overriding the user's; committed settings ignored; a key in the Lair's environment ignored; an unparseable file meaning no merge; the clean environment holding only the allowed names.
   - Settle check: the first sighting; `UNCHANGED` under 600 seconds and at 600 seconds, on an injected clock; each resetting marker; a lost cache; `CHECK_ERROR`.
   - Pinned head: equal, moved, unrecorded, and a fix-up head that is not a descendant.
-  - Recorded identity after recording: a base retargeted away from the trunk, seen on the late group's fresh read, giving `identity-changed` and no merge call.
-  - Late group: one property checked over every case that reaches the merge call. In the call log, the merge-settings read, the fresh pull request read, the issue read and the settle check come after every other tick read, in that order, and only the merge call follows them.
-  - Lair pull request checks: a fork, a wrong base, another author, a branch mismatch and a head mismatch.
+  - Lair pull request checks: the five failing cases, a fork, a wrong base, another author, a branch mismatch and a head mismatch, each run through both paths. The recording path gives an invalid result. The late group gives `identity-changed` and no merge call.
+  - Late group: one property checked over every case that reaches the merge call. The fake-call log shows the late-group reads in order, the settings, the pull request, the issue and the settle check, with only the merge script call after the last, so a tick read added after the group fails the test.
   - Issue edit before merge, the draft and closed-unmerged exits, and the review wait.
   - Fix-up runs: the CI-red rule; the review-finding cap; fix-up run outcomes and the breaker count; the halt and the breaker stopping fix-up runs while merges continue.
 - **Registration in `tools/validate.sh`, for each new suite:**
@@ -439,7 +440,7 @@ The design changes these slices. The ADRs each one touches were confirmed by rea
 | Slice | Change | ADRs |
 | --- | --- | --- |
 | #604 | Strain settings set the merge keys to empty strings and deny access to the two user settings files and the Lair's cache; the result gains `local_review_head`. | ADR-0045 decisions 4 and 5; ADR-0044 decision 17; ADR-0010, amendment 2026-10-31 |
-| #605 | The merge-lane step, the settle check, the auto-tier script, the expected-head argument, the routing table, the merge settings source and their tests. | ADR-0044 decisions 1, 4, 6, 9, 10, 14, 16 and 17 to 20; ADR-0045 decision 12; ADR-0043 decision 2; ADR-0029 decision 3; ADR-0020, amendment 2026-09-29 |
+| #605 | The merge-lane step with its late group, the late-group ordering test, the settle check, the auto-tier script, the expected-head argument, the routing table, the merge settings source and their tests. | ADR-0044 decisions 1, 4, 6, 9, 10, 14, 16 and 17 to 20; ADR-0045 decision 12; ADR-0043 decision 2; ADR-0029 decision 3; ADR-0020, amendment 2026-09-29 |
 | #606 | Under the release-train mode, the auto tier's bump input must come from the change fragments; #606 defines it. | ADR-0045 decisions 12 and 15 |
 | #608 | The tick calls the merge-lane step under the lock, reads the halt file before fix-up dispatch, and writes the run-end fields and the outcome mapping. | ADR-0045 decisions 2, 12, 16 and 17; ADR-0044 decision 17 |
 | #609 | Park counting and answer handling ignore fix-up parks. | ADR-0045 decisions 7 and 11 |
