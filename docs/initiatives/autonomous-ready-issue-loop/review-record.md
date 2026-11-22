@@ -1,18 +1,24 @@
 ---
-stamps: []
-verdict: fail
+stamps:
+  - path: docs/prds/autonomous-ready-issue-loop.md
+    blob: aa2e7c942a5160b954182f58f5770d0e9d8e8e89
+  - path: docs/initiatives/autonomous-ready-issue-loop/solution-design.md
+    blob: 2b8a7b6b58a953f657ba8ecef5c5a142b36cc7f9
+  - path: docs/adr/0045-lair-software-factory.md
+    blob: e1730da467123263e1e173c3404abae3c5b81861
+verdict: pass
 open:
   critical: 0
   high: 0
   medium: 0
   low: 0
-rounds: 2
-clean_round: false
+rounds: 3
+clean_round: true
 ---
 
 # Design review record: Lair — Software Factory
 
-The first review, rounds 1 to 3, did not converge. After round 3 the user split the initiative into three part designs: #630 strain launch, #631 merge lane and #632 claim integrity. #633 integrates them into this design. The integration review, rounds 1 to 3 of 2026-11-22, also reached the 3-round cap without converging, on strain containment, and the user split containment into its own part design, #646, Lair design: strain containment (Decisions asked, Round 3 questions). The restarted review, rounds 1 to 3 of 2026-11-22, reached the cap too, recurring on the decision digest, and the user narrowed the digest to a requirement whose design moves to #611 (Decisions asked, Restarted round 3 advisory). The second restarted review, rounds 1 to 3 of 2026-11-22, reached the cap with only 2 low findings in its round 3, both fixed, and under the user's standing rule its strong recommendation to restart was taken (Decisions taken, listed for veto, Second restart round 3's calls). This review restarts at round 1, a fresh re-review under ADR-0046 decision 6, Re-review after an amendment: the front matter is reset (`verdict`, `rounds`, the open counts and `clean_round`), the stamps are kept, and the earlier reviews' rounds and findings are kept under History below.
+The first review, rounds 1 to 3, did not converge. After round 3 the user split the initiative into three part designs: #630 strain launch, #631 merge lane and #632 claim integrity. #633 integrates them into this design. The integration review, rounds 1 to 3 of 2026-11-22, also reached the 3-round cap without converging, on strain containment, and the user split containment into its own part design, #646, Lair design: strain containment (Decisions asked, Round 3 questions). The restarted review, rounds 1 to 3 of 2026-11-22, reached the cap too, recurring on the decision digest, and the user narrowed the digest to a requirement whose design moves to #611 (Decisions asked, Restarted round 3 advisory). The second restarted review, rounds 1 to 3 of 2026-11-22, reached the cap with only 2 low findings in its round 3, both fixed, and under the user's standing rule its strong recommendation to restart was taken (Decisions taken, listed for veto, Second restart round 3's calls). This review restarts at round 1, a fresh re-review under ADR-0046 decision 6, Re-review after an amendment: the front matter is reset (`verdict`, `rounds`, the open counts and `clean_round`), the stamps are kept, and the earlier reviews' rounds and findings are kept under History below. This review passed at round 3, a clean round, with no finding open at any severity.
 
 ## Reviewed documents
 
@@ -20,7 +26,7 @@ The first review, rounds 1 to 3, did not converge. After round 3 the user split 
 - [Solution design: Lair — Software Factory](solution-design.md)
 - [ADR-0045](../../adr/0045-lair-software-factory.md): the Lair software factory
 
-Stamps follow ADR-0046 decision 7, Blob stamps. This re-review kept the first review's stamps under ADR-0046 decision 6, Re-review after an amendment, and they were empty; a record written with `verdict` `fail` keeps its stamps, so they stayed empty through the integration review, the restarted review and the second restarted review, and stay empty as this review restarts. The record that sets `verdict` `pass` stamps these three documents at the commit its clean pass reviewed, ADR-0045 among them because this pull request edits it.
+Stamps follow ADR-0046 decision 7, Blob stamps. This re-review kept the first review's stamps under ADR-0046 decision 6, Re-review after an amendment, and they were empty; a record written with `verdict` `fail` keeps its stamps, so they stayed empty through the integration review, the restarted review and the second restarted review, and through this review's rounds 1 and 2. This record sets `verdict` `pass`, so it stamps these three documents at `66c4858d38cae6b287c2816dadc17b0afc457047`, the commit its clean round 3 reviewed, ADR-0045 among them because this pull request edits it.
 
 The mechanism of strain containment is designed and reviewed in #646. This review reads the solution design's Seams between the part designs, item 6, as the requirement and its pointer to #646.
 
@@ -28,7 +34,7 @@ The three part designs, [strain launch](strain-launch-design.md), the [merge lan
 
 Review rule:
 
-- Rounds count from 1. Round 1 covers the whole documents, because no record of this design has passed.
+- Rounds count from 1. Round 1 covers the whole documents, because no record of this design had passed.
 - Each round is one fresh, read-only `hivemind:cerebrate` pass with `Memory context: none`, covering every angle. When a local review tool is configured, the round adds one pass of that tool. When none is configured, the record says that pass was skipped.
 - A round never runs two passes of one model.
 - The cap is 3 rounds.
@@ -53,6 +59,15 @@ Review rule:
 - **Local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, an angle review. Model: the tool's own default (ADR-0042 decision 7), from another vendor than the planner pass's. It raised 1 finding, C2-1, rated high by the tool and medium by the pass's reviewer agent, recorded as medium.
 - **Result:** 0 critical, 0 high, 2 medium and 2 low, all new. Under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Design-decision rule update), each finding takes its recommended fix, a strong recommendation, listed for veto (Decisions taken, listed for veto, Third restart round 2's calls). Every finding is disposed below, so none is open. The round raised new findings, so it is not clean, and round 3, the last under the cap, follows.
 - **Diminishing-returns advisory:** signal 1, recurrence: the `remediation-spent` route (R1-1: R2-1, C2-1), item 4's list of text replaced for invalid results (R1-2: R2-2) and #608's ADRs cell (R1-5: R2-3); signal 2 did not fire: severity flat at medium and low, 2 medium in each round, round 1's one high a rejected repeat; signal 3, partly: C2-1's case, a remediation that parks on an already-held pull request, is one the merge lane's Write order already bounds; the maintainer's standing rule: a strong recommendation is taken (Decisions asked, Standing rule clarification); the conductor's strong recommendation: keep going to round 3.
+
+### Round 3
+
+- **Date:** 2026-11-22.
+- **Reviewed commit:** `66c4858d38cae6b287c2816dadc17b0afc457047`.
+- **Scope:** a confirming round: the change since `56eddef4` and round 2's fixes, in the solution design and this record, with the part designs read as the text they supersede.
+- **Planner pass:** reviewer `hivemind:cerebrate`, a fresh read-only pass with `Memory context: none`. Model: `claude-opus-5-5`. It raised 0 findings and found every round-2 fix closed.
+- **Local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, an angle review. Model: the tool's own default (ADR-0042 decision 7), from another vendor than the planner pass's. It raised 0 findings and approved.
+- **Result:** clean round. No pass raised a new finding or found an earlier finding unfixed, and no finding is open at any severity, so the review passes under the pass rule of ADR-0046 decision 7.
 
 ## Findings
 
