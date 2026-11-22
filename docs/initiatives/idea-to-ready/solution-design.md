@@ -1,6 +1,6 @@
 # Solution design: Idea to Ready
 
-This is the HOW for [docs/prds/idea-to-ready.md](../../prds/idea-to-ready.md), as merged in #626 and narrowed by this pull request, which moves the council to #638 (D32). It does not reopen the PRD. Epic #614 tracks the slices #615 to #624; #618 and #624 move to the council epic of #638. #627 is this second by-hand pilot. ADR: [ADR-0046](../../adr/0046-idea-to-ready-process.md) (the idea-to-ready process). The design review record is [review-record.md](review-record.md) in this folder.
+This is the HOW for [docs/prds/idea-to-ready.md](../../prds/idea-to-ready.md), as merged in #626. Its decisions stand except the council, which this pull request removes from the PRD and moves to #638, as the user approved (D32). Epic #614 tracks the slices #615 to #624; #618 and #624 move to the council epic of #638. #627 is this second by-hand pilot. ADR: [ADR-0046](../../adr/0046-idea-to-ready-process.md) (the idea-to-ready process). The design review record is [review-record.md](review-record.md) in this folder.
 
 ## Context and code truth
 
@@ -22,7 +22,13 @@ Checked against main at commit `49787cc9`; line numbers are at that commit. Each
 - **standard-delivery** stops on a dirty tree (`dirty_paths`, `plugin/workflow-src/lib/facts.js`). plan-interrogation and plan-to-prd hold no git grant and leave the files they write uncommitted.
 - **Draft and closing lines.** The standard-delivery `draft` launch arg is absent, true or false, and absent means false (SD-48, `plugin/workflow-src/standard-delivery/contract.js:54`). The pull request body opens with one `Closes #N` line per `plan.closes` number (`renderClosingLines`, `plugin/workflow-src/lib/pr.js:198`), and each number must be a launch reference (`describeClosesProblem`, `plugin/workflow-src/lib/title.js:173`). `open-plan-pr.sh` leaves a reused pull request's title, body and draft state unchanged (`plugin/skills/open-plan-pr/scripts/open-plan-pr.sh:145`).
 - **Docs validation mapping.** `tools/validate.sh` maps `docs/adr/**` to `policy_check` only, and every other `docs/**` path except `docs/skill-authoring.md` to no suite (`tools/validate.sh:429`).
-- **Fix and post-PR commits.** `runValidateGate` (`plugin/workflow-src/lib/gates.js:477`) sends a failed validation to a `validation_remediation` decision (`gates.js:497`). `runFixRound` (`gates.js:420`) then commits the files the fix drone reports through `runCommitStep` (`plugin/workflow-src/lib/commit.js:180`). The validate drone's failures are its own text, under the schema description "Each failing command with its failure output." (`gates.js:217`). pr-feedback-remediation runs the same gate loop (PFR-23) and commits each wave through `runPlanWaves` (`plugin/workflow-src/lib/workers.js:234`, PFR-22), as standard-delivery does. `molt.sh` refuses a dirty path outside its file list. The github-reviewer validates per the Validation Procedure, returns blocked on a failure, and commits its own simple fixes with git (`plugin/agents/github-reviewer.md:76`). No code refuses a review record path today.
+- **Fix and post-PR commits.** `runValidateGate` (`plugin/workflow-src/lib/gates.js:477`) sends a failed validation to a `validation_remediation` decision (`gates.js:497`). `runFixRound` (`gates.js:420`) then commits the files the fix drone reports through `runCommitStep` (`plugin/workflow-src/lib/commit.js:180`). The validate drone's failures are its own text, under the schema description "Each failing command with its failure output." (`gates.js:217`). pr-feedback-remediation runs the same gate loop (PFR-23) and commits each wave through `runPlanWaves` (`plugin/workflow-src/lib/workers.js:234`, PFR-22), as standard-delivery does. Other routes commit outside `runCommitStep`:
+  - After a run that fails or ends blocked, the overlord continues on Instinct from the branch's last commit and commits through `hivemind:molt` (`plugin/agents/overlord.md:37`, `:65-69`).
+  - The local reviewer commits its own fixes through `hivemind:molt`. Standard-delivery's review gate passes it `caller_validates` true, so each fix's check is the Worker Self-Check over the files it touched, and the run validates again on its commit (`plugin/workflow-src/standard-delivery/review.js:28-36`, `:215`; `plugin/agents/local-reviewer.md:82-83`).
+  - pr-feedback-remediation runs a `hivemind:github-reviewer` fix pass (`plugin/workflow-src/pr-feedback-remediation/main.js:5`, `:95`), as the post-PR watch does. The github-reviewer validates per the Validation Procedure, returns blocked on a failure, and commits its own simple fixes with git (`plugin/agents/github-reviewer.md:76`).
+  - `molt.sh` refuses a dirty path outside its file list and has no review record refusal.
+
+  No code refuses a review record path today.
 - **Test homes.** Subissue-ops cases are in `tools/test_subissue_ops.sh` with fixtures in `tests/prd-to-issues/`. Triage-ops cases are in `tools/test_triage_ops.sh` with `tests/triage-backlog/`.
 - **Navigator checks.** CHECK 14 and CHECK 16 (`tools/policy_check.sh:2283`, `tools/policy_check.sh:3368`) treat a skill whose `allowed-tools` hold an entry starting `- Edit(.hivemind/` as a discovered navigator. One of its scripts must source `containment.sh` in the direct form. `docs/skill-authoring.md` (Covered Navigators) must list it with its Edit glob, and a skill may carry only its own listed glob.
 - **cerebrate** is read-only by its `tools:` list (Read, Glob, Grep, LSP, web and claude-mem search). A delegation line `Memory context:` stops its memory search.
@@ -43,7 +49,7 @@ The guide owns the docs branch (#622):
 - Before stage 2 writes any tracked file, it creates `docs/<slug>` from the fetched trunk.
 - It commits the stage-2 and stage-3 outputs on that branch through `hivemind:molt` with exact paths: the glossary and ADR edits from `hivemind:plan-interrogation` and the PRD from `hivemind:plan-to-prd`. The tree is then clean before stage 4's standard-delivery run, whose `dirty_paths` stop would otherwise refuse it.
 - It launches every standard-delivery run on the docs branch with `draft` true and no launch reference the run could close, so the docs pull request opens as a draft with no Closes line. Stage 4's first run opens it, and later runs reuse it.
-- It runs the record verify at the pull request head before `gh pr ready`. A later push to a stamped path returns the pull request to draft.
+- It marks the pull request ready with `gh pr ready` only after verify passes at its head and the record passes the pass rule. Before it launches a run on a docs pull request that is not a draft, it returns the pull request to draft with `gh pr ready --undo`. A push the guide did not launch is caught by verify in CI, where wired, and by the readiness check.
 
 Docs writing happens in a standard-delivery run on the docs branch, whose steps give a drone exact file scope. The design review runs from the main session between those runs. A standalone idea ends with an issue carrying the spec block, per Standalone spec block format, ready for triage.
 
@@ -65,7 +71,7 @@ A leaf skill that turns a merged-or-branch PRD into `docs/initiatives/<slug>/sol
 
 ### Design review
 
-A main-session skill that runs fresh read-only cerebrate analysis passes with `Memory context: none`. Round 1 is angles A and B in parallel; a confirming round follows. It records every finding with exactly one disposition. Only its record step, a standard-delivery wave, writes or re-stamps a record, and it rewrites the record after every round. Every commit except a standard-delivery wave refuses a record in code (Review record body). A review fix that stales a passing record fails verify, and goes through the confirming pass before the record step re-stamps, per Re-review and re-stamp. It exits per the design review rounds lifecycle.
+A main-session skill that runs fresh read-only cerebrate analysis passes with `Memory context: none`. Round 1 is angles A and B in parallel; a confirming round follows. It records every finding with exactly one disposition. Only its record step, a standard-delivery wave, writes or re-stamps a record, and it rewrites the record after every round. `runCommitStep` refuses a review record path, compared case-insensitively, in every validation fix-round commit of both workflows and every pr-feedback-remediation wave commit; only a standard-delivery wave may carry one (Review record body). Commits outside `runCommitStep` are a recorded residual (Trust boundaries). A review fix that stales a passing record fails verify, and goes through the confirming pass before the record step re-stamps, per Re-review and re-stamp. It exits per the design review rounds lifecycle.
 
 ### Slice design section
 
@@ -114,7 +120,7 @@ No progress state is stored anywhere. Every row below is ground truth in GitHub 
 | PRD | `docs/prds/<slug>.md` | `hivemind:plan-to-prd` | design stages, readiness check |
 | Solution design | `docs/initiatives/<slug>/solution-design.md` | a drone with exact file scope | design review, slices, readiness check |
 | ADRs | `docs/adr/NNNN-<title>.md` | a drone with exact file scope at the design stage; `hivemind:plan-interrogation` during interrogation | readiness check |
-| Review record | `docs/initiatives/<slug>/review-record.md` | the design review's record step only; every commit except a standard-delivery wave refuses it (#619) | readiness check, stage derivation, the design review's verify |
+| Review record | `docs/initiatives/<slug>/review-record.md` | the design review's record step only; `runCommitStep` refuses a review record path, compared case-insensitively, in every validation fix-round commit of both workflows and every pr-feedback-remediation wave commit; only a standard-delivery wave may carry one (#619) | readiness check, stage derivation, the design review's verify |
 | Slices and blocked-by edges | GitHub sub-issues and issue dependencies | `hivemind:prd-to-issues` (sub-issues); triage `deps-add` (edges) | readiness check, handoff check, the Lair |
 | Rating labels | GitHub labels | triage only, behind its confirm gate | readiness check |
 | `readiness:ready` | GitHub label | a user with write permission, through triage (D29) | the handoff check, the Lair, under ADR-0045 decision 10, as amended by #625 |
@@ -245,7 +251,7 @@ Each `blob` is the output of `git rev-parse HEAD:<path>` on the docs branch when
 - Stamps must include the PRD, the solution design and every ADR its own docs pull request adds or edits, never an ADR it only cites.
 - The record passes when `verdict` is `pass`, every open count (`critical`, `high`, `medium`, `low`) is 0, `clean_round` is `true` and `rounds` is 2 to 3. Round 1 is always followed by a confirming round. Each clause gives one reason code, per Readiness check output contract.
 - `open.<severity>` counts that severity's findings whose disposition is `open`. Any critical or high whose disposition is not `fixed` or `rejected` counts as open.
-- A record is authoritative only through a human-reviewed merge (D24). Only the design review's record step writes or re-stamps it. Every commit except a standard-delivery wave refuses `docs/initiatives/*/review-record.md` in code, per Review record body. The github-reviewer commits its own simple fixes with git, outside the workflow scripts: the Validation Procedure it loads forbids a fix that edits a record, and any record edit is authoritative only through the human-reviewed merge.
+- A record is authoritative only through a human-reviewed merge (D24). Only the design review's record step writes or re-stamps it. `runCommitStep` refuses a review record path, compared case-insensitively, in every validation fix-round commit of both workflows and every pr-feedback-remediation wave commit; only a standard-delivery wave may carry one, per Review record body. The github-reviewer commits its own simple fixes with git, outside the workflow scripts: the Validation Procedure it loads forbids a fix that edits a record, and any record edit is authoritative only through the human-reviewed merge. Commits outside `runCommitStep` are a recorded residual (Trust boundaries).
 
 Staleness rule: the record is stale when any stamped path's `git rev-parse <commit>:<path>` differs from its blob, or the path is missing. A blob id is a content hash, so the merge method does not matter, and any edit to a stamped file makes the record stale until a review of the change re-stamps it.
 
@@ -258,6 +264,10 @@ The body has these sections:
 - `## Findings`.
 - `## Decisions taken, listed for veto`, each with its always-ask screen.
 - `## Decisions asked`, each with the user's answer.
+- `## Residuals`, optional: each residual's scope, ground, bounded impact and where it is recorded.
+- `## History: <date>`, optional, per Re-review and re-stamp.
+
+Verify reads neither optional section, and parses only the table under `## Findings`.
 
 Findings is one Markdown table with the header `| ID | Round | Angle | Severity | Disposition | Note |` and one row per finding:
 
@@ -267,14 +277,15 @@ Findings is one Markdown table with the header `| ID | Round | Angle | Severity 
 - Disposition is exactly one of `fixed`, `rejected`, `deferred`, `recorded` or `open`.
 - Note holds the summary and, for `rejected`, `deferred` or `recorded`, the reason and destination.
 
-The readiness check never reads the body. The design review skill's `verify` (#619, D28) checks:
+The readiness check never reads the body. The design review skill's `verify` (#619, D28) checks stamp equality, each stamp equal to the blob at the pull request head, only for a record whose `verdict` is `pass`. Every record the pull request adds or edits gets every other check:
 
 - the front matter shape;
-- that each stamp equals the blob at the pull request head;
-- for each record the pull request adds or edits, that its stamps include every ADR the pull request adds or edits, read from its diff against the merge-base with trunk; every other passing record gets stamp equality only, as on trunk;
+- that its stamps include every ADR the pull request adds or edits, read from its diff against the merge-base with trunk;
 - that the Findings table parses, IDs are unique and every row has exactly one disposition from the set;
 - that the open counts equal the table under the open rule;
 - that `verdict` is `pass` only under the pass rule, so a passing record with any open Findings row fails.
+
+Every other passing record gets stamp equality only, as on trunk.
 
 Verify prints one line `record-verify-failed: <record path>` per failing record.
 
@@ -286,8 +297,8 @@ Where verify runs:
 
 A verify failure is never fixed in place (#619):
 
-- The validate step (`plugin/workflow-src/lib/gates.js`, shared with pr-feedback-remediation) reads the failures of a failed validation in code. A trimmed line of `record-verify-failed: ` and a path matching `^docs/initiatives/[a-z0-9]+(-[a-z0-9]+)*/review-record\.md$` stops the run blocked, next action report, naming each such record encoded, before any `validation_remediation` decision, so no fix round runs. The failures description asks for each such line word for word, and the Validation Procedure of `plugin/governance/definitions.md` says the same.
-- `runCommitStep` (`plugin/workflow-src/lib/commit.js`) refuses, before any runner call, a commit whose file list holds a path matching `^docs/initiatives/[^/]+/review-record\.md$`, compared case-insensitively, as a terminal stop naming the path encoded. Only a wave commit of a workflow whose `main.js` declares record writes may carry one, and only standard-delivery's does, because the record step is a standard-delivery wave. Which wave writes it is the accepted plan's, and the record is authoritative only through the human-reviewed merge (D24). So no validation fix round, in either workflow, and no pr-feedback-remediation commit carries a record, even when the validate drone leaves verify's line out.
+- The validate step (`plugin/workflow-src/lib/gates.js`, shared with pr-feedback-remediation) reads the failures of a failed validation in code. A trimmed line of `record-verify-failed: ` and a path matching `^docs/initiatives/[a-z0-9]+(-[a-z0-9]+)*/review-record\.md$` stops the run blocked, next action report, naming each such record encoded, before any `validation_remediation` decision, so no fix round runs. This narrows ADR-0037 decision 16 (asked after design review round 4, answer Q13 A). The failures description asks for each such line word for word, and the Validation Procedure of `plugin/governance/definitions.md` says the same.
+- `runCommitStep` (`plugin/workflow-src/lib/commit.js`) refuses a review record path, compared case-insensitively, in every validation fix-round commit of both workflows and every pr-feedback-remediation wave commit; only a standard-delivery wave may carry one. It refuses, before any runner call, a commit whose file list holds a path matching `^docs/initiatives/[^/]+/review-record\.md$`, as a terminal stop naming the path encoded. A wave commit may carry one only in a workflow whose `main.js` declares record writes, and only standard-delivery's does, because the record step is a standard-delivery wave. Which wave writes it is the accepted plan's, and the record is authoritative only through the human-reviewed merge (D24). So no validation fix round, in either workflow, and no pr-feedback-remediation wave commit carries a record, even when the validate drone leaves verify's line out.
 - The guide then starts the re-review path.
 
 ## Trust boundaries
@@ -295,8 +306,8 @@ A verify failure is never fixed in place (#619):
 - **External content stays data.** Issue bodies, PRD and design text and review findings are data per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (External Content Boundary). The readiness check parses fixed shapes and literal heading text and never runs or evaluates content. Links pass the path allowlist before any git call. Reason codes carry line indexes, never issue text. JSON is built with `jq --arg`. The Lair queue report and parks show reason codes encoded as untrusted data, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Trust-Boundary Discipline). Slices: #615, #621, #623.
 - **Write permission authorizes the ready label.** The authorization is write permission on the latest `readiness:ready` labeled event, with the title and body unedited since (ADR-0045 decision 10, as amended by #625; D29). The handoff check verifies the same (#621), and the Lair keeps its check (#623). "Maintainer" names a role, and triage's confirm gate is a workflow step, not an authorization boundary. The guide and the Lair never apply the label. Slices: #620, #621, #623.
 - **Reviewers are fresh and read-only.** Review passes run on cerebrate, whose tool list holds no Bash, Write or Edit. `Memory context: none` keeps the writing session's memory from steering a reviewer. A pass that errors, times out or returns unparseable output yields no round. Slices: #619.
-- **Stamps bind the reviewed content.** The record ships in the same pull request as the design, so it passes the same local review and bot review. Trunk never holds an unreviewed design, and any later edit is detected by blob id. Authority is a human-reviewed merge (D24). Only the design review's record step writes or re-stamps a record. Verify runs before the pull request leaves draft and, where wired, in CI (D28). Every commit except a standard-delivery wave refuses a record in code. #623 keeps docs paths out of the Lair's auto tier. Recorded residual: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval with no human review of the design. It is recorded per the user's decision, on the ground that it is outside the threat model as the maintainer's own opt-in (ADR-0044). It is bounded: where verify runs in CI, it keeps a merged record consistent and current, and in any repository the commit refusal, the guide's verify before ready and the readiness check, which fails every slice of a stale or delivered design, hold (ADR-0046, Residuals). Slices: #615, #619, #622, #623.
-- **No new credential and no merge-path change.** Everything runs under the executing user's credentials, and `merge-approved.sh` is untouched. The record refusal narrows only what a fix commit may carry; `merge-approved.sh` and the merge path are untouched. Slices: #619.
+- **Stamps bind the reviewed content.** The record ships in the same pull request as the design, so it passes the same local review and bot review. Trunk never holds an unreviewed design, and any later edit is detected by blob id. Authority is a human-reviewed merge (D24). Only the design review's record step writes or re-stamps a record. Verify runs before the pull request leaves draft and, where wired, in CI (D28). `runCommitStep` refuses a review record path, compared case-insensitively, in every validation fix-round commit of both workflows and every pr-feedback-remediation wave commit; only a standard-delivery wave may carry one. #623 keeps docs paths out of the Lair's auto tier. Recorded residual: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval with no human review of the design. It is recorded per the user's decision, on the ground that it is outside the threat model as the maintainer's own opt-in (ADR-0044). It is bounded: where verify runs in CI, it keeps a merged record consistent and current, and in any repository the commit refusal, the guide's verify before ready and the readiness check, which fails every slice of a stale or delivered design, hold (ADR-0046, Residuals). Recorded residual: four routes commit outside `runCommitStep` with no record refusal: the overlord's Instinct fallback after a blocked run, the local reviewer's molt fix commits, the github-reviewer's git commits and the guide's own molt commits (Context and code truth, Guide skill). It is recorded per the user's decision (asked after design review round 4, answer Q15 A), on the ground that a model that writes a molt inputs file or runs git can carry any path. It is bounded by verify in CI where wired, the guide's verify before ready, the readiness check, which fails every slice of a stale record, and D24 (ADR-0046, Residuals). Slices: #615, #619, #622, #623.
+- **No new credential and no merge-path change.** Everything runs under the executing user's credentials. The record refusal narrows only what a `runCommitStep` commit may carry, and `merge-approved.sh` and the merge path are untouched. Slices: #619.
 
 ## Lifecycle
 
@@ -307,7 +318,7 @@ A verify failure is never fixed in place (#619):
 3. **PRD.** `hivemind:plan-to-prd` writes the PRD on the docs branch `docs/<slug>` or `docs/<slug>-<suffix>`. The guide commits the PRD and the interrogation outputs on that branch.
 4. **Solution design and ADRs.** Written on the docs branch by drones with exact file scope, in standard-delivery runs the guide launches with `draft` true and no closable launch reference. The first run opens the docs pull request as a draft with no Closes line; later runs reuse it.
 5. **Design review.** Per the design review rounds below; the record is written on the docs branch.
-6. **Docs pull request.** It has been a draft since stage 4. It leaves draft through `gh pr ready` only after verify passes at its head, and merges to trunk. A later push by the guide that changes a stamped path returns it to draft.
+6. **Docs pull request.** It has been a draft since stage 4. It leaves draft through `gh pr ready` only after verify passes at its head and the record passes the pass rule, then merges to trunk. Before the guide launches a run on it while it is not a draft, the guide returns it to draft with `gh pr ready --undo`. A push the guide did not launch is caught by verify in CI, where wired, and by the readiness check.
 7. **Slicing.** `hivemind:prd-to-issues` reuses the seed issue as the epic and adds each slice's design section.
 8. **Triage.** The maintainer runs triage; it gates `readiness:ready` on the readiness check and writes native blocked-by edges.
 9. **Handoff check.** It passes only when every slice passes, and names each slice as claimable now or blocked.
@@ -316,16 +327,33 @@ Stage derivation picks the latest stage whose evidence exists. Evidence it canno
 
 ### Design review rounds
 
-Round 1 is two parallel fresh passes: angle A (code truth, governance and ADR conflicts, existing-path coverage) and angle B (failure modes, trust and injection, testability). Findings are fixed on the docs branch. Each later round is one fresh confirming pass over both angles. A pass that errors, times out or returns output the skill cannot parse yields no round and is re-run. Only a completed pass whose parsed list of new findings is empty makes a clean round. The review exits only when, after dispositions, no finding at any severity is open, and one round is clean: the pass rule of Review record front matter. So a passing review has 2 or 3 rounds. A review that has not converged after round 3 stops and reaches the maintainer as a signal to split the initiative. Every finding gets exactly one disposition: `fixed`, `rejected` with its reason, `deferred` or `recorded`. Critical and high findings are only `fixed` or `rejected`. Mediums follow `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Defer-with-Scope, Recorded Residual).
+Round 1 is two parallel fresh passes: angle A (code truth, governance and ADR conflicts, existing-path coverage) and angle B (failure modes, trust and injection, testability). Findings are fixed on the docs branch. Each round's fixes and its record rewrite land in one standard-delivery run, the record wave last. The run that writes `verdict` `pass` carries only the record wave and launches with `local_review` false (SD-30). Each later round is one fresh confirming pass over both angles. A pass that errors, times out or returns output the skill cannot parse yields no round and is re-run. Only a completed pass whose parsed list of new findings is empty makes a clean round. The review exits only when, after dispositions, no finding at any severity is open, and one round is clean: the pass rule of Review record front matter. So a passing review has 2 or 3 rounds. A review that has not converged after round 3 stops and reaches the maintainer as a signal to split the initiative. Every finding gets exactly one disposition: `fixed`, `rejected` with its reason, `deferred` or `recorded`. Critical and high findings are only `fixed` or `rejected`. Mediums follow `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Defer-with-Scope, Recorded Residual).
 
 The record step rewrites the record after every round: `verdict` stays `fail` until exit, and `rounds`, the open counts and the Findings table stay current. A lost session resumes from the record's rounds.
 
-This initiative's own review has one user-approved exception, D31.
+This initiative's own review had one user-approved exception, D31, a fourth round. That exception is spent, and this initiative's re-review starts at round 1.
 
 ### Re-review and re-stamp
 
-- Review fix: a local-review or post-PR fix that changes a stamped document of a passing record after the review exited stales it: verify fails, and where the project's validation runs verify, the validate step stops the run blocked, naming the record (Review record body). The design review then runs one fresh confirming pass over the diff since the stamped blobs. With no new finding the record step re-stamps, and the pass is appended under Rounds as a confirming pass that does not change `rounds` and does not count toward the cap. With a new finding it becomes a re-review.
-- Re-review after an amendment: fresh passes run over the diff since the stamped blobs, with rounds counted from 1 for that review. The front matter is replaced, and the body history is appended under a dated heading.
+Review fix: a local-review or post-PR fix that changes a stamped document of a passing record after the review exited runs in this order:
+
+1. The guide returns the pull request to draft.
+2. One standard-delivery run lands the fix waves and, last, a record wave that sets `verdict` to `fail` and `clean_round` to `false` and keeps the stamps, `rounds` and the open counts.
+3. The design review runs one fresh confirming pass over the diff since the stamped blobs.
+4. With no new finding, a record-only run with `local_review` false re-stamps, sets `verdict` to `pass` and `clean_round` to `true`, and appends the pass under Rounds. `rounds` is unchanged, and the pass does not count toward the cap.
+5. With a new finding, it becomes a re-review.
+6. The guide marks the pull request ready per stage 6 of Initiative stages.
+
+A fix that lands outside the guide stales the record: verify fails, and where the project's validation runs verify, the validate step stops the run blocked, naming the record (Review record body). The guide resumes at the confirming pass.
+
+Where the project's validation runs verify, a github-reviewer fix to a stamped document fails it in the Validation Procedure, so the github-reviewer returns blocked with the edit uncommitted. The post-PR watch reports it, and the guide takes it as a review fix. The uncommitted edit stops the next run on `dirty_paths` until the maintainer clears it; the guide never discards it.
+
+Re-review after an amendment:
+
+- Fresh passes run over the diff since the stamped blobs, with rounds counted from 1. A re-review covers the whole documents when no record of the initiative has passed.
+- The front matter is replaced.
+- The earlier Rounds and Findings move unchanged under one `## History: <date>` section, each heading one level down.
+- The re-review's Rounds and Findings start empty, and the decision lists and Residuals stay current.
 
 ### Close-out
 
@@ -343,7 +371,7 @@ One row per existing path, with its effect and the slice that makes it. "Unchang
 | `tools/test_triage_ops.sh`, `tests/triage-backlog/` | Gain the readiness gate, overlay and re-check cases. | #620 |
 | `plugin/skills/plan-interrogation/SKILL.md` | Unchanged. The guide commits its outputs on the docs branch. | #622 |
 | `plugin/skills/plan-to-prd/SKILL.md` | Unchanged. The guide commits the PRD on the docs branch. | #622 |
-| `plugin/skills/molt/SKILL.md` | Unchanged. The guide commits through it with exact paths. | none |
+| `plugin/skills/molt/SKILL.md` | Unchanged. The guide commits through it with exact paths. `molt.sh` has no review record refusal, so its commits are a recorded residual (Trust boundaries). | #622 |
 | `plugin/skills/prd-to-issues/SKILL.md`, `plugin/skills/prd-to-issues/scripts/subissue-ops.sh` | Gain the `## Design` section, seed reuse through `ensure-parent --existing-number` with the seed marker line kept, and a carve-out of the "No file paths or code snippets" rule for Design links. Idempotency and the four existing sections are unchanged. | #617 |
 | `tools/test_subissue_ops.sh`, `tests/prd-to-issues/` | Gain the Design section and seed reuse cases. | #617 |
 | `plugin/skills/create-handoff/SKILL.md` | Unchanged. Its handoff is never stage evidence. | none |
@@ -353,14 +381,16 @@ One row per existing path, with its effect and the slice that makes it. "Unchang
 | `plugin/workflow-src/analysis-only/`, `plugin/workflow-src/pr-feedback-remediation/` | Analysis-only source unchanged. pr-feedback-remediation's `main.js` declares that its waves commit no review record, and `contract.js` PFR-22 and PFR-23 name the refusal and the record stop. | #619 |
 | `docs/skill-authoring.md`, Covered Navigators | Unchanged. CHECK 14 and CHECK 16 of `tools/policy_check.sh` read it. The guide and triage-backlog carry no `Edit(.hivemind/` entry, so neither is a navigator. | #620, #622 |
 | `plugin/agents/cerebrate.md` | Unchanged. Review passes use it with `Memory context: none`. | #619 |
+| `plugin/agents/overlord.md` | Unchanged. After a run that fails or ends blocked, it continues on Instinct and commits through `hivemind:molt` with no record refusal, a recorded residual (Trust boundaries). | #619 |
+| `plugin/agents/local-reviewer.md`, `plugin/workflow-src/standard-delivery/review.js` | Unchanged. The local reviewer commits its own fixes through `hivemind:molt` with `caller_validates` true, so its fix check is the Worker Self-Check and the run validates again on its commit. No code refuses a record there, a recorded residual (Trust boundaries). The run that writes `verdict` `pass` launches with `local_review` false (SD-30). | #619, #622 |
 | `plugin/workflows/standard-delivery.js`, `plugin/workflows/analysis-only.js`, `plugin/workflows/pr-feedback-remediation.js` | `standard-delivery.js` and `pr-feedback-remediation.js` are regenerated by #619; their BUILD_IDs change, and each fits D20. `analysis-only.js` is unchanged, because #619 changes no function it bundles. | #619 |
 | `CONTEXT.md` | This pull request adds the initiative's terms and fixes the stale "planned" notes. | #627 |
 | `docs/adr/0045-lair-software-factory.md` | Not edited here; decision 10 is amended by #625. | #625 |
 | `tools/validate.sh` | Maps `docs/initiatives/`, `docs/prds/` and `docs/adr/` to the record verify suite, and registers the readiness check (#615), design review (#619) and stage derivation (#621) suites. | #615, #619, #621 |
-| `plugin/workflow-src/lib/gates.js` | The validate step, shared with pr-feedback-remediation, reads verify's `record-verify-failed:` line from a failed validation in code and stops blocked, naming the record, before any `validation_remediation` decision. Its failures description asks for that line word for word. The fix-round commit refuses a review record. | #619 |
-| `plugin/workflow-src/lib/commit.js` | `runCommitStep` refuses a review record path before any runner call, a terminal stop naming it, except in a wave commit of a workflow whose `main.js` declares record writes. | #619 |
+| `plugin/workflow-src/lib/gates.js` | The validate step, shared with pr-feedback-remediation, reads verify's `record-verify-failed:` line from a failed validation in code and stops blocked, naming the record, before any `validation_remediation` decision. Its failures description asks for that line word for word. This narrows ADR-0037 decision 16 (answer Q13 A). Its fix-round commit goes through `runCommitStep`, which refuses a review record path, compared case-insensitively, in every validation fix-round commit of both workflows. | #619 |
+| `plugin/workflow-src/lib/commit.js` | `runCommitStep` refuses a review record path, compared case-insensitively, in every validation fix-round commit of both workflows and every pr-feedback-remediation wave commit; only a standard-delivery wave may carry one. The refusal comes before any runner call, a terminal stop naming the path. A wave may carry one only in a workflow whose `main.js` declares record writes. | #619 |
 | `plugin/governance/definitions.md`, Validation Procedure | Gains the record rule: each `record-verify-failed:` line of failure output is reported word for word, and no fix edits a review record. It fits its budget by cutting (D20). | #619 |
-| `plugin/agents/github-reviewer.md` | Unchanged. It loads the Validation Procedure, so the record rule binds its own fix commits. | #619 |
+| `plugin/agents/github-reviewer.md` | Unchanged. It loads the Validation Procedure, so the record rule binds its own fix commits. It commits with git, outside `runCommitStep`, a recorded residual (Trust boundaries). A stamped-document fix that fails verify returns blocked with the edit uncommitted, and the guide takes it as a review fix (Re-review and re-stamp). | #619 |
 | `tests/workflow-scripts/standard-delivery.test.mjs`, `tests/workflow-scripts/pr-feedback-remediation.test.mjs` | Gain the record stop and commit refusal cases. | #619 |
 | `plugin/skills/open-plan-pr/scripts/open-plan-pr.sh` | Unchanged. A reused pull request keeps its draft state, and the `draft` launch arg (SD-48) is unchanged. | #622 |
 | Lair controller, not yet built (#608) | The readiness check is its admission step. Its protected-path list gains `docs/prds/`, `docs/initiatives/` and `docs/adr/` under the #625 amendment. | #623 |
@@ -372,20 +402,22 @@ One row per existing path, with its effect and the slice that makes it. "Unchang
 |---|---|---|
 | A stamped document is edited after review | The record is stale (`record_stale:<path>`) until a review of the change re-stamps it; every slice fails the check meanwhile. | #615, #619 |
 | A merge conflict resolution edits a stamped document | Same as above, seen on trunk; a follow-up docs pull request re-reviews and re-stamps. | #615, #619 |
-| A passing record goes stale on a later push | Where verify runs in CI, it fails, and the guide returns the pull request to draft. In any repository the readiness check fails every slice with `record_stale:<path>`. | #619, #622, #615 |
+| A passing record goes stale on a later push | Before the guide launches a run on a docs pull request that is not a draft, it returns the pull request to draft with `gh pr ready --undo`, and marks it ready again only per stage 6 of Initiative stages. A push the guide did not launch fails verify in CI, where wired. In any repository the readiness check fails every slice with `record_stale:<path>`. | #619, #622, #615 |
 | Another initiative's docs pull request adds an ADR | ADR inclusion is checked only for records the pull request adds or edits, so every other passing record gets stamp equality only. | #619 |
-| A fix round or post-PR fix would re-stamp a record to clear verify | Never: every commit except a standard-delivery wave refuses a review record path in code, a terminal stop naming it, and the edit stays uncommitted. The validate step reads verify's `record-verify-failed:` line in code and stops blocked before any `validation_remediation` decision. | #619 |
+| A fix round would re-stamp a record to clear verify | Never: `runCommitStep` refuses a review record path, compared case-insensitively, in every validation fix-round commit of both workflows and every pr-feedback-remediation wave commit, a terminal stop naming it, and the edit stays uncommitted; only a standard-delivery wave may carry one. The validate step reads verify's `record-verify-failed:` line in code and stops blocked before any `validation_remediation` decision. Commits outside `runCommitStep` are a recorded residual (Trust boundaries). | #619 |
+| An edited failing record's stamps differ from the head | Verify checks stamp equality only for a record whose `verdict` is `pass`, and gives the record every other check. The round's record wave re-stamps it. | #619 |
+| The github-reviewer fixes a stamped document | Where the project's validation runs verify, the fix fails it, and the github-reviewer returns blocked with the edit uncommitted. The post-PR watch reports it, and the guide takes it as a review fix. The edit stops the next run on `dirty_paths` until the maintainer clears it; the guide never discards it. | #619, #622 |
 | A docs-branch run would open a ready pull request or add a Closes line | The guide launches every docs-branch run with `draft` true and no closable launch reference. | #622 |
 | A pull request edits a stamped PRD or ADR outside `docs/initiatives/` | Where verify runs in CI, `docs/prds/` and `docs/adr/` map to it, which fails it. A record stale on trunk fails every slice with `record_stale:<path>` until a re-review. | #619, #615 |
 | A record claims pass with an open Findings row | Verify fails. | #619 |
-| The validate drone leaves verify's line out of its failures | The failure takes the fix path, but no fix commit can carry the record, so verify keeps failing until a review re-stamps it, and the fix limit asks. | #619 |
+| The validate drone leaves verify's line out of its failures | The failure takes the fix path, but `runCommitStep` refuses the record in every fix-round commit, so verify keeps failing until a review re-stamps it, and the fix limit asks. | #619 |
 | A design is marked delivered to escape verify | A record the pull request edits is verified whatever its design's status, and every slice of a delivered design fails `design_delivered`. | #615, #619 |
-| A repository wires no verify in CI | The guide's verify before `gh pr ready`, the readiness check and the commit refusal hold; a stale record fails every slice with `record_stale:<path>`. | #615, #619, #622 |
+| A repository wires no verify in CI | The guide's verify before `gh pr ready`, the readiness check and the `runCommitStep` refusal hold; a stale record fails every slice with `record_stale:<path>`. Commits outside `runCommitStep` are a recorded residual bounded by those checks (Trust boundaries). | #615, #619, #622 |
 | #625 merges first and changes ADR-0045 | No effect: this design cites only "ADR-0045 decision 10, as amended by #625" and never stamps ADR-0045. | #625 |
 | ADR number 0046 is taken on main | Checked before the pull request opens and before it leaves draft; the ADR is renumbered and every link updated. | #627 |
 | A design review pass errors, times out or returns unparseable output | It gives no round and is re-run. | #619 |
 | A session is lost mid-review | The next session resumes from the record's rounds. | #619 |
-| Local review or a post-PR fix changes a stamped document | One confirming pass over the diff, then a re-stamp; the pass does not count toward the cap. A new finding makes it a re-review. | #619 |
+| Local review or a post-PR fix changes a stamped document | Per Re-review and re-stamp: the guide returns the pull request to draft, one run lands the fix and a record wave setting `verdict` to `fail`, one confirming pass runs over the diff, and a record-only run with `local_review` false re-stamps; the pass does not count toward the cap. A new finding makes it a re-review. | #619, #622 |
 | The design review does not converge by round 3 | It stops and reaches the maintainer as a signal to split the initiative. | #619 |
 | `gh` or `git` fails, or a read is truncated | The check exits non-zero; no caller reads it as a pass, and the Lair leaves the issue unclaimed. | #615, #623 |
 | A linked document is missing | A reason code; the run continues to the next issue. | #615 |

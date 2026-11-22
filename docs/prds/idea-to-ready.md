@@ -55,7 +55,7 @@ A **readiness check** that a machine can repeat decides whether an issue may be 
   - It exits only with zero open critical or high findings and one round with no new ones, capped at three rounds. Non-convergence reaches the maintainer as a signal to split the initiative.
   - Every finding gets exactly one disposition, and mediums follow the existing defer-or-record rules.
 - **Review record.** The record stamps the exact versions of the PRD and solution design it reviewed. Any later edit makes it stale until a review of the change restores it. The record ships in the same docs pull request, so trunk never holds an unreviewed design.
-- **Design decisions.** A strong recommendation inside the PRD's scope with a clean gate is taken and listed in the record for veto. A change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible are always asked.
+- **Design decisions.** A strong recommendation inside the PRD's scope with a clean gate is taken and listed in the record for veto. A change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, anything irreversible and a call with no strong recommendation are always asked.
 - **Slicing.** Each slice of an initiative carries a design section naming the solution design, the exact headings it implements, its ADRs and the review record. The seed issue becomes the epic, and a rerun creates no duplicates.
 - **Handoff check.** Passes only when:
   - the docs are on trunk and the review is current;
