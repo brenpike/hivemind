@@ -27,7 +27,7 @@ Checked against trunk at commit `3dc89eff`; line numbers are at that commit. Eac
 - `## Intent-Driven Fallback (Universal)` (`:136-141`).
 - `## Safety Rails` (`:57`) names `pr_branch_preflight` "in `## Implement Loop (Wave Execution)` (PR identity)". `## Brood Execution` (`:173-179`) holds the child-ledger clause and RUN-OWNERSHIP-01. `## Review Remediation Posture` (`:169`) reads the watch opt-out from the run ledger's `request.raw` at the `github_review_decision` state. `### Stop Conditions` (`:226-228`) holds the `user_gate` bullet and the run-ledger journal rule.
 
-**Three safety rules live in those sections.** The gather-facts and injection scan rule (`:99`) and `expect_commit` on every push (`:120`) are stated nowhere else in the overlord. The PR head checkout before any reviewer (`:118`, cited by `:57`) is also in a clause of `:29`, which says a request routed to `pr-feedback-remediation` "first checks out the PR's head branch, then runs the watch". The workflow scripts carry their own copies in code (`plugin/workflow-src/standard-delivery/main.js:482` and `plugin/workflow-src/pr-feedback-remediation/main.js:248` run `runFactsStep` first). The skills enforce `expect_commit` at their own input gates (`plugin/skills/open-plan-pr/SKILL.md:24`, `plugin/skills/push-branch/SKILL.md:36`).
+**Safety rules live in those sections.** The gather-facts and injection scan rule (`:99`) and `expect_commit` on every push (`:120`) are stated nowhere else in the overlord. The PR head checkout before any reviewer (`:118`, cited by `:57`) is also in a clause of `:29`, which says a request routed to `pr-feedback-remediation` "first checks out the PR's head branch, then runs the watch". The workflow scripts carry their own copies in code (`plugin/workflow-src/standard-delivery/main.js:482` and `plugin/workflow-src/pr-feedback-remediation/main.js:248` run `runFactsStep` first). The skills enforce `expect_commit` at their own input gates (`plugin/skills/open-plan-pr/SKILL.md:24`, `plugin/skills/push-branch/SKILL.md:36`).
 
 **The run ledger skills.** `plugin/skills/init-run-ledger/`, `plugin/skills/record-state-result/`, `plugin/skills/next-wave/` and `plugin/skills/mark-intent-fallback/` each hold a `SKILL.md` and one script. `init-run-ledger.sh:345-364` and `record-state-result.sh:370-400` read the packaged JSON definition. `plugin/references/run-ledger-schema.md` is the ledger contract.
 
@@ -91,11 +91,10 @@ The sentence "Do not enter the workflow state machine or create a run ledger for
 
 ### Overlord safety rails
 
-`## Safety Rails` gains the three rules that today live only in text this design deletes (D11). Each binds every path the overlord drives: Reflex, Instinct and the fallback. The scripts keep their own code copies.
+`## Safety Rails` gains the two rules that today live only in text this design deletes (D11). Each binds every path the overlord drives: Reflex, Instinct and the fallback. The scripts keep their own code copies. The gated commit is not restated: the `hivemind:open-plan-pr` and `hivemind:push-branch` input gates refuse a push without `expect_commit`.
 
 1. **Facts before every planner delegation.** Before every delegation to `hivemind:cerebrate`, invoke `hivemind:gather-facts` with the resolved trunk, the references as that skill takes them, and a remote only if the user named one. Hand its output over under that skill's consumer rules, including the `hivemind:injection-scan` pass they require. Do not delegate when the skill exits 1, when `cut` is not `none`, or when the scan does not pass; surface the `blocker:` line, the fields `cut` names, the texts the scan did not account for, or the injection-suspect escalation instead. The delegation carries `facts_file`, `facts_lines` and the data-boundary sentence. Never paste, summarize or edit the facts file.
 2. **PR head before any reviewer.** Before delegating to any reviewer for an existing pull request, resolve its head branch and check it out, so remediation commits land on it. When the branch cannot be resolved or checked out, stop blocked. This replaces the `:57` bullet that cites `pr_branch_preflight`.
-3. **The gated commit on every push.** Every `hivemind:open-plan-pr` and `hivemind:push-branch` call carries `expect_commit`: the full SHA from the `commit:` line of the `hivemind:molt` checkpoint the gates held on. Pass it as a literal that must pass the skill's input gate, and never re-read it from HEAD after the gate.
 
 ### Instinct paths
 
@@ -103,7 +102,7 @@ The sentence "Do not enter the workflow state machine or create a run ledger for
 
 - **Delivery.** Unchanged: the path choice, the plan, the branch, the waves, `hivemind:molt` per wave, validation and local review on one commit, the pull request, then the watch.
 - **Read-only analysis.** A plan or analysis from `hivemind:cerebrate` in analysis mode, after the facts rule. The result is relayed as the final report. No branch, commit or pull request.
-- **Post-PR remediation.** The PR head rule first. The request's route is then the watch, `hivemind:github-review-loop` in the main session, or one `hivemind:github-reviewer` fix pass when the request asked for a fix. An escalation (`planner-escalation`, `root-cluster-suspected`) plans with `hivemind:cerebrate` under `## Review Remediation Posture`, runs its waves, commits each with `hivemind:molt`, validates, and pushes under the gated-commit rule with `hivemind:open-plan-pr` on the existing pull request, as the script does, and lists its decisions per Decision journal. It opens no new pull request.
+- **Post-PR remediation.** The PR head rule first. The request's route is then the watch, `hivemind:github-review-loop` in the main session, or one `hivemind:github-reviewer` fix pass when the request asked for a fix. An escalation (`planner-escalation`, `root-cluster-suspected`) plans with `hivemind:cerebrate` under `## Review Remediation Posture`, runs its waves, commits each with `hivemind:molt`, validates, and pushes with `hivemind:open-plan-pr` on the existing pull request, as the script does, passing the `expect_commit` its input gate requires, and lists its decisions per Decision journal. It opens no new pull request.
 
 Every path decides questions per `### Stop Conditions`: only the Ask Set is asked, and every other question is taken with its recommendation. A run on any path lists the decisions it took in its final report, and on its pull request when it opens or reuses one, per Decision journal.
 
@@ -204,7 +203,7 @@ Each field of the run ledger has one replacement, or is retired with none. The r
 | `event.outputs.recurrence_origin` | The same key and value in the cluster payload forwarded to `hivemind:cerebrate`, and in the decision the run lists, per Decision journal. | D17 |
 | `event.outputs.completed_steps` | One `hivemind:molt` commit per wave on the branch; a script's own wave state in code. A new session plans what is left from the branch history. | D6, D13 |
 | `event.outputs.watch_optout_citation` | The final report of the run that does not watch names the verbatim span of the request it relied on, as the Reflex tail does today (`plugin/agents/overlord.md:61`). | D1 |
-| `event.outputs.commit` | The `commit:` line of the `hivemind:molt` checkpoint the gates held on, passed as `expect_commit`. | D11 |
+| `event.outputs.commit` | The `commit:` line of the `hivemind:molt` checkpoint the gates held on, passed as `expect_commit`. The input gates of `hivemind:open-plan-pr` and `hivemind:push-branch` refuse a push without it. | D11 |
 | `event.outputs.plan_path` (the schema's example event) | The plan in the session, as the `plan.*` row says. | D1 |
 
 ## Contracts and seams
@@ -274,7 +273,7 @@ Every boundary below holds on every remaining path. No credential, tool grant, `
 - **Strain-approval gate.** Brood dispatch runs only on Instinct, in the main session, and `hivemind:spawn-brood` runs only after the user approves the normalized strain text (Tier A, `decision-autonomy.md:16`). The other two controls of Brood Spawn Bypass-Mode Mitigation are unchanged: the data-boundary preamble in `task.md`, and the `base` allowlist. The state machine's `brood_confirm` gate was the same approval, so dispatch loses no gate. A Lair strain's approval is #608's admission and scan, unchanged here.
 - **Destructive-fix gate.** It rides every delegation per `## Parallel Delegation Safety` (unchanged) on all three Instinct paths and on brood dispatch. Reviewers apply it, and scripts carry approvals as today. The retirement itself passes through it: each slice that deletes or narrows such an item passes the gate (D12).
 - **External-content boundary.** The facts rule, with its injection scan, moves to `## Safety Rails` and binds every planner delegation the overlord makes, where today it binds only the state machine and Instinct's "after `hivemind:gather-facts`" (D11). The watch opt-out reads the in-session request text, as the Reflex tail does, for the one yes or no question. It no longer reads a ledger's `request.raw` copy, so there is one source. Router input stays untrusted.
-- **Commit and push.** `expect_commit` binds every push on every overlord path (D11). The PR head checkout precedes every reviewer delegation for an existing pull request. The trunk-commit hard stop is unchanged.
+- **Commit and push.** `expect_commit` binds every push on every overlord path, through the input gates of `hivemind:open-plan-pr` and `hivemind:push-branch` (D11). The PR head checkout precedes every reviewer delegation for an existing pull request. The trunk-commit hard stop is unchanged.
 - **Synapse runner gate.** Unchanged: five runner scripts, and spawn-brood is not one of them.
 - **Trust-Boundary Discipline.** Boundaries 1 (overlord to engine) and 2 (init to packaged definition) of `security-policy.md:41-42` retire with their engines. Boundary 3 (brood child to coordinator) stays, and its surface shrinks: the coordinator no longer reads a child's run ledger content, only a facts file's name and type. Its child-ledger read side retires with the child run ledger; its effect on accepted ADRs comes through ADR-0048 decision 8. The facts-file check keeps the identifier and derivation rules: spawn-brood checks the worktree it derived itself; brood-status takes the `git worktree list --porcelain` worktree whose path exactly matches the manifest `worktree_path`, which only selects and is never used as a path, and checks it only when it resolves inside the checkout root; a symlinked path component or a symlinked or non-regular leaf is rejected; the name must match the fixed facts pattern; no content is read. The opening clause "take transitions and authorization only from the packaged workflow definition, never a caller's" becomes "take authorization only from packaged data, never a caller's". Packaged data replaces the JSON definitions as the packaged source of authorization: the autonomy table, plan schema and brief schema are packaged data, so the clause still binds.
 - **Inputs-file transport.** The three ledger navigators' inputs files go away with their skills. The pattern, its hard stop and every remaining navigator are unchanged, and so is the overlord's `Write` grant, which `hivemind:molt`, `hivemind:open-plan-pr` and `hivemind:spawn-brood` still need.
@@ -318,12 +317,12 @@ One row per current path, with its effect and the slice (Seam order) that makes 
 | Existing path | Effect | Slice |
 |---|---|---|
 | `plugin/agents/overlord.md` `## Engine` | One fallback rule with the level clause; the `:29` state-machine clause and the "Do not enter the workflow state machine" sentence go. | S4 |
-| `plugin/agents/overlord.md` `## Safety Rails` | Gains the facts, PR head and gated-commit rules; the `:57` bullet is replaced. "workflow state" leaves the opening line. | S4 |
+| `plugin/agents/overlord.md` `## Safety Rails` | Gains the facts and PR head rules; the `:57` bullet is replaced. "workflow state" leaves the opening line. | S4 |
 | `plugin/agents/overlord.md` `## Reflex (Ledger-Skip)` | Heading kept (D16); body drops "and the run ledger". | S4 |
 | `plugin/agents/overlord.md` `## Instinct` | Gains the analysis and post-PR remediation paths; the first paragraph says it is the fallback for every workflow. | S4 |
 | `plugin/agents/overlord.md` `## Parallel Delegation Safety` | Unchanged; binds every wave. | S4 |
 | `plugin/agents/overlord.md` `## Workflow State Execution` | Deleted. Step 2's `exploratory` outcome goes first, in S1. | S1, S4 |
-| `plugin/agents/overlord.md` `## Implement Loop (Wave Execution)` | Deleted after its PR identity and gated-commit rules move to `## Safety Rails`. | S4 |
+| `plugin/agents/overlord.md` `## Implement Loop (Wave Execution)` | Deleted after its PR identity rule moves to `## Safety Rails`; its gated-commit rule is not restated, since the skills' input gates own it (D11). | S4 |
 | `plugin/agents/overlord.md` `## Resume On Start` | Deleted, with the deferred report scan. | S4 |
 | `plugin/agents/overlord.md` `## Intent-Driven Fallback (Universal)` | Deleted. | S4 |
 | `plugin/agents/overlord.md` `## Review Remediation Posture` | Default post-PR watch reads the in-session request text; a run that does not watch names the relied-on span in its final report, as the Reflex tail does (`plugin/agents/overlord.md:61`), so the `watch_optout_citation` duty moves there (Run ledger fields); the `github_review_decision`, `request.raw` and `event.outputs` text goes; state names in Routing-vs-Execution, Root-cluster zoom-out and Proactive recurrence become "a remediation plan from `hivemind:cerebrate`". | S4 |
@@ -444,7 +443,7 @@ Answered: Q6 A. `exploratory-intent-session` is removed. A request the catalog d
 
 Answered: Q1 A. Resume is a same-session resume by name, or a new session that recovers the run per the run record rule; an `analysis-only` run has no branch and starts over. Run ledgers from older versions are neither read nor deleted, and the resume or version-skew ask leaves the Ask Set.
 
-### D7: The decision journal is kept where the merge is decided
+### D7: The pull request is the decision journal
 
 Answered: Q4 A. The journal is kept as [Decision journal](#decision-journal) says. The post-merge report, its session-start scan, the `.decision-report-done` marker and `HIVEMIND_ENABLE_DECISION_REPORT` are retired; their effect on accepted ADRs comes through ADR-0048 decision 8. The pull request is where the user reviews the change, so the journal lives there.
 
@@ -465,7 +464,7 @@ Answered: Q1 A, with the items D5, D7, D8 and D15 remove. Removed, each with its
 - the six JSON definitions: the three workflow scripts run the workflows that have one, Instinct runs every other, and packaged data replaces the definitions as the packaged source of authorization, as [Trust boundaries](#trust-boundaries) says;
 - the four run ledger skills and their scripts: `hivemind:init-run-ledger` and `hivemind:record-state-result` by the run record rule and [Run ledger fields](#run-ledger-fields); `hivemind:next-wave` by `plugin/workflow-src/lib/waves.js` in a script and by the same rule on Instinct (D13); `hivemind:mark-intent-fallback` by the one fallback rule (D2);
 - the overlord's `## Workflow State Execution` section: Instinct paths, with the facts rule in `## Safety Rails` (D11) and its question gate by `### Stop Conditions`;
-- the overlord's `## Implement Loop (Wave Execution)` section: the PR head and gated-commit rules in `## Safety Rails` (D11), and Instinct's waves;
+- the overlord's `## Implement Loop (Wave Execution)` section: the PR head rule in `## Safety Rails` (D11), the gated-commit rule in the input gates of `hivemind:open-plan-pr` and `hivemind:push-branch` (D11), and Instinct's waves;
 - the overlord's `## Resume On Start` section: the run record rule and Resume lifecycle; its deferred report scan, none (D7);
 - the overlord's `## Intent-Driven Fallback (Universal)` section: the one fallback rule (D2);
 - `plugin/references/run-ledger-schema.md`: [Run ledger fields](#run-ledger-fields), one replacement per field;
@@ -483,15 +482,14 @@ Answered: Q1 A, with the items D5, D7, D8 and D15 remove. Removed, each with its
 
 `tools/build_workflows.mjs --check` then keeps `plugin/workflows/` to generated scripts only.
 
-### D11: Three rules re-homed in the safety rails
+### D11: Two rules re-homed in the safety rails
 
-Taken, listed for veto. Three rules live only in text this design deletes, and each moves to `## Safety Rails` with its meaning kept:
+Answered: Q7 A. Two rules live only in text this design deletes, and each moves to `## Safety Rails` with its meaning kept:
 
 - gather-facts and injection-scan run before every planner delegation;
-- the PR head branch is checked out before any reviewer;
-- every push carries `expect_commit`.
+- the PR head branch is checked out before any reviewer.
 
-`## Safety Rails` binds every path the overlord drives, so each rule covers more paths than before, never fewer. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust boundary is relaxed, and each rule binds more paths; reversible.
+`## Safety Rails` binds every path the overlord drives, so each rule covers more paths than before, never fewer. The gated-commit rule, `expect_commit` on every push, is not restated in the overlord: the input gates of `hivemind:open-plan-pr` (`plugin/skills/open-plan-pr/SKILL.md:24`) and `hivemind:push-branch` (`plugin/skills/push-branch/SKILL.md:36`) refuse a push without it, so every push on every path meets the gate. The overlord text that states it today, at `plugin/agents/overlord.md:120`, goes with `## Implement Loop (Wave Execution)`.
 
 ### D12: Engine test deletion needs the user's confirmation
 
@@ -731,7 +729,7 @@ Each slice runs this repository's own gate, `bash tools/validate.sh --changed`. 
 - **S4 Overlord on one engine:**
   - `overlord-contract.test.mjs` pins:
     - the one fallback paragraph with its level clause first, naming all three workflows;
-    - the three re-homed rules in `## Safety Rails`;
+    - the two re-homed rules in `## Safety Rails`;
     - the Instinct analysis and post-PR remediation paths;
     - the `Decisions:` final report line;
     - `### Stop Conditions` names no journal destination of its own and cites `plugin/governance/decision-autonomy.md` (Decision Journal), and that governance text names that a run with no pull request lists its decisions in its final message or report and keeps no decision journal;
@@ -762,7 +760,7 @@ Slices start in this order; a slice waits on its blockers. No slice is cut and n
 | S1 Router without the exploratory path | none | Workflow router; Router output contract; Request lifecycle; Failure modes; D5: Exploratory intent session removed |
 | S2 Brood dispatch on Instinct | none | Brood dispatch on Instinct; spawn-brood; spawn-brood inputs and manifest; Brood dispatch lifecycle; Lair seams; Trust boundaries; Failure modes; D4: Brood dispatch runs on Instinct; D9: ADR-0005 is unchanged; D15: The manifest keeps version 4 without the hatchery block |
 | S3 Brood dashboard without child ledgers | none | brood-status; brood-status collect output; State and ownership; Failure modes; D8: The brood dashboard reads no child ledger |
-| S4 Overlord on one engine | S1, S2 | Overlord engine section; Overlord safety rails; Instinct paths; Decision journal; Launch and fallback contract; Level check seam; Decision journal destinations; Lair seams; Trust boundaries; State and ownership; Run ledger fields; Fallback lifecycle; Resume lifecycle; Upgrade lifecycle; Failure modes; D2: One fallback for every refused or blocked launch; D3: Instinct gains read-only analysis and post-PR remediation; D6: Resume on start has one path; D7: The decision journal is kept where the merge is decided; D11: Three rules re-homed in the safety rails; D16: The Reflex heading is kept; D17: The proactive zoom-out marker rides the cluster payload; D18: Exit-reason routing coverage moves to the overlord contract test |
+| S4 Overlord on one engine | S1, S2 | Overlord engine section; Overlord safety rails; Instinct paths; Decision journal; Launch and fallback contract; Level check seam; Decision journal destinations; Lair seams; Trust boundaries; State and ownership; Run ledger fields; Fallback lifecycle; Resume lifecycle; Upgrade lifecycle; Failure modes; D2: One fallback for every refused or blocked launch; D3: Instinct gains read-only analysis and post-PR remediation; D6: Resume on start has one path; D7: The pull request is the decision journal; D11: Two rules re-homed in the safety rails; D16: The Reflex heading is kept; D17: The proactive zoom-out marker rides the cluster payload; D18: Exit-reason routing coverage moves to the overlord contract test |
 | S5 Engine removal | S1, S2, S3, S4 | Removed components; Autonomy table; Waves rule home; Validation tooling; Waves expectation files; State and ownership; Run ledger fields; Trust boundaries; Failure modes; D1: Retire the JSON state machine; D10: The removal list; D12: Engine test deletion needs the user's confirmation; D13: waves.js keeps its parity fixtures as frozen expectations; D14: The autonomy table keeps only script sites |
 
 S4 waits on S1 and S2 so that, when it deletes `## Workflow State Execution` and `## Resume On Start`, no path still enters the state machine. Engine removal is last: it deletes what no remaining path reaches. The shared-document items of Changes to shared documents land in the slice each names. The Lair, ADR-0045, Idea to Ready and ADR-0046 items land in their own initiatives' re-reviews (D19), which this design neither schedules nor blocks on.
