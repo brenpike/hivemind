@@ -146,7 +146,7 @@ The entry fields of `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Dec
 
 ### Removed components
 
-Removed by D10:
+Removed by D10, which names each item's replacement:
 
 - the six JSON definitions;
 - `plugin/skills/{init-run-ledger,record-state-result,next-wave,mark-intent-fallback}/`;
@@ -178,6 +178,34 @@ Removed by D10:
 **Run record rule.** A run is recorded by the working branch, commits and pull request it opens, and a new session recovers from them (ADR-0037 decision 2). A run that opens none, such as `analysis-only` on its script or on Instinct, is recorded only by its final message or report, and a new session starts it over (ADR-0036 decision 10); a brood dispatch is also recorded by its brood manifest. No run keeps a run ledger.
 
 RUN-OWNERSHIP-01 is retired with the run ledger. The ownership it kept holds by worktree isolation without it: a child writes only in its own worktree, and the hatchery reads a child's facts file name and type, never its content. Children never write the brood manifest.
+
+### Run ledger fields
+
+Each field of the run ledger has one replacement, or is retired with none. The rows are keyed on two closed sets read from trunk at `3dc89eff`: every field section of `plugin/references/run-ledger-schema.md`, with the `plan_epoch` event field, the Brood and Hatchery parent blocks and the intent-fallback marker; and every `event.outputs` key a file under `plugin/` writes. ADR-0048 decision 8 reads this table and D10 as the map from a removed item to its replacement. A row set by a decision this design took itself, such as D13, D15 or D17, reaches an accepted ADR only through decision 8.
+
+| Field | Replacement | Set by |
+|---|---|---|
+| `schema_version` | Retired, none: no run ledger is written. | D1 |
+| `run.*` (`id`, `workflow`, `workflow_version`, `status`, `mode`, `created_at`, `updated_at`) | A script run's identity is the Workflow tool's run, resumed by name with `resumeFromRunId`; an Instinct run's is its working branch, per the run record rule. The workflow is the router's in-session selection. A run's status is its completion notice or final report, and a brood strain's is the observed `derived_status`. `workflow_version` and the version-skew door are retired, none. `mode` is retired with the intent-fallback marker. The timestamps are retired, none; commits and the pull request carry their own. | D1, D6, D8 |
+| `parent.*` | Retired, none: a run has no ledger parent. | D1 |
+| Brood parent block (`parent.kind: brood`) | The strain's `run.suggested_id` in the brood manifest and in its `task.md`, the strain's lineage key. | D15 |
+| Hatchery parent block (`artifacts.brood`) | The brood manifest at `.hivemind/broods/<brood-id>/manifest.json`, which records a brood dispatch. | D4 |
+| `request.*` (`raw`, `normalized`) | The in-session request text. The default post-PR watch reads it for its one yes or no question, as the Reflex tail does. | D1 |
+| `state.*` | Retired, none: a script holds its own steps in code, and Instinct states must-haves, not states. The dashboard's claimed-state columns go with it. | D1, D8 |
+| `facts.*` (`branch`, `base`, `pr`) | The facts file of `hivemind:gather-facts`, gathered fresh before every planner delegation. | D6, D11 |
+| `plan.*` (`path`, `current_step`, `steps`, `epoch`) | The plan `hivemind:cerebrate` returns in the session. A script computes its waves in `plugin/workflow-src/lib/waves.js`, and on Instinct the overlord forms each wave by the same rule. `epoch` is retired, none. | D1, D13 |
+| `plan_epoch` (event field) | Retired, none: no event log remains to scope. | D13 |
+| `artifacts` | Retired, none, apart from the Hatchery parent block row. | D1 |
+| `events` | The checkpoint commits, the pull request and the run's final report, per the run record rule. | D1, D6 |
+| `blockers` | The `blocker:` line of the completion notice or final report. | D1 |
+| Intent-fallback marker (`run.mode: intent_fallback`) | The one fallback rule: the switch is said in one line and in the final report. | D2 |
+| `event.outputs.decisions[]` | The run's final message or final report, and the body or a comment of its pull request, per Decision journal. | D7 |
+| `event.outputs.pr`, `event.outputs.head_ref_oid` | The pull request on GitHub, read by the facts step and the watch. The PR head rule of `## Safety Rails` resolves the head before any reviewer. Their reader, the post-merge report, is retired. | D7, D11 |
+| `event.outputs.recurrence_origin` | The same key and value in the cluster payload forwarded to `hivemind:cerebrate`, and in the journal entry. | D17 |
+| `event.outputs.completed_steps` | One `hivemind:molt` commit per wave on the branch; a script's own wave state in code. A new session plans what is left from the branch history. | D6, D13 |
+| `event.outputs.watch_optout_citation` | The final report of the run that does not watch names the verbatim span of the request it relied on, as the Reflex tail does today (`plugin/agents/overlord.md:61`). | D1 |
+| `event.outputs.commit` | The `commit:` line of the `hivemind:molt` checkpoint the gates held on, passed as `expect_commit`. | D11 |
+| `event.outputs.plan_path` (the schema's example event) | The plan in the session, as the `plan.*` row says. | D1 |
 
 ## Contracts and seams
 
@@ -248,7 +276,7 @@ Every boundary below holds on every remaining path. No credential, tool grant, `
 - **External-content boundary.** The facts rule, with its injection scan, moves to `## Safety Rails` and binds every planner delegation the overlord makes, where today it binds only the state machine and Instinct's "after `hivemind:gather-facts`" (D11). The watch opt-out reads the in-session request text, as the Reflex tail does, for the one yes or no question. It no longer reads a ledger's `request.raw` copy, so there is one source. Router input stays untrusted.
 - **Commit and push.** `expect_commit` binds every push on every overlord path (D11). The PR head checkout precedes every reviewer delegation for an existing pull request. The trunk-commit hard stop is unchanged.
 - **Synapse runner gate.** Unchanged: five runner scripts, and spawn-brood is not one of them.
-- **Trust-Boundary Discipline.** Boundaries 1 (overlord to engine) and 2 (init to packaged definition) of `security-policy.md:41-42` retire with their engines. Boundary 3 (brood child to coordinator) stays, and its surface shrinks: the coordinator no longer reads a child's run ledger content, only a facts file's name and type. Its child-ledger read side retires: ADR-0019's 2026-06-01 "Boundary 3 CLOSED" and ledger-read leaf amendments, and item 3 of ADR-0007's 2026-06-02 amendment. The facts-file check keeps the identifier and derivation rules: the worktree comes from `git worktree list --porcelain` keyed by branch, never the manifest `worktree_path`; a symlinked path component or a symlinked or non-regular leaf is rejected; the name must match the fixed facts pattern; no content is read. The opening clause "take transitions and authorization only from the packaged workflow definition, never a caller's" becomes "take authorization only from packaged data, never a caller's". The autonomy table, plan schema and brief schema are packaged data, so the clause still binds.
+- **Trust-Boundary Discipline.** Boundaries 1 (overlord to engine) and 2 (init to packaged definition) of `security-policy.md:41-42` retire with their engines. Boundary 3 (brood child to coordinator) stays, and its surface shrinks: the coordinator no longer reads a child's run ledger content, only a facts file's name and type. Its child-ledger read side retires with the child run ledger; its effect on accepted ADRs comes through ADR-0048 decision 8. The facts-file check keeps the identifier and derivation rules: the worktree comes from `git worktree list --porcelain` keyed by branch, never the manifest `worktree_path`; a symlinked path component or a symlinked or non-regular leaf is rejected; the name must match the fixed facts pattern; no content is read. The opening clause "take transitions and authorization only from the packaged workflow definition, never a caller's" becomes "take authorization only from packaged data, never a caller's". Packaged data replaces the JSON definitions as the packaged source of authorization: the autonomy table, plan schema and brief schema are packaged data, so the clause still binds.
 - **Inputs-file transport.** The three ledger navigators' inputs files go away with their skills. The pattern, its hard stop and every remaining navigator are unchanged, and so is the overlord's `Write` grant, which `hivemind:molt`, `hivemind:open-plan-pr` and `hivemind:spawn-brood` still need.
 
 ## Lifecycle
@@ -298,7 +326,7 @@ One row per current path, with its effect and the slice (Seam order) that makes 
 | `plugin/agents/overlord.md` `## Implement Loop (Wave Execution)` | Deleted after its PR identity and gated-commit rules move to `## Safety Rails`. | S4 |
 | `plugin/agents/overlord.md` `## Resume On Start` | Deleted, with the deferred report scan. | S4 |
 | `plugin/agents/overlord.md` `## Intent-Driven Fallback (Universal)` | Deleted. | S4 |
-| `plugin/agents/overlord.md` `## Review Remediation Posture` | Default post-PR watch reads the in-session request text; the `github_review_decision`, `request.raw` and `watch_optout_citation` text goes; state names in Routing-vs-Execution, Root-cluster zoom-out and Proactive recurrence become "a remediation plan from `hivemind:cerebrate`". | S4 |
+| `plugin/agents/overlord.md` `## Review Remediation Posture` | Default post-PR watch reads the in-session request text; a run that does not watch names the relied-on span in its final report, as the Reflex tail does (`plugin/agents/overlord.md:61`), so the `watch_optout_citation` duty moves there (Run ledger fields); the `github_review_decision`, `request.raw` and `event.outputs` text goes; state names in Routing-vs-Execution, Root-cluster zoom-out and Proactive recurrence become "a remediation plan from `hivemind:cerebrate`". | S4 |
 | `plugin/agents/overlord.md` `## Brood Execution` | Becomes brood dispatch on Instinct; the child-ledger clause and RUN-OWNERSHIP-01 go. | S2 |
 | `plugin/agents/overlord.md` `## Skills` | Loses the four ledger skills and `hivemind:decision-report`. | S4 |
 | `plugin/agents/overlord.md` `## Model Routing`, `## Delegation Format`, `## Continuous Execution`, `## Tool-Error Recovery` | Unchanged; `## Delegation Format` drops "state or". | S4 |
@@ -385,11 +413,11 @@ One row per current path, with its effect and the slice (Seam order) that makes 
 
 ## Decisions
 
-The user answered Q1 A to Q6 A before design review round 1. A decision the design takes itself names its always-ask screen (ADR-0046 decision 8): a change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible.
+The user answered Q1 A to Q6 A before design review round 1. Separately, after local review, the user accepted the amendment rule that ADR-0048 decision 8 records: a clause of an accepted ADR that relies on an item of D10 or on a run ledger field now relies on the replacement D10 or [Run ledger fields](#run-ledger-fields) names for it, or lapses where they name none. The rule reaches only a clause that relies on a removed item, never text that mentions the state machine as history. Every effect this design has on an ADR comes through decision 8, so no decision below lists ADR clauses of its own. A decision the design takes itself names its always-ask screen (ADR-0046 decision 8): a change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible.
 
 ### D1: Retire the JSON state machine
 
-Answered: Q1 A. The state machine is retired, and the workflow scripts, Instinct and Reflex remain. Two engines force every change to the overlord, governance and the decision flow to account for both. A fallback that knows neither unattended mode nor parks cannot serve the Lair. ADR-0048 amends ADR-0018 and the state-machine parts of ADR-0019, ADR-0035, ADR-0036, ADR-0037, ADR-0039 and ADR-0040.
+Answered: Q1 A. The state machine is retired, and the workflow scripts, Instinct and Reflex remain. Two engines force every change to the overlord, governance and the decision flow to account for both. A fallback that knows neither unattended mode nor parks cannot serve the Lair. Its effect on accepted ADRs comes through ADR-0048 decision 8.
 
 ### D2: One fallback for every refused or blocked launch
 
@@ -397,7 +425,7 @@ Answered: Q2 A. Every refused or blocked launch is said in one line and continue
 
 ### D3: Instinct gains read-only analysis and post-PR remediation
 
-Answered: Q2 A, which needs an Instinct path for each workflow the fallback serves. ADR-0039 decision 3 kept those workflows on the state machine, and ADR-0048 records the amendment Q2 A answered. Analysis makes no change; post-PR remediation keeps the watch, the fix pass and every delivery gate.
+Answered: Q2 A, which needs an Instinct path for each workflow the fallback serves, since no state machine remains to serve them. Its effect on accepted ADRs comes through ADR-0048 decision 8. Analysis makes no change; post-PR remediation keeps the watch, the fix pass and every delivery gate.
 
 ### D4: Brood dispatch runs on Instinct
 
@@ -413,26 +441,38 @@ Answered: Q1 A. Resume is a same-session resume by name, or a new session that r
 
 ### D7: The decision journal is kept where the merge is decided
 
-Answered: Q4 A. The journal is kept as [Decision journal](#decision-journal) says. The post-merge report, its session-start scan, the `.decision-report-done` marker and `HIVEMIND_ENABLE_DECISION_REPORT` are retired, which amends ADR-0026 and ADR-0030. The reader of a journal decides before merge, so it belongs where the merge is decided.
+Answered: Q4 A. The journal is kept as [Decision journal](#decision-journal) says. The post-merge report, its session-start scan, the `.decision-report-done` marker and `HIVEMIND_ENABLE_DECISION_REPORT` are retired; their effect on accepted ADRs comes through ADR-0048 decision 8. The reader of a journal decides before merge, so it belongs where the merge is decided.
 
 ### D8: The brood dashboard reads no child ledger
 
-Answered: Q5 A. The dashboard drops its claimed-state columns and child-ledger reads, and the gather-facts output file is the only started-evidence. This narrows the ADR-0007 dashboard's informational columns and retires item 3 of its 2026-06-02 amendment, the child-ledger read discipline, with ADR-0019's boundary 3 read side (see [Trust boundaries](#trust-boundaries)). Its observable status, the closed `derived_status` set and the demote-only gate are kept.
+Answered: Q5 A. The dashboard drops its claimed-state columns and child-ledger reads, and the gather-facts output file is the only started-evidence. Its effect on accepted ADRs comes through ADR-0048 decision 8 (see [Trust boundaries](#trust-boundaries)). Its observable status, the closed `derived_status` set and the demote-only gate are kept.
 
 ### D9: ADR-0005 is unchanged
 
-Taken, listed for veto. Brood dispatch on Instinct runs in the main session, where the overlord holds the Agent tool. `hivemind:spawn-brood` starts separate sessions, not subagents. No workflow script or subagent gains a spawn, so the constraint ADR-0005 records still holds as written. Always-ask screen: no PRD exists, so no scope change; it amends no ADR; no trust-boundary, credential or merge-path change; reversible.
+Taken, listed for veto. Brood dispatch on Instinct runs in the main session, where the overlord holds the Agent tool. `hivemind:spawn-brood` starts separate sessions, not subagents. No workflow script or subagent gains a spawn, so the constraint ADR-0005 records still holds as written. Always-ask screen: no PRD exists, so no scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary, credential or merge-path change; reversible.
 
 ### D10: The removal list
 
-Answered: Q1 A. Removed:
+Answered: Q1 A, with the items D5, D7, D8 and D15 remove. Removed, each with its replacement or none:
 
-- the six JSON definitions;
-- the four run ledger skills and their scripts;
-- the overlord's `## Workflow State Execution`, `## Implement Loop (Wave Execution)`, `## Resume On Start` and `## Intent-Driven Fallback (Universal)` sections;
-- `plugin/references/run-ledger-schema.md`;
-- the ledger parts of the `_shared` libraries (`ledger-engine-io.sh`, `ledger-project.sh`, `hivemind_brood_read_child_ledger`, `hivemind_assert_ledger_contained`), the governance docs, the autonomy table (four rows and every state-machine `resolved_at` site) and `docs/skill-authoring.md`;
-- the engine tests, the fixtures, the `tools/validate.sh` map entries and CHECK 15's `plugin/workflows/*.json` arm.
+- the six JSON definitions: the three workflow scripts run the workflows that have one, Instinct runs every other, and packaged data replaces the definitions as the packaged source of authorization, as [Trust boundaries](#trust-boundaries) says;
+- the four run ledger skills and their scripts: `hivemind:init-run-ledger` and `hivemind:record-state-result` by the run record rule and [Run ledger fields](#run-ledger-fields); `hivemind:next-wave` by `plugin/workflow-src/lib/waves.js` in a script and by the same rule on Instinct (D13); `hivemind:mark-intent-fallback` by the one fallback rule (D2);
+- the overlord's `## Workflow State Execution` section: Instinct paths, with the facts rule in `## Safety Rails` (D11) and its question gate by `### Stop Conditions`;
+- the overlord's `## Implement Loop (Wave Execution)` section: the PR head and gated-commit rules in `## Safety Rails` (D11), and Instinct's waves;
+- the overlord's `## Resume On Start` section: the run record rule and Resume lifecycle; its deferred report scan, none (D7);
+- the overlord's `## Intent-Driven Fallback (Universal)` section: the one fallback rule (D2);
+- `plugin/references/run-ledger-schema.md`: [Run ledger fields](#run-ledger-fields), one replacement per field;
+- the ledger parts of the `_shared` libraries: `hivemind_brood_read_child_ledger` and `ledger-project.sh` by `hivemind_detect_facts_evidence`, the facts file as the only started-evidence (D8); `ledger-engine-io.sh` and `hivemind_assert_ledger_contained`, none, since no ledger read remains to bootstrap or guard;
+- the ledger parts of the governance docs: the re-homed rules of `## Safety Rails` (D11) and the Decision journal rule; RUN-OWNERSHIP-01 by worktree isolation, as State and ownership says;
+- the autonomy table's four rows and every state-machine `resolved_at` site: none, since the Ask Set and `### Stop Conditions` govern the overlord (D14);
+- the ledger parts of `docs/skill-authoring.md`: none;
+- the router's `exploratory` outcome, its catalog entry and §G (D5): the no-fit rule of Workflow router;
+- the post-merge decision report, `hivemind:decision-report`, its session-start scan, the `.decision-report-done` marker and `HIVEMIND_ENABLE_DECISION_REPORT` (D7): the pre-merge list of Decision journal;
+- the brood dashboard's claimed-state columns (D8): its observed status column;
+- spawn-brood's `hatchery` input and the manifest's `hatchery` block (D15): none; `run.suggested_id` stays the strain's lineage key;
+- the engine tests and fixtures: the `waves.js` frozen expectations (D13), the `exit_reason` pins (D18) and the overlord contract pins of Verification strategy; the rest, none;
+- the `tools/validate.sh` map entries: none, since a path left behind escalates to the full suite (FAIL-CLOSED);
+- CHECK 15's `plugin/workflows/*.json` arm: `tools/build_workflows.mjs --check`, below.
 
 `tools/build_workflows.mjs --check` then keeps `plugin/workflows/` to generated scripts only.
 
@@ -444,15 +484,15 @@ Taken, listed for veto. Three rules live only in deleted sections, and each move
 - the PR head branch is checked out before any reviewer;
 - every push carries `expect_commit`.
 
-`## Safety Rails` binds every path the overlord drives, so each rule covers more paths than before, never fewer. Always-ask screen: no PRD scope change; amends no ADR; no trust boundary is relaxed, and each rule binds more paths; reversible.
+`## Safety Rails` binds every path the overlord drives, so each rule covers more paths than before, never fewer. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust boundary is relaxed, and each rule binds more paths; reversible.
 
 ### D12: Engine test deletion needs the user's confirmation
 
-Taken, listed for veto. A slice that deletes engine tests, fixtures, suite map entries or a policy check arm names DESTRUCTIVE-CAT 3 and needs the user's confirmation of each item before it lands. Its deletion of `hivemind_assert_ledger_contained` and `ledger-engine-io.sh`'s read guards names DESTRUCTIVE-CAT 2, read at its broadest, as security-relevant code. Retiring a subject does not exempt its tests from the gate. Always-ask screen: no PRD scope change; amends no ADR; it applies a gate and changes none; reversible.
+Taken, listed for veto. A slice that deletes engine tests, fixtures, suite map entries or a policy check arm names DESTRUCTIVE-CAT 3 and needs the user's confirmation of each item before it lands. Its deletion of `hivemind_assert_ledger_contained` and `ledger-engine-io.sh`'s read guards names DESTRUCTIVE-CAT 2, read at its broadest, as security-relevant code. Retiring a subject does not exempt its tests from the gate. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); it applies a gate and changes none; reversible.
 
 ### D13: waves.js keeps its parity fixtures as frozen expectations
 
-Taken, listed for veto. `waves.js`'s oracle, `next-wave.sh`, is deleted, so its outputs are captured once into `tests/next-wave/expected/` before the deletion, in the same slice, and the fixtures stay. The test keeps every case it checks today except other seeds. Always-ask screen: no PRD scope change; amends no ADR; no trust-boundary change; reversible.
+Taken, listed for veto. `waves.js`'s oracle, `next-wave.sh`, is deleted, so its outputs are captured once into `tests/next-wave/expected/` before the deletion, in the same slice, and the fixtures stay. The test keeps every case it checks today except other seeds. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change; reversible.
 
 ### D14: The autonomy table keeps only script sites
 
@@ -460,23 +500,23 @@ Answered: Q1 A, as the autonomy table part of the removal list. The four rows no
 
 ### D15: The manifest keeps version 4 without the hatchery block
 
-Taken, listed for veto. No reader reads the `hatchery` block, so dropping it changes nothing a reader sees. A version bump would make old and new manifests read differently for no gain. A caller-supplied `hatchery` input is ignored, as other script-owned fields are. Always-ask screen: no PRD scope change; amends no ADR; no trust-boundary change: the manifest's validated fields and its readers' gates are unchanged; reversible.
+Taken, listed for veto. No reader reads the `hatchery` block, so dropping it changes nothing a reader sees. A version bump would make old and new manifests read differently for no gain. A caller-supplied `hatchery` input is ignored, as other script-owned fields are. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change: the manifest's validated fields and its readers' gates are unchanged; reversible.
 
 ### D16: The Reflex heading is kept
 
-Taken, listed for veto. `## Reflex (Ledger-Skip)` is cited by heading text in `CONTEXT.md`, README and `web/`, and a Reflex still keeps no run ledger. Renaming it would churn every citation for no behavior. Only its body drops "and the run ledger". Always-ask screen: no PRD scope change; amends no ADR; no trust-boundary change; reversible.
+Taken, listed for veto. `## Reflex (Ledger-Skip)` is cited by heading text in `CONTEXT.md`, README and `web/`, and a Reflex still keeps no run ledger. Renaming it would churn every citation for no behavior. Only its body drops "and the run ledger". Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change; reversible.
 
 ### D17: The proactive zoom-out marker rides the cluster payload
 
-Taken, listed for veto. `recurrence_origin: "proactive"` was written to a run ledger event so the forced zoom-out could be told from a reviewer-returned cluster (`plugin/governance/remediation-doctrine.md:178-190`). With no ledger, the overlord puts the same key and value in the cluster payload it forwards to `hivemind:cerebrate`, and in the journal entry. The section heading becomes `### Proactive Zoom-Out Marker`, and its citers in `plugin/agents/overlord.md` and `tests/policy/safety-proactive-recurrence-routing.json` change in the same slice. The forced zoom-out's exception in the remediation-plan rule is unchanged. Always-ask screen: no PRD scope change; amends no ADR (ADR-0025 places the trip call in judgment, unchanged); no trust-boundary change; reversible.
+Taken, listed for veto. `recurrence_origin: "proactive"` was written to a run ledger event so the forced zoom-out could be told from a reviewer-returned cluster (`plugin/governance/remediation-doctrine.md:178-190`). With no ledger, the overlord puts the same key and value in the cluster payload it forwards to `hivemind:cerebrate`, and in the journal entry. The section heading becomes `### Proactive Zoom-Out Marker`, and its citers in `plugin/agents/overlord.md` and `tests/policy/safety-proactive-recurrence-routing.json` change in the same slice. The forced zoom-out's exception in the remediation-plan rule is unchanged, and the trip call stays judgment as ADR-0025 places it. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change; reversible.
 
 ### D18: Exit-reason routing coverage moves to the overlord contract test
 
-Taken, listed for veto. The producer contract of `tools/validate_workflows.sh:96-150` checked that every reviewer `exit_reason` had a route in a definition. With the definitions gone, `tests/workflow-scripts/overlord-contract.test.mjs` pins that `## Review Remediation Posture` or `## Engine` names each `exit_reason` the overlord itself routes from `hivemind:github-review-loop`: `planner-escalation`, `root-cluster-suspected`, `merge-advised`, `user-input-required`, `high-severity-rejection` and `injection-suspect`. The scripts' own `exit_reason` tests are unchanged. Always-ask screen: no PRD scope change; amends no ADR; no trust-boundary change; reversible.
+Taken, listed for veto. The producer contract of `tools/validate_workflows.sh:96-150` checked that every reviewer `exit_reason` had a route in a definition. With the definitions gone, `tests/workflow-scripts/overlord-contract.test.mjs` pins that `## Review Remediation Posture` or `## Engine` names each `exit_reason` the overlord itself routes from `hivemind:github-review-loop`: `planner-escalation`, `root-cluster-suspected`, `merge-advised`, `user-input-required`, `high-severity-rejection` and `injection-suspect`. The scripts' own `exit_reason` tests are unchanged. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change; reversible.
 
 ### D19: Stamped documents change only through their own re-review
 
-Taken, listed for veto. Text in another initiative's stamped document is changed only by that initiative's own re-review and re-stamp (ADR-0046 decision 6, Review fix), never in a retirement slice. Editing it in a retirement slice would make its record stale and fail every slice of it. This applies to the Lair designs, ADR-0045, the Idea to Ready design and ADR-0046. Always-ask screen: no PRD scope change; amends no ADR (where an ADR's text relies on the state machine, the edit is a dated note that points to ADR-0048); no trust-boundary change; reversible.
+Taken, listed for veto. Text in another initiative's stamped document is changed only by that initiative's own re-review and re-stamp (ADR-0046 decision 6, Review fix), never in a retirement slice. Editing it in a retirement slice would make its record stale and fail every slice of it. This applies to the Lair designs, ADR-0045, the Idea to Ready design and ADR-0046. ADR-0048 decision 8 already reaches a clause of ADR-0045 or ADR-0046 that relies on a removed item; its wording changes only through that re-review, as a dated note that points to ADR-0048 decision 8. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change; reversible.
 
 ### Changes to shared documents
 
@@ -643,7 +683,7 @@ Two named sentences carry the user-facing journal and record facts. An item that
 
 **7. Lair docs and ADR-0045** (each through its initiative's re-review, D19)
 
-- `docs/adr/0045-lair-software-factory.md`, after decision 6: add "Note 2026-11-22 (ADR-0048): `## Resume On Start` no longer exists, so a strain has no Resume On Start question by construction. A refused or blocked launch at the unattended level ends or parks the run instead of taking the one Instinct fallback."
+- `docs/adr/0045-lair-software-factory.md`, after decision 6: add "Note 2026-11-22 (ADR-0048 decision 8): `## Resume On Start` no longer exists, so a strain has no Resume On Start question by construction. A refused or blocked launch at the unattended level ends or parks the run instead of taking the one Instinct fallback."
 - `docs/initiatives/autonomous-ready-issue-loop/solution-design.md:10`: replace "the pull request state and the run ledger state" with "and the pull request state".
 - `:14`: replace "and the `## Resume On Start` path" with "and the one refused-launch fallback in `## Engine`".
 - `:33`: replace "the overlord's Instinct fallback, Resume On Start question and post-PR watch are replaced as ADR-0045 decision 6 states" with "the overlord's Instinct fallback and post-PR watch are replaced as ADR-0045 decision 6 states; the fallback's level clause is the one place #607 adds the unattended sentence (ADR-0048)".
@@ -657,7 +697,7 @@ Two named sentences carry the user-facing journal and record facts. An item that
 
 - `docs/initiatives/idea-to-ready/solution-design.md:26`: replace "After a refused launch, or after a started run that fails or ends blocked," with "After a refused or blocked launch of any workflow (ADR-0048), or after a started run that fails or ends blocked,".
 - `:440`: replace "runs on Instinct under ADR-0039 decision 3" with "runs on Instinct under ADR-0048".
-- `docs/adr/0046-idea-to-ready-process.md`, after decision 10: add "Note 2026-11-22 (ADR-0048): 'a refused or blocked launch starts no run and still runs on Instinct' now rests on ADR-0048's one fallback, which covers every workflow; ADR-0039 decision 3 is amended by it."
+- `docs/adr/0046-idea-to-ready-process.md`, after decision 10: add "Note 2026-11-22 (ADR-0048 decision 8): 'a refused or blocked launch starts no run and still runs on Instinct' now rests on ADR-0048's one fallback, which covers every workflow."
 
 ## Verification strategy
 
@@ -710,8 +750,8 @@ Slices start in this order; a slice waits on its blockers. No slice is cut and n
 | S1 Router without the exploratory path | none | Workflow router; Router output contract; Request lifecycle; Failure modes; D5: Exploratory intent session removed |
 | S2 Brood dispatch on Instinct | none | Brood dispatch on Instinct; spawn-brood; spawn-brood inputs and manifest; Brood dispatch lifecycle; Lair seams; Trust boundaries; Failure modes; D4: Brood dispatch runs on Instinct; D9: ADR-0005 is unchanged; D15: The manifest keeps version 4 without the hatchery block |
 | S3 Brood dashboard without child ledgers | none | brood-status; brood-status collect output; State and ownership; Failure modes; D8: The brood dashboard reads no child ledger |
-| S4 Overlord on one engine | S1, S2 | Overlord engine section; Overlord safety rails; Instinct paths; Decision journal; Launch and fallback contract; Level check seam; Decision journal destinations; Lair seams; Trust boundaries; State and ownership; Fallback lifecycle; Resume lifecycle; Upgrade lifecycle; Failure modes; D2: One fallback for every refused or blocked launch; D3: Instinct gains read-only analysis and post-PR remediation; D6: Resume on start has one path; D7: The decision journal is kept where the merge is decided; D11: Three rules re-homed in the safety rails; D16: The Reflex heading is kept; D17: The proactive zoom-out marker rides the cluster payload; D18: Exit-reason routing coverage moves to the overlord contract test |
-| S5 Engine removal | S1, S2, S3, S4 | Removed components; Autonomy table; Waves rule home; Validation tooling; Waves expectation files; State and ownership; Trust boundaries; Failure modes; D1: Retire the JSON state machine; D10: The removal list; D12: Engine test deletion needs the user's confirmation; D13: waves.js keeps its parity fixtures as frozen expectations; D14: The autonomy table keeps only script sites |
+| S4 Overlord on one engine | S1, S2 | Overlord engine section; Overlord safety rails; Instinct paths; Decision journal; Launch and fallback contract; Level check seam; Decision journal destinations; Lair seams; Trust boundaries; State and ownership; Run ledger fields; Fallback lifecycle; Resume lifecycle; Upgrade lifecycle; Failure modes; D2: One fallback for every refused or blocked launch; D3: Instinct gains read-only analysis and post-PR remediation; D6: Resume on start has one path; D7: The decision journal is kept where the merge is decided; D11: Three rules re-homed in the safety rails; D16: The Reflex heading is kept; D17: The proactive zoom-out marker rides the cluster payload; D18: Exit-reason routing coverage moves to the overlord contract test |
+| S5 Engine removal | S1, S2, S3, S4 | Removed components; Autonomy table; Waves rule home; Validation tooling; Waves expectation files; State and ownership; Run ledger fields; Trust boundaries; Failure modes; D1: Retire the JSON state machine; D10: The removal list; D12: Engine test deletion needs the user's confirmation; D13: waves.js keeps its parity fixtures as frozen expectations; D14: The autonomy table keeps only script sites |
 
 S4 waits on S1 and S2 so that, when it deletes `## Workflow State Execution` and `## Resume On Start`, no path still enters the state machine. Engine removal is last: it deletes what no remaining path reaches. The shared-document items of Changes to shared documents land in the slice each names. The Lair, ADR-0045, Idea to Ready and ADR-0046 items land in their own initiatives' re-reviews (D19), which this design neither schedules nor blocks on.
 
