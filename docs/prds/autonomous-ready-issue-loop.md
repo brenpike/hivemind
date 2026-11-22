@@ -49,7 +49,7 @@ GitHub is the Lair's state and dashboard. The user steers through labels, park a
 
   An issue that fails the readiness check stays unclaimed and is named in the tick's queue report, with no new label. The Lair never applies `readiness:ready` itself.
 - **Injection.** An issue the injection scan flags is handed off before any strain starts and never runs.
-- **Labels.** On claim the issue moves to `readiness:implementation` with a marker comment naming the run. It moves to `readiness:done` only when GitHub shows the pull request merged, and to `readiness:needs-decision` on an answerable park. It gets a handoff, failed or review marker in the Lair's own label family. The Lair never uses `readiness:blocked` or `readiness:parked`.
+- **Labels.** On claim the issue moves to `readiness:implementation` with a marker comment naming the run. It moves to `readiness:done` only when GitHub shows the pull request merged, and to `readiness:needs-decision` on an answerable park. A handed-off issue gets `lair:handoff`, a failed one `lair:failed`, and one sent to batch review `lair:review`. The Lair never uses `readiness:blocked` or `readiness:parked`.
 - **Unattended runs.**
   - An unattended run never waits for input. Every stop is taken and journaled, or ends the run with a result naming its outcome.
   - The Lair learns of every run end, a crash or stall included, without a human.
@@ -59,18 +59,18 @@ GitHub is the Lair's state and dashboard. The user steers through labels, park a
 - **Park answers.** A park comment carries the question key, options and recommendation.
   - An answer counts only when given in the answer form, by a user with write permission, unedited, after the park marker.
   - On the next claim the answer reaches the run as a settled decision, the run continues from the parked branch, and the question is not asked again.
-  - Comments by users without write permission never reach a strain.
+  - Comments by users without write permission never reach a strain. An in-scope reviewer Bot (ADR-0043) counts as trusted, because only an administrator can install the app behind it.
 - **Merges.**
-  - Only the Lair merges. A strain cannot merge, change labels or edit the issue.
+  - Only the Lair merges. A strain runs with the merge settings empty and with settings that deny the merge, label and issue-edit commands. A prompt-injected strain that runs with the user's GitHub rights stays a named residual.
   - While the Lair runs one issue at a time, it claims nothing while a non-draft Lair pull request is open.
   - A pull request merges unattended only when the script-computed auto tier and the ADR-0044 merge rules both pass. Any other Lair pull request is marked for batch review.
-- **Post-PR feedback.** Review findings on an open Lair pull request start exactly one remediation run for it.
+- **Post-PR feedback.** Review findings or a red CI result on an open Lair pull request start at most one remediation run for it, and none while the Lair is halted.
 - **Stop controls.**
   - Setting the halt switch stops new claims within one tick, and strains in flight finish.
   - Unsetting auto-merge stops merges from the next tick.
-  - Three consecutive failed, crashed or timed-out outcomes halt the Lair with a stated cause. Parks and review waits do not count.
+  - Three consecutive failed, crashed, stalled, timed-out or invalid-result outcomes halt the Lair with a stated cause. Parks and review waits do not count.
 - **Budgets and recovery.**
-  - A run over its wall-clock or agent-call budget ends and its issue is marked failed or parked.
+  - A run over its wall-clock or agent-call budget ends; its issue is marked failed or parked, or, for a remediation run that reaches its agent-call budget, its pull request goes to batch review.
   - On start the Lair resolves every claimed issue that has no live strain and no pull request to failed, never back to ready.
 - **Isolation.** Interactive sessions never enter unattended mode.
 - **Observability.**
@@ -81,30 +81,30 @@ GitHub is the Lair's state and dashboard. The user steers through labels, park a
 ## Implementation Decisions
 
 - **Three layers (ADR-0045).** The work graph lives in GitHub. The Lair is a deterministic controller with no model in it and no authoritative local state. Standard-delivery is the execution graph inside each strain.
-- **Strains are interactive sessions in tmux, one per claimed issue,** each in its own worktree off the fetched trunk commit. Headless runs are not used.
+- **Strains are interactive sessions in tmux, one per claimed issue,** each in its own worktree. A first claim starts off the fetched trunk commit, a re-claim at its pushed branch's head, and a remediation on its pull request's branch. Headless runs are not used.
 - **Strain settings are written by the Lair:**
-  - they carry the unattended marker and no merge settings, with deny rules on merging and issue writes;
+  - they carry the unattended marker and the merge keys set empty, with deny rules on merging and issue writes;
   - they are the only channel that selects unattended mode;
   - the coordinator's local settings are not copied into strains.
 - **A strain reports through one fixed result contract** that the Lair schema-checks: outcome, pull request, branch, head, typed park and decisions taken. The Lair ends and cleans up the session. An exit with no result is a crash; an idle session with no result and no activity is a stall.
 - **Unattended is an autonomy level whose third action is park.** With the marker set, the overlord's interactive paths (fallback to judgment delivery, resume questions, the post-PR watch) are replaced by parks. This amends ADR-0036 decision 8 for this level only.
 - **The Lair owns strain lifecycle, merge order and version coordination** (amends ADR-0007 for Lair strains). Strains need no knowledge of the factory beyond the marker.
 - **Trust.** A write-access ready label on an unedited issue is the strain approval (amends ADR-0026 for Lair strains). The issue text is captured at claim time and treated as data. Settled decisions entering a run carry their provenance.
-- **Credentials.** Everything runs under the executing user's credentials. Merges follow the user's existing merge settings, the admin bypass included, read fresh each tick. A dedicated identity is a later phase.
+- **Credentials.** Everything runs under the executing user's credentials. Merges follow the user's own merge settings, read fresh each tick from `.claude/settings.local.json` and then `~/.claude/settings.json`, never from the committed settings, the admin bypass included. A dedicated identity is a later phase.
 - **The auto tier is computed by a script,** never judged by a model.
 - **The "Decided for you" list never gates a merge;** the digest is the veto channel.
 - **More than one strain at a time requires a release-train versioning mode** in which pull requests carry change fragments and a release pull request applies the bump.
 
 ## Testing Decisions
 
-- **Contract tests for unattended mode:** each stop kind resolves to take, park or handoff as the ask policy states; no unattended path waits for input; the marker absent means today's behavior.
+- **Contract tests for unattended mode:** each stop kind resolves to take, park or handoff as the ask policy states; no unattended path waits for input; the marker absent means today's behavior, unless the worktree holds a Lair launch file.
 - **Contract tests for the controller tick** against recorded GitHub states, with no live GitHub:
   - admission (label actor, permission, edit time, blocked-by, locked; an epic or an issue failing the readiness check is not claimed and is named in the queue report with no new label);
   - claim, label and marker transitions;
   - the merge lane and auto tier;
   - the halt switch and circuit breaker;
   - orphan recovery.
-- **Strain contract tests:** result schema, crash and stall detection, and settings that carry no merge keys and deny merges and issue writes.
+- **Strain contract tests:** result schema, crash and stall detection, and settings that carry the merge keys set empty and deny merges and issue writes.
 - **A park round-trip test:**
   - an answer in the answer form by a write-access user becomes a settled decision that is not asked again, and the run continues from the parked branch;
   - an answer by anyone else, or edited, is ignored.
@@ -126,14 +126,14 @@ GitHub is the Lair's state and dashboard. The user steers through labels, park a
 - **A dedicated GitHub App identity for the Lair.** A later phase.
 - **Headless runs and hosting outside a tmux session:** cron, scheduled cloud agents, GitHub Actions.
 - **Repositories other than the one the Lair runs in.**
-- **Changing the ADR-0044 merge rules** beyond the auto-tier precondition, and changing the repository's ruleset.
+- **Changing the ADR-0044 merge rules** beyond the auto-tier precondition and the Lair tick's merge path of ADR-0044's 2026-11-21 amendment (decisions 17 to 20), and changing the repository's ruleset.
 - **Requesting reviews from bots,** or reading review text for approval.
 - **A web dashboard.** GitHub labels, comments and the decision digest are the user's views.
 
 ## Further Notes
 
 - The auto tier starts narrow (ADR-0044 gates, no protected paths, no major bump, local review not skipped). Widening it with triage effort or type labels and diff-size bounds is a later decision.
-- Budget values start from the PR #602 baseline of about four hours and 54 agents, and are tuned in use.
+- Budgets start at 6 hours of wall clock and 80 work agent calls (83 in total) per run. These replace the PR #602 baseline of about four hours and 54 agents as the starting point: 54 calls was about the 90th percentile of 94 measured delivery runs, and 80 exceeds all but one. The values are still tuned in use.
 - The release-train mode needs its own decision on fragment format, release cadence and who triggers the release pull request.
 - The intended sequence is human-confirmed triage first, then the Lair. The triage-backlog skill applies `readiness:ready` under the user's own account, which meets the admission rule. Triage leaves Lair-labeled issues alone.
 - Interactive standard-delivery keeps working in the current checkout.
