@@ -105,7 +105,7 @@ The sentence "Do not enter the workflow state machine or create a run ledger for
 - **Read-only analysis.** A plan or analysis from `hivemind:cerebrate` in analysis mode, after the facts rule. The result is relayed as the final report. No branch, commit or pull request.
 - **Post-PR remediation.** The PR head rule first. The request's route is then the watch, `hivemind:github-review-loop` in the main session, or one `hivemind:github-reviewer` fix pass when the request asked for a fix. An escalation (`planner-escalation`, `root-cluster-suspected`) plans with `hivemind:cerebrate` under `## Review Remediation Posture`, runs its waves, commits each with `hivemind:molt`, validates, and pushes under the gated-commit rule with `hivemind:open-plan-pr` on the existing pull request, as the script does, and lists its decisions per Decision journal. It opens no new pull request.
 
-Every path decides questions per `### Stop Conditions`: only the Ask Set is asked, and every other question is taken with its recommendation and listed per Decision journal.
+Every path decides questions per `### Stop Conditions`: only the Ask Set is asked, and every other question is taken with its recommendation. A run on any path lists the decisions it took in its final report, and on its pull request when it opens or reuses one, per Decision journal.
 
 ### Workflow router
 
@@ -132,7 +132,7 @@ The overlord invokes `hivemind:spawn-brood` under that skill's own `allowed-tool
 
 ### Decision journal
 
-A run lists each decision it took in its final message or final report. A run that opens a pull request, or reuses one, in both cases through `hivemind:open-plan-pr`, lists them there too, so the user can veto them before the merge: under "Decided for you" in the body of one it opens, and in a comment on one it reuses. A run that opens or reuses no pull request has no merge to veto before, so its final message or final report is its whole journal; `analysis-only` is such a run, on its script or on Instinct (ADR-0036 decision 9), and so is a brood dispatch. A workflow script writes the journal in code, unchanged; on Instinct the overlord writes it as Decision journal destinations says. No local copy exists.
+The decision journal is what a run that opens a pull request, or reuses one, in both cases through `hivemind:open-plan-pr`, lists on it and in its final message or final report, kept where the merge is decided so the user can veto each decision before the merge: under "Decided for you" in the body of a pull request it opens, and in a comment on one it reuses. A run that opens or reuses no pull request, `analysis-only` on its script or on Instinct and a brood dispatch, lists its decisions in its final message or final report and keeps no decision journal; ADR-0036 decision 9 stands as written. A workflow script writes the journal in code, unchanged; on Instinct the overlord writes it as Decision journal destinations says. No local copy exists.
 
 The entry fields of `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Journal) are kept. The post-merge report, its skill, its session-start scan, the `.decision-report-done` marker and `HIVEMIND_ENABLE_DECISION_REPORT` are removed.
 
@@ -169,13 +169,13 @@ Removed by D10, which names each item's replacement:
 |---|---|---|---|---|
 | Working branch, commits, pull request | git and GitHub | the overlord through `hivemind:create-working-branch`, `hivemind:molt`, `hivemind:open-plan-pr`, `hivemind:push-branch`; script runners | the facts step, the watch, the user | Unchanged. See the run record rule. |
 | Facts file | `.hivemind/facts/facts-<UTC>Z-<12 hex>.json` | `hivemind:gather-facts` | the planner; `spawn-brood.sh` and `brood-status` (name and type only) | Unchanged shape. The only started-evidence of a strain. |
-| Decision journal entries | per Decision journal | script code; the overlord on Instinct | the user | Instinct adds the final report line and the body or comment write. No local copy. |
+| Taken decisions | the final message or final report; for a run that opens or reuses a pull request, also its body or a comment, its decision journal, per Decision journal | script code; the overlord on Instinct | the user | Instinct adds the final report line and the body or comment write. No local copy. |
 | Brood manifest | `.hivemind/broods/<brood-id>/manifest.json` | `spawn-brood.sh` | `brood-status`, `enable-brood-remote` | Loses the `hatchery` block. `manifest_version` stays 4. |
 | Paused script run | the Workflow tool's own run store | the harness | `resumeFromRunId` | Unchanged; owned by Claude Code. |
 | Run ledgers from older versions | `.hivemind/runs/<run-id>/` | none | none | Neither read nor deleted. The user owns them and may delete them by hand. |
 | `.decision-report-done` markers | inside old run dirs | none | none | Left as they are. |
 
-**Run record rule.** A run is recorded by the working branch, commits and pull request it opens, and a new session recovers from them (ADR-0037 decision 2). A run that opens none, such as `analysis-only` on its script or on Instinct, is recorded only by its final message or report, and a new session starts it over (ADR-0036 decision 10); a brood dispatch is also recorded by its brood manifest. No run keeps a run ledger.
+**Run record rule.** A run is recorded by the working branch, commits and pull request it opens, and a new session recovers from them (ADR-0037 decision 2). A run that opens no branch and pull request, such as `analysis-only` on its script or on Instinct, keeps no run record (ADR-0036 decision 10), so a new session starts it over; a brood dispatch is still recorded by its brood manifest. No run keeps a run ledger.
 
 RUN-OWNERSHIP-01 is retired with the run ledger. The ownership it kept holds by worktree isolation without it: a child writes only in its own worktree, and the hatchery reads a child's facts file name and type, never its content. Children never write the brood manifest.
 
@@ -199,9 +199,9 @@ Each field of the run ledger has one replacement, or is retired with none. The r
 | `events` | The checkpoint commits, the pull request and the run's final report, per the run record rule. | D1, D6 |
 | `blockers` | The `blocker:` line of the completion notice or final report. | D1 |
 | Intent-fallback marker (`run.mode: intent_fallback`) | The one fallback rule: the switch is said in one line and in the final report. | D2 |
-| `event.outputs.decisions[]` | The run's final message or final report, and the body or a comment of its pull request, per Decision journal. | D7 |
+| `event.outputs.decisions[]` | The decisions a run lists in its final message or final report; for a run that opens or reuses a pull request, also in its body or a comment, its decision journal, per Decision journal. | D7 |
 | `event.outputs.pr`, `event.outputs.head_ref_oid` | The pull request on GitHub, read by the facts step and the watch. The PR head rule of `## Safety Rails` resolves the head before any reviewer. Their reader, the post-merge report, is retired. | D7, D11 |
-| `event.outputs.recurrence_origin` | The same key and value in the cluster payload forwarded to `hivemind:cerebrate`, and in the journal entry. | D17 |
+| `event.outputs.recurrence_origin` | The same key and value in the cluster payload forwarded to `hivemind:cerebrate`, and in the decision the run lists, per Decision journal. | D17 |
 | `event.outputs.completed_steps` | One `hivemind:molt` commit per wave on the branch; a script's own wave state in code. A new session plans what is left from the branch history. | D6, D13 |
 | `event.outputs.watch_optout_citation` | The final report of the run that does not watch names the verbatim span of the request it relied on, as the Reflex tail does today (`plugin/agents/overlord.md:61`). | D1 |
 | `event.outputs.commit` | The `commit:` line of the `hivemind:molt` checkpoint the gates held on, passed as `expect_commit`. | D11 |
@@ -413,7 +413,7 @@ One row per current path, with its effect and the slice (Seam order) that makes 
 
 ## Decisions
 
-The user answered Q1 A to Q6 A before design review round 1. Separately, after local review, the user accepted the amendment rule that ADR-0048 decision 8 records: a clause of an accepted ADR that relies on an item of D10 or on a run ledger field now relies on the replacement D10 or [Run ledger fields](#run-ledger-fields) names for it, or lapses where they name none. The rule reaches only a clause that relies on a removed item, never text that mentions the state machine as history. Every effect this design has on an ADR comes through decision 8, so no decision below lists ADR clauses of its own. A decision the design takes itself names its always-ask screen (ADR-0046 decision 8): a change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible.
+The user answered Q1 A to Q6 A before design review round 1. Separately, after local review, the user accepted the amendment rule that ADR-0048 decision 8 records: a clause of an accepted ADR that relies on an item of D10 or on a run ledger field now relies on the replacement D10 or [Run ledger fields](#run-ledger-fields) names for it, or lapses where they name none. The rule reaches only a clause that relies on a removed item, never text that mentions the state machine as history. Every effect this design has on an ADR comes through decision 8, so no decision below lists ADR clauses of its own. No decision below changes the meaning of a clause that relies on no removed item; where a design sentence would, the design changes and the clause stands. A decision the design takes itself names its always-ask screen (ADR-0046 decision 8): a change to the PRD's scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change, and anything irreversible.
 
 ### D1: Retire the JSON state machine
 
@@ -442,6 +442,8 @@ Answered: Q1 A. Resume is a same-session resume by name, or a new session that r
 ### D7: The decision journal is kept where the merge is decided
 
 Answered: Q4 A. The journal is kept as [Decision journal](#decision-journal) says. The post-merge report, its session-start scan, the `.decision-report-done` marker and `HIVEMIND_ENABLE_DECISION_REPORT` are retired; their effect on accepted ADRs comes through ADR-0048 decision 8. The reader of a journal decides before merge, so it belongs where the merge is decided.
+
+ADR-0036 decision 9 stands as written, as ADR-0048 decision 8 records.
 
 ### D8: The brood dashboard reads no child ledger
 
@@ -508,7 +510,7 @@ Taken, listed for veto. `## Reflex (Ledger-Skip)` is cited by heading text in `C
 
 ### D17: The proactive zoom-out marker rides the cluster payload
 
-Taken, listed for veto. `recurrence_origin: "proactive"` was written to a run ledger event so the forced zoom-out could be told from a reviewer-returned cluster (`plugin/governance/remediation-doctrine.md:178-190`). With no ledger, the overlord puts the same key and value in the cluster payload it forwards to `hivemind:cerebrate`, and in the journal entry. The section heading becomes `### Proactive Zoom-Out Marker`, and its citers in `plugin/agents/overlord.md` and `tests/policy/safety-proactive-recurrence-routing.json` change in the same slice. The forced zoom-out's exception in the remediation-plan rule is unchanged, and the trip call stays judgment as ADR-0025 places it. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change; reversible.
+Taken, listed for veto. `recurrence_origin: "proactive"` was written to a run ledger event so the forced zoom-out could be told from a reviewer-returned cluster (`plugin/governance/remediation-doctrine.md:178-190`). With no ledger, the overlord puts the same key and value in the cluster payload it forwards to `hivemind:cerebrate`, and in the decision the run lists. The section heading becomes `### Proactive Zoom-Out Marker`, and its citers in `plugin/agents/overlord.md` and `tests/policy/safety-proactive-recurrence-routing.json` change in the same slice. The forced zoom-out's exception in the remediation-plan rule is unchanged, and the trip call stays judgment as ADR-0025 places it. Always-ask screen: no PRD scope change; no ADR amendment of its own (ADR-0048 decision 8); no trust-boundary change; reversible.
 
 ### D18: Exit-reason routing coverage moves to the overlord contract test
 
@@ -522,10 +524,10 @@ Taken, listed for veto. Text in another initiative's stamped document is changed
 
 Exact proposed text for each document. None is edited in this run. Each item names the slice that lands it. An item in another initiative's stamped document lands only through that initiative's re-review (D19).
 
-Two named sentences carry the user-facing journal and record facts. An item that states either fact uses its named sentence verbatim, says which, and carries no other wording of that fact.
+Two named sentences carry the user-facing decision-list and record facts. An item that states either fact uses its named sentence verbatim, says which, and carries no other wording of that fact.
 
-- **Journal sentence:** "A run lists the decisions it took in its final message or report, and on its pull request when it opens or reuses one, so you can veto them before you merge. A read-only analysis opens no pull request, so its final message or report is its whole list."
-- **Record sentence:** "No path keeps a run ledger: a run that opens a branch and a pull request is recorded by them, and a run that opens none, such as a read-only analysis, only by its final message or report."
+- **List sentence:** "A run lists the decisions it took in its final message or report, and on its pull request when it opens or reuses one, so you can veto them before you merge. A read-only analysis opens no pull request, so its final message or report is its whole list."
+- **Record sentence:** "No path keeps a run ledger: a run that opens a branch and a pull request is recorded by them, and a run that opens none, such as a read-only analysis, keeps no record."
 
 **1. `CONTEXT.md`** (S5)
 
@@ -538,7 +540,7 @@ Two named sentences carry the user-facing journal and record facts. An item that
 - Replace the **Decision Journal** entry (`:249-251`) with:
 
   > **Decision Journal**:
-  > The per-decision record (situation, options, trade-offs, recommendation strength, gate outcome, disposition, decision, rationale, reversibility) of every autonomous and surfaced decision. Where a run lists it is set by ADR-0048 decision 6.
+  > The per-decision record (situation, options, trade-offs, recommendation strength, gate outcome, disposition, decision, rationale, reversibility) of every autonomous and surfaced decision of a run that opens or reuses a pull request, listed on that pull request and in the run's final message or report. A run with no pull request keeps none; where it lists its decisions is set by ADR-0048 decision 6.
   > _Avoid_: audit log, decision log
 
 - Delete the **Decision Report** entry (`:253-255`).
@@ -565,7 +567,7 @@ Two named sentences carry the user-facing journal and record facts. An item that
 
 - In Flagged ambiguities, add, ending with the Record sentence:
 
-  > - "run ledger" — retired (ADR-0048). Files under `.hivemind/runs/` from older versions are neither read nor deleted. No path keeps a run ledger: a run that opens a branch and a pull request is recorded by them, and a run that opens none, such as a read-only analysis, only by its final message or report.
+  > - "run ledger" — retired (ADR-0048). Files under `.hivemind/runs/` from older versions are neither read nor deleted. No path keeps a run ledger: a run that opens a branch and a pull request is recorded by them, and a run that opens none, such as a read-only analysis, keeps no record.
 
 **2. `CLAUDE.md`** (S4 for the key, S5 for the rest)
 
@@ -595,13 +597,13 @@ Two named sentences carry the user-facing journal and record facts. An item that
   > - A `Workflow(hivemind:<id>)` entry in `permissions.deny` refuses the launch with no prompt. A refused or blocked launch of any workflow runs on Instinct, and so does a started `standard-delivery` run that fails or ends blocked. The fallback rules are in `plugin/agents/overlord.md` (`## Engine`), `docs/adr/0039-instinct-delivery-path.md` and ADR-0048.
 
 - `:266` (S4): delete the sentence "That watch has no run ledger."
-- `:268-292` (S4): replace the **State machine.** paragraph, its diagram and the numbered list 1-9 with this paragraph, which points to the Decision autonomy paragraph for the journal:
+- `:268-292` (S4): replace the **State machine.** paragraph, its diagram and the numbered list 1-9 with this paragraph, which points to the Decision autonomy paragraph for the decision list:
 
   > **Instinct.** On Instinct the overlord runs the same lifecycle by judgment: it gathers facts and scans them before every cerebrate delegation, takes a plan, creates the working branch, builds in waves with one checkpoint commit per wave, runs validation and local review on one commit, and opens the PR with `hivemind:open-plan-pr` on the commit both held on. It lists the decisions it took as Decision autonomy below says. Only an Ask Set question asks you; any other is taken with its recommendation.
 
 - `:298` (S5): replace "made by a runner in a script run and by the overlord on Instinct and on the state machine. On the state machine, `hivemind:next-wave` computes each wave from the run ledger; the script computes its waves in `plugin/workflow-src/lib/waves.js`." with "made by a runner in a script run and by the overlord on Instinct. The script computes its waves in `plugin/workflow-src/lib/waves.js`; on Instinct the overlord forms each wave by the same rule."
 - `:300` (S4): replace "go to the overlord's question gate, which asks you" with "go to the overlord, which asks you".
-- `:302` (S4): replace the **Decision autonomy.** paragraph with this paragraph, which uses the Journal sentence:
+- `:302` (S4): replace the **Decision autonomy.** paragraph with this paragraph, which uses the List sentence:
 
   > **Decision autonomy.** Routine judgment calls are decided for you; every merge comes back to you. **Tier A** is the closed Ask Set, always surfaced, defined in `plugin/governance/decision-autonomy.md` (Decision Tiers); who decides a reviewer's question is set by `plugin/governance/decision-autonomy.md` (Review Calls). Only an Ask Set question asks you, on every path. **Tier B** decisions are taken with one disposition: `did-now`, `deferred`, `recorded`, or `surfaced` (when the promotion gate trips). A run lists the decisions it took in its final message or report, and on its pull request when it opens or reuses one, so you can veto them before you merge. A read-only analysis opens no pull request, so its final message or report is its whole list. There is no post-merge decision report. Policy: `plugin/governance/decision-autonomy.md`.
 
@@ -655,16 +657,16 @@ Two named sentences carry the user-facing journal and record facts. An item that
 `web/` mirrors README. Each element below keeps its markup, with each backtick span as `<code>`.
 
 - `web/index.html:76` (S4): "Routes each request to a workflow, then launches its workflow script or runs it on Instinct. Owns branches, checkpoint commits, ver…", the rest unchanged.
-- `web/index.html:114` (S4), using the Record sentence: "Eight beats from your intent to a reviewed pull request, as a standard-delivery workflow script run. No path keeps a run ledger: a run that opens a branch and a pull request is recorded by them, and a run that opens none, such as a read-only analysis, only by its final message or report. When a launch is refused or blocked, or a started standard-delivery run fails, the request continues on Instinct, with no script."
+- `web/index.html:114` (S4), using the Record sentence: "Eight beats from your intent to a reviewed pull request, as a standard-delivery workflow script run. No path keeps a run ledger: a run that opens a branch and a pull request is recorded by them, and a run that opens none, such as a read-only analysis, keeps no record. When a launch is refused or blocked, or a started standard-delivery run fails, the request continues on Instinct, with no script."
 - `web/index.html:119` (S4): "`hivemind:route-workflow` picks standard-delivery, analysis-only, pr-feedback-remediation or hatchery-dispatch. The first three launch as the `hivemind:analysis-only`, `hivemind:standard-delivery` and `hivemind:pr-feedback-remediation` workflow scripts when Claude Code's Workflow tool is available. Brood dispatch, a refused or blocked launch, and a started standard-delivery run that fails, run on Instinct, with no script."
 - `web/index.html:121` (S4): replace "skips the router, the run ledger and the cerebrate" with "skips the router and the cerebrate".
-- `web/benefits.html:80` (S4), using the Record sentence, then the Journal sentence: replace from "A `Workflow(hivemind:standard-delivery)` entry" to the end with: "A `Workflow(hivemind:<id>)` entry in `permissions.deny` sends that workflow to Instinct, a judgment-driven path with no script. No path keeps a run ledger: a run that opens a branch and a pull request is recorded by them, and a run that opens none, such as a read-only analysis, only by its final message or report. A run lists the decisions it took in its final message or report, and on its pull request when it opens or reuses one, so you can veto them before you merge. A read-only analysis opens no pull request, so its final message or report is its whole list. `plugin/workflows/` holds only the generated `.js` scripts."
+- `web/benefits.html:80` (S4), using the Record sentence, then the List sentence: replace from "A `Workflow(hivemind:standard-delivery)` entry" to the end with: "A `Workflow(hivemind:<id>)` entry in `permissions.deny` sends that workflow to Instinct, a judgment-driven path with no script. No path keeps a run ledger: a run that opens a branch and a pull request is recorded by them, and a run that opens none, such as a read-only analysis, keeps no record. A run lists the decisions it took in its final message or report, and on its pull request when it opens or reuses one, so you can veto them before you merge. A read-only analysis opens no pull request, so its final message or report is its whole list. `plugin/workflows/` holds only the generated `.js` scripts."
 - `web/benefits.html:170` (S5): replace "on every delivery path, the workflow scripts, Instinct and the state machine:" with "on every delivery path, the workflow scripts and Instinct:", and "A script run computes its waves in `plugin/workflow-src/lib/waves.js`; `hivemind:next-wave` reads the run ledger only on the state machine." with "A script run computes its waves in `plugin/workflow-src/lib/waves.js`."
 - `web/benefits.html:173` (S5): delete the `hivemind:next-wave` tag.
 - `web/functionality.html:117` (S5), `:121` (S4), `:155` (S4): the README `:22`, `:23` and `.hivemind/` texts above, with `:155` reading "It holds the branch facts files `hivemind:gather-facts` writes under `.hivemind/facts/`, brood manifests, the local reviewer's finding ledger, handoffs and the plans they point at, and short-lived inputs files that skills pass to their engine scripts. Run ledgers from earlier versions under `.hivemind/runs/` are neither read nor deleted."
 - `web/functionality.html:214` (S4), `:270` (S1): the README `:418` and `:453` texts.
 - `web/functionality.html` skills table (S5, and S4 for the report row): delete the `<tr>` rows of `hivemind:init-run-ledger` (`:273`), `hivemind:record-state-result` (`:277`), `hivemind:next-wave` (`:281`), `hivemind:mark-intent-fallback` (`:285`) and `hivemind:decision-report` (`:333`).
-- `web/functionality.html:404` (S4), using the Record sentence, then the Journal sentence: "`hivemind:route-workflow` selects the workflow first, for every request that is not a Reflex. When Claude Code's Workflow tool is available, `analysis-only`, `standard-delivery` and `pr-feedback-remediation` launch as workflow scripts. In manual mode the Workflow tool shows an approval prompt; in auto mode the launch goes ahead with no prompt. A No at the prompt interrupts the turn, and has no fallback. A refused or blocked launch, and a started `standard-delivery` run that fails, continue on *Instinct*: the overlord's judgment-driven path, with no script, that keeps the plan, the branch and every gate. No path keeps a run ledger: a run that opens a branch and a pull request is recorded by them, and a run that opens none, such as a read-only analysis, only by its final message or report. A run lists the decisions it took in its final message or report, and on its pull request when it opens or reuses one, so you can veto them before you merge. A read-only analysis opens no pull request, so its final message or report is its whole list. A `standard-delivery` script run, from request to PR:"
+- `web/functionality.html:404` (S4), using the Record sentence, then the List sentence: "`hivemind:route-workflow` selects the workflow first, for every request that is not a Reflex. When Claude Code's Workflow tool is available, `analysis-only`, `standard-delivery` and `pr-feedback-remediation` launch as workflow scripts. In manual mode the Workflow tool shows an approval prompt; in auto mode the launch goes ahead with no prompt. A No at the prompt interrupts the turn, and has no fallback. A refused or blocked launch, and a started `standard-delivery` run that fails, continue on *Instinct*: the overlord's judgment-driven path, with no script, that keeps the plan, the branch and every gate. No path keeps a run ledger: a run that opens a branch and a pull request is recorded by them, and a run that opens none, such as a read-only analysis, keeps no record. A run lists the decisions it took in its final message or report, and on its pull request when it opens or reuses one, so you can veto them before you merge. A read-only analysis opens no pull request, so its final message or report is its whole list. A `standard-delivery` script run, from request to PR:"
 - `web/functionality.html:440-441` (S4): heading `Instinct fallback` kept; text: "When any launch is refused or blocked (denied, not found, or workflows turned off), or a started `standard-delivery` run fails, the overlord says so in one line and continues on Instinct without asking. Instinct never relaunches a workflow. A run you stopped does not fall back. The final report names the switch and where the run stopped."
 - `web/functionality.html:443-446` (S4): delete the `State machine` beat, the `<li>` holding the `:444` heading.
 - `web/functionality.html:449-463` (S4): in the diagram, delete the `(default watch, state machine)` qualifier and the `State machine  (resumed runs, other workflows)` line, and drop the state machine from the `aria-label`.
@@ -722,7 +724,7 @@ Each slice runs this repository's own gate, `bash tools/validate.sh --changed`. 
     - the three re-homed rules in `## Safety Rails`;
     - the Instinct analysis and post-PR remediation paths;
     - the `Decisions:` final report line;
-    - `### Stop Conditions` names no journal destination of its own and cites `plugin/governance/decision-autonomy.md` (Decision Journal), and that governance text names the run that opens or reuses no pull request;
+    - `### Stop Conditions` names no journal destination of its own and cites `plugin/governance/decision-autonomy.md` (Decision Journal), and that governance text names that a run with no pull request lists its decisions in its final message or report and keeps no decision journal;
     - the absence of `## Workflow State Execution`, `## Implement Loop (Wave Execution)`, `## Resume On Start`, `## Intent-Driven Fallback (Universal)`, `.hivemind/runs`, `request.raw`, `record-state-result`, `init-run-ledger`, `next-wave`, `mark-intent-fallback` and `decision-report`.
   - The D18 `exit_reason` pins.
   - `tests/policy/safety-default-pr-watch.json` pins the in-session signal.
