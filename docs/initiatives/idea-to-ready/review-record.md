@@ -1,50 +1,159 @@
 ---
 stamps:
   - path: docs/prds/idea-to-ready.md
-    blob: 87696cdd88a93ab24c9a08010d43e791e0b49d19
+    blob: a8d9fd9fb30ee65a19d5a11c1902178bd77f5899
   - path: docs/initiatives/idea-to-ready/solution-design.md
-    blob: 3916ccd153458910d698f973452ee15a9f7561dd
+    blob: 6d7ada4576c641e116268d9ad0f8eb9f54c05e52
   - path: docs/adr/0046-idea-to-ready-process.md
-    blob: 5dd73dc279c2350d07edfd56b4132b86fe614225
-  - path: docs/adr/0047-abathur-council.md
-    blob: f26c68f5965192dc6fe52f368c7e33709b7f8f93
+    blob: 3e3a5c191758ce1425a5627c108c3c57429be290
 verdict: fail
 open:
   critical: 0
   high: 0
   medium: 0
   low: 0
-rounds: 3
+rounds: 0
 clean_round: false
 ---
 
 # Design review record: Idea to Ready
 
-Round 3, the last round the cap allows, ran and found new findings. Every finding is fixed on the docs branch. The record fails the pass rule on two counts: `verdict` is `fail` and `clean_round` is `false`.
+The first review, rounds 1 to 4, did not converge. After round 4 the user split the council out into its own initiative, #638 (answers Q12 A and Q14 B), and approved the narrowing of ADR-0037 decision 16 (answer Q13 A).
 
-Round 4 is a one-time confirming round the user approved after round 3 (answer Q9 A, D31). It is added under Rounds as the D31 confirming round and does not change `rounds` (answer Q11 A). If it raises any new critical or high finding, the council work (#618, #624) splits out into its own initiative. Any other new finding stops the review and reaches the maintainer. The three-round cap stays the general rule. The pull request stays a draft until this record passes and its stamps equal the documents at the pull request head.
+The front matter is replaced for a fresh re-review under Re-review and re-stamp of the solution design. It starts at round 1 and covers the whole documents, because no record of this initiative has passed. The first review's Rounds and Findings are kept under History below.
 
-The stamps are the blobs of commit `cc65ed646ad8fe38ae8ca24fd3c8a54176509011`, read with `git rev-parse HEAD:<path>`. Any later edit to a stamped file makes this record stale until a review of the change re-stamps it. The design review skill's verify does not exist yet (#619), so this record is checked by hand.
+The stamps are the blobs of commit `6fe5e03342397d06be7f722878ccc4e8fd755184`, read with `git rev-parse HEAD:<path>`. Any later edit to a stamped file makes this record stale until a review of the change re-stamps it. The pull request stays a draft until the re-review passes. The design review skill's verify does not exist yet (#619), so this record is checked by hand.
 
 ## Reviewed documents
 
 - [PRD: Idea to Ready](../../prds/idea-to-ready.md)
 - [Solution design: Idea to Ready](solution-design.md)
 - [ADR-0046](../../adr/0046-idea-to-ready-process.md): the idea-to-ready process
-- [ADR-0047](../../adr/0047-abathur-council.md): the Abathur council
 
-The [glossary](../../../CONTEXT.md) edits were reviewed but are not stamped.
+The council ADR drafted in this pull request was withdrawn to #638. The [glossary](../../../CONTEXT.md) edits were reviewed but are not stamped.
 
 ## Rounds
 
-### Round 1
+None yet.
+
+## Findings
+
+| ID | Round | Angle | Severity | Disposition | Note |
+|---|---|---|---|---|---|
+
+## Decisions taken, listed for veto
+
+Each decision has its always-ask screen: an answer to each of the four always-ask items. "no" means the decision does not do that.
+
+| Decision | Scope change | ADR amendment | Trust, credential or merge path | Irreversible |
+|---|---|---|---|---|
+| D1: Guide is a user-only conductor skill | no | no | no | no |
+| D2: Stage derived only from GitHub and git | no | no | no | no |
+| D3: One deterministic readiness check shared by three callers | no | no | no | no |
+| D4: Track read from the native parent and labels | no | no | no | no |
+| D5: Per-initiative docs folder | no | no | no | no |
+| D6: Design review by fresh read-only planner passes | no | no | no | no |
+| D7: Review record front matter with blob stamps | no | no | no | no |
+| D8: Ready label allowed with open blockers | no | no | no | no |
+| D9: Design-decision always-ask rule | no | Within the ADR-0026 decision 2 amendment asked under D32, answer Q16 A. | no | no |
+| D10: Delivered design frozen as history | no | no | no | no |
+| D11: No dedicated different-model design pass in v1 | no | no | no | no |
+| D15: Drone with exact file scope writes designs and records | no | no | no | no |
+| D17: Readiness check is a shared library | no | no | no | no |
+| D19: Native blocked-by edges written at triage | no | no | no | no |
+| D27: Design-stage resolution is judgment checked by review | no | no | no | no |
+| D28: Record verified before ready and on every push | no | no | no | no |
+| D29: Write permission is the ready label's authority | no | Restates ADR-0045 decision 10, as amended by #625. | no | no |
+| A16: the PRD's Lair retrofit criterion covered by #625 | No. The criterion stands, and #625's acceptance criteria verify it. | no | no | no |
+| Local-review severities: d224e40e medium, 820000d7 medium, 0c9bd346 high | no | no | no | No. All three are fixed, so the open counts do not depend on the severities. |
+| Round-0 placeholder record, now replaced by this record | no | no | no | No. This record replaces it. |
+| R2B2: ADR inclusion checked only for records the pull request adds or edits | no | no | no | no |
+| R2B3: a verify failure stops the run, and fix rounds never edit a record | no | No. ADR-0026 Tier B surfaces a validation failure remediation cannot resolve. | Narrows: a fix can no longer re-stamp a record. | no |
+| R2B4: every docs-branch run launches as a draft with no closable launch reference | no | no | no | no |
+| R2B5: CI maps `docs/prds/` and `docs/adr/` to verify, beside `docs/initiatives/` | no | no | no | no |
+| R2B6: the design slug is derived from the parent epic's seed marker; #615's delivery adds the marker by hand to epics #603 and #614 | No. This pull request edits no epic. | no | no | no |
+| R2B8 and R2B9: exact Design block line counts, and the seed marker slug checked before any `git` or `gh` call | no | no | no | no |
+| R2B10: every open count is 0 at pass, stricter than the PRD's exit rule of zero open critical or high | No. A medium or low may still be deferred or recorded, which is a disposition, not open, so the PRD's one-disposition rule leaves no open finding at exit. | no | no | no |
+| R2B11: named test scripts, fixture folders and `tools/validate.sh` suites | no | no | no | no |
+| R2A8: #623 blocked by #625 | no | no | no | no |
+| D20's list covers `standard-delivery.js` and `pr-feedback-remediation.js` | no | no | no | no |
+| Consumer repositories rely on the guide's verify, the readiness check and the fix-round commit refusal; D28, ADR-0046 decision 7 and the auto-merge residual are scoped to repositories that wire verify in CI | no | no | No change: it states where the existing bound holds. | no |
+| The guide does not pass verify as a validation command | no | no | no | no |
+| The guide's verdict-fail-first step removed | no | no | no | no |
+| The github-reviewer's own fix commits are bound by a Validation Procedure rule and D24 | no | no | No change: its commit path is unchanged, a record edit is authoritative only through the human-reviewed merge (D24, answer Q5 A), and its git commits fall inside the recorded residual Record commits outside the fix-round commit step. | no |
+| R3B8: the triage overlay is a `--overlay` JSON argument | no | no | Narrows: triage carries no inputs-file Edit entry. | no |
+| R3A7: the PRD path shape in the allowlist | no | no | no | no |
+| R3B9: one reason code per pass-rule clause, and `record_open_blocking` renamed `record_open` | no | no | no | no |
+| Duplicates merged: R3B6 with R3A7 | no | no | no | no |
+| Verify checks stamp equality only for a record whose `verdict` is `pass` | no | no | No change: a failing record fails the pass rule and the readiness check either way. | no |
+| Each round's fixes and its record rewrite land in one standard-delivery run, the record wave last | no | no | no | no |
+| The run that writes `verdict` `pass` carries only the record wave and launches with `local_review` false | no | no | No change: the documents it stamps passed local review in earlier runs, and the merge stays human-reviewed (D24). | no |
+| A review fix after the review exits follows the order of Re-review and re-stamp | no | no | no | no |
+| The guide returns a docs pull request that is not a draft to draft with `gh pr ready --undo` before it launches a run on it | no | no | Narrows: a pull request a run may change is a draft. | no |
+| The record body's Residuals and History sections are optional, and verify reads neither | no | no | no | no |
+| The PRD's design-decisions criterion matches its user story: a call with no strong recommendation is asked (overlord) | Within the approved council removal (D32, answers Q12 A and Q14 B). | no | no | no |
+| Every other finding fixed as recommended | no | no | The trust-boundary and merge-path fixes were asked (D24, D28). | no |
+
+Moved to #638 with the council, so no longer listed here: D12, D13, D14, D16, D18 and D18's `skip` at `balanced`, D25, D26, the A1 redesign, ADR-0042 decision 9 not amended, A15, R2A3, the switched-option gate, the `needs_user_fact` absent rule, the council switch re-plan, script-local council answers, the composed-brief defect, the `dissent` bound, `council.js`, the merges of A5 with B12, A6 with B13, R2A1 with R2B1, R2A4 with B15, R2B7 with A2, R3A8 with R3B1 and R3B8 with R3A2, R3B1, R3B2, R3B3, R3A2, R3A3, R3A4 and R3B7.
+
+The commit refusal, the code-read verify stop, CI verify on every record the pull request adds or edits and `design_delivered` were asked (Q10 A), and the round-4 count was asked (Q11 A). After round 4 the council split (Q12 A, Q14 B), the narrowing of ADR-0037 decision 16 (Q13 A), the commit refusal's scope (Q15 A), the ADR-0026 decision 2 amendment (Q16 A) and the remediation plan (Q17 A) were asked. So none of them has a taken row.
+
+## Decisions asked
+
+- D20, prose budget with no pre-approved raise. The user's answer: Q1 B, no budget raise is pre-approved.
+- D24, review record authority is a human-reviewed merge. The user's answer: Q5 A, take the recommendation.
+- D28, record integrity enforced in code. The user's answers:
+  - Q10 A, asked after design review round 3: every commit except a standard-delivery wave refuses a review record, the validate step reads verify's `record-verify-failed: <record path>` line in code and stops the run blocked before any fix decision, CI verify runs on every record the pull request adds or edits, and a delivered design's slices fail `design_delivered`.
+  - Q15 A, asked after design review round 4, narrows Q10 A: the commit refusal covers `runCommitStep` only. The overlord's Instinct fallback, the local reviewer's and the guide's molt commits and the github-reviewer's git commits carry no refusal, a recorded residual.
+  - Q13 A, asked after design review round 4: the validate step's record stop narrows ADR-0037 decision 16.
+- D31, one-time fourth design review round. Asked after design review round 3. Spent: round 4 raised new high findings, so the council split out (D32). The user's answers:
+  - Q9 A: fix all round-3 findings, then run round 4 as a one-time confirming round; if it raises any new critical or high finding, the council work (#618, #624) splits out into its own initiative.
+  - Q11 A: round 4 is recorded under Rounds as the D31 confirming round, and `rounds` stays 3.
+- D32, council split into its own initiative. Asked after design review round 4. The user's answers:
+  - Q12 A and Q14 B: the council, slices #618 and #624 and the decisions listed under Moved to #638 with the council go to #638, and the PRD loses its council requirements.
+  - Q16 A: until #638 ships, a design decision with a weak or absent recommendation is asked, recorded as an amendment of ADR-0026 decision 2 for design-stage decisions.
+  - Q17 A: the round-4 remediation plan is accepted.
+
+## Moved to #638 with the council
+
+These asked decisions are no longer decisions of this design. Their numbers are not reused.
+
+- D21, accepted-ADR amendments recorded in ADR-0047. The user's answer: Q2 A, the amendments of ADR-0026, ADR-0036 and ADR-0045 are recorded in ADR-0047 only.
+- D22, runner member through a sixth runner-gate script. The user's answer: Q3 A, take the recommendation.
+- D23, overlord may launch the council agents. The user's answer: Q4 A, take the recommendation.
+- D30, council settles unmarked weak or unanswered questions. Asked in design review round 2. The user's answers:
+  - Q6 A: the council weighs every weak or unanswered planner question not marked as needing a fact only the user holds. A strong result with a clean gate is taken. A switch plans again with the answer settled. A split is asked with each side's reasoning. Planners mark through one brief field, `needs_user_fact`.
+  - Q7 A: #618 seeds `Edit(.hivemind/council-inputs-*.json)` through `settings-merge.sh`.
+  - Q8 A: the round-2 remediation plan is accepted with the Q6 answer.
+
+## Residuals
+
+Auto-merge of a docs pull request, from finding B5:
+
+- Scope: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval and green checks with no human review of the design.
+- Ground: the user's decision of 2026-11-21 (answer Q5). It is outside the threat model as the maintainer's own opt-in under [ADR-0044](../../adr/0044-settled-approval-and-opt-in-auto-merge.md).
+- Bounded impact: in a repository that wires verify in CI, verify keeps a merged record consistent and current. In any repository, the fix-round commit refusal holds, the guide runs verify before ready, the readiness check fails every slice of a stale or delivered design, and #623 closes the Lair path. A wrong design is caught only by a later review.
+- Recorded in [ADR-0046](../../adr/0046-idea-to-ready-process.md), Residuals.
+
+Record commits outside the fix-round commit step, from findings R4A1 and R4B1:
+
+- Scope: four commit routes can carry a review record path with no code refusal: the overlord's Instinct fallback after a blocked run, the local reviewer's own molt fix commits, the github-reviewer's git commits and the guide's own molt commits.
+- Ground: unclosable on this engine, because a model that writes a molt inputs file or runs git can carry any path. The user decided so (asked after design review round 4, answer Q15 A).
+- Bounded impact: verify in CI where wired, the guide's verify before ready, and the readiness check failing every slice of a stale record. A re-stamp without review reaches trunk only through a human-reviewed merge (D24) or under the auto-merge residual.
+- Recorded in [ADR-0046](../../adr/0046-idea-to-ready-process.md), Residuals.
+
+## History: 2026-11-22
+
+### Rounds
+
+#### Round 1
 
 Two parallel passes. Each was fresh and read-only, ran with `Memory context: none`, and neither reviewer wrote the design.
 
 - Angle A: reviewer `hivemind:cerebrate`, model opus (Claude Opus). Code truth, governance and ADR conflicts, existing-path coverage.
 - Angle B: reviewer `hivemind:cerebrate`, model opus (Claude Opus). Failure modes, trust and injection, testability.
 
-### Round 2
+#### Round 2
 
 The confirming round. It ran as one pass per angle. Each pass was fresh and read-only, ran with `Memory context: none`, and neither reviewer wrote the design.
 
@@ -53,7 +162,7 @@ The confirming round. It ran as one pass per angle. Each pass was fresh and read
 
 Angle A confirmed every round-1 finding fixed except A2, A13 and A14, which were partly or not fixed. Angle B confirmed every round-1 finding fixed except B15. Those four rows are reopened with Round 2. The round raised 21 new findings, R2A1 to R2A10 and R2B1 to R2B11.
 
-### Round 3
+#### Round 3
 
 The confirming round. It ran as one pass per angle. Each pass was fresh and read-only, ran with `Memory context: none`, and neither reviewer wrote the design.
 
@@ -62,7 +171,16 @@ The confirming round. It ran as one pass per angle. Each pass was fresh and read
 
 Angle A confirmed every round-1 and round-2 finding fixed. It judged R2B3 fixed but found that its fix introduced R3A1. Angle B confirmed every round-1 and round-2 finding fixed except R2B3: the rule was written but not enforced, the validate step's failures were free text, and the fix round had no file scope. So R2B3 is reopened with Round 3. The round raised 17 new findings, R3A1 to R3A8 and R3B1 to R3B9.
 
-## Findings
+#### Round 4
+
+The D31 confirming round. It ran as one pass per angle. Each pass was fresh and read-only, ran with `Memory context: none`, and neither reviewer wrote the design. The first attempt of each pass was cut off by a usage limit, yielded no round and was re-run fresh.
+
+- Angle A: reviewer `hivemind:cerebrate`, model opus (Claude Opus). Code truth, governance and ADR conflicts, existing-path coverage.
+- Angle B: reviewer `hivemind:cerebrate`, model opus (Claude Opus). Failure modes, trust and injection, testability.
+
+Both angles confirmed every round-1 to round-3 finding fixed. The round raised 9 new findings, R4A1 to R4A5 and R4B1 to R4B4. R4A1 is high, so the council split out into its own initiative, #638 (D32). Round 4 did not change `rounds` (answer Q11 A).
+
+### Findings
 
 Local review reported no severity for d224e40e, 820000d7 and 0c9bd346. The severities below are assigned to match the finding each one shares a fix with: B18, B9 and B5.
 
@@ -152,104 +270,12 @@ Local review reported no severity for d224e40e, 820000d7 and 0c9bd346. The sever
 | R3B7 | 3 | B | low | fixed | Two Synapse Runner Gate residual bullets needed widening. #618 widens Cross-script use to six scripts and the broken-hook seeded-rules bullet to the council inputs rule (Runner member brief mode). |
 | R3B8 | 3 | B | low | fixed | The triage overlay's inputs-file transport was unspecified. Duplicate in part of R3A2, fixed by the same change. |
 | R3B9 | 3 | B | low | fixed | The pass-rule clauses lacked one reason code each. Each clause has one reason code, and `record_open_blocking` is renamed `record_open` (Readiness check output contract). |
-
-## Decisions taken, listed for veto
-
-Each decision has its always-ask screen: an answer to each of the four always-ask items. "no" means the decision does not do that.
-
-| Decision | Scope change | ADR amendment | Trust, credential or merge path | Irreversible |
-|---|---|---|---|---|
-| D1: Guide is a user-only conductor skill | no | no | no | no |
-| D2: Stage derived only from GitHub and git | no | no | no | no |
-| D3: One deterministic readiness check shared by three callers | no | no | no | no |
-| D4: Track read from the native parent and labels | no | no | no | no |
-| D5: Per-initiative docs folder | no | no | no | no |
-| D6: Design review by fresh read-only planner passes | no | no | no | no |
-| D7: Review record front matter with blob stamps | no | no | no | no |
-| D8: Ready label allowed with open blockers | no | no | no | no |
-| D9: Design-decision always-ask rule | no | Within D21's approved amendment, narrowed by D30. | no | no |
-| D10: Delivered design frozen as history | no | no | no | no |
-| D11: No dedicated different-model design pass in v1 | no | no | no | no |
-| D12: Abathur council with two callers | no | Within D21's approved amendment, narrowed by D30. | no | no |
-| D13: Consult setting as data with a per-run cap | no | Within D21's approved amendment, narrowed by D30. | no | no |
-| D14: Council member named Overseer | no | no | no | no |
-| D15: Drone with exact file scope writes designs and records | no | no | no | no |
-| D16: Process and council get separate ADRs | no | no | no | no |
-| D17: Readiness check is a shared library | no | no | no | no |
-| D18: Initial consult setting values | no | no | no | no |
-| D19: Native blocked-by edges written at triage | no | no | no | no |
-| D25: Consult step with decide unchanged | no | Within D21's approved amendment of ADR-0036 decision 6, narrowed by D30. ADR-0037 is not amended. | no | no |
-| D26: Caller composes the council brief | no | no | Narrows the council's authority: options and gates stay producer-written, and it widens none. | no |
-| D27: Design-stage resolution is judgment checked by review | no | no | no | no |
-| D28: Record verified before ready and on every push | no | no | no | no |
-| D29: Write permission is the ready label's authority | no | Restates ADR-0045 decision 10, as amended by #625. | no | no |
-| A1 redesign: the consult runs in the planning pass ahead of an unchanged `decide()` (D25) | no | No. ADR-0037's closed Ask Set, list reasons and check order are unchanged. | no | no |
-| ADR-0042 decision 9 is not amended | no | No. `run-review.sh` still runs every local review; the runner member is a separate gate script. | The sixth runner-gate script was asked (D22); this decision adds no change. | no |
-| A15: the ADR-0026 decision 2 amendment narrowed to the design stages and standard-delivery | no | Narrows the amendment approved under D21 and adds none. | no | no |
-| A16: the PRD's Lair retrofit criterion covered by #625 | No. The criterion stands, and #625's acceptance criteria verify it. | no | no | no |
-| Local-review severities: d224e40e medium, 820000d7 medium, 0c9bd346 high | no | no | no | No. All three are fixed, so the open counts do not depend on the severities. |
-| Round-0 placeholder record, now replaced by this record | no | no | no | No. This record replaces it. |
-| Duplicates merged: A5 with B12, A6 with B13 | no | no | no | no |
-| R2B2: ADR inclusion checked only for records the pull request adds or edits | no | no | no | no |
-| R2B3: a verify failure stops the run, and fix rounds never edit a record | no | No. ADR-0026 Tier B surfaces a validation failure remediation cannot resolve. | Narrows: a fix can no longer re-stamp a record. | no |
-| R2B4: every docs-branch run launches as a draft with no closable launch reference | no | no | no | no |
-| R2B5: CI maps `docs/prds/` and `docs/adr/` to verify, beside `docs/initiatives/` | no | no | no | no |
-| R2B6: the design slug is derived from the parent epic's seed marker; #615's delivery adds the marker by hand to epics #603 and #614 | No. This pull request edits no epic. | no | no | no |
-| R2B8 and R2B9: exact Design block line counts, and the seed marker slug checked before any `git` or `gh` call | no | no | no | no |
-| R2B10: every open count is 0 at pass, stricter than the PRD's exit rule of zero open critical or high | No. A medium or low may still be deferred or recorded, which is a disposition, not open, so the PRD's one-disposition rule leaves no open finding at exit. | no | no | no |
-| R2B11: named test scripts, fixture folders and `tools/validate.sh` suites | no | no | no | no |
-| R2A3: council members counted with the runner member | no | no | no | no |
-| R2A8: #623 blocked by #625 | no | no | no | no |
-| A switched option's gate is a fresh producer gate read, with no per-option gate | no | Within D21's approved amendment, narrowed by D30. | Narrows: no gate is council-written. | no |
-| A question whose `needs_user_fact` is absent is never convened | no | no | Narrows: an unmarked question reaches the user as it would with no council. | no |
-| A council switch plans again through a new pass from the facts step, outside `maxReplans()` and bounded by `per_run_cap` | no | No. ADR-0037 invariant 3 holds: every planning pass starts from fresh facts. | no | no |
-| Council answers are script-local settled entries, never in `run.answerLog`, its rounds or `resume_args` | no | no | no | no |
-| A composed brief `decide()` refuses as a defect gives no council result | no | no | no | no |
-| `dissent` holds at most 4 entries | no | no | no | no |
-| Council code lives in `plugin/workflow-src/standard-delivery/council.js` | no | no | no | no |
-| D20's list covers `synapse.md` and the three built scripts | no | no | no | no |
-| Duplicates merged: R2A1 with R2B1, R2A4 with B15, R2B7 with A2 | no | no | no | no |
-| Consumer repositories rely on the guide's verify, the readiness check and the commit refusal; D28, ADR-0046 decision 7 and the auto-merge residual are scoped to repositories that wire verify in CI | no | no | No change: it states where the existing bound holds. | no |
-| The guide does not pass verify as a validation command | no | no | no | no |
-| The guide's verdict-fail-first step removed | no | no | no | no |
-| The github-reviewer's own fix commits are bound by a Validation Procedure rule and D24 | no | no | No change: its commit path is unchanged, a record edit is authoritative only through the human-reviewed merge (D24, answer Q5 A), and under auto-merge it falls inside the recorded residual. | no |
-| R3B1: a composed ask carries its raw question's key, reused within a pass | no | Within D21's approved amendment, narrowed by D30. | no | no |
-| R3B2: council text reaches a planner prompt only inside a shown question | no | no | States the existing exposure and widens none. | no |
-| R3B3: a failed scan gives no council result, and design-stage classification is checked by review | no | no | Narrows: unscanned council text is never used. | no |
-| D18: `skip` at `balanced` | no | no | no | no |
-| R3A7: the PRD path shape in the allowlist | no | no | no | no |
-| R3B9: one reason code per pass-rule clause, and `record_open_blocking` renamed `record_open` | no | no | no | no |
-| R3A2: `hivemind:council-member` is the one council navigator, and the guide invokes it | no | no | Narrows: the guide carries no inputs-file Edit entry. | no |
-| R3B8: the triage overlay is a `--overlay` JSON argument | no | no | Narrows: triage carries no inputs-file Edit entry. | no |
-| R3A3: the runner kernel and `council-member.sh` routed to `test_run_review` | no | no | no | no |
-| R3A4: D20 says the built scripts drop schema descriptions | no | no | no | no |
-| R3B7: two Synapse Runner Gate residual bullets widened | no | no | Within the asked D22 and D30, answers Q3 A and Q7 A: it states the exposure they add. | no |
-| Duplicates merged: R3A8 with R3B1, R3B6 with R3A7, R3B8 with R3A2 | no | no | no | no |
-| Every other finding fixed as recommended | no | no | The trust-boundary and merge-path fixes were asked (D22, D23, D24, D30). | no |
-
-The seeded `Edit(.hivemind/council-inputs-*.json)` rule was asked (Q7 A). The commit refusal, the code-read verify stop, CI verify on every record the pull request adds or edits and `design_delivered` were asked (Q10 A), and the round-4 count was asked (Q11 A). So none of them has a taken row.
-
-## Decisions asked
-
-- D20, prose budget with no pre-approved raise. The user's answer: Q1 B, no budget raise is pre-approved.
-- D21, accepted-ADR amendments recorded in ADR-0047. The user's answer: Q2 A, the amendments of ADR-0026, ADR-0036 and ADR-0045 are recorded in ADR-0047 only.
-- D22, runner member through a sixth runner-gate script. The user's answer: Q3 A, take the recommendation.
-- D23, overlord may launch the council agents. The user's answer: Q4 A, take the recommendation.
-- D24, review record authority is a human-reviewed merge. The user's answer: Q5 A, take the recommendation.
-- D30, council settles unmarked weak or unanswered questions. Asked in design review round 2. The user's answers:
-  - Q6 A: the council weighs every weak or unanswered planner question not marked as needing a fact only the user holds. A strong result with a clean gate is taken. A switch plans again with the answer settled. A split is asked with each side's reasoning. Planners mark through one brief field, `needs_user_fact`.
-  - Q7 A: #618 seeds `Edit(.hivemind/council-inputs-*.json)` through `settings-merge.sh`.
-  - Q8 A: the round-2 remediation plan is accepted with the Q6 answer.
-- D28, record integrity enforced in code. Asked after design review round 3. The user's answer: Q10 A: every commit except a standard-delivery wave refuses a review record, the validate step reads verify's `record-verify-failed: <record path>` line in code and stops the run blocked before any fix decision, CI verify runs on every record the pull request adds or edits, and a delivered design's slices fail `design_delivered`.
-- D31, one-time fourth design review round. Asked after design review round 3. The user's answers:
-  - Q9 A: fix all round-3 findings, then run round 4 as a one-time confirming round; if it raises any new critical or high finding, the council work (#618, #624) splits out into its own initiative.
-  - Q11 A: round 4 is recorded under Rounds as the D31 confirming round, and `rounds` stays 3.
-
-## Residuals
-
-Auto-merge of a docs pull request, from finding B5:
-
-- Scope: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval and green checks with no human review of the design.
-- Ground: the user's decision of 2026-11-21 (answer Q5). It is outside the threat model as the maintainer's own opt-in under [ADR-0044](../../adr/0044-settled-approval-and-opt-in-auto-merge.md).
-- Bounded impact: in a repository that wires verify in CI, verify keeps a merged record consistent and current. In any repository, every commit except a standard-delivery wave refuses a record, the guide runs verify before ready, the readiness check fails every slice of a stale or delivered design, and #623 closes the Lair path. A wrong design is caught only by a later review.
-- Recorded in [ADR-0046](../../adr/0046-idea-to-ready-process.md), Residuals.
+| R4A1 | 4 | A | high | fixed | The claim that every commit except a standard-delivery wave refuses a record was false: four commit routes run outside `runCommitStep`. Scoped to `runCommitStep`; the other routes are a recorded residual (answer Q15 A, Residuals). |
+| R4B1 | 4 | B | high | fixed | Duplicate of R4A1, fixed by the same change. |
+| R4A2 | 4 | A | medium | fixed | Fixed in commit `05a6fbaf`; its taken decisions are listed for veto. |
+| R4A3 | 4 | A | medium | fixed | The validate step's record stop conflicted with ADR-0037 decision 16. The stop now narrows that decision (answer Q13 A). |
+| R4A4 | 4 | A | medium | deferred | Council-only: an unattended consult never convenes. Moved to #638 with the council, no impact here. |
+| R4B2 | 4 | B | medium | deferred | Duplicate of R4A4, moved to #638 with it. |
+| R4A5 | 4 | A | low | fixed | Fixed in commit `05a6fbaf`; its taken decisions are listed for veto. |
+| R4B3 | 4 | B | low | fixed | Fixed in commit `05a6fbaf`; its taken decisions are listed for veto. |
+| R4B4 | 4 | B | low | deferred | Council-only: the design-stage classification check. Moved to #638 with the council. |
