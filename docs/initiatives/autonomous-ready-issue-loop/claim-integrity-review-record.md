@@ -71,6 +71,7 @@ The other parts of A3-12 (no-merge after edit, the CI-red rule) and of B3-20 (ov
 - The [claim-integrity design](claim-integrity-design.md) on this branch.
 - The user's answers to this run's four Tier A questions, given on 2026-11-21.
 - The pre-PR local review of this branch, whose root-cluster finding, design-invariant drift, the [Design invariants](claim-integrity-design.md#design-invariants) subsection answers. It found the orphan rule stated differently by the reconciler and the proposed decision 17 amendment, a lock scope that did not match its claims, and park marker text that broke the untrusted-text rule.
+- A second root-cluster finding of the same local review: each site listed its path's preconditions instead of deriving them from the inputs it depends on. The claim's re-read before the claim marker missed admission inputs, and an unreadable state root still reconciled and reported. Invariant Path inputs in [Design invariants](claim-integrity-design.md#design-invariants) answers it, with the claim's re-take of every claim input under [Lifecycle](claim-integrity-design.md#lifecycle).
 
 ## Decisions taken (listed for veto)
 
@@ -88,15 +89,17 @@ The other parts of A3-12 (no-merge after edit, the CI-red rule) and of B3-20 (ov
   - A claim that stopped partway always moves forward to `crashed`, never back to ready and never retried.
   - Claim state is derived once, in invariant Claim state, and labels follow counting markers under invariant Markers and labels. The reconciler moves labels forward only, and skips repair when a `readiness:ready` labeled event is newer than the latest counting outcome or handoff marker, since that event is the user's re-admission.
   - One lock scope, invariant Lock scope: one repository, one user account and one machine, through `flock`, taken before any write other than creating the state root and the lock file. The lock descriptor is never inherited, so no tmux, strain, scanner or helper child holds it.
+  - Invariant Path inputs: each controller path has a fixed input list. An unavailable input skips only the paths that list it and is never read as an invalid marker, a halt cause or a failed check. Availability is probed each tick and never stored.
   - One snapshot per candidate, a Lair-side `check-error` state, and at most 5 checks of 60 seconds each per tick.
+  - The claim re-takes every claim input and writes only when all equal the first take.
   - The scan verdict is a token file; only the exact clean token passes, malformed is suspect, and missing is an error.
   - Three consecutive scan errors halt the Lair.
   - The `body_sha256` form: a hash of the title and body hashes, with no normalization.
   - Invariant Lair-written text: every string the Lair writes is a fixed template, a validated token or the one bounded slot, the park marker's question block (printable text only, at most 2000 bytes, fenced, read by no Lair reader). The queue report has no slot and gives a stage and reason codes per failure.
   - A parked issue keeps `lair:claimed`.
   - Only `failed`, `crashed` and `timed-out` outcomes count toward the breaker; a park is skipped, and any other outcome ends a streak.
-  - The halt file's path and cause codes.
-- The proposed ADR-0045 decision 17 amendment's wording, re-derived from invariant Claim state, under the design's Changes to shared documents. It also covers a claim that stopped before its label writes, which decision 17 already names an orphaned claim. It is not applied in this pull request.
+  - The halt file's path and cause codes, with `state-root` a report-only cause code never written to the file.
+- The proposed ADR-0045 decision 17 amendment's wording, re-derived from invariant Claim state, under the design's Changes to shared documents. It also covers a claim that stopped before its label writes, which decision 17 already names an orphaned claim. It applies the rule only when the Lair can verify markers, so it is conditioned on a readable key, derived from invariant Path inputs. It is not applied in this pull request.
 - The proposed `solution-design.md` Amendments pointer, under the design's Changes to shared documents. It is not applied in this pull request.
 
 ## Decisions asked
