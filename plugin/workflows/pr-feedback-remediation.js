@@ -692,7 +692,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'eb68ae84dfd8ec65';
+const BUILD_ID = '5187533fe0990fa8';
 
 function supportedSchemaKeywords(){
 return[
@@ -3034,7 +3034,7 @@ if(resettled!==undefined){
 return stopDelivery([{problem:'Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.',terminal:true,nextAction:'report'}],run,[],true);
 }
 const lead=describePlanLine(planResult.plan);
-const pinned=buildRepeatPinned(resolution,planResult.plan,run,replan);
+const pinned=fitPinned(resolution,run,lead,buildRepeatPinned(resolution,planResult.plan,run,replan));
 const round=run.answerLog.length+1;
 const reply=takeNextReply(run,round);
 if(reply===undefined){
@@ -3199,14 +3199,14 @@ function maxFindingsDataLength(){
 return 1800;
 }
 function buildFindingsData(root,findings){
-const lines=root===undefined?[]:['Root: '+encodeUntrustedText(root)];
+const rootLine=root===undefined?undefined:'Root: '+encodeUntrustedText(root);
+const lines=rootLine!==undefined&&rootLine.length<=maxFindingsDataLength()?[rootLine]:[];
 let used=lines.join('\n').length;
 for(const finding of findings){
 const line='Finding: '+encodeUntrustedText(finding.title);
 used+=line.length+1;
 if(used>maxFindingsDataLength()){
-lines.push('...');
-break;
+return lines.length===0?undefined:lines.concat('...').join('\n');
 }
 lines.push(line);
 }
@@ -3505,7 +3505,8 @@ if(resolveDecision(kind,brief,undefined,run,resolution)==='take'){
 acceptResolution(resolution,run);
 return{};
 }
-return replanFromTailAsk(resolution.asks[0],run,pinned);
+const ask=resolution.asks[0];
+return replanFromTailAsk(ask,run,fitPinned({asks:[ask],taken:[]},run,describeTailLead(run),pinned));
 }
 
 function renderReversibleEffects(effects){
@@ -3671,6 +3672,9 @@ if(!canShowWhole({resumeArgs:resumeArgs,blocks:blocks})){
 return finishOpenQuestions(resolution,'exact_text_size',run,pinned);
 }
 return pauseForUser({resumeArgs:resumeArgs,blocks:blocks});
+}
+function fitPinned(resolution,run,lead,pinned){
+return pinned!==undefined&&pauseDelivery(resolution,run,lead,pinned).needs_user?pinned:undefined;
 }
 function describeStopLead(causes,endLines){
 return buildStopBlocks(causes).filter((block)=>block.whole!==true).map((block)=>block.text).concat(endLines).join('\n');

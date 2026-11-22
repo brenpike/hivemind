@@ -119,6 +119,10 @@
  *           recommendation is never taken. The askTail lead is
  *           the cause problems in buildStopBlocks order, then the end
  *           lines, one per line.
+ *   fitPinned(resolution, run, lead, pinned)  pinned when pauseDelivery of
+ *           the same arguments pauses, else undefined: a caller whose pinned
+ *           text is optional (the repeated-cluster and repeats_surface asks)
+ *           passes it through here, so it never ends a pause blocked.
  *   finishOpenQuestions  finishDeliveryBlocked over one cause, the fixed
  *           lead with next action answer, with the open questions as its
  *           end line, its pinned passed on and the round's taken decisions
@@ -395,6 +399,17 @@ function pauseDelivery(resolution, run, lead, pinned) {
     return finishOpenQuestions(resolution, 'exact_text_size', run, pinned);
   }
   return pauseForUser({ resumeArgs: resumeArgs, blocks: blocks });
+}
+
+/**
+ * Returns pinned when pauseDelivery of resolution, run, lead and pinned
+ * pauses, else undefined. A caller whose pinned text is optional passes it
+ * through here, so that text is never the reason a pause ends blocked. A
+ * pinned text within maxFindingsDataLength() shows whole in the blocked
+ * end that probe builds, so the probe does not throw.
+ */
+function fitPinned(resolution, run, lead, pinned) {
+  return pinned !== undefined && pauseDelivery(resolution, run, lead, pinned).needs_user ? pinned : undefined;
 }
 
 function describeStopLead(causes, endLines) {

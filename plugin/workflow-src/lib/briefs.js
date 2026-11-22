@@ -46,18 +46,22 @@
  *   buildFindingsData(root, findings)  the pinned text of an approach
  *            question: a Root line for the reviewer's suspected shared root,
  *            when given, then one Finding line per open finding title, each
- *            value encoded by encodeUntrustedText and shown whole. Lines are
- *            added while the encoded text stays within
- *            maxFindingsDataLength() code units; a title that does not fit
- *            and every one after it are left out, with a line of three
- *            dots. undefined when nothing is shown. It is never a brief
- *            field, so no BRIEF_SCHEMA bound applies to it.
+ *            value encoded by encodeUntrustedText and shown whole. Every line,
+ *            Root included, is held to maxFindingsDataLength() code units:
+ *            the Root line first, left out whole when it alone does not
+ *            fit, then each Finding line while all the encoded lines stay
+ *            within it; a title that does not fit and every one after it are
+ *            left out, with a line of three dots. undefined when nothing is
+ *            shown. It is never a brief field, so no BRIEF_SCHEMA bound
+ *            applies to it. Its callers pass it as optional pinned text
+ *            (fitPinned, lib/record.js).
  *   buildRepeatPinned(resolution, plan, run, replan)  the pinned text of the
  *            pause of runPlanningPass (lib/plan.js) that asks the remediation
  *            plan acceptance of a plan whose repeats_surface is true:
  *            buildFindingsData of the replan review's hypothesized_root and
  *            of run.open, shown after the lead and kept in the question text
- *            of the answers block; undefined for any other pause.
+ *            of the answers block when the pause shows it (fitPinned,
+ *            lib/record.js); undefined for any other pause.
  *   buildPlanAcceptanceBrief(plan), buildRemediationPlanBrief(plan),
  *   buildTrunkStaleBrief(facts) and buildExternalEffectBrief(summary)
  *            the briefs lib/plan.js resolves through decide(). The effect brief
@@ -181,19 +185,19 @@ function describeApproachChange(reply, brief) {
 }
 
 function maxFindingsDataLength() {
-  /* 1800: encoded values of at most 6 chars a code point, escaped to 7 in the notice, keep the pause with its lead and question inside half of noticeBudget(). */
+  /* 1800 code units of encoded text: a BMP code point encodes to at most 6 and an astral one to 12, and each is escaped to 7 per 6 in the notice. */
   return 1800;
 }
 
 function buildFindingsData(root, findings) {
-  const lines = root === undefined ? [] : ['Root: ' + encodeUntrustedText(root)];
+  const rootLine = root === undefined ? undefined : 'Root: ' + encodeUntrustedText(root);
+  const lines = rootLine !== undefined && rootLine.length <= maxFindingsDataLength() ? [rootLine] : [];
   let used = lines.join('\n').length;
   for (const finding of findings) {
     const line = 'Finding: ' + encodeUntrustedText(finding.title);
     used += line.length + 1;
     if (used > maxFindingsDataLength()) {
-      lines.push('...');
-      break;
+      return lines.length === 0 ? undefined : lines.concat('...').join('\n');
     }
     lines.push(line);
   }

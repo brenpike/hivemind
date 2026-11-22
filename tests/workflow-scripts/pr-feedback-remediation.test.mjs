@@ -915,6 +915,35 @@ const ROW_TESTS = {
       assert.ok(readDataBlock(revise, 'questions').includes(changeApproach));
       assert.ok(callOf(resumed, 'work-2-STEP-001').prompt.includes('src/other.js') || resumed.result.outcome === 'complete', resumed.result.message);
     });
+    test('an astral root of 300 code points is left out of the pinned text whole, the approach question still pauses, and a root that fits is kept', async () => {
+      const repeated = planResult(makePlan({ remediation_gate: { ...makePlan().remediation_gate, repeats_surface: true } }));
+      const astralFix = { ...EXIT_RESULTS['root-cluster-suspected'], hypothesized_root: ASTRAL.repeat(300) };
+      const first = await runWorkflow(LAUNCH, escalationResults('root-cluster-suspected', { 'fix-1': astralFix, 'plan-2': repeated }));
+      assert.equal(first.result.needs_user, true, first.result.message);
+      assert.ok(first.result.message.startsWith(PLAN_LINE + '\n\n**Q1. Run the remediation plan for the local review findings'), first.result.message);
+      assert.ok(!first.result.message.includes('Root: '), first.result.message);
+      assert.equal(main.buildFindingsData(ASTRAL.repeat(300), []), undefined);
+      assert.equal(main.buildFindingsData(ASTRAL.repeat(100), []), 'Root: ' + main.encodeUntrustedText(ASTRAL.repeat(100)));
+    });
+    test('with the replies at the canCarry limit the pinned root never ends the approach question blocked: it is shown while the pause shows it whole and left out when it does not', () => {
+      const repeated = planResult(makePlan({ remediation_gate: { ...makePlan().remediation_gate, repeats_surface: true } }));
+      const replan = { review: { hypothesized_root: 'y'.repeat(300) } };
+      const brief = main.buildRemediationPlanBrief(repeated.plan);
+      const state = createStateWithReplies(['r'.repeat(findCarryLimit())]);
+      const resolution = { asks: [main.buildUndecidedAsk(brief.kind, brief, state)], taken: [] };
+      const pinned = main.buildRepeatPinned(resolution, repeated.plan, state, replan);
+      assert.equal(pinned, 'Root: ' + main.encodeUntrustedText('y'.repeat(300)));
+      assert.equal(main.fitPinned(resolution, state, PLAN_LINE, pinned), pinned);
+      const paused = main.pauseDelivery(resolution, state, PLAN_LINE, main.fitPinned(resolution, state, PLAN_LINE, pinned));
+      assert.equal(paused.needs_user, true, paused.message);
+      assert.ok(paused.message.includes('\n\n' + pinned + '\n\n**Q1. '), paused.message);
+      const tooLong = 'Root: ' + 'z'.repeat(4500);
+      assert.equal(main.pauseDelivery(resolution, state, PLAN_LINE, tooLong).outcome, 'blocked');
+      assert.equal(main.fitPinned(resolution, state, PLAN_LINE, tooLong), undefined);
+      const asked = main.pauseDelivery(resolution, state, PLAN_LINE, main.fitPinned(resolution, state, PLAN_LINE, tooLong));
+      assert.equal(asked.needs_user, true, asked.message);
+      assert.ok(!asked.message.includes('zzz') && asked.message.includes('**Q1. '), asked.message);
+    });
     test('a reply C to the approach question reaches the revise as the reply, and a revise that rejects the shown plan runs its own plan, never the rejected steps', async () => {
       const repeated = planResult(makePlan({ remediation_gate: { ...makePlan().remediation_gate, repeats_surface: true } }));
       const recorded = planResult(makePlan({ summary: 'Record the rejection of the cluster.', steps: [{ ...makePlan().steps[0], files: ['src/other.js'] }] }));

@@ -3601,7 +3601,7 @@ const ROW_TESTS = {
       assert.ok(moduleSource.includes('function askTails(asks, run, lead, pinned) {\n  const leadText = lead === undefined ? describeTailLead(run) : lead;'));
       assert.ok(moduleSource.includes('return { result: pauseDelivery({ asks: asks, taken: [] }, run, leadText, pinned) };'));
       assert.ok(moduleSource.includes('function askTail(ask, run, lead, pinned) {\n  return askTails([ask], run, lead, pinned);\n}'));
-      assert.ok(moduleSource.includes('  return replanFromTailAsk(resolution.asks[0], run, pinned);\n}'));
+      assert.ok(moduleSource.includes('  const ask = resolution.asks[0];\n  return replanFromTailAsk(ask, run, fitPinned({ asks: [ask], taken: [] }, run, describeTailLead(run), pinned));\n}'));
       assert.equal((moduleSource.match(/replanFromTailAsk\(buildUndecidedAsk\(/g) || []).length, 1);
       assert.ok(moduleSource.includes('replanFromTailAsk(buildUndecidedAsk(VALIDATION_REMEDIATION_KIND, buildFixLimitBrief(run.head), run), run)'));
       assert.ok(!moduleSource.includes('buildUndecidedAsk(GATE_RERUN_KIND'), 'the gate rerun limit opens a draft, never asks');
@@ -10072,10 +10072,10 @@ const ROW_TESTS = {
     function listCallSites(pattern) {
       return [...builtCode.matchAll(pattern)].filter((match) => !/function\s+$/.test(builtCode.slice(Math.max(0, match.index - 16), match.index))).map((match) => findEnclosingFunction(builtCode, match.index));
     }
-    test('the built script pauses only through pauseDelivery, which only askTails and runPlanningPass call, waits only through waitForService, an ask is pushed only in resolveDecision, and needs_user true is set only in lib/result.js', () => {
+    test('the built script pauses only through pauseDelivery, which only askTails, runPlanningPass and the probe fitPinned call, waits only through waitForService, an ask is pushed only in resolveDecision, and needs_user true is set only in lib/result.js', () => {
       assert.deepEqual(listCallSites(/\bpauseForUser\(/g), ['pauseDelivery']);
       assert.deepEqual(listCallSites(/\bpauseForRetry\(/g), ['waitForService']);
-      assert.deepEqual(listCallSites(/\bpauseDelivery\(/g).sort(), ['askTails', 'runPlanningPass']);
+      assert.deepEqual(listCallSites(/\bpauseDelivery\(/g).sort(), ['askTails', 'fitPinned', 'runPlanningPass']);
       assert.deepEqual(listCallSites(/\basks\.push\(/g), ['resolveDecision']);
       const resultSource = readText(join(sourceDir, '../lib/result.js'));
       const resultFunctions = [...resultSource.matchAll(/^function (\w+)\(/gm)].map((match) => match[1]);
@@ -10546,21 +10546,89 @@ const ROW_TESTS = {
       assert.ok(/^[\x20-\x7e\n]*$/.test(REPEAT_PINNED) && !asked.result.message.includes('caf\u00e9'), asked.result.message);
       assert.equal(state.repeatClusterAsked, true);
     });
-    test('the pinned text of a worst case cluster, 50 open findings of 300 characters and a 300 character root, shows each line whole, ends in three dots and still pauses', async () => {
-      for (const [char, rootChar] of [['A', 'y'], ['\u4e00', '\u{1F600}']]) {
+    test('every pinned line, the Root line included, is held to maxFindingsDataLength(): a worst case cluster of 50 open findings of 300 characters and a 300 character root shows each line that fits whole, leaves the rest out and still pauses', async () => {
+      for (const [char, rootChar] of [['A', 'y'], ['A', '\u{1F600}'], ['一', 'y'], ['一', '\u{1F600}']]) {
         const open = Array.from({ length: 50 }, (_, index) => ({ finding_id: 'a'.repeat(8), title: String.fromCodePoint(char.codePointAt(0) + index).repeat(300) }));
         const root = rootChar.repeat(300);
+        const isRootShown = rootChar === 'y';
         const pinned = main.buildFindingsData(root, open);
-        const lines = pinned.split('\n');
-        assert.equal(lines[0], 'Root: ' + lib.encodeUntrustedText(root));
-        assert.equal(lines.at(-1), '...');
-        lines.slice(1, -1).forEach((line, index) => assert.equal(line, 'Finding: ' + lib.encodeUntrustedText(open[index].title)));
-        assert.equal(lines.length > 2, char === 'A');
-        assert.ok(pinned.length <= Math.max(1800, lines[0].length) + '\n...'.length, String(pinned.length));
+        if (!isRootShown && char !== 'A') {
+          assert.equal(pinned, undefined);
+        } else {
+          const lines = pinned.split('\n');
+          assert.equal(lines[0].startsWith('Root: '), isRootShown, rootChar + char);
+          assert.equal(lines.at(-1), '...');
+          const findingLines = lines.slice(isRootShown ? 1 : 0, -1);
+          findingLines.forEach((line, index) => assert.equal(line, 'Finding: ' + lib.encodeUntrustedText(open[index].title)));
+          assert.equal(findingLines.length > 0, char === 'A');
+          assert.ok(pinned.length <= main.maxFindingsDataLength() + '\n...'.length, String(pinned.length));
+          if (isRootShown) {
+            assert.equal(lines[0], 'Root: ' + lib.encodeUntrustedText(root));
+          }
+        }
         const run = await runWorkflow(LAUNCH, sameSurfaceResults({ 'review-2-1': { ...REPEAT_CLUSTER, hypothesized_root: root, open_findings: open, findings_open: 50 } }));
         assert.equal(run.result.needs_user, true, run.result.message);
-        assert.ok(run.result.message.includes('\n\n' + pinned + '\n\n**Q1. '), run.result.message);
+        assert.equal(run.result.message.includes('Root: '), isRootShown, run.result.message);
+        assert.equal(run.result.message.includes('\n\n' + pinned + '\n\n**Q1. '), pinned !== undefined, run.result.message);
       }
+    });
+    test('an astral root of 300 code points, 3600 encoded characters, is left out whole, a root that fits is kept first, and the Finding lines that fit are still shown', () => {
+      const astralRoot = '\u{1F600}'.repeat(300);
+      assert.ok(lib.encodeUntrustedText(astralRoot).length > 2 * main.maxFindingsDataLength());
+      assert.equal(main.buildFindingsData(astralRoot, []), undefined);
+      assert.equal(main.buildFindingsData(astralRoot, [OPEN_FINDING]), 'Finding: "The key builder still reads raw input."');
+      const fitting = '\u{1F600}'.repeat(100);
+      assert.equal(main.buildFindingsData(fitting, [OPEN_FINDING]), 'Root: ' + lib.encodeUntrustedText(fitting) + '\nFinding: "The key builder still reads raw input."');
+    });
+    function pauseWithReply(review, size, pendingReply) {
+      const state = createReplannedState();
+      state.open = review.open_findings;
+      state.answerLog.push({ question: 'Q', settled: [], reply: 'x'.repeat(size) });
+      state.pendingReply = pendingReply;
+      return { state: state, asked: main.requestReviewReplan(review, state, SAME_SURFACE_PLAN) };
+    }
+    function findCarryLimit() {
+      let [low, high] = [0, 8000];
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        [low, high] = main.canCarry(main.buildResumeArgs(['r'.repeat(middle)], BUILD_ID)) ? [middle, high] : [low, middle - 1];
+      }
+      return low;
+    }
+    test('with the replies at the canCarry limit the repeated cluster question still pauses asking with its worst case pinned text, and one more code unit ends reply_size, never exact_text_size', () => {
+      const open = Array.from({ length: 50 }, (_, index) => ({ finding_id: 'a'.repeat(8), title: String.fromCodePoint(65 + index).repeat(300) }));
+      const review = { ...REPEAT_CLUSTER, hypothesized_root: '\u{1F600}'.repeat(300), open_findings: open, findings_open: 50 };
+      const limit = findCarryLimit();
+      for (let size = limit - 40; size <= limit; size += 1) {
+        const { asked, state } = pauseWithReply(review, size);
+        assert.equal(asked.result.needs_user, true, size + ' ' + asked.result.message);
+        assert.ok(asked.result.message.includes('\n\nFinding: ') && !asked.result.message.includes('Root: ') && asked.result.message.includes('**Q1. '), asked.result.message);
+        assert.equal(state.repeatClusterAsked, true);
+      }
+      const blocked = pauseWithReply(review, limit + 1).asked.result;
+      assert.equal(blocked.needs_user, false);
+      assert.ok(blocked.message.includes(main.renderStopIntro('reply_size')) && !blocked.message.includes(main.renderStopIntro('exact_text_size')), blocked.message);
+    });
+    test('pinned text that the pause cannot show whole is left out: fitPinned returns it only when pauseDelivery pauses, and resolveTailDecision asks the question without it where askTail ends blocked exact_text_size', () => {
+      const brief = repeatedBrief();
+      const state = createReplannedState();
+      state.answerLog.push({ question: 'Q', settled: [], reply: 'x'.repeat(findCarryLimit()) });
+      const ask = main.buildUndecidedAsk(brief.kind, brief, state);
+      const resolution = { asks: [ask], taken: [] };
+      const lead = 'LEAD_ZQ.';
+      const fits = 'Root: "Fits."';
+      const tooLong = 'Root: ' + 'z'.repeat(4500);
+      assert.equal(main.fitPinned(resolution, state, lead, undefined), undefined);
+      assert.equal(main.fitPinned(resolution, state, lead, fits), fits);
+      assert.equal(main.fitPinned(resolution, state, lead, tooLong), undefined);
+      assert.equal(main.pauseDelivery(resolution, state, lead, tooLong).outcome, 'blocked');
+      assert.equal(main.askTail(ask, state, lead, tooLong).result.outcome, 'blocked');
+      const asked = main.resolveTailDecision(brief.kind, brief, state, tooLong);
+      assert.equal(asked.result.needs_user, true, asked.result.message);
+      assert.ok(!asked.result.message.includes('zzz') && asked.result.message.includes('**Q1. '), asked.result.message);
+      state.pendingReply = 'B';
+      const replied = main.resolveTailDecision(brief.kind, brief, state, tooLong);
+      assert.ok(replied.replan !== undefined && !state.answerLog.at(-1).question.includes('zzz'), state.answerLog.at(-1).question);
     });
     test('a second repeated root cluster after the question was asked opens a draft pull request with that reason and the open finding titles in its body, and asks nothing', async () => {
       const reason = 'Local review returned root-cluster-suspected on the same class after a change of approach.';

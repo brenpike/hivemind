@@ -121,13 +121,13 @@
  *           of requestReviewReplan asks the approach question, gate
  *           architectural, so decide() always asks, once a run: the next one
  *           returns {draft} (SD-87). The ask pins the encoded root and open
- *           titles (buildFindingsData), and a reply of B adds that choice
- *           (describeApproachChange) to the replan reason. No message cuts a reviewer
- *           value: REVIEW_SCHEMA (review-schema.js) bounds each field that
- *           reaches a message or the planner, and a field with no bound is not
- *           shown. rejected_findings lists the findings the loop rejected
- *           under recorded decisions (remediation-doctrine.md, Recorded
- *           Decisions and Repeat Findings), and undone_fixes the findings
+ *           titles (buildFindingsData) only when its pause shows them whole
+ *           (fitPinned), and a reply of B adds that choice (describeApproachChange)
+ *           to the replan reason. No message cuts a reviewer value: REVIEW_SCHEMA
+ *           (review-schema.js) bounds each field that reaches a message or the
+ *           planner, and a field with no bound is not shown. rejected_findings
+ *           lists the findings the loop rejected under recorded decisions
+ *           (remediation-doctrine.md, Recorded Decisions and Repeat Findings), and undone_fixes the findings
  *           whose failed fix the loop undid. keepReviewLists keeps each new
  *           finding_id of a usable review in run.rejected or run.undone, and
  *           sets run.open to its open_findings, before its route: a held

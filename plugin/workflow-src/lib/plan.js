@@ -582,7 +582,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
       return stopDelivery([{ problem: 'Workflow defect: the ' + resettled.kind + ' question came back after a reply settled it, so ' + RUN_NAME + ' stopped.', terminal: true, nextAction: 'report' }], run, [], true);
     }
     const lead = describePlanLine(planResult.plan);
-    const pinned = buildRepeatPinned(resolution, planResult.plan, run, replan);
+    const pinned = fitPinned(resolution, run, lead, buildRepeatPinned(resolution, planResult.plan, run, replan));
     const round = run.answerLog.length + 1;
     const reply = takeNextReply(run, round);
     if (reply === undefined) {

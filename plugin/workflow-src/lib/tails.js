@@ -28,8 +28,10 @@
  *   buildUndecidedAsk  the ask, for kind, brief and run, of a question
  *          decide() must never take.
  *   resolveTailDecision(kind, brief, run, pinned)  {} when decide() takes
- *          it, else what replanFromTailAsk returns with pinned, the must-read
- *          text of the ask or undefined.
+ *          it, else what replanFromTailAsk returns with pinned, the optional
+ *          text of the ask or undefined, passed through fitPinned
+ *          (lib/record.js): the question is asked without pinned when the
+ *          pause cannot show it whole, never ended blocked for it.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -121,5 +123,6 @@ function resolveTailDecision(kind, brief, run, pinned) {
     acceptResolution(resolution, run);
     return {};
   }
-  return replanFromTailAsk(resolution.asks[0], run, pinned);
+  const ask = resolution.asks[0];
+  return replanFromTailAsk(ask, run, fitPinned({ asks: [ask], taken: [] }, run, describeTailLead(run), pinned));
 }
