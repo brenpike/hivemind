@@ -50,9 +50,9 @@ These are the round-3 findings of the epic's [review record](review-record.md) t
 | ID | Severity | Finding | Disposition |
 | --- | --- | --- | --- |
 | B3-1 | high | The pre-spawn injection scan has no executor. | fixed: [Scanner session](claim-integrity-design.md#scanner-session) |
-| B3-3 | high | Marker comments have no author rule, so anyone can forge breaker, budget, park and sweep inputs. | fixed: [Marker signer and verifier](claim-integrity-design.md#marker-signer-and-verifier) |
-| B3-10 | medium | A claim is several writes, and the partial states and the sweep are undefined. | fixed: [Claim sequence](claim-integrity-design.md#claim-sequence) |
-| B3-11 | medium | The single-instance lock scope is not stated. | fixed: [Single-instance lock](claim-integrity-design.md#single-instance-lock) |
+| B3-3 | high | Marker comments have no author rule, so anyone can forge breaker, budget, park and sweep inputs. | fixed: [Marker signer and verifier](claim-integrity-design.md#marker-signer-and-verifier) and [Design invariants](claim-integrity-design.md#design-invariants) |
+| B3-10 | medium | A claim is several writes, and the partial states and the sweep are undefined. | fixed: [Claim sequence](claim-integrity-design.md#claim-sequence) and [Design invariants](claim-integrity-design.md#design-invariants) |
+| B3-11 | medium | The single-instance lock scope is not stated. | fixed: [Single-instance lock](claim-integrity-design.md#single-instance-lock) and [Design invariants](claim-integrity-design.md#design-invariants) |
 | B3-16 | medium | The readiness check needs one snapshot, an error state and a cost limit. | fixed: [Readiness snapshot](claim-integrity-design.md#readiness-snapshot) |
 | A3-12, breaker part | medium | The session-scoped circuit breaker was a design call that should have been asked. | fixed: [Decisions](claim-integrity-design.md#decisions) |
 | B3-18 | low | The `body_sha256` form is undefined (CRLF, null body). | fixed: [Contracts and seams](claim-integrity-design.md#contracts-and-seams) |
@@ -69,7 +69,8 @@ The other parts of A3-12 (no-merge after edit, the CI-red rule) and of B3-20 (ov
 
 - The round-3 findings of the epic's [review record](review-record.md).
 - The [claim-integrity design](claim-integrity-design.md) on this branch.
-- The user's answers to this run's three Tier A questions, given on 2026-11-21.
+- The user's answers to this run's four Tier A questions, given on 2026-11-21.
+- The pre-PR local review of this branch, whose root-cluster finding, design-invariant drift, the [Design invariants](claim-integrity-design.md#design-invariants) subsection answers. It found the orphan rule stated differently by the reconciler and the proposed decision 17 amendment, a lock scope that did not match its claims, and park marker text that broke the untrusted-text rule.
 
 ## Decisions taken (listed for veto)
 
@@ -78,29 +79,31 @@ The other parts of A3-12 (no-merge after edit, the CI-red rule) and of B3-20 (ov
 - New finding IDs take the prefix `C`, so they never collide with the epic's `A3-` and `B3-` IDs.
 - B3-22 is `recorded`, not `fixed`: the design answers it as an assumption about #615, which owns the readiness check.
 - A3-11 is noted as met for this scope, not given a disposition.
-- The design's decisions other than the three Tier A answers, each listed in its [Decisions](claim-integrity-design.md#decisions):
+- The design's decisions other than the four Tier A answers, each listed in its [Decisions](claim-integrity-design.md#decisions):
   - HMAC-SHA256 with one local key per repository, and a `kid` in every marker.
   - The state root lives outside every checkout and worktree.
   - Every marker reader fails toward stopping, and an invalid or missing marker halts the Lair.
   - Markers are append-only; the outcome is a separate outcome marker, not an edit of the claim marker.
   - Claim write order: claim marker, then labels, then spawn. Run end: outcome marker, then labels.
   - A claim that stopped partway always moves forward to `crashed`, never back to ready and never retried.
-  - The sweep covers only Lair issues: a `lair:*` label or a counting claim marker, through a proposed ADR-0045 decision 17 amendment the user chose on 2026-11-21.
-  - The lock covers one repository for one account on one machine, through `flock`.
+  - Claim state is derived once, in invariant Claim state, and labels follow counting markers under invariant Markers and labels. The reconciler moves labels forward only, and skips repair when a `readiness:ready` labeled event is newer than the latest counting outcome or handoff marker, since that event is the user's re-admission.
+  - One lock scope, invariant Lock scope: one repository, one user account and one machine, through `flock`, taken before any write other than creating the state root and the lock file. The lock descriptor is never inherited, so no tmux, strain, scanner or helper child holds it.
   - One snapshot per candidate, a Lair-side `check-error` state, and at most 5 checks of 60 seconds each per tick.
   - The scan verdict is a token file; only the exact clean token passes, malformed is suspect, and missing is an error.
   - Three consecutive scan errors halt the Lair.
   - The `body_sha256` form: a hash of the title and body hashes, with no normalization.
-  - The queue report prints only fixed keys and validated tokens, with a stage and reason codes per failure.
+  - Invariant Lair-written text: every string the Lair writes is a fixed template, a validated token or the one bounded slot, the park marker's question block (printable text only, at most 2000 bytes, fenced, read by no Lair reader). The queue report has no slot and gives a stage and reason codes per failure.
   - A parked issue keeps `lair:claimed`.
   - Only `failed`, `crashed` and `timed-out` outcomes count toward the breaker; a park is skipped, and any other outcome ends a streak.
   - The halt file's path and cause codes.
+- The proposed ADR-0045 decision 17 amendment's wording, re-derived from invariant Claim state, under the design's Changes to shared documents. It also covers a claim that stopped before its label writes, which decision 17 already names an orphaned claim. It is not applied in this pull request.
 - The proposed `solution-design.md` Amendments pointer, under the design's Changes to shared documents. It is not applied in this pull request.
 
 ## Decisions asked
 
-The user answered three Tier A questions on 2026-11-21 and took the recommended option each time.
+The user answered four Tier A questions on 2026-11-21. For the first three the user took the recommended option; for the fourth the user chose option A.
 
 - **The pre-spawn injection scan's executor and ADR-0045 decision 10.** Answer, 2026-11-21: the scan runs in a locked-down scanner session, and ADR-0045 decision 10 stays unchanged.
 - **Marker authentication.** Answer, 2026-11-21: markers are signed with a key no Lair-started session can read, and count only when unedited and written by the Lair's login. Forgery after a containment escape is a proposed ADR-0045 residual, under the design's Changes to shared documents.
 - **The circuit-breaker scope.** Answer, 2026-11-21: the breaker counts the runs that ended in the current Lair session. A trip writes the halt file with its cause, so only the user deleting that file re-arms the Lair.
+- **The sweep scope and the proposed ADR-0045 decision 17 amendment.** Answer A, 2026-11-21: the sweep covers only Lair issues, as invariant Claim state of the design defines them, through a proposed amendment to ADR-0045 decision 17 under the design's Changes to shared documents. The amendment's wording is decided for the user and listed for veto under Decisions taken.
