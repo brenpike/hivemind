@@ -475,17 +475,19 @@ FIX_TMUX="${FIX_BROOD_ID}-api"
 # Both committed fixtures are manifest_version 4 now (the v1/v2 filenames are historical: v1 is
 # the no-run-block shape, v2 carries the additive run block). This asserts the no-run-block
 # fixture parses and yields the brood-id-derived tmux_session/branch, AND that manifest_version
-# is 4 (version parity).
+# is 4 (version parity). The fixture still carries the top-level hatchery block spawn-brood no
+# longer writes, so a manifest written before that change is proven to still read.
 assert_v1_old() {
     local name="V1:old-manifest-no-run-block"
-    local session branch version
+    local session branch version has_hatchery
     session="$(extract_tmux_session "$MANIFEST_V1")"
     branch="$(extract_branch "$MANIFEST_V1")"
     version="$(jq -r '.manifest_version' "$MANIFEST_V1")"
-    if [[ "$session" == "$FIX_TMUX" && "$branch" == "$FIX_BRANCH" && "$version" == "4" ]]; then
-        pass "$name" "v1 (no-run-block) manifest_version=4; session=$session branch=$branch"
+    has_hatchery="$(jq -r '(.hatchery | type) == "object"' "$MANIFEST_V1")"
+    if [[ "$session" == "$FIX_TMUX" && "$branch" == "$FIX_BRANCH" && "$version" == "4" && "$has_hatchery" == "true" ]]; then
+        pass "$name" "v1 (no-run-block) manifest_version=4; session=$session branch=$branch; legacy hatchery block still reads"
     else
-        failed "$name" "expected $FIX_TMUX/$FIX_BRANCH/v4, got session=$session branch=$branch version=$version"
+        failed "$name" "expected $FIX_TMUX/$FIX_BRANCH/v4 + a top-level hatchery object, got session=$session branch=$branch version=$version hatchery_object=$has_hatchery"
     fi
 }
 
@@ -493,19 +495,21 @@ assert_v1_old() {
 # The additive run: block is carried (run.suggested_id kept, run.suggested_ledger DROPPED in v4).
 # Asserts the run-block fixture parses, yields the brood-id-derived session/branch, manifest_version
 # is 4, AND that the dropped run.suggested_ledger is genuinely absent while run.suggested_id remains.
+# Like Assertion 1, it also asserts the fixture still carries the legacy top-level hatchery block.
 assert_v2_new() {
     local name="V2:new-manifest-additive-run-block"
-    local session branch version sid sledger
+    local session branch version sid sledger has_hatchery
     session="$(extract_tmux_session "$MANIFEST_V2")"
     branch="$(extract_branch "$MANIFEST_V2")"
     version="$(jq -r '.manifest_version' "$MANIFEST_V2")"
     sid="$(jq -r '.strains[0].run.suggested_id // ""' "$MANIFEST_V2")"
     sledger="$(jq -r '.strains[0].run | has("suggested_ledger")' "$MANIFEST_V2")"
+    has_hatchery="$(jq -r '(.hatchery | type) == "object"' "$MANIFEST_V2")"
     if [[ "$session" == "$FIX_TMUX" && "$branch" == "$FIX_BRANCH" && "$version" == "4" \
-          && "$sid" == "${FIX_BROOD_ID}--api" && "$sledger" == "false" ]]; then
-        pass "$name" "v2 manifest_version=4; session=$session branch=$branch; suggested_id kept, suggested_ledger dropped"
+          && "$sid" == "${FIX_BROOD_ID}--api" && "$sledger" == "false" && "$has_hatchery" == "true" ]]; then
+        pass "$name" "v2 manifest_version=4; session=$session branch=$branch; suggested_id kept, suggested_ledger dropped; legacy hatchery block still reads"
     else
-        failed "$name" "expected v4 + $FIX_TMUX/$FIX_BRANCH + suggested_id=${FIX_BROOD_ID}--api + no suggested_ledger; got version=$version session=$session branch=$branch sid=$sid has_ledger=$sledger"
+        failed "$name" "expected v4 + $FIX_TMUX/$FIX_BRANCH + suggested_id=${FIX_BROOD_ID}--api + no suggested_ledger + a top-level hatchery object; got version=$version session=$session branch=$branch sid=$sid has_ledger=$sledger hatchery_object=$has_hatchery"
     fi
 }
 
@@ -1765,7 +1769,7 @@ assert_spawn_brood_facts_base_nonmatching_refused() {
 # task.md is authored in Pass 1 (per-strain provisioning) BEFORE any readiness/started-evidence
 # wait, so the assertion holds on task.md CONTENT regardless of how far the stub child boots. A
 # LOW STARTED_EVIDENCE_TIMEOUT keeps Pass 3 from burning the full default 180s grace (the stub
-# never writes a ledger, so each strain lands in `starting` quickly), keeping the case fast and
+# never writes a facts file, so each strain lands in `starting` quickly), keeping the case fast and
 # deterministic.
 #
 # DEPENDENCY GATING: identical to the escape cases — gated on tmux+jq (claude via the stub). SKIP
@@ -1804,7 +1808,7 @@ assert_spawn_brood_task_identity_not_cross_wired() {
 
     local rc=0
     local marker="$WORKDIR/launch-marker.txt"
-    # LOW STARTED_EVIDENCE_TIMEOUT: the stub never writes a run ledger, so each strain exhausts the
+    # LOW STARTED_EVIDENCE_TIMEOUT: the stub never writes a facts file, so each strain exhausts the
     # cold-boot grace and lands in `starting`. A 1s grace keeps Pass 3 fast and deterministic while
     # leaving task.md (authored in Pass 1) untouched — the assertion target.
     reap_brood_sessions
@@ -1860,8 +1864,8 @@ assert_spawn_brood_task_identity_not_cross_wired() {
 }
 
 # ── Assertion 11: DEFECT-B:alive-no-evidence-starting-exit0 (#290 regression) ────
-# Defect B (#290): when a strain's child session is ALIVE but no started-evidence (run-ledger
-# state.current) appears within the cold-boot grace, the OLD code marked the strain `failed` and
+# Defect B (#290): when a strain's child session is ALIVE but no started-evidence (a gather-facts
+# output file) appears within the cold-boot grace, the OLD code marked the strain `failed` and
 # spawn-brood exited 1 — falsely declaring a slow-but-healthy cold boot a failure. STEP-002
 # distinguishes liveness: on grace exhaustion an ALIVE tmux session ⇒ manifest status `starting`
 # (a transient, NOT `failed`), `starting` is EXCLUDED from failed_count, and spawn-brood exits 0;
@@ -1869,7 +1873,7 @@ assert_spawn_brood_task_identity_not_cross_wired() {
 #
 # This case drives that path deterministically: a claude stub that emits the READY_SUBSTRING (so
 # Pass-2 readiness passes and the strain reaches Pass-3 verify), stays ALIVE until the case kills
-# its session, and NEVER writes a run ledger (no started-evidence). A LOW STARTED_EVIDENCE_TIMEOUT
+# its session, and NEVER writes a facts file (no started-evidence). A LOW STARTED_EVIDENCE_TIMEOUT
 # makes the virtual-clock grace expire WHILE the stub session is still alive (nothing ends the stub
 # before the case does, so the verifier observes `has-session` true at exhaustion — the `starting`
 # branch, never the dead-session `failed` branch). Assert: the strain's manifest status == `starting`, spawn-brood
@@ -1998,7 +2002,7 @@ LONGSTUB_EOF
 #   - emits READY_SUBSTRING (Pass-2 readiness passes, strain reaches Pass-3 verify),
 #   - stays ALIVE until its exit file exists, so verify_strain's grace-exhaustion `has-session`
 #     probe observes the session ALIVE → classifies `starting`, NOT the dead-session `failed` branch,
-#   - and NEVER writes a run-ledger state.json (no started-evidence ever, so the sweep cannot
+#   - and NEVER writes a gather-facts output file (no started-evidence ever, so the sweep cannot
 #     promote to `running` — it must fall through to the DEAD branch).
 # A sleep hook ends the stub INSIDE the sweep's one-shot RECONCILE_SETTLE sleep: on `sleep 14` it
 # creates exit-api and returns only once the api session is gone. 14 is the only sleep argument
@@ -2082,34 +2086,29 @@ DEATHHOOK_EOF
     fi
 }
 
-# ── Assertion 13: TAIL-STARTED:starting-strain-writes-ledger-in-settle-window-promoted (#291) ──
+# ── Assertion 13: TAIL-STARTED:starting-strain-writes-facts-file-in-settle-window-promoted (#291) ──
 # The complementary reconciliation branch to Assertion 12: a strain `starting` at its verify probe
-# that CROSSES the started-evidence line (writes a valid run-ledger state.current) DURING the
+# that CROSSES the started-evidence line (writes a gather-facts output file) DURING the
 # RECONCILE_SETTLE window must be PROMOTED to `running` by the sweep, and spawn must exit 0.
 #
-# The stub launches with cwd = the child WORKTREE root (tmux runs `claude` there), so it resolves
-# its own ledger path the same way verify_started_evidence does: rel_chain =
-# .hivemind/runs/<run_id>/state.json, run_id == run.suggested_id. The internally-generated brood-id
-# (hence suggested_id) is unknown to the harness, but spawn-brood provisions task.md UNDER the
-# worktree at .hivemind/brood/task.md BEFORE launch, carrying `run.suggested_id` as a 4-space
-# block-scalar. The stub parses suggested_id from that task.md and writes a minimal valid ledger
-# ({"state":{"current":"implement_step"}}) at .hivemind/runs/<suggested_id>/state.json relative to
-# its cwd — exactly the leaf the confined reader projects.
+# The stub launches with cwd = the child WORKTREE root (tmux runs `claude` there), so it writes its
+# facts file where strain_has_started_evidence looks: .hivemind/facts/facts-<UTC>Z-<12 hex>.json
+# under the worktree, the name hivemind_detect_facts_evidence matches.
 #
-# ORDERING (fake clock, same Pass ordering as Assertion 12): the ledger must be ABSENT at the
-# verify probe (→ starting) and PRESENT at the re-probe (→ running). The stub writes no ledger until
-# start-api exists. A sleep hook creates start-api on the one-shot RECONCILE_SETTLE sleep (14, the
-# only sleep argument that is the settle) and returns only once the stub has written the ledger and
-# its started-api acknowledgement. So the ledger appears after every verify probe and before the
-# re-probe, whatever the machine's speed. The stub then stays alive until the case kills its
-# session, so the session is ALIVE through manifest emission (the sweep's running-branch needs a
+# ORDERING (fake clock, same Pass ordering as Assertion 12): the facts file must be ABSENT at the
+# verify probe (→ starting) and PRESENT at the re-probe (→ running). The stub writes no facts file
+# until start-api exists. A sleep hook creates start-api on the one-shot RECONCILE_SETTLE sleep (14,
+# the only sleep argument that is the settle) and returns only once the stub has written the facts
+# file and its started-api acknowledgement. So the facts file appears after every verify probe and
+# before the re-probe, whatever the machine's speed. The stub then stays alive until the case kills
+# its session, so the session is ALIVE through manifest emission (the sweep's running-branch needs a
 # live session as well as evidence).
 #
 # Assert: the single strain's manifest status == `running`, spawn exited 0.
 #
 # DEPENDENCY GATING: identical to Assertion 12.
 assert_spawn_brood_tail_started_promoted() {
-    local name="TAIL-STARTED:starting-strain-writes-ledger-in-settle-window-promoted-running-exit0"
+    local name="TAIL-STARTED:starting-strain-writes-facts-file-in-settle-window-promoted-running-exit0"
     local missing=""
     missing="$(spawn_deps_satisfied)" || {
         skip "$name" "spawn-brood dep check precedes the reconciliation sweep; skipping (missing: $missing)"
@@ -2120,38 +2119,24 @@ assert_spawn_brood_tail_started_promoted() {
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
 
-    # DEDICATED promotion stub: emit READY, stay un-started until start-api exists (no ledger yet →
-    # the verify probe classifies `starting`), THEN parse run.suggested_id from the provisioned
-    # task.md (cwd = child worktree root) and write a minimal valid ledger at the EXACT
-    # confined-reader leaf (.hivemind/runs/<suggested_id>/state.json) DURING the settle window,
-    # acknowledge with started-api, then stay alive until the case kills its session. The 4-space
-    # block-scalar parse mirrors the suite's parse_task_field awk.
+    # DEDICATED promotion stub: emit READY, stay un-started until start-api exists (no facts file
+    # yet → the verify probe classifies `starting`), THEN write a gather-facts output file in the
+    # worktree's facts folder (cwd = child worktree root) DURING the settle window, acknowledge
+    # with started-api, then stay alive until the case kills its session.
     local promote_stub="$WORKDIR/promote-stub"
     mkdir -p "$promote_stub"
     cat > "$promote_stub/claude" <<'PROMOTESTUB_EOF'
 #!/usr/bin/env bash
 # Promotion stub: emit readiness chrome, stay un-started until the case signals start, then cross
-# the started-evidence line DURING the reconciliation settle window by writing a valid run ledger
-# at the confined-reader leaf, then stay alive. cwd is the child worktree root.
+# the started-evidence line DURING the reconciliation settle window by writing a gather-facts
+# output file, then stay alive. cwd is the child worktree root.
 printf 'hivemind:overlord\n'
 short="$(basename "$(pwd -P)")"
 : > "$HIVEMIND_TEST_SIGNAL_DIR/booted-$short"
-# Stay un-started until start-<short> exists (ledger absent at the verify probe → starting).
+# Stay un-started until start-<short> exists (facts file absent at the verify probe → starting).
 hivemind-real-wait 120 test -e "$HIVEMIND_TEST_SIGNAL_DIR/start-$short" || exit 1
-# Resolve suggested_id from the provisioned task.md (run.suggested_id, 4-space block-scalar under
-# the top-level `run:` section). awk tracks the active top-level section so the `suggested_id` key
-# under `run:` is unambiguous.
-sid="$(awk '
-    $0 == "run:" { in_top=1; next }
-    /^[^[:space:]]/ { in_top=0 }
-    in_top && $0 == "  suggested_id: |-" { grab=1; next }
-    grab { sub(/^    /, ""); print; exit }
-' .hivemind/brood/task.md 2>/dev/null)"
-if [ -n "$sid" ]; then
-    mkdir -p ".hivemind/runs/$sid" 2>/dev/null || true
-    printf '{"state":{"current":"implement_step"},"run":{"status":"running"}}\n' \
-        > ".hivemind/runs/$sid/state.json" 2>/dev/null || true
-fi
+mkdir -p .hivemind/facts
+: > .hivemind/facts/facts-20261122T120000Z-a1b2c3d4e5f6.json
 : > "$HIVEMIND_TEST_SIGNAL_DIR/started-$short"
 # Stay alive through manifest emission (re-probe + exit-code computation).
 hivemind-real-wait 120 test -e "$HIVEMIND_TEST_SIGNAL_DIR/exit-$short"
@@ -2162,7 +2147,7 @@ PROMOTESTUB_EOF
     cat > "$promote_hook" <<'PROMOTEHOOK_EOF'
 #!/usr/bin/env bash
 # Tail-started hook: during the one-shot RECONCILE_SETTLE sleep (14), signal the api stub to write
-# its ledger and wait for its acknowledgement.
+# its facts file and wait for its acknowledgement.
 [ "$1" = "14" ] || exit 0
 : > "$HIVEMIND_TEST_SIGNAL_DIR/start-api"
 hivemind-real-wait 30 test -e "$HIVEMIND_TEST_SIGNAL_DIR/started-api"
@@ -2175,7 +2160,7 @@ PROMOTEHOOK_EOF
         --arg overlap_risk "low" \
         --arg overlap_details "tail-started reconciliation regression (#291): starting strain crosses started-evidence in settle window" \
         --arg strain_name "api" \
-        --arg strain_desc "starting at verify probe, writes run ledger before the reconciliation re-probe" \
+        --arg strain_desc "starting at verify probe, writes a facts file before the reconciliation re-probe" \
         '{
             base: $base,
             overlap_risk: $overlap_risk,
@@ -2188,7 +2173,7 @@ PROMOTEHOOK_EOF
     local stdout_out="$WORKDIR/spawn-stdout.txt"
     local marker="$WORKDIR/launch-marker.txt"
     # STARTED_EVIDENCE_TIMEOUT=2 (verify exhausts while the stub is still un-started → starting).
-    # RECONCILE_SETTLE=14 (the hook has the stub write its ledger inside that settle, so the
+    # RECONCILE_SETTLE=14 (the hook has the stub write its facts file inside that settle, so the
     # re-probe observes started-evidence → promote to running).
     reap_brood_sessions
     ( cd "$gitroot" && PATH="$promote_stub:$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
@@ -2212,7 +2197,7 @@ PROMOTEHOOK_EOF
     fi
 
     if [[ "$rc" -eq 0 && "$manifest_status" == "running" ]]; then
-        pass "$name" "starting strain that wrote its ledger in the settle window promoted -> manifest status=running; exit 0"
+        pass "$name" "starting strain that wrote its facts file in the settle window promoted -> manifest status=running; exit 0"
     else
         failed "$name" "expected exit 0 + status=running; rc=$rc status=$manifest_status manifest=${manifest:-<none>}"
     fi
@@ -2610,6 +2595,178 @@ assert_spawn_brood_settings_symlink_source_refused() {
         pass "$name" "symlinked coordinator settings refused in pre-flight (exit 1); no worktree, no launch, marker copied nowhere"
     else
         failed "$name" "expected exit 1 + refusal blocker + no worktree + no launch + marker nowhere; rc=$rc refusal=$refusal worktree_leaked=$worktree_leaked stub_launched=$stub_launched marker_copied=$marker_copied stderr: $(cat "$stderr_out" 2>/dev/null)"
+    fi
+}
+
+# ── Assertion 13h: LEDGER-ALONE:run-ledger-without-facts-file-stays-starting ─────
+# A child run ledger is no longer started-evidence: only a gather-facts output file is. A stub
+# child parses run.suggested_id from its task.md (as the old Assertion 13 stub did), writes a valid
+# run ledger at .hivemind/runs/<run.suggested_id>/state.json BEFORE its readiness line, writes no
+# facts file, then stays alive recording every line it receives. The ledger is on disk at every
+# verify probe and at the reconciliation re-probe, so a spawn-brood that still counted a ledger
+# would promote the strain to `running` and send it `/rc`. Assert: the ledger was written, no facts
+# folder exists, exit 0, manifest status `starting`, exactly one skipped remote line, and no `/rc`
+# received (proven against a sentinel line the stub records after spawn-brood returns).
+#
+# DEPENDENCY GATING: gated on tmux+jq (claude via the stub). SKIP cleanly when any is absent.
+assert_spawn_brood_ledger_alone_stays_starting() {
+    local name="LEDGER-ALONE:run-ledger-without-facts-file-stays-starting-no-rc"
+    local missing=""
+    missing="$(spawn_deps_satisfied)" || {
+        skip "$name" "spawn-brood dep check precedes verify; skipping (missing: $missing)"
+        return
+    }
+
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
+    local gitroot="$WORKDIR/brood-git"
+    init_spawn_repo "$gitroot"
+
+    # DEDICATED ledger-only stub: cwd is the child worktree root. The 45 s idle read timeout only
+    # stops a leaked stub; the case kills its session.
+    local ledger_stub="$WORKDIR/ledger-stub"
+    mkdir -p "$ledger_stub"
+    cat > "$ledger_stub/claude" <<'LEDGERSTUB_EOF'
+#!/usr/bin/env bash
+# Ledger-only stub: write a valid run ledger at the suggested run id, never a facts file, emit
+# readiness chrome, then record every received line until the case kills the session.
+sid="$(awk '
+    $0 == "run:" { in_top=1; next }
+    /^[^[:space:]]/ { in_top=0 }
+    in_top && $0 == "  suggested_id: |-" { grab=1; next }
+    grab { sub(/^    /, ""); print; exit }
+' .hivemind/brood/task.md 2>/dev/null)"
+if [ -n "$sid" ]; then
+    mkdir -p ".hivemind/runs/$sid" \
+        && printf '{"state":{"current":"implement_step"},"run":{"status":"running"}}\n' \
+            > ".hivemind/runs/$sid/state.json"
+fi
+printf 'hivemind:overlord\n'
+: > "$HIVEMIND_TEST_SIGNAL_DIR/booted-$(basename "$(pwd -P)")"
+while IFS= read -r -t 45 received_line; do
+    printf '%s\n' "$received_line" >> .hivemind/stub-received.txt
+done
+exit 0
+LEDGERSTUB_EOF
+    chmod +x "$ledger_stub/claude"
+    local inputs="$gitroot/brood-inputs.json"
+    write_one_strain_inputs "$inputs" "main" "child that writes a run ledger and no facts file"
+
+    local rc=0
+    local stdout_out="$WORKDIR/spawn-stdout.txt"
+    local marker="$WORKDIR/launch-marker.txt"
+    # STARTED_EVIDENCE_TIMEOUT=3 (as Assertion 11): the grace exhausts while the stub is alive, below
+    # RESEND_POLL_TIMEOUT (8), so no bare-Enter nudge fires.
+    reap_brood_sessions
+    ( cd "$gitroot" && PATH="$ledger_stub:$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" \
+        STARTED_EVIDENCE_TIMEOUT=3 bash "$SPAWN_SCRIPT" "$inputs" ) >"$stdout_out" 2>/dev/null || rc=$?
+    local launched_session wt received sentinel_seen=no
+    local sentinel_line="hivemind-test-sentinel"
+    launched_session="$(launched_session_name "$stdout_out")"
+    wt="$(find_strain_worktree "$gitroot")"
+    received="$wt/.hivemind/stub-received.txt"
+    if [ -n "$launched_session" ] && tmux send-keys -t "$launched_session" "$sentinel_line" Enter 2>/dev/null \
+         && wait_for_received_line "$received" "$sentinel_line"; then
+        sentinel_seen=yes
+    fi
+    [ -n "$launched_session" ] && tmux kill-session -t "$launched_session" 2>/dev/null || true
+    tmux kill-server 2>/dev/null || true
+
+    local manifest manifest_status="" suggested_id="" ledger_written=no facts_absent=no
+    local rc_received=no skipped_line=no
+    manifest="$(find_brood_manifest "$gitroot")"
+    if [ -n "$manifest" ]; then
+        manifest_status="$(jq -r '.strains[0].status // ""' "$manifest" 2>/dev/null)"
+        suggested_id="$(jq -r '.strains[0].run.suggested_id // ""' "$manifest" 2>/dev/null)"
+    fi
+    if [ -n "$wt" ] && [ -n "$suggested_id" ] \
+         && jq -e '.state.current == "implement_step"' "$wt/.hivemind/runs/$suggested_id/state.json" >/dev/null 2>&1; then
+        ledger_written=yes
+    fi
+    [ -n "$wt" ] && [ ! -e "$wt/.hivemind/facts" ] && facts_absent=yes
+    grep -q '^/rc' "$received" 2>/dev/null && rc_received=yes
+    [[ "$(grep -cxF 'remote: skipped: api (not started when spawn ended; ask for enable-brood-remote later)' "$stdout_out" 2>/dev/null || true)" == "1" ]] && skipped_line=yes
+
+    if [[ "$rc" -eq 0 && "$manifest_status" == "starting" && "$ledger_written" == "yes" && "$facts_absent" == "yes" \
+          && "$sentinel_seen" == "yes" && "$rc_received" == "no" && "$skipped_line" == "yes" ]]; then
+        pass "$name" "run ledger alone is not started-evidence -> status=starting; exit 0; one remote skipped line; no /rc sent"
+    else
+        failed "$name" "expected exit 0 + status=starting + ledger written + no facts folder + sentinel recorded + no /rc + one skipped line; rc=$rc status=$manifest_status ledger_written=$ledger_written facts_absent=$facts_absent sentinel_seen=$sentinel_seen rc_received=$rc_received skipped_line=$skipped_line manifest=${manifest:-<none>} stdout: $(cat "$stdout_out" 2>/dev/null)"
+    fi
+}
+
+# ── Assertion 13i: NO-HATCHERY:hatchery-input-never-reaches-the-manifest ──────────
+# spawn-brood no longer reads a hatchery input or writes a hatchery manifest block. The inputs carry
+# a hatchery object; the spawn must still succeed, and the manifest it writes must have no hatchery
+# key while keeping manifest_version 4, hatchery_session and strains[0].run.suggested_id.
+#
+# DEPENDENCY GATING: gated on tmux+jq (claude via the stub). SKIP cleanly when any is absent.
+assert_spawn_brood_no_hatchery_manifest_block() {
+    local name="NO-HATCHERY:hatchery-input-ignored-manifest-has-no-hatchery-key"
+    local missing=""
+    missing="$(spawn_deps_satisfied)" || {
+        skip "$name" "spawn-brood dep check precedes the manifest write; skipping (missing: $missing)"
+        return
+    }
+
+    make_scratch_dir WORKDIR "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX"
+    local gitroot="$WORKDIR/brood-git"
+    init_spawn_repo "$gitroot"
+    local plain_inputs="$WORKDIR/plain-inputs.json"
+    write_one_strain_inputs "$plain_inputs" "main" "child whose inputs carry a hatchery object"
+    local inputs="$gitroot/brood-inputs.json"
+    jq '. + {hatchery: {run_id: "coordinator-hatchery-run", workflow: "hatchery-dispatch"}}' \
+        "$plain_inputs" > "$inputs"
+
+    local rc=0
+    local stderr_out="$WORKDIR/spawn-stderr.txt"
+    local marker="$WORKDIR/launch-marker.txt"
+    reap_brood_sessions
+    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" \
+        STARTED_EVIDENCE_TIMEOUT=1 bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>"$stderr_out" || rc=$?
+    tmux kill-server 2>/dev/null || true
+
+    local manifest has_hatchery="" version="" has_session="" suggested_id=""
+    manifest="$(find_brood_manifest "$gitroot")"
+    if [ -n "$manifest" ]; then
+        has_hatchery="$(jq -r 'has("hatchery")' "$manifest" 2>/dev/null)"
+        version="$(jq -r '.manifest_version' "$manifest" 2>/dev/null)"
+        has_session="$(jq -r 'has("hatchery_session")' "$manifest" 2>/dev/null)"
+        suggested_id="$(jq -r '.strains[0].run.suggested_id // ""' "$manifest" 2>/dev/null)"
+    fi
+
+    if [[ "$rc" -eq 0 && "$has_hatchery" == "false" && "$version" == "4" && "$has_session" == "true" && -n "$suggested_id" ]]; then
+        pass "$name" "hatchery input ignored; manifest has no hatchery key; manifest_version=4; hatchery_session and run.suggested_id present; exit 0"
+    else
+        failed "$name" "expected exit 0 + no hatchery key + manifest_version 4 + hatchery_session + run.suggested_id; rc=$rc has_hatchery=$has_hatchery version=$version has_session=$has_session suggested_id=$suggested_id manifest=${manifest:-<none>} stderr: $(cat "$stderr_out" 2>/dev/null)"
+    fi
+}
+
+# ── Assertion 13j: SOURCE:spawn-brood-reads-no-hatchery-and-no-child-ledger ───────
+# A dependency-free scan of spawn-brood.sh code lines (comment lines dropped): no `.hatchery` inputs
+# read, no `hatchery:` manifest key, no hivemind_brood_read_child_ledger call, no ledger-project.sh
+# source, and strain_has_started_evidence calls hivemind_detect_facts_evidence.
+assert_spawn_brood_source_no_hatchery_no_ledger() {
+    local name="SOURCE:spawn-brood-no-hatchery-no-child-ledger-facts-only-evidence"
+    local spawn_source code_lines evidence_body problems=""
+    spawn_source="$(cat "$SPAWN_SCRIPT")"
+    code_lines="$(grep -v '^[[:space:]]*#' <<<"$spawn_source" || true)"
+    grep -qE '\.hatchery([^_[:alnum:]]|$)' <<<"$code_lines" && problems+=" reads-.hatchery-inputs"
+    grep -qE '(^|[^_[:alnum:]])hatchery:' <<<"$code_lines" && problems+=" writes-hatchery-manifest-key"
+    grep -qF 'hivemind_brood_read_child_ledger' <<<"$code_lines" && problems+=" calls-hivemind_brood_read_child_ledger"
+    grep -qF 'ledger-project.sh' <<<"$code_lines" && problems+=" sources-ledger-project.sh"
+    evidence_body="$(awk '/^strain_has_started_evidence\(\) \{/ { in_fn=1 } in_fn { print } in_fn && /^\}/ { in_fn=0 }' <<<"$code_lines")"
+    if [ -z "$evidence_body" ]; then
+        problems+=" no-strain_has_started_evidence-function"
+    elif ! grep -qF 'hivemind_detect_facts_evidence' <<<"$evidence_body"; then
+        problems+=" strain_has_started_evidence-skips-hivemind_detect_facts_evidence"
+    fi
+
+    if [[ -z "$problems" ]]; then
+        pass "$name" "spawn-brood.sh reads no hatchery input, writes no hatchery key, reads no child ledger; started-evidence is hivemind_detect_facts_evidence"
+    else
+        failed "$name" "spawn-brood.sh source:$problems"
     fi
 }
 
@@ -4628,6 +4785,9 @@ assert_spawn_brood_exact_session_not_prefix_sibling
 assert_spawn_brood_manifest_temp_symlink_not_followed
 assert_spawn_brood_inputs_snapshot_read_once
 assert_spawn_brood_settings_symlink_source_refused
+assert_spawn_brood_ledger_alone_stays_starting
+assert_spawn_brood_no_hatchery_manifest_block
+assert_spawn_brood_source_no_hatchery_no_ledger
 assert_reconcile_settle_clamp_bounds_huge_override
 
 echo ''
