@@ -13,6 +13,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [11.0.0] - 2026-11-22
+
+### Changed
+
+- The workflow router (`hivemind:route-workflow`) keeps four catalog entries: `analysis-only`, `standard-delivery`, `pr-feedback-remediation` and `hatchery-dispatch`, and three outcomes: `selected`, `ambiguous` and `blocked`. A request that fits no entry now routes to `analysis-only` when it asks for no change, to `standard-delivery` when it asks for one, and to an ambiguous question otherwise.
+- The overlord now surfaces a router status of `blocked`, or any status it does not know, as blocked.
+
+### Removed
+
+- BREAKING: the `exploratory-intent-session` route, the router's `exploratory` outcome and the escape-hatch-decay guard (section G). A request that used to route there now follows the no-fit rule above.
+- Tests: the route-catalog parity test against the packaged workflow definitions, replaced by a fixed pin of the four entries. The site test's workflow list now reads the router catalog.
+
+No migration is needed.
+
+No prose budget raised.
+
+Issue: #653.
+
 ## [10.1.1] - 2026-11-22
 
 ### Changed

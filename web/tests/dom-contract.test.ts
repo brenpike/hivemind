@@ -149,9 +149,8 @@ function listSkillNames(): string[] {
 }
 
 function listWorkflowNames(): string[] {
-  return readdirSync(join(REPO_ROOT, 'plugin', 'workflows'))
-    .filter((entry) => entry.endsWith('.json') && entry !== 'workflow-router.json')
-    .map((entry) => basename(entry, '.json'));
+  const routerSkill = readFileSync(join(REPO_ROOT, 'plugin', 'skills', 'route-workflow', 'SKILL.md'), 'utf8');
+  return [...routerSkill.matchAll(/^- `([a-z-]+)`: /gm)].map((match) => match[1]);
 }
 
 function sortedCopy(values: string[]): string[] {
