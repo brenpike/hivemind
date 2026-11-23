@@ -2,7 +2,7 @@
   "rule": "Decision-autonomy governance doc consumer coupling",
   "source": {
     "file": "plugin/governance/decision-autonomy.md",
-    "pattern": "## Post-Merge Decision Report Trigger"
+    "pattern": "## Decision Journal"
   },
   "consumers": [
     {
@@ -11,7 +11,7 @@
     },
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "(Post-Merge Decision Report Trigger)"
+      "pattern": "**Journal.** List each decision per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Journal)."
     },
     {
       "file": "plugin/agents/overlord.md",

@@ -1,6 +1,6 @@
 {
   "rule": "PR requires validation pass",
-  "description": "P3 coupling. The open-plan-pr consumer pin carries the outcome discriminator — Blocked (`stage: validation`). WHICH report outcome forces exit 1 is the claim-carrying antecedent; pinning only the obligation leaves the exit rekeyable on a different outcome with the suite green.",
+  "description": "P3 coupling. The overlord consumer pins the Delivery sentence that commits by `hivemind:molt` and validates per the Validation Procedure section. The open-plan-pr consumer pin carries the outcome discriminator — Blocked (`stage: validation`). WHICH report outcome forces exit 1 is the claim-carrying antecedent; pinning only the obligation leaves the exit rekeyable on a different outcome with the suite green.",
   "source": {
     "file": "plugin/governance/workflow.md",
     "pattern": "Open PR only when: plan complete, validation passed, version bump included if required, branch pushed"
@@ -8,7 +8,7 @@
   "consumers": [
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "at a `validate` state, run validation per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure)"
+      "pattern": "commits by `hivemind:molt`, one per wave; validation per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure)"
     },
     {
       "file": "plugin/skills/open-plan-pr/SKILL.md",

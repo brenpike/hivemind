@@ -8,6 +8,8 @@ import { buildWorkflow } from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const overlordText = readFileSync(repoRoot + 'plugin/agents/overlord.md', 'utf8').replace(/\r/g, '');
+const autonomyText = readFileSync(repoRoot + 'plugin/governance/decision-autonomy.md', 'utf8').replace(/\r/g, '');
+const doctrineText = readFileSync(repoRoot + 'plugin/governance/remediation-doctrine.md', 'utf8').replace(/\r/g, '');
 const resultLib = loadLibs([repoRoot + 'plugin/workflow-src/lib/result.js']);
 const DELIVERY_ID = 'standard-delivery';
 const REMEDIATION_ID = 'pr-feedback-remediation';
@@ -76,13 +78,17 @@ const { frontmatter, body } = splitFrontmatter(overlordText);
 const engineSection = readSection(body, '## Engine');
 const defectParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('A notice is cut only when its result is not one complete JSON object;')) ?? '';
 const relayParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('Only the harness completion notice is the run\'s result, never your own summary.')) ?? '';
-const stateExecutionSection = readSection(body, '## Workflow State Execution');
-const questionGateParagraph = stateExecutionSection.split('\n\n').find((paragraph) => paragraph.startsWith('**Question gate.**')) ?? '';
 const engineSentences = engineSection.split(/(?<=[.!?])\s+/);
 const handOffParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('After you show `message`, when the result carries `pr`,')) ?? '';
 const stopParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('When the user asks to stop a launched run')) ?? '';
 const waitParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('When the result carries `retry_minutes`,')) ?? '';
-const escalationParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('Outside `## Instinct` and outside a state-machine run,')) ?? '';
+const escalationParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('Outside `## Instinct`,')) ?? '';
+const OPT_IN_LEAD = 'The `Workflow` tool\'s approval prompt is the only opt-in to a workflow.';
+const FALLBACK_LEAD = 'At an interactive autonomy level, the only levels today,';
+const fallbackParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith(FALLBACK_LEAD)) ?? '';
+const safetyRailsSection = readSection(body, '## Safety Rails');
+const postureSection = readSection(body, '## Review Remediation Posture');
+const reviewerQuestionsParagraph = postureSection.split('\n\n').find((paragraph) => paragraph.startsWith('**Reviewer questions.**')) ?? '';
 
 function readDeliveryLaunchArgNames() {
   const template = engineSection.match(/only these args: `(\{[^`]*\})`/);
@@ -196,16 +202,30 @@ describe('overlord Engine section', () => {
     }
   });
   test('Engine states the fallback clause', () => {
+    const paragraphs = engineSection.split('\n\n');
+    const optInIndex = paragraphs.findIndex((paragraph) => paragraph.startsWith(OPT_IN_LEAD));
+    assert.notEqual(optInIndex, -1, `## Engine has no paragraph starting ${OPT_IN_LEAD}`);
+    assert.notEqual(fallbackParagraph, '', `## Engine has no paragraph starting ${FALLBACK_LEAD}`);
+    assert.equal(paragraphs.indexOf(fallbackParagraph), optInIndex + 1, 'the fallback paragraph does not sit right after the opt-in paragraph');
     for (const phrase of [
-      'For `standard-delivery`, launch only when `## Instinct` picks the engine',
-      'If a `standard-delivery` launch is refused or blocked (denied, not found, or workflows turned off), or the started run fails or ends blocked, say so in one line and continue on Instinct from the branch\'s last commit without asking;',
-      'the final report says it switched and where the engine stopped.',
-      'Uncommitted edits the failed run left stop the takeover per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State) and are never discarded',
-      'Instinct never relaunches the engine.',
+      '`standard-delivery`',
+      '`analysis-only`',
+      '`pr-feedback-remediation`',
+      'without asking, said in one line',
+      'continues from the branch\'s last commit',
+      'reported as it ended',
+      'says it switched and where the run stopped',
+      '`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State)',
+      'Instinct never relaunches a workflow.',
       'A run the user stopped does not fall back.',
-      'Any other workflow runs a refused or blocked launch on the state machine and reports a started run as it ended.',
     ]) {
-      assert.ok(normalizeWhitespace(engineSection).includes(normalizeWhitespace(phrase)), `## Engine fallback clause lacks ${phrase}`);
+      assert.ok(normalizeWhitespace(fallbackParagraph).includes(normalizeWhitespace(phrase)), `## Engine fallback paragraph lacks ${phrase}`);
+    }
+  });
+  test('no other Engine paragraph names on Instinct', () => {
+    const otherParagraphs = engineSection.split('\n\n').filter((paragraph) => paragraph !== fallbackParagraph);
+    for (const paragraph of otherParagraphs) {
+      assert.ok(!paragraph.includes('on Instinct'), `an Engine paragraph other than the fallback names on Instinct: ${paragraph}`);
     }
   });
 });
@@ -270,8 +290,9 @@ describe('overlord pull request hand-off and opt-in', () => {
       assert.ok(!reflexSection.includes(phrase), `## Reflex (Ledger-Skip) restates the watch predicate: ${phrase}`);
     }
   });
-  test('Engine never enters the state machine for the launched request', () => {
-    assert.ok(engineSection.includes('Do not enter the workflow state machine or create a run ledger for the launched request.'));
+  test('Engine names no state machine and no run ledger', () => {
+    assert.doesNotMatch(engineSection, /state.machine/i, '## Engine still names a state machine');
+    assert.ok(!engineSection.includes('run ledger'), '## Engine still names a run ledger');
   });
   test('Engine states the approval prompt opt-in, that a No interrupts the turn, and the permissions.deny opt-out', () => {
     for (const phrase of ['The `Workflow` tool\'s approval prompt is the only opt-in to a workflow.', 'A No there interrupts the turn: nothing runs and nothing falls back.', 'A `Workflow(hivemind:<id>)` entry in `permissions.deny` is the opt-out: it denies the launch, which falls back as stated next']) {
@@ -283,24 +304,22 @@ describe('overlord pull request hand-off and opt-in', () => {
 describe('overlord watch escalation to pr-feedback-remediation', () => {
   const remediationFunctions = loadWorkflowFunctions(REMEDIATION_ID, 'runRemediation');
   test('Engine has the escalation paragraph', () => {
-    assert.notEqual(escalationParagraph, '', '## Engine has no paragraph starting Outside `## Instinct` and outside a state-machine run,');
+    assert.notEqual(escalationParagraph, '', '## Engine has no paragraph starting Outside `## Instinct`,');
   });
   test('the escalation paragraph launches pr-feedback-remediation by name on both watch exits', () => {
     for (const phrase of ['a watch ending `planner-escalation` or `root-cluster-suspected` launches `pr-feedback-remediation` by name', 'and no other key.']) {
       assert.ok(escalationParagraph.includes(phrase), `escalation paragraph lacks ${phrase}`);
     }
   });
-  test('the escalation paragraph excludes Instinct and state-machine runs, and Instinct does not name the workflow', () => {
-    assert.ok(escalationParagraph.startsWith('Outside `## Instinct` and outside a state-machine run,'), 'escalation paragraph lacks the Instinct and state-machine exclusion');
+  test('the escalation paragraph excludes Instinct, and Instinct does not name the workflow', () => {
+    assert.ok(escalationParagraph.startsWith('Outside `## Instinct`,'), 'escalation paragraph lacks the Instinct exclusion');
     assert.ok(!readSection(body, '## Instinct').includes('pr-feedback-remediation'), '## Instinct names pr-feedback-remediation');
   });
-  test('the escalation paragraph falls back to the state machine with intake fix', () => {
-    assert.ok(escalationParagraph.includes('A refused or blocked launch takes the state machine with intake outcome `fix`.'), 'escalation paragraph lacks the fix-intake fallback');
-  });
-  test('the escalation paragraph checks out the PR head branch for a routed request, then watches or launches', () => {
-    for (const phrase of ['A request routed to `pr-feedback-remediation` first checks out the PR\'s head branch', 'then runs the watch', 'or for a one-shot fix launches as above.']) {
+  test('the escalation paragraph runs the watch for a routed request, or launches a one-shot fix', () => {
+    for (const phrase of ['A request routed to `pr-feedback-remediation` runs the watch', 'or for a one-shot fix launches as above.']) {
       assert.ok(escalationParagraph.includes(phrase), `escalation paragraph lacks ${phrase}`);
     }
+    assert.ok(!escalationParagraph.includes('checks out'), 'escalation paragraph still checks out the PR head itself');
   });
   test('Engine keeps pr-feedback-remediation off the generic routed launch', () => {
     for (const phrase of ['for `pr-feedback-remediation`, only as stated below.', 'Launch no workflow this section does not name, and write no workflow script.']) {
@@ -376,68 +395,133 @@ describe('overlord workflow definition reads', () => {
   test('overlord.md has no pointer into the workflows directory', () => {
     assert.ok(!overlordText.includes('${CLAUDE_PLUGIN_ROOT}/workflows/'), 'overlord.md still points into ${CLAUDE_PLUGIN_ROOT}/workflows/');
   });
-  test('Workflow State Execution takes the state from the engine output lines', () => {
-    for (const phrase of ['`current_state`', '`state_definition`', '`hivemind:init-run-ledger`', '`hivemind:record-state-result`']) {
-      assert.ok(stateExecutionSection.includes(phrase), `## Workflow State Execution lacks ${phrase}`);
-    }
+});
+
+// These check each Safety Rails phrase is present, never its meaning, per tests/policy/README.md (1. Honest capability statement); issue 656.
+describe('overlord Safety Rails facts and PR-head rules', () => {
+  test('Safety Rails holds on every path', () => {
+    assertSectionHasPhrases('## Safety Rails', ['Hard stops on every path you drive: the Reflex tail, a launched workflow and Instinct, its fallback included.']);
   });
-  test('Workflow State Execution gathers facts before cerebrate and stops on a cut', () => {
+  test('Safety Rails gathers facts before cerebrate and stops on a cut', () => {
     for (const phrase of ['`hivemind:gather-facts`', '`facts_file`', '`facts_lines`', '`cut`']) {
-      assert.ok(stateExecutionSection.includes(phrase), `## Workflow State Execution lacks ${phrase}`);
+      assert.ok(safetyRailsSection.includes(phrase), `## Safety Rails lacks ${phrase}`);
     }
   });
-  test('Workflow State Execution has a Question gate paragraph', () => {
-    assert.notEqual(questionGateParagraph, '', '## Workflow State Execution has no paragraph starting **Question gate.**');
+  test('Safety Rails sends the scan rule to the gather-facts consumer rules, and delivery stops nothing', () => {
+    assert.ok(safetyRailsSection.includes('the scan its consumer rules require does not pass'), '## Safety Rails does not defer the scan rule to the skill consumer rules');
+    assert.ok(safetyRailsSection.includes('the texts the scan did not account for'), '## Safety Rails does not surface the texts the scan did not account for');
+    assert.ok(safetyRailsSection.includes('`delivery` and `delivery_stops` stop nothing'), '## Safety Rails lets delivery or delivery_stops stop the run');
   });
-  test('the Question gate paragraph routes to the question user gate and asks the user', () => {
-    for (const phrase of ['routes to the `question` user gate', 'record that result', 'ask the user the question in plain words, with its options and any recommendation it carries, and wait']) {
-      assert.ok(questionGateParagraph.includes(phrase), `Question gate paragraph lacks ${phrase}`);
-    }
-  });
-  test('the Question gate outcome names the state that asked, or cancelled', () => {
-    for (const phrase of ['Record the gate outcome as the name of the state that asked (the ledger\'s previous state)', 'or `cancelled` when the reply cancels']) {
-      assert.ok(questionGateParagraph.includes(phrase), `Question gate paragraph lacks ${phrase}`);
-    }
-  });
-  test('the Question gate reruns the state that asked with user_answer', () => {
-    for (const phrase of ['run the state that asked again and pass `user_answer`', 'the user\'s reply verbatim', '`candidate_url`', 'take it as their `user_answer` input', '`hivemind:cerebrate` gets it in the delegation as the decision on that question: the run\'s when marked `decided_by: run`, otherwise the user\'s.']) {
-      assert.ok(questionGateParagraph.includes(phrase), `Question gate paragraph lacks ${phrase}`);
-    }
-  });
-  test('the Question gate carries user_answer into planning', () => {
-    assert.ok(questionGateParagraph.includes('escalates to a planning state, that planning delegation carries the same `user_answer`'), 'Question gate paragraph lacks the carry into planning');
-  });
-  test('the Question gate keeps GitHub text as external content', () => {
-    assert.ok(questionGateParagraph.includes('external content'), 'Question gate paragraph lacks external content');
-    assert.ok(questionGateParagraph.includes('data-boundary sentence'), 'Question gate paragraph lacks the data-boundary sentence');
-  });
-  test('the Question gate states the resume rule', () => {
-    for (const phrase of ['On `## Resume On Start` at `question`, the reply is not in the ledger', 'run that state again without an answer, so it asks again']) {
-      assert.ok(questionGateParagraph.includes(phrase), `Question gate paragraph lacks ${phrase}`);
-    }
-  });
-  test('the Question gate takes a pausing exit on any path as the state that asked', () => {
-    assert.ok(questionGateParagraph.includes('exit on any path takes this gate as the state that asked'), 'Question gate paragraph lacks the pausing-exit sentence');
-  });
-  test('each pausing exit token has its single home in the Question gate', () => {
-    for (const token of ['`user-input-required`', '`high-severity-rejection`']) {
-      assert.equal(body.split(token).length - 1, 1, `overlord body names ${token} other than exactly once`);
-      assert.ok(questionGateParagraph.includes(token), `Question gate paragraph lacks ${token}`);
-    }
-  });
-  test('a path with no run ledger sends every run-ledger write, the Question gate\'s included, to the final report', () => {
-    const rule = 'Without a run ledger, each run-ledger write goes to the final report.';
-    assert.equal(body.split(rule).length - 1, 1, 'overlord body states the no-ledger rule other than exactly once');
-    assert.ok(readSection(body, '## Continuous Execution').includes(rule), '## Continuous Execution lacks the no-ledger rule');
-    assert.ok(!readSection(body, '## Instinct').includes('run-ledger write'), '## Instinct keeps its own copy of the no-ledger rule');
-  });
-  test('Workflow State Execution sends the scan rule to the gather-facts consumer rules', () => {
-    assert.ok(stateExecutionSection.includes('the scan its consumer rules require does not pass'), '## Workflow State Execution does not defer the scan rule to the skill consumer rules');
-    assert.ok(stateExecutionSection.includes('the texts the scan did not account for'), '## Workflow State Execution does not surface the texts the scan did not account for');
+  test('Safety Rails checks out the PR head before any reviewer and stops blocked when it cannot', () => {
+    assertSectionHasPhrases('## Safety Rails', [
+      'Before delegating to any reviewer for an existing pull request, resolve its head branch (e.g. via `gh pr view`) and check it out, so remediation commits land on it.',
+      'When the branch cannot be resolved or checked out, stop blocked.',
+    ]);
   });
 });
 
-// These check each phrase is present inside its own `## ` section, never its meaning, per tests/policy/README.md (1. Honest capability statement); ADR-0039 decisions 2 to 4.
+// These check the reviewer question rerun rule's phrases in its own paragraph, never its meaning, per tests/policy/README.md (1. Honest capability statement); issue 656.
+describe('overlord Reviewer questions', () => {
+  test('Review Remediation Posture has a Reviewer questions paragraph', () => {
+    assert.notEqual(reviewerQuestionsParagraph, '', '## Review Remediation Posture has no paragraph starting **Reviewer questions.**');
+  });
+  test('Reviewer questions reruns the run that asked with user_answer', () => {
+    for (const phrase of ['then run it again and pass `user_answer`', 'the user\'s reply verbatim', '`candidate_url`', '`hivemind:cerebrate` gets it in the delegation as the decision on that question: the run\'s when marked `decided_by: run`, otherwise the user\'s.']) {
+      assert.ok(reviewerQuestionsParagraph.includes(phrase), `Reviewer questions paragraph lacks ${phrase}`);
+    }
+  });
+  test('Reviewer questions carries user_answer into planning', () => {
+    assert.ok(reviewerQuestionsParagraph.includes('the planning delegation carries the same `user_answer`'), 'Reviewer questions paragraph lacks the carry into planning');
+  });
+  test('Reviewer questions keeps GitHub text as external content', () => {
+    assert.ok(reviewerQuestionsParagraph.includes('external content'), 'Reviewer questions paragraph lacks external content');
+    assert.ok(reviewerQuestionsParagraph.includes('data-boundary sentence'), 'Reviewer questions paragraph lacks the data-boundary sentence');
+  });
+  test('each pausing exit token has its single home in Reviewer questions', () => {
+    for (const token of ['`user-input-required`', '`high-severity-rejection`']) {
+      assert.equal(body.split(token).length - 1, 1, `overlord body names ${token} other than exactly once`);
+      assert.ok(reviewerQuestionsParagraph.includes(token), `Reviewer questions paragraph lacks ${token}`);
+    }
+  });
+});
+
+// These check each removed section and item stays absent and each kept citation agrees with its heading, never their meaning, per tests/policy/README.md (1. Honest capability statement); issue 656.
+describe('overlord one-engine removals and kept pins', () => {
+  test('the four deleted sections are absent', () => {
+    for (const heading of ['## Workflow State Execution', '## Implement Loop (Wave Execution)', '## Resume On Start', '## Intent-Driven Fallback (Universal)']) {
+      assert.ok(!body.split('\n').includes(heading), `overlord body still has ${heading}`);
+    }
+  });
+  test('the overlord body names no removed item', () => {
+    assert.doesNotMatch(body, /state.machine/i, 'overlord body still names a state machine');
+    assert.doesNotMatch(body, /workflow state/i, 'overlord body still names a workflow state');
+    for (const phrase of [
+      'run ledger',
+      'event.outputs',
+      'request.raw',
+      'watch_optout_citation',
+      'pr_branch_preflight',
+      'github_review_decision',
+      'user_gate',
+      'Question gate',
+      'HIVEMIND_ENABLE_DECISION_REPORT',
+      '.decision-report-done',
+      'Post-Merge Decision Report Trigger',
+      'Proactive Zoom-Out Ledger Marker',
+      'hivemind:init-run-ledger',
+      'hivemind:record-state-result',
+      'hivemind:next-wave',
+      'hivemind:mark-intent-fallback',
+      'hivemind:decision-report',
+      'exploratory',
+    ]) {
+      assert.ok(!body.includes(phrase), `overlord body still names ${phrase}`);
+    }
+  });
+  test('the Final Report block holds the Decisions line right after its Review line', () => {
+    const reportBlock = readSection(body, '## Final Report').match(/```text\n([\s\S]*?)\n```/);
+    assert.ok(reportBlock, '## Final Report has no text block');
+    const reportLines = reportBlock[1].split('\n');
+    const reviewIndex = reportLines.findIndex((line) => line.startsWith('Review:'));
+    assert.notEqual(reviewIndex, -1, '## Final Report block has no Review line');
+    assert.equal(reportLines[reviewIndex + 1], 'Decisions: [one line per taken decision | None]');
+  });
+  test('Stop Conditions cites the Decision Journal and names no ledger mechanism', () => {
+    const stopConditions = readSection(body, '### Stop Conditions');
+    assert.ok(stopConditions.includes('`${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Journal)'), '### Stop Conditions lacks the (Decision Journal) citation');
+    for (const phrase of ['event.outputs', 'run ledger', 'final report', 'record-state-result', 'user_gate']) {
+      assert.ok(!stopConditions.includes(phrase), `### Stop Conditions still names ${phrase}`);
+    }
+  });
+  test('the Reflex heading is kept and its body names no run ledger', () => {
+    assert.ok(body.split('\n').includes('## Reflex (Ledger-Skip)'), 'overlord body lacks ## Reflex (Ledger-Skip)');
+    assert.ok(!readSection(body, '## Reflex (Ledger-Skip)').includes('run ledger'), '## Reflex (Ledger-Skip) still names a run ledger');
+  });
+  test('the post-PR watch reads only the in-session request text', () => {
+    assert.ok(postureSection.includes('The only signal is the in-session request text'), '## Review Remediation Posture lacks the in-session request text signal');
+    assert.ok(!postureSection.includes('request.raw'), '## Review Remediation Posture still reads request.raw');
+  });
+  test('decision-autonomy Decision Journal lists decisions in the final message and keeps no journal without a pull request', () => {
+    assert.ok(readSection(autonomyText, '## Decision Journal').includes('lists its decisions in its final message or final report and keeps no decision journal'), 'decision-autonomy ## Decision Journal lacks the no-pull-request rule');
+  });
+  test('decision-autonomy drops the resume doors and the post-merge decision report', () => {
+    const tierA = readSection(autonomyText, '## Decision Tiers').split('### Tier B')[0];
+    for (const phrase of ['Resume On Start', 'version-skew']) {
+      assert.ok(!tierA.includes(phrase), `decision-autonomy Tier A still names ${phrase}`);
+    }
+    for (const phrase of ['## Post-Merge Decision Report Trigger', 'HIVEMIND_ENABLE_DECISION_REPORT']) {
+      assert.ok(!autonomyText.includes(phrase), `decision-autonomy still names ${phrase}`);
+    }
+  });
+  test('the Proactive Zoom-Out Marker heading agrees with every citer', () => {
+    assert.ok(doctrineText.split('\n').includes('### Proactive Zoom-Out Marker'), 'remediation-doctrine lacks ### Proactive Zoom-Out Marker');
+    assert.ok(!doctrineText.includes('Ledger Marker'), 'remediation-doctrine still names Ledger Marker');
+    assert.ok(body.includes('(Proactive Zoom-Out Marker)'), 'overlord body does not cite (Proactive Zoom-Out Marker)');
+    assert.ok(autonomyText.includes('Proactive Zoom-Out Marker)'), 'decision-autonomy does not cite Proactive Zoom-Out Marker');
+  });
+});
+
+// These check each phrase is present inside its own `## ` section, never its meaning, per tests/policy/README.md (1. Honest capability statement); issue 656.
 describe('overlord section-scoped Instinct pins', () => {
   test('readSection stops at the next H2 and keeps an H3 inside its parent', () => {
     const syntheticBody = ['## First', 'first text', '### Child', 'child text', '## Second', 'second text'].join('\n');
@@ -445,14 +529,21 @@ describe('overlord section-scoped Instinct pins', () => {
     assert.ok(!firstSection.includes('second text'), 'a phrase in the next ## section was found in the section before it');
     assert.ok(firstSection.includes('child text'), 'a ### subsection left its parent section');
   });
-  test('Instinct states the permanent path, the default choice, the plan and the one-commit PR gate', () => {
+  test('Instinct states the permanent path, its three paths, the plan and the one-commit PR gate', () => {
     assertSectionHasPhrases('## Instinct', [
-      'Instinct, a permanent delivery path beside the script engine, is also its `standard-delivery` fallback',
+      'Instinct is a permanent path beside the workflow scripts',
+      'the fallback for every workflow per `## Engine`',
+      'asks only what `### Stop Conditions` surfaces',
       'A `standard-delivery` request that names neither path takes the engine when it carries a `working_branch.base` ref',
       'otherwise ask the user which, with your recommendation',
       'Every run needs a plan before any edit',
       'the PR by `hivemind:open-plan-pr` only on a commit that validation and local review (unless the request skips it or it returns `skipped`, named with its reason in the PR body and final report) both passed on',
       'a later commit rerunning both',
+      '**Read-only analysis.**',
+      'Open no branch, commit or pull request',
+      '**Post-PR remediation.**',
+      'Check out the PR head per `## Safety Rails` first',
+      '`hivemind:open-plan-pr` opens a new one',
     ]);
   });
   test('Parallel Delegation Safety holds on any path and forbids git writes and repo-global mutations', () => {
@@ -460,65 +551,6 @@ describe('overlord section-scoped Instinct pins', () => {
       'These rules hold for every wave, on any path.',
       'Each wave delegation must forbid git writes',
       'Each wave delegation must forbid repo-global mutations',
-    ]);
-  });
-});
-
-// These check each state-machine rule's key phrases inside its own `## ` section, never its meaning, per tests/policy/README.md (1. Honest capability statement).
-describe('overlord section-scoped state-machine pins', () => {
-  test('Implement Loop aggregates a wave fail-closed and records one result and one checkpoint', () => {
-    assertSectionHasPhrases('## Implement Loop (Wave Execution)', [
-      '`all_done: true` (empty `wave`, `remaining` 0) maps to the `all_steps_complete` transition',
-      'any `blocked` records `blocked`; else any `needs_replan` records `needs_replan`; else `complete`',
-      'Record one `implement_step` result with `hivemind:record-state-result`, setting `event.outputs.completed_steps` to the step-ids completed in this wave',
-      'molt one `checkpoint` for the whole wave',
-      'never record an undispatched step in `completed_steps`',
-    ]);
-  });
-  test('Implement Loop degrades to judgment only when next-wave cannot run, and stops on its blocker', () => {
-    assertSectionHasPhrases('## Implement Loop (Wave Execution)', [
-      'When `hivemind:next-wave` cannot run (script or substrate missing) or fails transiently',
-      'drain steps by judgment, respecting `depends_on` and file disjointness yourself',
-      'When it exits 1 with a `blocker:` line',
-      'the fallback does not apply: this is a hard stop. Record `blocked` and surface it to the user.',
-      'You must never re-parse or drain the rejected `plan.steps` by judgment.',
-    ]);
-  });
-  test('Implement Loop checks out the PR branch at pr_branch_preflight and persists the PR identity', () => {
-    assertSectionHasPhrases('## Implement Loop (Wave Execution)', [
-      'at the `pr_branch_preflight` decision (entered from `intake` on both the `watch` and `fix` routes), resolve the PR\'s head branch',
-      'check it out before delegating to any reviewer',
-      'Carry the intake route forward as the same `watch`/`fix` outcome; take `blocked` if the branch cannot be resolved or checked out.',
-      'When recording `pr_branch_preflight`, or `open_pr`, with `hivemind:record-state-result`, you must pass `outputs: { pr: <url>, head_ref_oid: <sha> }`',
-    ]);
-    assertSectionHasPhrases('## Safety Rails', ['never delegate to a reviewer before the `pr_branch_preflight` checkout in `## Implement Loop (Wave Execution)` (PR identity)']);
-  });
-  test('Resume On Start anchors its scan, guards the ledger leaf and gates version skew', () => {
-    assertSectionHasPhrases('## Resume On Start', [
-      'with `<checkout-root>` from `git rev-parse --show-toplevel`, never CWD-relative',
-      'Two or more: surface them; never auto-pick.',
-      'never a path built from an externally supplied `run_id`',
-      'only through the ledger-read guard (`hivemind_open_ledger` / `hivemind_assert_ledger_contained`), never raw',
-      'Before the version-skew gate, check `ledger.run.mode`.',
-      'never re-apply the skew doors',
-      'never auto-resume or continue the deterministic run against the new definition',
-      'Offer exactly two doors',
-      'invoke `hivemind:mark-intent-fallback` with `close_status: cancelled` on the old run',
-    ]);
-  });
-  test('Resume On Start gates the decision report before any GitHub call and fails open', () => {
-    assertSectionHasPhrases('## Resume On Start', [
-      'Check `HIVEMIND_ENABLE_DECISION_REPORT` by presence before any GitHub call.',
-      'Unset or empty: make no GitHub call, render nothing, and `touch` each awaiting run\'s marker.',
-      'surface the narrative it returns in chat, then `touch <rundir>/.decision-report-done`',
-      'The deferred-report scan is best-effort and fail-open, an exception to `## Tool-Error Recovery`.',
-      'or with the key unset a marker `touch`, fails for any reason, never stop or block the session: leave that run awaiting and unmarked',
-    ]);
-  });
-  test('Intent-Driven Fallback marks only a readable skewed ledger', () => {
-    assertSectionHasPhrases('## Intent-Driven Fallback (Universal)', [
-      'invoke `hivemind:mark-intent-fallback` with the `run_id`, the current state string and a summary, and no `close_status`',
-      'never call `hivemind:mark-intent-fallback`, which needs a readable ledger, and attempt no engine write',
     ]);
   });
 });
@@ -533,9 +565,6 @@ describe('overlord Reflex check before routing', () => {
     assert.notEqual(reflexCheck, -1, 'the opening ## Engine paragraph lacks the Reflex check');
     assert.notEqual(routing, -1, 'the opening ## Engine paragraph lacks the routing sentence');
     assert.ok(reflexCheck < routing, 'the opening ## Engine paragraph routes before it checks the Reflex');
-  });
-  test('Workflow State Execution routes only a non-Reflex request', () => {
-    assert.ok(stateExecutionSection.includes("1. Select a non-Reflex request's workflow with `hivemind:route-workflow`."), '## Workflow State Execution step 1 routes a Reflex');
   });
   test('the Reflex conditions admit a version-only edit only as the whole bump', () => {
     assertSectionHasPhrases('## Reflex (Ledger-Skip)', [
@@ -556,11 +585,12 @@ describe('overlord Reflex check before routing', () => {
 describe('overlord brood dispatch on Instinct', () => {
   const broodSection = readSection(body, '## Brood Execution');
   const hatcheryParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('When `hivemind:route-workflow` selects `hatchery-dispatch`,')) ?? '';
-  test('Engine routes a selected hatchery-dispatch to ## Brood Execution and keeps it off the state machine', () => {
+  test('Engine routes a selected hatchery-dispatch to ## Brood Execution and launches no workflow', () => {
     assert.notEqual(hatcheryParagraph, '', '## Engine has no paragraph starting When `hivemind:route-workflow` selects `hatchery-dispatch`,');
-    for (const phrase of ['launch no workflow', 'never enter the workflow state machine', 'run `## Brood Execution` in this session']) {
+    for (const phrase of ['launch no workflow', 'run `## Brood Execution` in this session']) {
       assert.ok(hatcheryParagraph.includes(phrase), `hatchery-dispatch paragraph lacks ${phrase}`);
     }
+    assert.ok(!hatcheryParagraph.includes('never enter the workflow state machine'), 'hatchery-dispatch paragraph still names the workflow state machine');
   });
   test('Brood Execution states both entry conditions, facts and plan, the Tier A approval before spawn, relay and monitoring', () => {
     assertSectionHasPhrases('## Brood Execution', [
@@ -592,7 +622,6 @@ describe('overlord brood dispatch on Instinct', () => {
     assert.ok(!body.includes('RUN-OWNERSHIP-01'), 'the overlord body still names RUN-OWNERSHIP-01');
   });
   test('decision-autonomy Tier A still lists brood strain approval', () => {
-    const autonomyText = readFileSync(repoRoot + 'plugin/governance/decision-autonomy.md', 'utf8').replace(/\r/g, '');
     const tierA = readSection(autonomyText, '## Decision Tiers').split('### Tier B')[0];
     assert.ok(tierA.includes('brood strain approval'), 'decision-autonomy Tier A no longer lists brood strain approval');
   });
