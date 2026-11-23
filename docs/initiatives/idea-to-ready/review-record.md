@@ -95,7 +95,20 @@ The round raised 5 findings: 0 critical, 1 high (e9fd803f, rejected), 0 medium a
 
 The fixes landed in commit `9cceeadb0ce173281305145795628b4b62d8bcee` (R3-1 and R3-2) and this record wave (R3-2's record copies, R3-3 and R3-4). Every finding is fixed or rejected; none is deferred, recorded or open. The round raised findings, so it is not clean. A fourth, confirming round follows, past the three-round cap.
 
-Diminishing-returns advisory: signal 3 fired, every finding a bounded edge case, and signal 1 in part, since R3-1 and R3-2 sit on round 2's two structural fixes; severity fell from six high findings in round 1 and five in round 2 to none high or medium in round 3. Round 3 was not clean and was the last under the cap, so the maintainer was asked; answer A of 2026-11-23: fix all four findings and run a fourth, confirming round past the cap (Decisions asked).
+Diminishing-returns advisory: signal 3 fired, every finding a bounded edge case, and signal 1 in part, since R3-1 and R3-2 sit on round 2's two structural fixes; severity fell from six high findings in round 1 and five in round 2 to one high, e9fd803f, a rejected repeat of a recorded decision, and no medium in round 3. Round 3 was not clean and was the last under the cap, so the maintainer was asked; answer A of 2026-11-23: fix all four findings and run a fourth, confirming round past the cap (Decisions asked).
+
+### Round 4
+
+A confirming round past the three-round cap, by the maintainer's answer A of 2026-11-23 after round 3 (D41). It does not change `rounds`, which stays 3, as D31's and D34's fourth rounds did not. It reviewed the change since round 3's reviewed commit, `29af7b10c2f21eb596466b16174d46ac992bc85e`, and the fixes to round 3's findings. Neither reviewer wrote the design.
+
+- Reviewer `hivemind:cerebrate`, model opus (Claude Opus), cerebrate's own model (D11). One fresh, read-only pass with `Memory context: none`, covering every angle. It reviewed commit `f27334bd0d2c73f48f58f7c2a1c9473a4d7a166c` and raised 4 findings, R4-1 to R4-4: 0 critical, 0 high, 1 medium (R4-1) and 3 low (R4-2, R4-3 and R4-4).
+- Reviewer: the local review tool, the `codex-plugin` preset, run through `run-review.sh`, with the model the Codex configuration's default; the round's output named no model. Its base was `29af7b10c2f21eb596466b16174d46ac992bc85e`, round 3's reviewed commit. Its one iteration reviewed commit `f27334bd0d2c73f48f58f7c2a1c9473a4d7a166c` and raised 1 finding, 892f655d high, a planner escalation the tool's loop did not fix; it is fixed by D41.
+
+The round raised 5 findings: 0 critical, 1 high (892f655d), 1 medium and 3 low.
+
+The fixes landed in commit `ac606e616e5b83a0230bafaa81e91b4fb3c61709` (R4-1, 892f655d, R4-2 and R4-4) and this record wave (R4-3). Every finding is fixed; none is rejected, deferred, recorded or open. The round raised findings, so it is not clean. A fifth, confirming round over that diff only follows, past the cap (D41).
+
+Diminishing-returns advisory: signal 1 fired, since R4-2 sits on R3-1's fix and R4-1 sits on the round 4 exception itself, and signal 3, every other finding a bounded edge case. The maintainer was asked; answer A of 2026-11-23: fix all four findings and run a fifth, confirming round over that diff only (D41, Decisions asked).
 
 ## Findings
 
@@ -144,6 +157,11 @@ Diminishing-returns advisory: signal 3 fired, every finding a bounded edge case,
 | R3-3 | 3 | confirm | low | fixed | Round 2 lacked the contracted `Diminishing-returns advisory:` line, and the amendment's taken-table intro said "round 1" only. Fixed in this record wave. |
 | R3-4 | 3 | confirm | low | fixed | R2-3's deferral Note stated a bound that held only before the Verdict is written. Reworded in this record wave. |
 | e9fd803f | 3 | review | high | rejected | Local review tool pass, finding_id `e9fd803fd6c1a41760290ee8fada0cf67a5ad1f9f74369eb852b9918dc8f399e`: stage derivation counts the prototype stage done once the Verdict is filled, so a forged Verdict could move the guide on early. Rejected as a repeat of the recorded decision of 687d54b5: the [solution design](solution-design.md), Trust boundaries, "The prototype verdict marks progress, not approval". |
+| R4-1 | 4 | confirm | medium | fixed | The fourth round past the cap was not recorded as a decision and, read literally, would set `rounds` to 4, so the record could never pass. D41 records the maintainer's one-time fourth and fifth confirming rounds; neither changes `rounds` (Design review rounds, D41, Amendments; ADR-0046 Amendments). Fixed in commit `ac606e61`. |
+| R4-2 | 4 | confirm | low | fixed | R3-1's wording made every record wave rewrite the stamps, contradicting the keep-stamps rule and #619's test. Only a stamping record wave writes the blob ids the guide names (Review record front matter, Guide skill, Verification #622; ADR-0046 Amendments). Fixed in commit `ac606e61`. |
+| R4-3 | 4 | confirm | low | fixed | Round 3's `Diminishing-returns advisory:` line said round 3 had no high finding; it had one, e9fd803f, rejected as a repeat of a recorded decision. Corrected in this record wave. |
+| R4-4 | 4 | confirm | low | fixed | ADR-0046's Amendments entry lacked the round 3 corrections to decisions 7 and 12. Added, with round 4's decision 7 correction. Fixed in commit `ac606e61`. |
+| 892f655d | 4 | review | high | fixed | Local review tool pass, finding_id `892f655d4e19f4491677bd87121513893ebe34d7725375e7aaadf23eacddca4d`: planner escalation. The fourth round went past ADR-0046 decision 6's three-round cap with no recorded design decision. Fixed by D41 in the [solution design](solution-design.md), in commit `ac606e61`. The same issue as R4-1. |
 
 ## Decisions taken, listed for veto
 
@@ -222,7 +240,7 @@ Each decision in this first table, all taken before the always-ask list was remo
 
 Moved to #638 with the council, so no longer listed here: D12, D13, D14, D16, D18 and D18's `skip` at `balanced`, D25, D26, the A1 redesign, ADR-0042 decision 9 not amended, A15, R2A3, the switched-option gate, the `needs_user_fact` absent rule, the council switch re-plan, script-local council answers, the composed-brief defect, the `dissent` bound, `council.js`, the merges of A5 with B12, A6 with B13, R2A1 with R2B1, R2A4 with B15, R2B7 with A2, R3A8 with R3B1 and R3B8 with R3A2, R3B1, R3B2, R3B3, R3A2, R3A3, R3A4 and R3B7.
 
-The commit refusal, the code-read verify stop, verify on every record the pull request adds or edits (in a repository's own CI where it wires verify there, optional per Q21 A) and `design_delivered` were asked (Q10 A), and the round-4 count was asked (Q11 A). After round 4 the council split (Q12 A, Q14 B), the narrowing of ADR-0037 decision 16 (Q13 A), the commit refusal's scope (Q15 A), the ADR-0026 decision 2 amendment (Q16 A) and the remediation plan (Q17 A) were asked. In re-review round 1 the narrowing of ADR-0026 decision 3 (Q18 A, D9), the return of a guide-launched run to the guide (Q19 A, D33) and the remediation plan (Q20 A) were asked. In re-review round 2 the plugin-only merge check with the narrowing of ADR-0044's merge conditions (Q21 A, D28) and the remediation plan (Q22 A) were asked. After re-review round 3 the broadened merge check (Q23 A, D28), its git fetch and base-drift details (Q24 A, D28) and the one-time fourth re-review round (Q23 A, D34) were asked. After re-review round 4 the move of merge-time enforcement out to #619 (Q25 A, D28, D34) and the diminishing-returns check (D35, the user's directive) were asked, and the taken rows for merge mode's details left with it. After round 1 of the re-review of the 2026-11-22 amendment the UI prototype's trust boundary was asked (answer A of 2026-11-23). After round 2 of that re-review the D35 advisory was asked (answer A of 2026-11-23). After round 3 of that re-review the round cap and the D35 advisory were asked (answer A of 2026-11-23). So none of them has a taken row.
+The commit refusal, the code-read verify stop, verify on every record the pull request adds or edits (in a repository's own CI where it wires verify there, optional per Q21 A) and `design_delivered` were asked (Q10 A), and the round-4 count was asked (Q11 A). After round 4 the council split (Q12 A, Q14 B), the narrowing of ADR-0037 decision 16 (Q13 A), the commit refusal's scope (Q15 A), the ADR-0026 decision 2 amendment (Q16 A) and the remediation plan (Q17 A) were asked. In re-review round 1 the narrowing of ADR-0026 decision 3 (Q18 A, D9), the return of a guide-launched run to the guide (Q19 A, D33) and the remediation plan (Q20 A) were asked. In re-review round 2 the plugin-only merge check with the narrowing of ADR-0044's merge conditions (Q21 A, D28) and the remediation plan (Q22 A) were asked. After re-review round 3 the broadened merge check (Q23 A, D28), its git fetch and base-drift details (Q24 A, D28) and the one-time fourth re-review round (Q23 A, D34) were asked. After re-review round 4 the move of merge-time enforcement out to #619 (Q25 A, D28, D34) and the diminishing-returns check (D35, the user's directive) were asked, and the taken rows for merge mode's details left with it. After round 1 of the re-review of the 2026-11-22 amendment the UI prototype's trust boundary was asked (answer A of 2026-11-23). After round 2 of that re-review the D35 advisory was asked (answer A of 2026-11-23). After round 3 of that re-review the round cap and the D35 advisory were asked (answer A of 2026-11-23, D41). After round 4 of that re-review the D35 advisory and a fifth confirming round were asked (answer A of 2026-11-23, D41). So none of them has a taken row.
 
 The 2026-11-22 amendment's decisions, and those taken in rounds 1 and 2 of its re-review, are taken under ADR-0046 decision 8 as amended. Each lists its recommendation strength and what it touches, from scope, ADR amendment, trust, credential and merge path. None acts irreversibly now. The parts of D36 the maintainer set in #663 are under Decisions asked.
 
@@ -338,6 +356,33 @@ The 2026-11-22 amendment's decisions, and those taken in rounds 1 and 2 of its r
   ```
 
   The user's answer, word for word: "A". The user chose to fix all four round-3 findings in the documents and run a fourth, confirming round past the three-round cap over that diff only; if it is clean, the documents are re-stamped and the pull request opened.
+- Round 5 and D35 advisory after round 4 of the re-review of the 2026-11-22 amendment, on 2026-11-23 (D41). The question as shown, word for word:
+
+  ```text
+  Round 4 isn't clean either, so this needs your call again.
+
+  **Round 4 results:**
+  - **Cerebrate pass:** 4 findings, all with a strong recommendation, all text-only.
+    - **R4-1 (medium).** The fourth round you approved isn't recorded the way D31 and D34 were. Read literally, `rounds` would become 4, and the record could then never pass, because the pass rule only allows 2 to 3. Fix: record round 4 as a one-time exception, design decision D41, with `rounds` staying 3 (the Q11 A precedent). Then name it in the design's exceptions line and the Amendments.
+    - **R4-2 (low).** R3-1's wording makes every record wave rewrite the stamps. That contradicts "a failing record keeps its stamps". Fix: only a stamping record wave writes them.
+    - **R4-3 (low).** The record's round 3 advisory line says "no high". Round 3 had one high, `e9fd803f`, rejected as a repeat. Fix: correct the count.
+    - **R4-4 (low).** ADR-0046's Amendments entry has no list of round 3 corrections. Fix: add the two bullets.
+  - **Local review tool pass:** 1 high finding, `892f655d`, raising the same point as R4-1. Round 4 goes past ADR-0046's cap with no recorded design decision. It was escalated, not fixed. The fix for R4-1 settles it, and later repeats can then be rejected by citing D41.
+
+  **Diminishing returns (D35) fired again:**
+  - Signal 1: R4-2 sits on R3-1's fix, and R4-1 sits on the round 4 exception itself.
+  - Signal 3: everything else is a bounded edge case.
+
+  **Options:**
+
+  - **A. Fix and run round 5 (recommended).** Apply all four fixes, including D41, which records rounds 4 and 5 as one-time exceptions with `rounds` staying 3. Then run a fifth, confirming round over that small diff only. If it's clean, I re-stamp and open the PR.
+  - **B. Fix and stop.** Apply the fixes but run no further round. There is no clean round, so the record can't pass and no PR opens.
+  - **C. Stop now.** No fixes, no PR. The branch stays at verdict fail.
+
+  Reply A, B or C.
+  ```
+
+  The user's first reply, word for word: "How nitpicky are the text changes? Would they impact the implementation of left as is?". It was answered: R4-3 and R4-4 change nothing; R4-2, left as is, would leave #622 with a test contradicting #619's; R4-1 keeps the record honest and stops the reviewer loop re-flagging the cap. The user's answer, word for word: "Lets just do A". The user chose to apply all four fixes, record rounds 4 and 5 as one-time exceptions that do not change `rounds` (D41), and run a fifth, confirming round over that diff only; if it is clean, the documents are re-stamped and the pull request opened.
 
 ## Moved to #638 with the council
 
