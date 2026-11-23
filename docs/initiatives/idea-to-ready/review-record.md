@@ -12,7 +12,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 2
+rounds: 3
 clean_round: false
 ---
 
@@ -68,6 +68,8 @@ The round raised 18 findings: 0 critical, 5 high (9bcca72b, f3664c09, c42622c2, 
 
 The fixes landed in commits `768fe3bb0fde4d316a6891da20ef130b8e41d903` (from the local review tool pass: 9bcca72b, f3664c09, c42622c2 and 65737ca5), `f96d4733a2f35659d6089c4157377c861e7e9890` (the round's fix wave) and this record wave. Every critical and high finding is fixed. R2-3 and R2-5 are deferred to #622 by the maintainer's answer. None is open. The round raised findings, so it is not clean. Round 3, the last under the cap, follows.
 
+Diminishing-returns advisory: signals 1 to 3 below; answer A of 2026-11-23 (narrow and hand off).
+
 Diminishing-returns advisory, raised after the round, round 2 of 3 (D35). The signals as shown to the maintainer:
 
 ```text
@@ -81,6 +83,19 @@ Read against the findings:
 - Signal 3: R2-3 and R2-5 are edge cases that D38, the readiness check and D24 already bound.
 
 The maintainer's answer, 2026-11-23: A, narrow and hand off. Word for word: "A" (Decisions asked).
+
+### Round 3
+
+A confirming round, round 3 of 3, the last under the cap: it reviewed the change since round 2's reviewed commit, `5219c499b7921ae8ca57b583721d4ef118b54a8e`, and the fixes to round 2's findings. Neither reviewer wrote the design.
+
+- Reviewer `hivemind:cerebrate`, model opus (Claude Opus), cerebrate's own model (D11). One fresh, read-only pass with `Memory context: none`, covering every angle. It reviewed commit `29af7b10c2f21eb596466b16174d46ac992bc85e` and raised 4 findings, R3-1 to R3-4, all low: 0 critical, 0 high, 0 medium and 4 low.
+- Reviewer: the local review tool, the `codex-plugin` preset, run through `run-review.sh`, with the model the Codex configuration's default; the round's output named no model. Its base was `5219c499b7921ae8ca57b583721d4ef118b54a8e`, round 2's reviewed commit. Its one iteration reviewed commit `29af7b10c2f21eb596466b16174d46ac992bc85e` and raised 1 finding, e9fd803f high, rejected as a repeat of a recorded decision. The loop exited clean, with no fix commits.
+
+The round raised 5 findings: 0 critical, 1 high (e9fd803f, rejected), 0 medium and 4 low.
+
+The fixes landed in commit `9cceeadb0ce173281305145795628b4b62d8bcee` (R3-1 and R3-2) and this record wave (R3-2's record copies, R3-3 and R3-4). Every finding is fixed or rejected; none is deferred, recorded or open. The round raised findings, so it is not clean. A fourth, confirming round follows, past the three-round cap.
+
+Diminishing-returns advisory: signal 3 fired, every finding a bounded edge case, and signal 1 in part, since R3-1 and R3-2 sit on round 2's two structural fixes; severity fell from six high findings in round 1 and five in round 2 to none high or medium in round 3. Round 3 was not clean and was the last under the cap, so the maintainer was asked; answer A of 2026-11-23: fix all four findings and run a fourth, confirming round past the cap (Decisions asked).
 
 ## Findings
 
@@ -106,9 +121,9 @@ The maintainer's answer, 2026-11-23: A, narrow and hand off. Word for word: "A" 
 | d53e191d | 1 | review | high | fixed | Local review tool pass, finding_id `d53e191decee731b2662539e5292e0cb9a5b98b2210f2f3bcc75cf51c3f3d9d0`: the UI prototype files were missing from the data-only list. Trust boundaries lists `index.html` and `notes.md` as data (commit `e2fbda4b`). |
 | 6d349cd2 | 1 | review | high | rejected | Local review tool pass, finding_id `6d349cd2e2e44e265b1ed7e8625684185e0b01099236bce238623f18c29053fd`: a repeat of 687d54b5. Rejected under the same record: the [solution design](solution-design.md), Trust boundaries, "The prototype verdict marks progress, not approval". |
 | bf0ada2f | 1 | review | high | rejected | Local review tool pass, finding_id `bf0ada2f088177d9f4a52dde97c6d34698ca56344e2d1702d06289208b6e3f8c`: opening the UI prototype runs agent-written script in the maintainer's browser, and nothing checks its no-network rule. Rejected by the user's answer A of 2026-11-23 (Decisions asked), the same record as R1-8: the [solution design](solution-design.md), Trust boundaries, "The UI prototype is a stub page". |
-| R2-1 | 2 | confirm | medium | fixed | `hivemind:prd-to-issues`'s initiative test, `docs/initiatives/<slug>/` existing on trunk, disagreed with the Track fact and let a UI initiative be sliced with no prototype. The Design section, seed reuse, the Prototype line and the refusal now apply only when the resolved epic is the seed issue for the PRD's slug, the readiness check's own binding. Otherwise it slices as today, and its slices fail `epic_marker_missing` (Slice design section, ADR-0046 decision 12, PRD). The same issue as c990e86a. |
+| R2-1 | 2 | confirm | medium | fixed | `hivemind:prd-to-issues`'s initiative test, `docs/initiatives/<slug>/` existing on trunk, disagreed with the Track fact and let a UI initiative be sliced with no prototype. The Design section, seed reuse, the Prototype line and the refusal now apply only when the resolved epic is the seed issue for the PRD's slug, the readiness check's own binding. Otherwise it slices as today, and its slices fail the readiness check: `epic_marker_missing` under an epic with no valid marker, `design_block_missing` under another initiative's seed (Slice design section, ADR-0046 decision 12, PRD). The same issue as c990e86a. |
 | R2-2 | 2 | confirm | medium | fixed | Nothing built the veto list comment. After each record wave and before `gh pr ready`, the guide posts the record's Decisions taken, listed for veto section as one docs pull request comment, the latest superseding earlier ones, and #622 tests it (Guide skill, Verification strategy). |
-| R2-3 | 2 | confirm | medium | deferred | Nothing keeps the maintainer's UI prototype approval answer between stage 4 and the record's first write at stage 6. Deferred by the maintainer's answer A to the D35 advisory: #622 builds where the guide keeps it, for example a docs pull request comment that the first record step copies under Decisions asked (UI prototype). Bounded: a lost answer makes the guide ask again, and the Verdict authorizes nothing. #622 |
+| R2-3 | 2 | confirm | medium | deferred | Nothing keeps the maintainer's UI prototype approval answer between stage 4 and the record's first write at stage 6. Deferred by the maintainer's answer A to the D35 advisory: #622 builds where the guide keeps it, for example a docs pull request comment that the first record step copies under Decisions asked (UI prototype). Bounded: before the refinement run writes the Verdict, a lost answer makes the guide ask again; after it, the maintainer's own words are in `notes.md`, the Verdict authorizes nothing, and the approval's authority is the human-reviewed merge (D24). #622 |
 | R2-4 | 2 | confirm | medium | fixed | The changeling carve-out lifted only the Hard Stop Rules, and nothing named each prototype file's owner or pinned the carve-out. It now lifts `## Do Not Own` and the Hard Stop Rules for `prototype/index.html` only; the guide's fixed wording names each file's owner; the cerebrate row says the planner reads the carve-out; and a `tests/policy/safety-*.json` fixture pins it (D39, Existing-path coverage, #622). |
 | R2-5 | 2 | confirm | low | deferred | A refinement run that stops after the fold and before the Verdict leaves stage derivation asking for approval again over a folded `index.html`. Deferred by the maintainer's answer A to the D35 advisory: #622 builds the resolution, with #621's stage reading (Failure modes). Bounded: one repeated ask. #622 |
 | R2-6 | 2 | confirm | low | fixed | The Residuals named a state-machine implement loop that no longer exists, the `plugin/agents/overlord.md` coverage row was ungrammatical and named a stale budget, and D20's numbers were undated and stale. The loop is dropped and the row reworded. D20 restates the budgets from `tests/policy/prose-byte-budget.json` at commit `768fe3bb` and dates the `49787cc9` measurements. |
@@ -124,6 +139,11 @@ The maintainer's answer, 2026-11-23: A, narrow and hand off. Word for word: "A" 
 | 9bcca72b | 2 | review | high | fixed | Local review tool pass, finding_id `9bcca72bda59982b2f639c305aa27d898297554606368738cb893b1201405bfe`: ADR-0046 decisions 8 and 12 still called the `notes.md` Verdict the approval. Fixed in commit `768fe3bb`. |
 | f3664c09 | 2 | review | high | fixed | Local review tool pass, finding_id `f3664c0933caeca1bd59c38e63023b0e2a4615aa4ee33957507d47e62cd34dfb`: the PRD allowed open medium and low findings while the ADR and the design allow none. Fixed in commit `768fe3bb`. |
 | c42622c2 | 2 | review | high | fixed | Local review tool pass, finding_id `c42622c2dc030652a9dd4f61cfac26364cb83578a4543f05a17aa0fa5115d146`: the PRD said only the maintainer may write the ready label, while the design says anyone with write permission. Fixed in commit `768fe3bb`. |
+| R3-1 | 3 | confirm | low | fixed | The stamp write had no path to the Document existence test's one implementation. The guide's script now reads each stamp path's blob id at the reviewed commit through the readiness check library, the record wave's fixed wording names them, and the record step writes them as given (Review record front matter, Guide skill, Seam order #622, Verification #622, ADR-0046 decision 7). Fixed in commit `9cceeadb`. |
+| R3-2 | 3 | confirm | low | fixed | Slices outside the seed fail `epic_marker_missing` under an epic with no valid marker and `design_block_missing` under another initiative's seed; `subissue-ops.sh` tests the condition with the library's seed-marker parse on the epic body it reads itself; the guide names the seed issue number, passed to ensure-parent as `--existing-number` (Slice design section, Readiness check, Failure modes, Initiative stages, Guide skill, ADR-0046 decision 12). Fixed in commit `9cceeadb` and in this record's R2-1 Note and its taken row. |
+| R3-3 | 3 | confirm | low | fixed | Round 2 lacked the contracted `Diminishing-returns advisory:` line, and the amendment's taken-table intro said "round 1" only. Fixed in this record wave. |
+| R3-4 | 3 | confirm | low | fixed | R2-3's deferral Note stated a bound that held only before the Verdict is written. Reworded in this record wave. |
+| e9fd803f | 3 | review | high | rejected | Local review tool pass, finding_id `e9fd803fd6c1a41760290ee8fada0cf67a5ad1f9f74369eb852b9918dc8f399e`: stage derivation counts the prototype stage done once the Verdict is filled, so a forged Verdict could move the guide on early. Rejected as a repeat of the recorded decision of 687d54b5: the [solution design](solution-design.md), Trust boundaries, "The prototype verdict marks progress, not approval". |
 
 ## Decisions taken, listed for veto
 
@@ -202,9 +222,9 @@ Each decision in this first table, all taken before the always-ask list was remo
 
 Moved to #638 with the council, so no longer listed here: D12, D13, D14, D16, D18 and D18's `skip` at `balanced`, D25, D26, the A1 redesign, ADR-0042 decision 9 not amended, A15, R2A3, the switched-option gate, the `needs_user_fact` absent rule, the council switch re-plan, script-local council answers, the composed-brief defect, the `dissent` bound, `council.js`, the merges of A5 with B12, A6 with B13, R2A1 with R2B1, R2A4 with B15, R2B7 with A2, R3A8 with R3B1 and R3B8 with R3A2, R3B1, R3B2, R3B3, R3A2, R3A3, R3A4 and R3B7.
 
-The commit refusal, the code-read verify stop, verify on every record the pull request adds or edits (in a repository's own CI where it wires verify there, optional per Q21 A) and `design_delivered` were asked (Q10 A), and the round-4 count was asked (Q11 A). After round 4 the council split (Q12 A, Q14 B), the narrowing of ADR-0037 decision 16 (Q13 A), the commit refusal's scope (Q15 A), the ADR-0026 decision 2 amendment (Q16 A) and the remediation plan (Q17 A) were asked. In re-review round 1 the narrowing of ADR-0026 decision 3 (Q18 A, D9), the return of a guide-launched run to the guide (Q19 A, D33) and the remediation plan (Q20 A) were asked. In re-review round 2 the plugin-only merge check with the narrowing of ADR-0044's merge conditions (Q21 A, D28) and the remediation plan (Q22 A) were asked. After re-review round 3 the broadened merge check (Q23 A, D28), its git fetch and base-drift details (Q24 A, D28) and the one-time fourth re-review round (Q23 A, D34) were asked. After re-review round 4 the move of merge-time enforcement out to #619 (Q25 A, D28, D34) and the diminishing-returns check (D35, the user's directive) were asked, and the taken rows for merge mode's details left with it. After round 1 of the re-review of the 2026-11-22 amendment the UI prototype's trust boundary was asked (answer A of 2026-11-23). After round 2 of that re-review the D35 advisory was asked (answer A of 2026-11-23). So none of them has a taken row.
+The commit refusal, the code-read verify stop, verify on every record the pull request adds or edits (in a repository's own CI where it wires verify there, optional per Q21 A) and `design_delivered` were asked (Q10 A), and the round-4 count was asked (Q11 A). After round 4 the council split (Q12 A, Q14 B), the narrowing of ADR-0037 decision 16 (Q13 A), the commit refusal's scope (Q15 A), the ADR-0026 decision 2 amendment (Q16 A) and the remediation plan (Q17 A) were asked. In re-review round 1 the narrowing of ADR-0026 decision 3 (Q18 A, D9), the return of a guide-launched run to the guide (Q19 A, D33) and the remediation plan (Q20 A) were asked. In re-review round 2 the plugin-only merge check with the narrowing of ADR-0044's merge conditions (Q21 A, D28) and the remediation plan (Q22 A) were asked. After re-review round 3 the broadened merge check (Q23 A, D28), its git fetch and base-drift details (Q24 A, D28) and the one-time fourth re-review round (Q23 A, D34) were asked. After re-review round 4 the move of merge-time enforcement out to #619 (Q25 A, D28, D34) and the diminishing-returns check (D35, the user's directive) were asked, and the taken rows for merge mode's details left with it. After round 1 of the re-review of the 2026-11-22 amendment the UI prototype's trust boundary was asked (answer A of 2026-11-23). After round 2 of that re-review the D35 advisory was asked (answer A of 2026-11-23). After round 3 of that re-review the round cap and the D35 advisory were asked (answer A of 2026-11-23). So none of them has a taken row.
 
-The 2026-11-22 amendment's decisions, and those taken in round 1 of its re-review, are taken under ADR-0046 decision 8 as amended. Each lists its recommendation strength and what it touches, from scope, ADR amendment, trust, credential and merge path. None acts irreversibly now. The parts of D36 the maintainer set in #663 are under Decisions asked.
+The 2026-11-22 amendment's decisions, and those taken in rounds 1 and 2 of its re-review, are taken under ADR-0046 decision 8 as amended. Each lists its recommendation strength and what it touches, from scope, ADR amendment, trust, credential and merge path. None acts irreversibly now. The parts of D36 the maintainer set in #663 are under Decisions asked.
 
 | Decision | Recommendation strength | What it touches |
 |---|---|---|
@@ -230,7 +250,7 @@ The 2026-11-22 amendment's decisions, and those taken in round 1 of its re-revie
 | A History heading whose date an earlier History section uses gains a short suffix; the passing re-review moves under History: 2026-11-22 (re-review) | strong | none |
 | R1-1: the changeling keeps building `index.html`, through a #622 carve-out in `plugin/agents/changeling.md` scoped to `docs/initiatives/<slug>/prototype/index.html` only. Not taken: a drone owns `index.html`, which would undo #663 detail 3, the builder taken with a strong recommendation and listed for veto (D39) | strong | D39; D20; ADR amendment (ADR-0046 decision 11); #622 |
 | 687d54b5, a review call the run took: option A, the prototype Verdict marks progress only, and the approval's authority is the D38 ask, the stamps and the human-reviewed merge (D24) | strong; reversible; not architectural | trust (Trust boundaries) |
-| c990e86a and R2-1, superseding R1-3: the Design section, seed reuse, the Prototype line and the slicing refusal apply only when the epic `hivemind:prd-to-issues` resolves is the seed issue for the PRD's slug, the readiness check's own binding; otherwise it slices as today and its slices fail `epic_marker_missing`. Not taken: R1-3's folder test, a second definition of an initiative; the PRD's `**UI:**` line alone, which would refuse a standalone use whose PRD says `**UI:** yes` | strong | scope (slicing); ADR amendment (decision 12); PRD; #617 |
+| c990e86a and R2-1, superseding R1-3: the Design section, seed reuse, the Prototype line and the slicing refusal apply only when the epic `hivemind:prd-to-issues` resolves is the seed issue for the PRD's slug, the readiness check's own binding; otherwise it slices as today and its slices fail the readiness check: `epic_marker_missing` under an epic with no valid marker, `design_block_missing` under another initiative's seed. Not taken: R1-3's folder test, a second definition of an initiative; the PRD's `**UI:**` line alone, which would refuse a standalone use whose PRD says `**UI:** yes` | strong | scope (slicing); ADR amendment (decision 12); PRD; #617 |
 | R1-5: the veto list's home is the review record and a docs pull request comment the guide posts with `gh pr comment` | strong | ADR amendment (ADR-0046 decision 8); Design-decision rule; PRD |
 | R1-7: the retire-json D19 section 8 edits are applied in this pull request rather than deferred | strong | ADR amendment (ADR-0046 decision 10); solution design Context and code truth and Failure modes |
 | e224800e, 3f7d8dd4, 65737ca5, 15e0bfa2 and R2-10: one Document existence test under Contracts and seams, `git ls-tree --full-tree`, implemented once in the readiness check library; every git read of an initiative document goes through it, and every blob id and content read comes from its entry. Not taken: extending Document parsing rules, which parse text, not git objects | strong | trust (object-type reads); ADR amendment (decisions 3 and 7); #615, #617, #619, #621 |
@@ -289,6 +309,35 @@ The 2026-11-22 amendment's decisions, and those taken in round 1 of its re-revie
   ```
 
   The user's answer, word for word: "A". The user chose to narrow and hand off: fix the two high findings with one structural rule (one Document existence test used by every reader, and slicing keyed on the readiness check's own initiative binding), apply the cheap strong text fixes, and hand R2-3 and R2-5 to the slices that build them (#622, with #621) as tracked follow-ups; round 3 confirms.
+- Round cap and D35 advisory after round 3 of the re-review of the 2026-11-22 amendment, on 2026-11-23. The question as shown, word for word:
+
+  ```text
+  Round 3 is not clean, and it was the last round under the cap. The cap and the diminishing-returns advisory are your call.
+
+  **Round 3 results:**
+  - **Cerebrate pass:** 4 findings, all low and text-only. Each is bounded by verify, the readiness check or the human merge.
+    - **R3-1.** The record step writes stamps without going through the one Document existence test implementation. Fix: the guide reads the blob ids through the library and passes them to the record wave.
+    - **R3-2.** The slicing condition names the wrong failure code under another initiative's seed. It also isn't tied to the library's seed-marker parse, and it never says how prd-to-issues learns the seed issue number.
+    - **R3-3.** Two record defects: the `Diminishing-returns advisory:` line is missing, and the intro of the taken-decisions table is stale.
+    - **R3-4.** R2-3's deferral note states a bound that only holds before the Verdict is written.
+  - **Local review tool pass:** one high finding, rejected as a repeat of the recorded "verdict marks progress, not approval" decision (finding 687d54b5). No edits.
+
+  **Diminishing returns (D35) fired again:**
+  - Signal 3 fully: every finding is a bounded edge case.
+  - Signal 1 in part: R3-1 and R3-2 sit on round 2's two structural fixes.
+
+  The severity trend: round 1 had 6 high findings, round 2 had 5, round 3 has 0 high or medium.
+
+  Your options:
+
+  - **A. One more round (recommended).** I fix all four in the documents. Each has a strong recommendation and is text-only. Then a fourth, confirming round reviews only that diff. If it's clean, I re-stamp and open the PR. This goes past the three-round cap.
+  - **B. Hand off and confirm.** Defer R3-1 to #622 and R3-2 to #617 as tracked follow-ups, and fix only the record text (R3-3, R3-4). A fourth round then confirms that small diff. This also goes past the cap, with less change.
+  - **C. Stop here.** No pull request. The branch stays with the record at verdict fail.
+
+  Reply A, B or C.
+  ```
+
+  The user's answer, word for word: "A". The user chose to fix all four round-3 findings in the documents and run a fourth, confirming round past the three-round cap over that diff only; if it is clean, the documents are re-stamped and the pull request opened.
 
 ## Moved to #638 with the council
 
