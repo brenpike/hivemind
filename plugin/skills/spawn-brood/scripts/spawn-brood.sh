@@ -80,10 +80,10 @@
 #     launch stays `claude --permission-mode auto`.
 #   - Writes the brood manifest to .hivemind/broods/<brood-id>/manifest.json (JSON,
 #     manifest_version: 4) in the coordinator checkout (anchored to the checkout root).
-#   - Reads no brood state itself. Every brood-state read (a child run ledger, a child's
-#     gather-facts started-evidence, the pre-launch facts guard) goes through
-#     skills/_shared/brood-state.sh, the only home of brood-state reads, which takes identifiers
-#     (a worktree root and a run id) and derives every location from them.
+#   - Reads no brood state itself. Every brood-state read (a child's gather-facts output file
+#     as started-evidence, the pre-launch facts guard) goes through
+#     skills/_shared/brood-state.sh, the only home of brood-state reads, which takes an
+#     identifier (a worktree root) and derives every location from it.
 #   - On full success: prints `brood_id: <brood-id>` and `manifest: <abs path>` to stdout,
 #     exits 0. The brood_id line lets the overlord capture the generated id for monitoring.
 #   - On any per-strain failure: writes the manifest with failed strains marked
@@ -137,10 +137,9 @@ POLL_INTERVAL=2
 # submit model (inject_strain) is now a SINGLE send: paste, settle, send Enter ONCE,
 # return. spawn-brood does NOT verify turn-start by screen-scraping the TUI. A child that
 # fails to actually start a turn surfaces later through hivemind:brood-status, which judges
-# liveness from on-disk ground truth (a child run-ledger state.current or a gather-facts output
-# file present => running, neither => starting) — not from capture-pane frames. PROVENANCE: both
-# sources post-date launch by construction. The run-ledger leaf is keyed by the spawn-generated
-# brood GUID run id, and the facts folder was proven absent before launch (3a-facts-guard).
+# liveness from on-disk ground truth (a gather-facts output file present => running, absent =>
+# starting) — not from capture-pane frames. PROVENANCE: the gather-facts output file post-dates
+# launch by construction: the facts folder was proven absent before launch (3a-facts-guard).
 INJECT_SETTLE=0.2
 
 # SPAWN-TIME RESEND TUNABLES (inject_strain turn-start verification): under load (many
@@ -158,8 +157,7 @@ RESEND_POLL_TIMEOUT=8
 
 # STARTED_EVIDENCE_TIMEOUT: cold-boot first-evidence grace window (seconds) for Pass-3
 # per-strain turn-start verification. A cold `claude` boot → workflow start chain can take >2min
-# on a loaded host before the child writes started-evidence (a run-ledger state.current or a
-# gather-facts output file), so the
+# on a loaded host before the child writes started-evidence (a gather-facts output file), so the
 # legacy (RESEND_RETRIES+1)*RESEND_POLL_TIMEOUT (~32s) budget falsely failed LIVE, progressing
 # strains. verify_strain now polls started-evidence against THIS deadline (computed per-strain at
 # its own Pass-3 entry — never a shared scheduler), nudging with bare-Enter resends every
@@ -250,20 +248,11 @@ plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev
 # dashboard cannot faithfully render.
 [ -f "$plugin_root/skills/_shared/allowlist.sh" ] || blocker "required shared library missing: skills/_shared/allowlist.sh; refusing to proceed"
 . "$plugin_root/skills/_shared/allowlist.sh" || blocker "failed to source skills/_shared/allowlist.sh (unparseable); refusing to proceed"
-# Source the shared run-ledger scalar projector so spawn-time started-evidence is single-sourced
-# from the SAME validator the brood-status dashboard uses (hivemind_project_state_current_content).
-# This closes the prior divergence where an inline non-empty-string check accepted ledger values
-# the canonical projector rejects as MALFORMED (overlength, wrong charset, multi-document JSON),
-# producing split-brain launch evidence between spawn-brood and brood-status.
-[ -f "$plugin_root/skills/_shared/ledger-project.sh" ] || blocker "required shared library missing: skills/_shared/ledger-project.sh; refusing to proceed"
-. "$plugin_root/skills/_shared/ledger-project.sh" || blocker "failed to source skills/_shared/ledger-project.sh (unparseable); refusing to proceed"
 # Source the brood-state reader, the ONLY home of brood-state reads. It derives every location
-# from identifiers (a worktree root and a run id) and refuses a symlinked or non-directory
-# component and a symlinked or non-regular leaf: the child run ledger
-# (hivemind_brood_read_child_ledger), the gather-facts started-evidence
-# (hivemind_detect_facts_evidence, the second started-evidence source, written by a
-# script-engine child that keeps no run ledger) and the pre-launch facts guard
-# (hivemind_brood_facts_absent). It needs containment.sh and ledger-project.sh, sourced above.
+# from an identifier (a worktree root) and refuses a symlinked or non-directory component and a
+# symlinked or non-regular leaf: the gather-facts output file started-evidence
+# (hivemind_detect_facts_evidence, the only started-evidence source) and the pre-launch facts
+# guard (hivemind_brood_facts_absent). It needs containment.sh, sourced above.
 [ -f "$plugin_root/skills/_shared/brood-state.sh" ] || blocker "required shared library missing: skills/_shared/brood-state.sh; refusing to proceed"
 . "$plugin_root/skills/_shared/brood-state.sh" || blocker "failed to source skills/_shared/brood-state.sh (unparseable); refusing to proceed"
 
@@ -358,25 +347,15 @@ base="$(read_inputs_field '.base // ""')"
 overlap_risk="$(read_inputs_field '.overlap_risk // ""')"
 overlap_details="$(read_inputs_field '.overlap_details // ""')"
 
-# ── manifest hatchery bridge fields (ADDITIVE; ledger-bridge) ────────────────────
+# ── manifest format ──────────────────────────────────────────────────────────────
 # manifest_version: 4 marks the per-brood-namespaced JSON manifest format: top-level
 # brood_id (the generated GUID) and created_at, brood-id-carrying per-strain worktree/session,
 # no per-strain branch field (each worktree boots detached; readers treat an absent branch as
 # MISSING), and per-strain run.suggested_ledger DROPPED (the read side derives it now). No backwards-
 # compat with prior versions (single-user, unreleased): drain any running brood before upgrade.
-# The hatchery run metadata POINTS at the coordinator's own run ledger (which the hatchery
-# overlord owns and writes in its OWN worktree — this script never creates it; it only records
-# suggested pointers). All values are either overlord-supplied scalars or derived from the
-# generated brood_id, so no new untrusted bytes enter here. They enter the manifest jq
-# construction below as --arg bindings.
+# The manifest is a registry and coordination artifact; a caller-supplied hatchery input is
+# never read.
 manifest_version='4'
-hatchery_run_id="$(read_inputs_field '.hatchery.run_id // ""')"
-[ -n "$hatchery_run_id" ] || hatchery_run_id="$brood_id-hatchery"
-hatchery_workflow="$(read_inputs_field '.hatchery.workflow // ""')"
-[ -n "$hatchery_workflow" ] || hatchery_workflow="hatchery-dispatch"
-# The hatchery ledger is JSON (state.json), as is the manifest carrying the pointer —
-# format-follows-consumer (ADR-0018 §A): both are machine-consumed by jq (the ledger by the
-# child/engine, the manifest by brood-status). Anchored to the coordinator checkout root.
 
 [ -n "$base" ]         || { printf 'blocker: inputs file is missing base\n' >&2; exit 1; }
 [ -n "$overlap_risk" ] || { printf 'blocker: inputs file is missing overlap_risk\n' >&2; exit 1; }
@@ -420,8 +399,8 @@ esac
 # these variables — never interpolated into command source.
 declare -a S_NAME S_DESC S_SHORT S_TMUX S_WT S_STATUS
 # ledger-bridge (STEP-007): per-strain suggested run metadata, index-aligned with the
-# arrays above. The suggested run id is the lineage key the manifest records and the run-ledger
-# leaf the started-evidence read confines; this script never creates a child ledger.
+# arrays above. The suggested run id is the lineage key the manifest records and task.md
+# carries; started-evidence is the gather-facts output file, which the run id does not key.
 declare -a S_RUN_ID S_RUN_HINT
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" \
@@ -487,8 +466,8 @@ for idx in $(seq 0 $((strain_count - 1))); do
 
   # ledger-bridge (STEP-007): derive the per-strain suggested run metadata. suggested_id
   # combines the brood_id with the sanitized short. No ledger path is derived or handed to the
-  # child (ADR-0037 decision 24): the started-evidence read derives the leaf from the ground-truth
-  # worktree. workflow_hint is an OPTIONAL overlord-supplied hint (a non-binding suggestion; the
+  # child (ADR-0037 decision 24): the started-evidence read derives the gather-facts output file
+  # location from the ground-truth worktree. workflow_hint is an OPTIONAL overlord-supplied hint (a non-binding suggestion; the
   # child's own router decides), defaulting to standard-delivery. Values derive only from the
   # generated brood_id / short, so no new untrusted bytes.
   run_id="$brood_id_safe--$short"
@@ -967,8 +946,8 @@ done
 #   Pass 2 — shared-deadline readiness round-robin + FAST submit_strain (no blocking poll).
 #   Pass 3 — per-strain verify_strain, each computing its OWN deadline at its Pass-3 entry, so
 #            no strain's verifier shares wall-clock with another's.
-# The turn-start evidence stays on-disk ground truth (#213/#248 direction) — a run-ledger
-# state.current or a gather-facts output file (strain_has_started_evidence) — NEVER capture-pane;
+# The turn-start evidence stays on-disk ground truth (#213/#248 direction) — a gather-facts
+# output file (strain_has_started_evidence) — NEVER capture-pane;
 # the split only moved the poll out of the shared loop.
 
 # submit_strain: the FAST, non-blocking half of the former inject_strain. Inject a ready
@@ -1063,50 +1042,16 @@ submit_strain() {
 # informational line + return 0; session DEAD => fail-closed mark_failed + warning + return 1. A
 # dead-pane send-keys failure mid-nudge is likewise mark_failed + return 1. Returns 0 the moment
 # started-evidence appears.
-# verify_started_evidence <idx>: single-snapshot projection of the strain's child run-ledger
-# state.current. Echoes the validated state.current, or one of the fixed tokens MISSING /
-# MALFORMED. This is the read-side discipline mandated by the security policy for hostile
-# child-ledger reads. The read is SINGLE-SOURCED from hivemind_brood_read_child_ledger in
-# _shared/brood-state.sh (shared with brood-status), the only home of brood-state reads. It takes
-# IDENTIFIERS, never a path: the strain's GROUND-TRUTH worktree (S_WT[$idx], script-derived from
-# the canonical repo_root + generated brood-id/short — never a manifest/child-supplied path) and
-# the suggested run id (S_RUN_ID[$idx]). It refuses a symlinked or non-directory component, rejects
-# a symlinked / non-regular / NUL-bearing leaf, reads EXACTLY ONCE into an in-memory snapshot, and
-# projects from CONTENT via hivemind_project_state_current_content. It emits TWO lines
-# (state.current, then run.status) from ONE snapshot; spawn-brood consumes ONLY line1
-# (state.current). We read on-disk run-ledger ground truth, NOT capture-pane (#213/#248): the
-# child writes state.current when its workflow actually starts; we never screen-scrape the TUI.
-verify_started_evidence() {
-  local idx="$1"
-
-  # Single-snapshot read via the shared brood-state reader. It outputs two lines from one
-  # snapshot (line1 = state.current, line2 = run.status); spawn-brood needs only line1. Read
-  # both set-u-safely so an absent second line cannot trip a bad read.
-  local state_out="" _run_out=""
-  { IFS= read -r state_out; IFS= read -r _run_out; } \
-    < <(hivemind_brood_read_child_ledger "${S_WT[$idx]}" "${S_RUN_ID[$idx]}")
-  printf '%s\n' "$state_out"
-}
-
-# strain_has_started_evidence <idx>: succeed when the strain shows started-evidence. Two sources,
-# both read from the strain's GROUND-TRUTH worktree S_WT[$idx] (script-derived, never a
-# manifest/child-supplied path):
-#   1. the confined run-ledger read (verify_started_evidence) gives a valid state.current —
-#      neither MISSING nor MALFORMED (a state-machine child);
-#   2. hivemind_detect_facts_evidence (brood-state.sh) reports a gather-facts output file (a
-#      script-engine child, which keeps no run ledger).
-# Both are the SAME shared brood-state.sh functions brood-status uses, so spawn-time and
-# dashboard evidence cannot diverge. Fail closed: neither source => not started.
-# PROVENANCE: both sources post-date launch by construction. The ledger leaf is keyed by the
-# spawn-generated brood GUID run id (S_RUN_ID), and the worktree's facts folder was proven absent
-# before launch (3a-facts-guard), so no base-tree file can count.
+# strain_has_started_evidence <idx>: succeed only when hivemind_detect_facts_evidence
+# (brood-state.sh) reports a gather-facts output file in the strain's GROUND-TRUTH worktree
+# S_WT[$idx] (script-derived from the canonical repo_root + generated brood-id/short, never a
+# manifest/child-supplied path). It is the SAME shared brood-state.sh function brood-status uses,
+# so spawn-time and dashboard evidence cannot diverge. Fail closed: no gather-facts output file
+# => not started. PROVENANCE: the file post-dates launch by construction, because the worktree's
+# facts folder was proven absent before launch (3a-facts-guard), so no base-tree file can count.
 strain_has_started_evidence() {
   local idx="$1"
-  local state_current facts_evidence
-  state_current="$(verify_started_evidence "$idx")"
-  if [ "$state_current" != "MISSING" ] && [ "$state_current" != "MALFORMED" ]; then
-    return 0
-  fi
+  local facts_evidence
   facts_evidence="$(hivemind_detect_facts_evidence "${S_WT[$idx]}")"
   [ "$facts_evidence" = "yes" ]
 }
@@ -1120,27 +1065,17 @@ verify_strain() {
   # WHY read on-disk evidence and
   # NOT capture-pane: capture-pane turn-start verification was deliberately REMOVED in issue
   # #213 / PR #248 because screen-scraping the TUI for a turn-started frame caused a break-fix
-  # review cluster (frame races, chrome coupling, false resends). The run-ledger
-  # (.../.hivemind/runs/<run_id>/state.json) and the gather-facts output file
-  # (.../.hivemind/facts/facts-*.json) are GROUND TRUTH: the child writes one of them when its
-  # workflow actually starts. We poll THOSE files (strain_has_started_evidence) — never the
-  # pane — for started-evidence, and resend a bare Enter only if none appears. Neither file can
-  # come from the base tree: the ledger leaf is keyed by the spawn-generated brood GUID run id,
-  # and the facts folder was proven absent before launch (3a-facts-guard).
+  # review cluster (frame races, chrome coupling, false resends). The gather-facts output file
+  # (.../.hivemind/facts/facts-*.json) is GROUND TRUTH: the child writes it when its workflow
+  # actually starts. We poll THAT file (strain_has_started_evidence) — never the pane — for
+  # started-evidence, and resend a bare Enter only if none appears. The file cannot come from the
+  # base tree: the facts folder was proven absent before launch (3a-facts-guard).
   #
-  # CONFINED READ (security-policy discipline for hostile child-ledger reads): the per-poll
-  # projection is delegated to verify_started_evidence above, which calls the brood-state.sh
-  # reader with the strain's GROUND-TRUTH worktree and run id. That reader rejects a
-  # symlinked/non-regular/NUL-bearing leaf, reads ONCE into a snapshot, and projects via the
-  # CONTENT projector — the same reader brood-status-project.sh uses.
-  #
-  # Started-evidence MUST match the brood-status derive gate. It is single-sourced from the SAME
-  # canonical content projector the dashboard uses — hivemind_project_state_current_content in
-  # _shared/ledger-project.sh — so the two mechanisms cannot diverge: started-evidence is a
-  # state.current that projects to neither MISSING nor MALFORMED, which enforces single-document
-  # JSON, object shape, the ^[a-z0-9_]+$ charset, and the <=64 length cap. Absent file /
-  # unparseable / null / empty / non-string / overlength / wrong-charset / multi-document =>
-  # MISSING or MALFORMED => NOT started (fail-closed). Never hand-parse — the projector owns it.
+  # CONFINED READ: the per-poll check is delegated to strain_has_started_evidence above, which
+  # calls the brood-state.sh reader (hivemind_detect_facts_evidence) with the strain's
+  # GROUND-TRUTH worktree. That reader refuses a symlinked or non-directory component and a
+  # symlinked or non-regular leaf — the same reader brood-status uses, so started-evidence
+  # matches the brood-status derive gate. Never hand-parse — the reader owns it.
   # Per-strain grace deadline, computed HERE at this strain's own Pass-3 entry (independent of
   # every other strain's verifier — never a shared scheduler). The cap is now this single time
   # budget; bare-Enter nudges are periodic WITHIN it (every ~RESEND_POLL_TIMEOUT) rather than a
@@ -1148,10 +1083,9 @@ verify_strain() {
   local grace_deadline=$(( $(date +%s) + STARTED_EVIDENCE_TIMEOUT ))
   local next_nudge=$(( $(date +%s) + RESEND_POLL_TIMEOUT ))
   while [ "$(date +%s)" -lt "$grace_deadline" ]; do
-    # Fail-closed: started ONLY when strain_has_started_evidence finds a validated
-    # state.current (neither MISSING nor MALFORMED) or a gather-facts output file. The confined
-    # readers handle containment (leaf/ancestor symlink reject, NUL reject) AND value-shape
-    # validation; anything else => keep polling. Fast path: a child already started on the first
+    # Fail-closed: started ONLY when strain_has_started_evidence finds a gather-facts output
+    # file. The confined reader handles containment (leaf/ancestor symlink reject); anything
+    # else => keep polling. Fast path: a child already started on the first
     # poll returns immediately.
     if strain_has_started_evidence "$idx"; then
       return 0
@@ -1284,8 +1218,8 @@ for idx in $(seq 0 $((strain_count - 1))); do
   [ "${S_STATUS[$idx]}" = "starting" ] || continue
   tmux_session="${S_TMUX[$idx]}"
   # (a) Reuse the EXACT started-evidence check verify_strain uses (strain_has_started_evidence:
-  # a valid run-ledger state.current or a gather-facts output file, both via the shared confined
-  # readers). Never hand-parse the ledger here.
+  # a gather-facts output file, via the shared confined reader). Never hand-parse the facts
+  # folder here.
   has_evidence=0
   if strain_has_started_evidence "$idx"; then
     has_evidence=1
@@ -1341,10 +1275,6 @@ hatchery_session="${TMUX:-}"   # current tmux session identifier, if any; inert 
 # top-level field. `date -u +%Y-%m-%dT%H:%M:%SZ` is portable (GNU + BSD date); the value is a
 # fixed-format machine string, not untrusted input.
 created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-# hatchery_ledger is derived here (repo_root in scope) and anchored to the coordinator
-# checkout root; it POINTS at the coordinator overlord's own JSON run ledger (this script
-# never creates it).
-hatchery_ledger=".hivemind/runs/$hatchery_run_id/state.json"
 
 # Build the strains array as JSON. Each strain object is constructed by a per-strain jq -n
 # invocation binding every untrusted value (name, description, worktree_path,
@@ -1398,9 +1328,6 @@ manifest_json="$(printf '%s' "$strains_objects" | jq -s '.' \
     --arg created_at "$created_at" \
     --arg hatchery_session "$hatchery_session" \
     --arg base "$base" \
-    --arg hatchery_run_id "$hatchery_run_id" \
-    --arg hatchery_ledger "$hatchery_ledger" \
-    --arg hatchery_workflow "$hatchery_workflow" \
     --arg overlap_risk "$overlap_risk" \
     --arg overlap_details "$overlap_details" \
     '{
@@ -1409,11 +1336,6 @@ manifest_json="$(printf '%s' "$strains_objects" | jq -s '.' \
       created_at: $created_at,
       hatchery_session: $hatchery_session,
       base: $base,
-      hatchery: {
-        run_id: $hatchery_run_id,
-        ledger: $hatchery_ledger,
-        workflow: $hatchery_workflow
-      },
       overlap_risk: $overlap_risk,
       overlap_details: $overlap_details,
       strains: .,

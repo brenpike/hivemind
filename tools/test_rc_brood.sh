@@ -53,6 +53,7 @@
 #      with ZERO send-keys, even when the outside manifest is well-formed (Cases 19a-19c). A manifest
 #      holding a literal NUL (in the middle or trailing) and a symlinked .hivemind/broods directory
 #      are each a pre-flight blocker with ZERO send-keys too (Cases 19d-19f).
+#  13. Retired hatchery block ignored: Case 7's fixture still carries the block and Case 7 passes.
 #
 # Usage:
 #   ./tools/test_rc_brood.sh
@@ -560,6 +561,9 @@ assert_eq "brood-mismatch:zero-sendkeys" "0" "$(count_records "$LOG6")" "no keys
 echo '=== Case 7: foreign session — exact-identity mismatch skip, never addressed ==='
 BID7="brood-feedface-0000-4000-8000-000000000004"
 ROOT7="$(new_brood_root foreign-session "$BID7" "$FIXTURES/rc-manifest-foreign-session.json")"
+# INVARIANT: this fixture keeps the retired top-level hatchery block, so Case 7 passing proves
+# rc-brood ignores the block.
+assert_eq "foreign:hatchery-block-kept" "true" "$(jq 'has("hatchery")' "$ROOT7/.hivemind/broods/$BID7/manifest.json")" "fixture carries the retired hatchery block"
 ALIVE7="$WORKDIR/alive7"
 LOG7="$WORKDIR/log7"
 : > "$LOG7"
@@ -602,7 +606,6 @@ jq -n --arg bid "$BID7S" '{
   created_at: "2026-06-21T00:00:00Z",
   hatchery_session: "",
   base: "main",
-  hatchery: { run_id: ($bid + "-hatchery"), ledger: (".hivemind/runs/" + $bid + "-hatchery/state.json"), workflow: "hatchery-dispatch" },
   overlap_risk: "low",
   overlap_details: "No shared file scopes detected.",
   strains: [ {
@@ -664,7 +667,6 @@ git -C "$ROOT10" init -q
 jq -n --arg bid "$BID10" '{
   manifest_version: 4, brood_id: $bid, created_at: "2026-06-21T00:00:00Z",
   hatchery_session: "", base: "main",
-  hatchery: { run_id: ($bid + "-hatchery"), ledger: (".hivemind/runs/" + $bid + "-hatchery/state.json"), workflow: "hatchery-dispatch" },
   overlap_risk: "low", overlap_details: "No shared file scopes detected.", merge_order: []
 }' > "$ROOT10/.hivemind/broods/$BID10/manifest.json"
 ALIVE10="$WORKDIR/alive10"; : > "$ALIVE10"
@@ -685,7 +687,6 @@ git -C "$ROOT11" init -q
 jq -n --arg bid "$BID11" '{
   manifest_version: 4, brood_id: $bid, created_at: "2026-06-21T00:00:00Z",
   hatchery_session: "", base: "main",
-  hatchery: { run_id: ($bid + "-hatchery"), ledger: (".hivemind/runs/" + $bid + "-hatchery/state.json"), workflow: "hatchery-dispatch" },
   overlap_risk: "low", overlap_details: "No shared file scopes detected.",
   strains: null, merge_order: []
 }' > "$ROOT11/.hivemind/broods/$BID11/manifest.json"
@@ -711,7 +712,6 @@ git -C "$ROOT12" init -q
 jq -n --arg bid "$BID12" '{
   manifest_version: 4, brood_id: $bid, created_at: "2026-06-21T00:00:00Z",
   hatchery_session: "", base: "main",
-  hatchery: { run_id: ($bid + "-hatchery"), ledger: (".hivemind/runs/" + $bid + "-hatchery/state.json"), workflow: "hatchery-dispatch" },
   overlap_risk: "low", overlap_details: "No shared file scopes detected.",
   strains: {
     api: { name: "api", tmux_session: ($bid + "-api"), status: "running", pr: null, merged: false, rebased_after: [] }
@@ -737,7 +737,6 @@ git -C "$ROOT13" init -q
 jq -n --arg bid "$BID13" '{
   manifest_version: 4, brood_id: $bid, created_at: "2026-06-21T00:00:00Z",
   hatchery_session: "", base: "main",
-  hatchery: { run_id: ($bid + "-hatchery"), ledger: (".hivemind/runs/" + $bid + "-hatchery/state.json"), workflow: "hatchery-dispatch" },
   overlap_risk: "low", overlap_details: "No shared file scopes detected.",
   strains: [ "not-an-object" ],
   merge_order: []
@@ -761,7 +760,6 @@ git -C "$ROOT14" init -q
 jq -n --arg bid "$BID14" '{
   manifest_version: 4, brood_id: $bid, created_at: "2026-06-21T00:00:00Z",
   hatchery_session: "", base: "main",
-  hatchery: { run_id: ($bid + "-hatchery"), ledger: (".hivemind/runs/" + $bid + "-hatchery/state.json"), workflow: "hatchery-dispatch" },
   overlap_risk: "low", overlap_details: "No shared file scopes detected.",
   strains: [], merge_order: []
 }' > "$ROOT14/.hivemind/broods/$BID14/manifest.json"
@@ -793,7 +791,6 @@ jq -n --arg bid "$BID9" '{
   created_at: "2026-06-21T00:00:00Z",
   hatchery_session: "",
   base: "main",
-  hatchery: { run_id: ($bid + "-hatchery"), ledger: (".hivemind/runs/" + $bid + "-hatchery/state.json"), workflow: "hatchery-dispatch" },
   overlap_risk: "low",
   overlap_details: "No shared file scopes detected.",
   strains: [
@@ -892,7 +889,6 @@ git -C "$ROOT16" init -q
 jq -n --arg bid "$BID16" '{
   manifest_version: 4, brood_id: $bid, created_at: "2026-06-21T00:00:00Z",
   hatchery_session: "", base: "main",
-  hatchery: { run_id: ($bid + "-hatchery"), ledger: (".hivemind/runs/" + $bid + "-hatchery/state.json"), workflow: "hatchery-dispatch" },
   overlap_risk: "low", overlap_details: "No shared file scopes detected.",
   strains: [ {
     name: "api",
@@ -946,7 +942,6 @@ git -C "$ROOT16B" init -q
 jq -n --arg bid "$BID16B" '{
   manifest_version: 4, brood_id: $bid, created_at: "2026-06-21T00:00:00Z",
   hatchery_session: "", base: "main",
-  hatchery: { run_id: ($bid + "-hatchery"), ledger: (".hivemind/runs/" + $bid + "-hatchery/state.json"), workflow: "hatchery-dispatch" },
   overlap_risk: "low", overlap_details: "No shared file scopes detected.",
   strains: [ {
     name: "api",
@@ -1005,7 +1000,6 @@ git -C "$ROOT17" init -q
 jq -n --arg bid "$BID17" '{
   manifest_version: 4, brood_id: $bid, created_at: "2026-06-21T00:00:00Z",
   hatchery_session: "", base: "main",
-  hatchery: { run_id: ($bid + "-hatchery"), ledger: (".hivemind/runs/" + $bid + "-hatchery/state.json"), workflow: "hatchery-dispatch" },
   overlap_risk: "low", overlap_details: "No shared file scopes detected.",
   strains: [ {
     name: "api",

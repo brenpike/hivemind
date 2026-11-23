@@ -217,7 +217,6 @@ SOURCE_ROWS=(
     "$(build_std_source_row plugin/skills/record-state-result/scripts/record-state-result.sh '$plugin_root/skills/_shared' ledger-engine-io.sh)"
     "$(build_std_source_row plugin/skills/spawn-brood/scripts/spawn-brood.sh '$plugin_root/skills/_shared' containment.sh)"
     "$(build_std_source_row plugin/skills/spawn-brood/scripts/spawn-brood.sh '$plugin_root/skills/_shared' allowlist.sh)"
-    "$(build_std_source_row plugin/skills/spawn-brood/scripts/spawn-brood.sh '$plugin_root/skills/_shared' ledger-project.sh)"
     "$(build_std_source_row plugin/skills/spawn-brood/scripts/spawn-brood.sh '$plugin_root/skills/_shared' brood-state.sh)"
     "$(build_std_source_row plugin/skills/seed-hive/scripts/seed-hive.sh '$shared_dir' containment.sh)"
     'plugin/skills/adaptation-cycle/scripts/run-review.sh|$shared_dir/containment.sh|review references missing|review references missing|containment.sh'
