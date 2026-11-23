@@ -12,7 +12,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 0
+rounds: 1
 clean_round: false
 ---
 
@@ -44,16 +44,47 @@ The council ADR drafted in the first docs pull request was withdrawn to #638. Th
 
 ## Rounds
 
-This amendment touches a trust boundary and the merge path: the readiness check's snapshot mode for Lair admission, the Lair's auto-tier floor for docs pull requests, and the stamp paths of the path allowlist. So each round runs one fresh `hivemind:cerebrate` pass covering every angle and adds one local review tool pass when a tool is configured (`HIVEMIND_LOCAL_REVIEWER`, or the `codex-plugin` default when the Codex plugin is installed); a round with none configured, or whose tool cannot run, says the pass was skipped. No round has run yet.
+This amendment touches a trust boundary and the merge path: the readiness check's snapshot mode for Lair admission, the Lair's auto-tier floor for docs pull requests, and the stamp paths of the path allowlist. So each round runs one fresh `hivemind:cerebrate` pass covering every angle and adds one local review tool pass when a tool is configured (`HIVEMIND_LOCAL_REVIEWER`, or the `codex-plugin` default when the Codex plugin is installed); a round with none configured, or whose tool cannot run, says the pass was skipped.
+
+### Round 1
+
+The first round of the re-review, under the three-round cap. Neither reviewer wrote the design. Its scope was the diff since the stamped blobs, which includes main's 2026-11-22 amendment of ADR-0046 decision 8 (#649), because each stamp differed from main at `8ea1526b` before the round, plus `CONTEXT.md` and this record since the merge-base with main, `8ea1526ba9532ca588f6a70f72be9306c49f8fb8`.
+
+- Reviewer `hivemind:cerebrate`, model opus (Claude Opus), cerebrate's own model (D11). One fresh, read-only pass with `Memory context: none`, covering every angle. It reviewed commit `193abe9d4fd46748da9feb7c2e9bbdb36b4317d8`, the branch head with a clean tree, and raised 15 findings, R1-1 to R1-15: 0 critical, 1 high, 7 medium and 7 low.
+- Reviewer: the local review tool, run by `hivemind:local-reviewer` through `hivemind:adaptation-cycle` and `run-review.sh`, the `codex-plugin` preset, model gpt-5.6-sol, read from the Codex configuration (`~/.codex/config.toml`). It ran because the amendment touches a trust boundary: the path allowlist and the readiness check's input mode. Its base was `8ea1526ba9532ca588f6a70f72be9306c49f8fb8`, the merge-base with main. Iteration 1 reviewed commit `193abe9d4fd46748da9feb7c2e9bbdb36b4317d8` and iteration 2 reviewed commit `8f322f5002015b93828850b6afd58d9a81dbd0bb`. It raised 5 findings, all high: 687d54b5, 15e0bfa2, d53e191d, 6d349cd2 and bf0ada2f.
+
+The fixes landed in commits `e2fbda4b5e228e2b8dc037b0df9a03bf13ef281a` and `8f322f5002015b93828850b6afd58d9a81dbd0bb` (from the local review tool pass), `a526e25d3404b915653fbc5a0622671a171c64ee` (the round's fix wave) and this record wave. Every finding is fixed or rejected; none is deferred, recorded or open. After the round the user answered the prototype trust question (answer A of 2026-11-23, Decisions asked). The round raised findings, so it is not clean. Round 2, a confirming round, follows.
+
+The diminishing-returns check (D35) ran after the round, round 1 of 3. No signal fired, so no advisory was raised: the findings fell to fixes, with no recurrence on a surface an earlier round fixed.
 
 ## Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
 |---|---|---|---|---|---|
+| R1-1 | 1 | A | high | fixed | The changeling's contract forbade the UI prototype's runtime behavior: the `?variant=` switcher, the key cycling and the in-memory stub state, and its intended variants. #622 gives `plugin/agents/changeling.md` a carve-out scoped to `docs/initiatives/<slug>/prototype/index.html` only, within D20's budget, with an Existing-path coverage row (D39, ADR-0046 decision 11). The option taken is listed for veto. |
+| R1-2 | 1 | B | medium | fixed | A filled `## Verdict` section in `notes.md` did not prove the maintainer's approval or the fold. The build run writes no Verdict; only the refinement run writes it, after the fold, and #621 and #622 test both cases (UI prototype, UI prototype format, Guide skill). |
+| R1-3 | 1 | A | medium | fixed | The `hivemind:prd-to-issues` refusal broke the standalone path. The refusal and the Prototype line apply only when `docs/initiatives/<slug>/` exists on trunk, and #617 gains a fixture for it (Slice design section format). The test taken is listed for veto. |
+| R1-4 | 1 | B | medium | fixed | Under `HIVEMIND_AUTO_MERGE` a taken design decision can merge unseen, and nothing said so. The residuals name it with its bound (Design-decision rule, Trust boundaries, ADR-0046 Residuals). The weak option, asking before `gh pr ready`, is recorded in ADR-0046 Residuals and not taken. |
+| R1-5 | 1 | A | medium | fixed | The veto list was said to be in the docs pull request's body, which is never updated. It is in the review record and in a docs pull request comment the guide posts with `gh pr comment` (ADR-0046 decision 8, Design-decision rule, PRD). The home taken is listed for veto. |
+| R1-6 | 1 | B | medium | fixed | A #619 test case encoded the removed always-ask rule. It is rewritten to the current design-decision rule (Verification strategy). |
+| R1-7 | 1 | A | medium | fixed | The retire-json D19 section 8 edits were not applied. They are applied verbatim, the ADR-0039 decision 3 references are aligned to ADR-0048, and stale `plugin/agents/overlord.md` line references are replaced by section names. Applying them in this pull request is listed for veto. |
+| R1-8 | 1 | B | medium | rejected | The UI prototype's "no network request" read as a trust claim that nothing checks. Rejected by the user's answer A of 2026-11-23 (Decisions asked): the prototype is a stub page the maintainer opens in their own browser, agents treat its files only as data, and nothing checks or sandboxes it; the sentence is narrowed to a build rule. Recorded in the [solution design](solution-design.md), Trust boundaries, "The UI prototype is a stub page", and UI prototype format. The same issue as bf0ada2f. |
+| R1-9 | 1 | A | low | fixed | ADR-0046's Status line credited the clause-1-only gate to answer Q18 A. It credits the amendment of 2026-11-22 (#649). |
+| R1-10 | 1 | A | low | fixed | Moving the passing re-review under History turned "#640" into "##640". It is restored under History: 2026-11-22 (re-review). |
+| R1-11 | 1 | A | low | fixed | The always-ask screen intro read as covering every taken decision, and four D36 rows set by the maintainer (#663) were listed as taken. The intro is scoped to the pre-amendment table, those rows moved to Decisions asked as the maintainer's decisions in #663, and the removal of the always-ask list (#649) is under Decisions asked. |
+| R1-12 | 1 | A | low | fixed | "Only two kinds are asked" read as the complete ask set. The Design-decision rule names Tier A, Surface-Growth Escalation and the UI prototype approval gate (D38) beside them. |
+| R1-13 | 1 | A | low | fixed | Cross-reference nits: the record-last rule's decision citation, a clause of Review record front matter and D9's historical name. The citations are corrected, and D9 says its name is historical (#649). |
+| R1-14 | 1 | B | low | fixed | No fixture pinned the PRD's `**UI:**` line template. #622 adds a `tests/policy` fixture for it (Verification strategy). |
+| R1-15 | 1 | B | low | fixed | The gh-mode contract cases and the evaluation of the Prototype line under `prd_ui_invalid` were unstated. Readiness check output contract and Verification strategy state them. |
+| 687d54b5 | 1 | review | high | rejected | Local review tool pass, finding_id `687d54b54fed0129ab7ef3f1fed2fbd994ed33a515ad8f51576bfeb80f6d7f84`: a filled `## Verdict` section could stand in for the maintainer's approval. Rejected: stage derivation is a progress read, not an authorization boundary. The Verdict marks progress only, and the approval's authority is the D38 ask, the stamps and the human-reviewed merge (D24). Recorded in the [solution design](solution-design.md), Trust boundaries, "The prototype verdict marks progress, not approval", a review call the run took (`plugin/governance/decision-autonomy.md`, Review Calls), listed for veto. |
+| 15e0bfa2 | 1 | review | high | fixed | Local review tool pass, finding_id `15e0bfa2c0f0ec5bf361d41a003da9bddf75bf1659ff6d22cea11580314318aa`: a symlink blob passed the path checks. The check reads only regular-file blobs, by their mode from `git ls-tree` (commit `e2fbda4b`). |
+| d53e191d | 1 | review | high | fixed | Local review tool pass, finding_id `d53e191decee731b2662539e5292e0cb9a5b98b2210f2f3bcc75cf51c3f3d9d0`: the UI prototype files were missing from the data-only list. Trust boundaries lists `index.html` and `notes.md` as data (commit `e2fbda4b`). |
+| 6d349cd2 | 1 | review | high | rejected | Local review tool pass, finding_id `6d349cd2e2e44e265b1ed7e8625684185e0b01099236bce238623f18c29053fd`: a repeat of 687d54b5. Rejected under the same record: the [solution design](solution-design.md), Trust boundaries, "The prototype verdict marks progress, not approval". |
+| bf0ada2f | 1 | review | high | rejected | Local review tool pass, finding_id `bf0ada2f088177d9f4a52dde97c6d34698ca56344e2d1702d06289208b6e3f8c`: opening the UI prototype runs agent-written script in the maintainer's browser, and nothing checks its no-network rule. Rejected by the user's answer A of 2026-11-23 (Decisions asked), the same record as R1-8: the [solution design](solution-design.md), Trust boundaries, "The UI prototype is a stub page". |
 
 ## Decisions taken, listed for veto
 
-Each decision has its always-ask screen: an answer to each of the four always-ask items. "no" means the decision does not do that.
+Each decision in this first table, all taken before the always-ask list was removed (#649), has its always-ask screen: an answer to each of the four always-ask items. "no" means the decision does not do that.
 
 | Decision | Scope change | ADR amendment | Trust, credential or merge path | Irreversible |
 |---|---|---|---|---|
@@ -128,17 +159,14 @@ Each decision has its always-ask screen: an answer to each of the four always-as
 
 Moved to #638 with the council, so no longer listed here: D12, D13, D14, D16, D18 and D18's `skip` at `balanced`, D25, D26, the A1 redesign, ADR-0042 decision 9 not amended, A15, R2A3, the switched-option gate, the `needs_user_fact` absent rule, the council switch re-plan, script-local council answers, the composed-brief defect, the `dissent` bound, `council.js`, the merges of A5 with B12, A6 with B13, R2A1 with R2B1, R2A4 with B15, R2B7 with A2, R3A8 with R3B1 and R3B8 with R3A2, R3B1, R3B2, R3B3, R3A2, R3A3, R3A4 and R3B7.
 
-The commit refusal, the code-read verify stop, verify on every record the pull request adds or edits (in a repository's own CI where it wires verify there, optional per Q21 A) and `design_delivered` were asked (Q10 A), and the round-4 count was asked (Q11 A). After round 4 the council split (Q12 A, Q14 B), the narrowing of ADR-0037 decision 16 (Q13 A), the commit refusal's scope (Q15 A), the ADR-0026 decision 2 amendment (Q16 A) and the remediation plan (Q17 A) were asked. In re-review round 1 the narrowing of ADR-0026 decision 3 (Q18 A, D9), the return of a guide-launched run to the guide (Q19 A, D33) and the remediation plan (Q20 A) were asked. In re-review round 2 the plugin-only merge check with the narrowing of ADR-0044's merge conditions (Q21 A, D28) and the remediation plan (Q22 A) were asked. After re-review round 3 the broadened merge check (Q23 A, D28), its git fetch and base-drift details (Q24 A, D28) and the one-time fourth re-review round (Q23 A, D34) were asked. After re-review round 4 the move of merge-time enforcement out to #619 (Q25 A, D28, D34) and the diminishing-returns check (D35, the user's directive) were asked, and the taken rows for merge mode's details left with it. So none of them has a taken row.
+The commit refusal, the code-read verify stop, verify on every record the pull request adds or edits (in a repository's own CI where it wires verify there, optional per Q21 A) and `design_delivered` were asked (Q10 A), and the round-4 count was asked (Q11 A). After round 4 the council split (Q12 A, Q14 B), the narrowing of ADR-0037 decision 16 (Q13 A), the commit refusal's scope (Q15 A), the ADR-0026 decision 2 amendment (Q16 A) and the remediation plan (Q17 A) were asked. In re-review round 1 the narrowing of ADR-0026 decision 3 (Q18 A, D9), the return of a guide-launched run to the guide (Q19 A, D33) and the remediation plan (Q20 A) were asked. In re-review round 2 the plugin-only merge check with the narrowing of ADR-0044's merge conditions (Q21 A, D28) and the remediation plan (Q22 A) were asked. After re-review round 3 the broadened merge check (Q23 A, D28), its git fetch and base-drift details (Q24 A, D28) and the one-time fourth re-review round (Q23 A, D34) were asked. After re-review round 4 the move of merge-time enforcement out to #619 (Q25 A, D28, D34) and the diminishing-returns check (D35, the user's directive) were asked, and the taken rows for merge mode's details left with it. After round 1 of the re-review of the 2026-11-22 amendment the UI prototype's trust boundary was asked (answer A of 2026-11-23). So none of them has a taken row.
 
-The 2026-11-22 amendment's decisions are taken under ADR-0046 decision 8 as amended. Each lists its recommendation strength and what it touches, from scope, ADR amendment, trust, credential and merge path. None acts irreversibly now.
+The 2026-11-22 amendment's decisions, and those taken in round 1 of its re-review, are taken under ADR-0046 decision 8 as amended. Each lists its recommendation strength and what it touches, from scope, ADR amendment, trust, credential and merge path. None acts irreversibly now. The parts of D36 the maintainer set in #663 are under Decisions asked.
 
 | Decision | Recommendation strength | What it touches |
 |---|---|---|
-| D36: the UI prototype, a conditional, required initiative artifact between the PRD and the solution design | set by the maintainer (#663) | scope (PRD solution, stories and acceptance criteria); ADR amendment (ADR-0046 decisions 1, 5 and 12) |
-| D36: its shape: one self-contained `prototype/index.html` with 3 to 5 structurally different variants and the `?variant=` switcher, `notes.md` with per-variant feedback and a verdict, stub data only, no polish | set by the maintainer (#663) | scope; ADR amendment (decision 12) |
-| D36: approval, then refinement into one approved variant | set by the maintainer (#663) | scope; ADR amendment (decision 12) |
-| D36: the approved prototype stamped on trunk, the losing variants kept only in the docs pull request's history (a recorded deviation from the upstream prototype skill), and `notes.md` describing each variant in words | set by the maintainer (#663); the word descriptions strong | scope; ADR amendment (decisions 7 and 12) |
-| D36: no design tool, hosted service, build step, framework or account (P26); a published link optional; the file references nothing outside itself and makes no network request | strong (#663 detail 2) | trust (the file the maintainer opens); ADR amendment (decision 12) |
+| D36: `notes.md` describes each variant in words | strong | scope; ADR amendment (decisions 7 and 12) |
+| D36: no design tool, hosted service, build step, framework or account (P26); a published link optional; as a build rule, not a trust claim and unchecked, the file references nothing outside itself and makes no network request | strong (#663 detail 2) | trust (the file the maintainer opens); ADR amendment (decision 12) |
 | D37: the `**UI:**` line, the PRD's first non-blank line after its title, exactly `yes` or `no`, set during interrogation and written by `hivemind:plan-to-prd` (#622) | strong (#663 detail 1) | scope; ADR amendment (decision 12) |
 | D37: a missing line reads as `no`; any other value gives `prd_ui_invalid`; #619's verify fails a record the pull request adds or edits whose stamped PRD lacks a valid line; this PRD gains `**UI:** no` | strong | scope (this PRD); ADR amendment (decisions 7 and 12) |
 | D38: the prototype approval is the stage's approval gate, asked beside the two asked kinds and recorded under Decisions asked; a strong UI choice inside the prototype is taken and listed for veto | strong (#663 detail 4) | ADR amendment (decision 8) |
@@ -157,10 +185,16 @@ The 2026-11-22 amendment's decisions are taken under ADR-0046 decision 8 as amen
 | D24: `docs/prds/`, `docs/initiatives/` and `docs/adr/` are in the auto-tier floor #605 builds, not added by #623; the Lair's merge is #605's merge lane | strong; the Lair design (answer 2A of 2026-11-22) | merge path; ADR amendment (decision 7, Consequences and Residuals) |
 | Lair admission inherits the new reason codes and prototype paths through the shared check, read by the headings Readiness check output contract and Slice design section format | strong | none |
 | A History heading whose date an earlier History section uses gains a short suffix; the passing re-review moves under History: 2026-11-22 (re-review) | strong | none |
+| R1-1: the changeling keeps building `index.html`, through a #622 carve-out in `plugin/agents/changeling.md` scoped to `docs/initiatives/<slug>/prototype/index.html` only. Not taken: a drone owns `index.html`, which would undo #663 detail 3, the builder the maintainer took | strong | D39; D20; ADR amendment (ADR-0046 decision 11); #622 |
+| 687d54b5, a review call the run took: option A, the prototype Verdict marks progress only, and the approval's authority is the D38 ask, the stamps and the human-reviewed merge (D24) | strong; reversible; not architectural | trust (Trust boundaries) |
+| R1-3: the initiative-track test for the Prototype line and the slicing refusal is that `docs/initiatives/<slug>/` exists on trunk | strong | Slice design section format; #617 |
+| R1-5: the veto list's home is the review record and a docs pull request comment the guide posts with `gh pr comment` | strong | ADR amendment (ADR-0046 decision 8); Design-decision rule; PRD |
+| R1-7: the retire-json D19 section 8 edits are applied in this pull request rather than deferred | strong | ADR amendment (ADR-0046 decision 10); solution design Context and code truth and Failure modes |
 
 ## Decisions asked
 
 - D9, design-decision always-ask rule. Asked in re-review round 1. The user's answer: Q18 A: ADR-0046 records narrowing ADR-0026 decision 3 for design-stage decisions only; the always-ask list replaces the Promotion Gate's architectural clause (clause 2). D9 and D32 cite it.
+- D9, removal of the always-ask list. Set by the maintainer's direction of 2026-11-22 (#649), merged from main: ADR-0046 decision 8 has no always-ask list. A design-stage decision with a strong recommendation is taken and listed for veto whatever it touches, only a weak or absent recommendation and an action irreversible now are asked, and the gate reads Promotion Gate clause 1 only ([ADR-0046](../../adr/0046-idea-to-ready-process.md), Amendments, "2026-11-22: strong design decisions are taken in every category"). It supersedes the always-ask list of answer Q18 A.
 - D20, prose budget with no pre-approved raise. The user's answer: Q1 B, no budget raise is pre-approved.
 - D24, review record authority is a human-reviewed merge. The user's answer: Q5 A, take the recommendation.
 - D28, record integrity enforced in code. The user's answers:
@@ -180,11 +214,23 @@ The 2026-11-22 amendment's decisions are taken under ADR-0046 decision 8 as amen
 - D33, guide-launched runs return to the guide. Asked in re-review round 1. The user's answer: Q19 A: a run the guide launched that fails or ends blocked returns to the guide, which re-derives the stage, with no Instinct takeover. This narrows ADR-0039 decision 4 for guide-launched runs, recorded in ADR-0046; #622 edits `plugin/agents/overlord.md` (`## Engine`) within D20.
 - D34, one-time fourth re-review round. Asked after re-review round 3. The user's answer: Q23 A: fix all four round-3 findings, then run round 4 of the re-review as a one-time confirming round, recorded like D31: it does not change `rounds`; if it raises any new critical or high finding, the merge enforcement moves out to #619's own design, and the design narrows its claim to the guide's draft rule and the readiness check. Q25 A, asked after re-review round 4: round 4 raised a new high finding, RR4-C1, so the merge enforcement moved out to #619 (D28), and one final confirming round over that change follows and does not change `rounds`.
 - D35, diminishing-returns check after every round. The user's directive after re-review round 4: "We should factor diminishing returns identification into our design review....I shouldn't have to ask specifically if we're at diminishing returns." After every round the review checks its findings for recurrence on an already-fixed surface, a downward severity trend while fixes add surface, and edge cases an existing safeguard bounds, and raises the advisory to the maintainer unprompted.
+- D36, UI prototype between the PRD and the solution design. The maintainer's decisions of 2026-11-22 in #663, taken as set:
+  - The artifact: "A UI prototype is a conditional, required initiative artifact. It is produced and approved between the PRD and the solution design."
+  - Its shape: "Several radically different variants. Default 3, cap 5." "All variants live in a single self-contained `docs/initiatives/<slug>/prototype/index.html`". "The variant is chosen by a `?variant=` URL parameter". "`docs/initiatives/<slug>/prototype/notes.md` holds the review feedback: one section per variant, plus a verdict section". "Each variant renders with realistic stub data, in memory only". "Skip the polish."
+  - Approval, then refinement: "The maintainer reviews the variants and writes notes. The builder then folds the verdict into one approved variant in the same file, and the record stamps that."
+  - The approved prototype on trunk, a recorded deviation from the upstream prototype skill: "Here the approved prototype is a stamped initiative artifact on main, because slices link to it and the readiness check verifies it. The losing variants are kept in the docs pull request's history and are not carried forward once a verdict is recorded."
 - D35 advisories after the round-4 confirming checks. The user's answers:
   - Q26 A, asked after the D34 confirming round: fix the four findings and run a narrow check on those edits.
   - Q27 A, asked after the narrow check: fix the one sentence and run a one-sentence check.
 - Round-2 remediation plan. Asked in re-review round 2. The user's answer: Q22 A, the plan is accepted. Review findings reach a guide run only as docs pull request comments under the pass scan, the guide request has a fixed layout (RR2-C1, RR2-2; D33), stamp equality and ADR inclusion are checked only on a passing record (RR2-1; D28), and the Note shapes are defined (RR2-3).
 - Round-3 remediation plan. Asked after re-review round 3. The user's answer: Q24 A, the plan is accepted.
+- UI prototype trust boundary, from findings bf0ada2f and R1-8. Asked after round 1 of the re-review of the 2026-11-22 amendment, on 2026-11-23. The question, word for word:
+
+  ```text
+  Two passes raised the same issue: local review (finding bf0ada2f, high) and cerebrate (R1-8, medium). The approval step has you open the model-written docs/initiatives/<slug>/prototype/index.html in your own browser, so its scripts run. The design says the file "references nothing outside itself and makes no network request". Nothing checks that, and no review happens before you open it. The recommendation from both passes is weak, so I'm asking you. A. Record it as an accepted threat model in the solution design's Trust boundaries. Agents treat the file only as data, and your browser runs it. The risk is bounded by four things: the file comes from your own run on your own branch, the request is fixed, the source is reviewed, and the human merge is still required. The "no network request" sentence is narrowed to match. (Recommended, weak.) B. Add a fail-closed check: index.html must start <head> with a fixed Content-Security-Policy <meta> that blocks the network, and it may hold no external URLs. The readiness check (#615) and verify (#619) check this by line match, and the guide also checks it before asking you to approve. C. Sandboxed preview only: you view the prototype only through a sandbox with scripts and network turned off, and never open the raw file. Reply A, B or C.
+  ```
+
+  The user's answer, word for word: "The fact we are even acting like a prototype is a threat model is absolutely insane. A". Recorded in the [solution design](solution-design.md), Trust boundaries, "The UI prototype is a stub page".
 
 ## Moved to #638 with the council
 
@@ -200,9 +246,9 @@ These asked decisions are no longer decisions of this design. Their numbers are 
 
 ## Residuals
 
-Auto-merge of a docs pull request, from finding B5:
+Auto-merge of a docs pull request, from findings B5 and R1-4:
 
-- Scope: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval and green checks with no human review of the design.
+- Scope: with `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a bot approval and green checks with no human review of the design. Since the 2026-11-22 (#649) amendment of decision 8, strong design decisions touching scope, an ADR, trust, credentials or the merge path are taken, so under auto-merge they can reach trunk unseen; each is listed for veto in the review record and a docs pull request comment, is reversible by a later docs pull request, and changes no code until a slice builds it.
 - Ground: the user's decision of 2026-11-21 (answer Q5). It is outside the threat model as the maintainer's own opt-in under [ADR-0044](../../adr/0044-settled-approval-and-opt-in-auto-merge.md).
 - Bounded impact: in any repository, `merge-approved.sh` never merges a draft, and the guide keeps the pull request a draft until verify passes at its head and the record passes (ADR-0046 decision 7). The fix-round commit refusal holds, the readiness check fails every slice of a stale, failing or delivered record, and #605's auto-tier floor closes the Lair path. Where a repository adds verify to its own CI, verify there also keeps a merged record consistent and current. A wrong design is caught only by a later review.
 - Recorded in [ADR-0046](../../adr/0046-idea-to-ready-process.md), Residuals.
@@ -233,7 +279,7 @@ From round 2, by the user's instruction after round 1:
 - When the design touches trust, credentials or the merge path and a local review tool is configured (`HIVEMIND_LOCAL_REVIEWER`, or the `codex-plugin` default when the Codex plugin is installed), one more pass runs through that tool via `run-review.sh`. When none is configured, that pass is skipped and the skip is recorded in this record.
 - The confirming round reviews only the diff since the previous round and the fixes to open findings, with effort medium.
 
-##640, #641 and #643, merged from main after round 2, set this procedure in the PRD, so the PRD and this note now agree. The PRD names no effort level.
+#640, #641 and #643, merged from main after round 2, set this procedure in the PRD, so the PRD and this note now agree. The PRD names no effort level.
 
 This design touches trust and the merge path. `HIVEMIND_LOCAL_REVIEWER` is unset and the Codex plugin is installed, so the `codex-plugin` default runs the extra pass.
 
