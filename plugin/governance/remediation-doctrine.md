@@ -173,20 +173,18 @@ The overlord reconstructs the per-surface counter behind **Cross-Iteration Same-
 
 The counter persists across structural fixes, so the trip point stays the first non-closing fix after any accepted structural fix.
 
-The user-only architecture zoom-out skill carries `disable-model-invocation: true`, so the overlord routes an architectural zoom-out through the cerebrate via the `review_remediation_plan` / `review_remediation_plan_postpr` remediation state, the path a `root-cluster-suspected` exit_reason takes.
+The user-only architecture zoom-out skill carries `disable-model-invocation: true`, so the overlord routes an architectural zoom-out to a remediation plan from the cerebrate, the path a `root-cluster-suspected` exit_reason takes.
 
-### Proactive Zoom-Out Ledger Marker
+### Proactive Zoom-Out Marker
 
-When the overlord's proactive counter trips per **Forced zoom-out after the first non-closing structural fix**, it records a marker in the run ledger so its `root-cluster-suspected` transition is distinguishable from a reviewer-returned one, which takes the same route.
-
-The marker is one key in the transition's `event.outputs` object:
+When the overlord's proactive counter trips per **Forced zoom-out after the first non-closing structural fix**, it marks the zoom-out so it is distinguishable from a reviewer-returned `root-cluster-suspected`, which takes the same route. The marker is one key in the cluster payload the overlord forwards to `hivemind:cerebrate`, and in the decision the run lists:
 
 - Key: `recurrence_origin`.
 - Value `"proactive"`: the overlord's reconstructed counter tripped.
 - A reviewer-returned cluster omits the key or carries `"reviewer"`.
 - Consumers infer proactive origin only from an explicit `"proactive"` value.
 
-The marker records judgment; the trip call stays judgment per ADR-0025. It is written through the `hivemind:record-state-result` `outputs` path on the `root-cluster-suspected` transition, never via `hivemind:mark-intent-fallback` or any fallback path. It rides whichever producer state carries that exit_reason (`github_review_loop`, `github_reviewer_fix`, or the post-PR mirror that targets `review_remediation_plan_postpr`), lives only in `event.outputs`, and never collides with `plan_steps` or any `plan.*` field.
+The marker records judgment; the trip call stays judgment per ADR-0025. It rides whichever producer carries that exit_reason (local review, `hivemind:github-review-loop` or a `hivemind:github-reviewer` fix pass) and is never a `plan:` field.
 
 ## Skeleton-Enrichment Judgment Criteria
 

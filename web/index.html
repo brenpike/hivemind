@@ -73,7 +73,7 @@
             <li class="agent-card panel c0" data-cluster="0">
               <div class="card-top"><span class="node" aria-hidden="true"></span><h3 class="xg">Overlord</h3><span class="tag">Orchestrator</span></div>
               <p class="kind xs">Bioform · <code>hivemind:overlord</code> · session default</p>
-              <p class="desc xs">Routes each request to a workflow, then launches its workflow script, runs a standard-delivery request on Instinct, or runs the workflow state machine and its run ledger. Owns branches, checkpoint commits, version-bump decisions, PRs and review routing. It delegates all implementation and never writes code.</p>
+              <p class="desc xs">Routes each request to a workflow, then launches its workflow script or runs it on Instinct. Owns branches, checkpoint commits, version-bump decisions, PRs and review routing. It delegates all implementation and never writes code.</p>
             </li>
             <li class="agent-card panel c1" data-cluster="1">
               <div class="card-top"><span class="node" aria-hidden="true"></span><h3 class="xg">Cerebrate</h3><span class="tag">Strategist · read-only</span></div>
@@ -111,14 +111,14 @@
           <header class="panel plate">
             <p class="kicker xs">standard-delivery</p>
             <h2 id="workflow-title" class="xg">How a run works</h2>
-            <p class="xs">Eight beats from your intent to a reviewed pull request, as a standard-delivery workflow script run. A script run keeps no run ledger: the working branch, its commits and the PR are the record. When a standard-delivery launch is refused or blocked, or a started run fails, the request continues on Instinct, with no script and no run ledger. Only the state machine keeps a run ledger.</p>
+            <p class="xs">Eight beats from your intent to a reviewed pull request, as a standard-delivery workflow script run. No path keeps a run ledger: a run that opens a branch and a pull request is recorded by them, and a run that opens none, such as a read-only analysis, keeps no record. When a launch is refused or blocked, or a started standard-delivery run fails, the request continues on Instinct, with no script.</p>
           </header>
           <ol class="beats">
             <li class="beat panel">
               <h3 class="xg">Route</h3>
-              <p class="xs"><code>hivemind:route-workflow</code> picks standard-delivery, analysis-only, pr-feedback-remediation, hatchery-dispatch or exploratory-intent-session. Analysis-only and standard-delivery launch as the <code>hivemind:analysis-only</code> and <code>hivemind:standard-delivery</code> workflow scripts when Claude Code's Workflow tool is available. A refused or blocked standard-delivery launch, and a started run that fails, continue on Instinct, with no script and no run ledger. The state machine runs the other workflows, a refused analysis-only launch and resumed runs, and only it keeps a run ledger.</p>
+              <p class="xs"><code>hivemind:route-workflow</code> picks standard-delivery, analysis-only, pr-feedback-remediation or hatchery-dispatch. The first three launch as the <code>hivemind:analysis-only</code>, <code>hivemind:standard-delivery</code> and <code>hivemind:pr-feedback-remediation</code> workflow scripts when Claude Code's Workflow tool is available. Brood dispatch, a refused or blocked launch, and a started standard-delivery run that fails, run on Instinct, with no script.</p>
               <p class="xs">Analysis-only has been a script since 6.0.0, standard-delivery since 7.0.0. In manual mode the Workflow tool shows an approval prompt; in auto mode the launch goes ahead with no prompt. A No at the prompt interrupts the turn, with no fallback. To keep delivery off its script, add <code>Workflow(hivemind:standard-delivery)</code> to <code>permissions.deny</code>: the launch is refused with no prompt and the request runs on Instinct. The definitions live in <code>plugin/workflows/</code>: <code>.json</code> state machines plus the generated <code>.js</code> scripts.</p>
-              <p class="xs">A trivial task, such as a one-file change or a version-only edit, is checked before routing and takes the Reflex fast path, which skips the router, the run ledger and the cerebrate.</p>
+              <p class="xs">A trivial task, such as a one-file change or a version-only edit, is checked before routing and takes the Reflex fast path, which skips the router and the cerebrate.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Facts</h3>
