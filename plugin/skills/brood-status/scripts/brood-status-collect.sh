@@ -29,18 +29,15 @@
 # per-probe (a dead/none/unknown observable), it does not abort the run.
 #
 # OUTPUT (CONTRACT — the navigator depends on this schema):
-#   ONE JSON document on stdout, schema "brood-status-collect/1":
-#     { "schema": "brood-status-collect/1",
+#   ONE JSON document on stdout, schema "brood-status-collect/2":
+#     { "schema": "brood-status-collect/2",
 #       "broods": [ { "brood_id", "status":"ok|empty|unreadable|blocker", "detail":string|null,
 #         "strains":[ {"name","branch","session":"alive|dead","tmux_session",
 #           "pr":{"number":int|null,"state":"open|merged|none|unknown"},
-#           "workflow_state","run_status","derived_status"} ],
-#           workflow_state is a real workflow-state token or one of the fixed tokens MISSING /
-#           MALFORMED / NO_LEDGER_POINTER (legacy manifest with no ledger pointer); run_status is a
-#           real run.status token or MISSING / MALFORMED. branch is the selected worktree's git LIVE
-#           branch (projector field 10) or MISSING / MALFORMED (no worktree, detached HEAD, or a
-#           rejected name) — new manifests carry no per-strain branch, so the manifest column is
-#           not shown.
+#           "derived_status"} ],
+#           branch is the selected worktree's git LIVE branch (projector field 8) or MISSING /
+#           MALFORMED (no worktree, detached HEAD, or a rejected name) — new manifests carry no
+#           per-strain branch, so the manifest column is not shown.
 #         "summary":{"complete","running","blocked_failed","total"} } ],
 #       "global":{"total_broods","unreadable","complete","total_strains"} }
 #   Broods in sorted discovery order; strains in projector/manifest order. PER-BROOD FAILURE
@@ -104,15 +101,14 @@ fi
 # ── Per-strain observable probes (IMPURE) ─────────────────────────────────────────
 # Each probe consumes a projector-VALIDATED token. Skip a probe when its required token is EITHER
 # of the projector's two fixed sentinels — `MISSING` (absent field) or `MALFORMED` (rejected
-# field): tmux_session gates the tmux probe; the git LIVE branch (live_branch, field 10) gates the
+# field): tmux_session gates the tmux probe; the git LIVE branch (live_branch, field 8) gates the
 # PR probe. Both sentinels are FIXED tokens the projector emits in lieu of a real identifier (see
 # brood-status-project.sh field emission), NOT probeable observables — probing
 # `tmux has-session -t MISSING` or `gh pr list --head MISSING` would let an unrelated real
 # session/branch/PR literally named `MISSING`/`MALFORMED` masquerade as this strain's observable,
 # fabricating alive/open/merged/running status and hiding the very manifest corruption the sentinel
-# signals. A MALFORMED/MISSING *ledger* scalar still NEVER suppresses an observable probe
-# (informational-only); only the probe's OWN gating token (tmux_session / live_branch) is checked
-# here. These tokens are inert "$var" args, never command source.
+# signals. Only the probe's OWN gating token (tmux_session / live_branch) is checked here. These
+# tokens are inert "$var" args, never command source.
 SENTINEL_RE='^(MISSING|MALFORMED)$'
 
 # probe_session_alive <tmux_session> -> echoes 1 (alive) or 0 (dead/skip).
@@ -131,7 +127,7 @@ probe_session_alive() {
 
 # probe_pr <live_branch> -> echoes "<state>\t<number>" where state is open|merged|none|unknown and
 # number is the PR number or empty. The argument is the selected worktree's git GROUND-TRUTH LIVE
-# branch (projector field 10), NOT the manifest `branch` column: a brood child opens its PR from
+# branch (projector field 8), NOT the manifest `branch` column: a brood child opens its PR from
 # the DERIVED branch it switched its worktree HEAD onto, so keying on the stale manifest scratch ref
 # would find no PR and falsely derive `failed (session ended, no PR)` (#270). A MISSING/MALFORMED
 # live branch skips the probe — both are fixed projector sentinels (a detached-HEAD worktree or an
@@ -240,25 +236,23 @@ for brood_id in "${brood_ids[@]+"${brood_ids[@]}"}"; do
   # Brood-id integrity holds. Parse STRAIN lines. Zero strains -> empty brood.
   strain_objects=()
   buckets=()
-  while IFS="$TAB" read -r sentinel f_brood f_name f_wt f_branch f_tmux f_status f_state f_run f_live_branch f_facts; do
+  while IFS="$TAB" read -r sentinel f_brood f_name f_wt f_branch f_tmux f_status f_live_branch f_facts f_gate; do
     [ "$sentinel" = "STRAIN" ] || continue
     # Probe observables using the projector-validated tokens (inert "$var").
     session_alive="$(probe_session_alive "$f_tmux")"
     # PR probe keys on the git GROUND-TRUTH live branch of the selected worktree (f_live_branch,
-    # field 10), NOT the display-only manifest `branch` (f_branch). A brood child opens its PR from
+    # field 8), NOT the display-only manifest `branch` (f_branch). A brood child opens its PR from
     # the DERIVED branch it switched onto, so the stale manifest scratch ref would find no PR (#270).
     pr_pair="$(probe_pr "$f_live_branch")"
     pr_state="${pr_pair%%$TAB*}"
     pr_number="${pr_pair#*$TAB}"
 
-    # f_state (state.current) and f_run (run.status) are the child-ledger started-evidence tokens
-    # already projected at the loop head; f_facts (projector field 11, yes|no) is the facts
-    # started-evidence of a script-engine child, which writes no run ledger. Threaded inert
-    # ("$var") into derivation: an alive session with neither source (MISSING/MALFORMED
-    # state.current and f_facts != yes) demotes to `starting` rather than masking as `running`. A
-    # legacy manifest with no ledger pointer projects NO_LEDGER_POINTER, for which the
-    # started-evidence gate does not apply (observable status is kept). No new probe, no new I/O.
-    derived="$(hivemind_derive_strain_status "$f_status" "$session_alive" "$pr_state" "$pr_number" "$f_state" "$f_run" "$f_facts")"
+    # f_facts (projector field 9, yes|no) is the facts started-evidence; f_gate (projector field
+    # 10, on|off) says whether the started-evidence gate applies. Threaded inert ("$var") into
+    # derivation: with the gate on, an alive session without facts evidence demotes to `starting`
+    # rather than masking as `running`. A legacy manifest with no run.suggested_id projects the
+    # gate off, so the observable status is kept. No new probe, no new I/O.
+    derived="$(hivemind_derive_strain_status "$f_status" "$session_alive" "$pr_state" "$pr_number" "$f_facts" "$f_gate")"
     buckets+=( "$(hivemind_classify_status_bucket "$derived")" )
 
     session_word="dead"; [ "$session_alive" -eq 1 ] && session_word="alive"
@@ -280,12 +274,10 @@ for brood_id in "${brood_ids[@]+"${brood_ids[@]}"}"; do
       --arg tmux_session "$f_tmux" \
       --argjson number "$pr_num_json" \
       --arg state "$pr_state" \
-      --arg wstate "$f_state" \
-      --arg run "$f_run" \
       --arg derived "$derived" \
       '{name:$name, branch:$branch, session:$session, tmux_session:$tmux_session,
         pr:{number:$number, state:$state},
-        workflow_state:$wstate, run_status:$run, derived_status:$derived}')" )
+        derived_status:$derived}')" )
   done <<< "$proj_out"
 
   # Per-brood summary via the pure aggregator.
@@ -334,7 +326,7 @@ jq -n \
   --argjson unreadable "$g_unreadable" \
   --argjson complete "$g_complete" \
   --argjson total_strains "$g_strains" \
-  '{schema:"brood-status-collect/1",
+  '{schema:"brood-status-collect/2",
     broods:$broods,
     global:{total_broods:$total_broods, unreadable:$unreadable,
             complete:$complete, total_strains:$total_strains}}'

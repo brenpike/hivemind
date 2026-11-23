@@ -13,6 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [12.0.0] - 2026-11-22
+
+### Changed
+
+- A child's facts file is its only started-evidence: an alive child with no facts file shows `starting`, with one `running`. A child run ledger alone now shows `starting`. A strain with no `run.suggested_id` is still not demoted (internal `started_gate` flag).
+- `hivemind_derive_strain_status` signature is now `<manifest_status> <session_alive> <pr_state> <pr_number> <facts_evidence> [<started_gate>]`.
+- Tests: the brood-status Projection and collect cases and the derive cases follow the facts-only gate.
+
+### Removed
+
+- The Strain State (claimed) and Strain Status (claimed) columns from brood-status. brood-status reads no child run ledger: `brood-status-project.sh` no longer sources `ledger-project.sh` or calls `hivemind_brood_read_child_ledger`, and the `NO_LEDGER_POINTER` token is gone.
+- BREAKING: `brood-status-collect.sh` emits schema `brood-status-collect/2`, which has no `workflow_state` or `run_status` on each strain. Migration: read `derived_status`.
+
+No prose budget raised.
+
+Issue: #655.
+
 ## [11.1.0] - 2026-11-22
 
 ### Changed

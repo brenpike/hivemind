@@ -27,14 +27,16 @@ set -u
 
 # ── hivemind_derive_strain_status ─────────────────────────────────────────────────
 # hivemind_derive_strain_status <manifest_status> <session_alive:0|1> <pr_state> <pr_number> \
-#                               <state_current> <run_status> [<facts_evidence:yes|no>]
+#                               <facts_evidence:yes|no> [<started_gate:on|off>]
 #   -> prints the derived Status string to stdout.
 #
-# <facts_evidence> (OPTIONAL 7th argument) is the projector's field 11: `yes` when a gather-facts
-# output file sits in the strain's ground-truth worktree (hivemind_detect_facts_evidence in
-# brood-state.sh), the started-evidence of a script-engine child, which writes no run ledger.
-# Only the exact value `yes` counts; an ABSENT argument (every 6-argument call), an empty value or
-# any other value means `no`, so every 6-argument call keeps its result.
+# <facts_evidence> is the projector's facts-evidence field: `yes` when a gather-facts output file
+# sits in the strain's ground-truth worktree (hivemind_detect_facts_evidence in brood-state.sh).
+# Only the exact value `yes` counts; an empty value or any other value means `no`.
+#
+# <started_gate> (OPTIONAL 6th argument) switches the started-evidence gate. Only the exact value
+# `off` exempts the strain from the gate; an ABSENT argument, an empty value or any other value
+# (including `OFF`) means `on`, so the gate fails closed.
 #
 # Ports the SKILL.md rule table EXACTLY. Priority (highest first):
 #   1. manifest_status == failed (failed-precedence): a strain recorded failed in the manifest is
@@ -57,38 +59,17 @@ set -u
 # Status derives from tmux + best-known PR). Any unrecognized tmux/PR combination falls through to
 # the dead+none "failed" terminal, the conservative default.
 #
-# <state_current> is the child ledger's `state.current` token as projected by
-# brood-status-project.sh — a real workflow-state token, or the fixed sentinels MISSING (a ledger
-# pointer exists but the child has not yet written started-evidence), MALFORMED (a present-but-
-# rejected ledger), or NO_LEDGER_POINTER (the manifest carries no ledger pointer at all — a legacy
-# no-run-block manifest — so started-evidence is STRUCTURALLY unavailable). <run_status> is the
-# projected `run.status` token (informational; not part of the started-evidence gate below). These
-# are tier-3 child-ledger evidence (informational, never overrides observable status — ADR-0007):
-# they only DEMOTE an alive-but-unstarted child away from `running`, never promote to complete and
-# never hide a dead session. The demotion applies ONLY when a ledger pointer EXISTS but shows no
-# started-evidence (MISSING/MALFORMED/empty). NO_LEDGER_POINTER is the legacy no-pointer
-# fall-through: the gate does NOT apply, and the strain derives its observable status (running /
-# running (PR #N open)) — preserving ADR-0007's demote-only posture (we never withhold the
-# observable `running` claim from a strain that structurally cannot supply ledger evidence).
-#
-# STARTED-EVIDENCE GATE: an alive session is NOT proof the child
-# started its workflow — a pasted-but-never-submitted child has an alive tmux session and no run
-# ledger. The ground-truth started signal is EITHER of two sources: RUN-LEDGER EVIDENCE (a
-# present, non-MISSING/non-MALFORMED state.current, written by a state-machine child) OR FACTS
-# EVIDENCE (<facts_evidence> == yes, a gather-facts output file written by a script-engine child).
-# An alive session WITHOUT either source derives the DISTINCT,
-# TRANSIENT (non-terminal), non-running, non-complete status below instead of a bare `running`.
-# MALFORMED state.current is fail-closed (NOT started-evidence -> demote to starting, not running).
-# The gate applies ONLY when a ledger pointer EXISTS but supplies no started-evidence (state.current
-# empty/MISSING/MALFORMED). A legacy manifest with NO ledger pointer projects state.current as
-# NO_LEDGER_POINTER, for which started-evidence is STRUCTURALLY unavailable: the gate does NOT apply
-# (legacy no-pointer fall-through) and an alive session derives its observable status exactly as it
-# did before the gate existed. NO_LEDGER_POINTER is DELIBERATELY excluded from the gate's sentinel
-# set and is NOT a real workflow-state token — it never leaks into the rendered Status (the non-gated
-# alive branch picks running vs running (PR #N open) from pr_for_derive, never from state_current).
+# STARTED-EVIDENCE GATE: an alive session is NOT proof the child started its workflow — a
+# pasted-but-never-submitted child has an alive tmux session and no gather-facts output. The
+# ground-truth started signal is FACTS EVIDENCE (<facts_evidence> == yes). With the gate on, an
+# alive session WITHOUT facts evidence derives the DISTINCT, TRANSIENT (non-terminal), non-running,
+# non-complete status below instead of a bare `running`. With <started_gate> == off, an alive
+# session derives its observable status (running / running (PR #N open)) without facts evidence.
+# The gate only DEMOTES an alive-but-unstarted child away from `running` (ADR-0007): it never
+# promotes to complete, never hides a dead session and never overrides failed-precedence.
 hivemind_derive_strain_status() {
   local manifest_status="$1" session_alive="$2" pr_state="$3" pr_number="$4"
-  local state_current="$5" run_status="$6" facts_evidence="${7:-no}"
+  local facts_evidence="$5" started_gate="${6:-on}"
 
   # 1. failed-precedence (manifest static field beats the alive-session inference).
   if [ "$manifest_status" = "failed" ]; then
@@ -105,20 +86,12 @@ hivemind_derive_strain_status() {
   [ "$pr_for_derive" = "unknown" ] && pr_for_derive="none"
 
   if [ "$session_alive" -eq 1 ]; then
-    # Started-evidence gate: a present, non-MISSING/non-MALFORMED state.current is ground-truth
-    # proof the child wrote its run ledger and started its workflow; facts_evidence == yes is the
-    # same proof for a script-engine child. Absent both, an alive session is demoted from `running`
-    # to the transient `starting` status. The gate fires ONLY for a ledger pointer that EXISTS but
-    # supplies no started-evidence (empty/MISSING/MALFORMED) and no facts evidence.
-    # NO_LEDGER_POINTER (legacy no-pointer manifest) is INTENTIONALLY absent from this set:
-    # started-evidence is structurally unavailable there, so the strain falls through to the
-    # observable table below and derives running / running (PR #N open) — the legacy no-pointer
-    # fall-through.
-    if [ -z "$state_current" ] || [ "$state_current" = "MISSING" ] || [ "$state_current" = "MALFORMED" ]; then
-      if [ "$facts_evidence" != "yes" ]; then
-        printf '%s' "starting (session alive, workflow not yet started)"
-        return 0
-      fi
+    # Started-evidence gate: facts_evidence == yes is ground-truth proof the child started its
+    # workflow. Absent it, an alive session is demoted from `running` to the transient `starting`
+    # status unless started_gate is exactly `off`.
+    if [ "$started_gate" != "off" ] && [ "$facts_evidence" != "yes" ]; then
+      printf '%s' "starting (session alive, workflow not yet started)"
+      return 0
     fi
     case "$pr_for_derive" in
       open) printf 'running (PR #%s open)' "$pr_number" ;;
