@@ -1,12 +1,15 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const skillText = readFileSync(repoRoot + 'plugin/skills/route-workflow/SKILL.md', 'utf8').replace(/\r/g, '');
-const workflowsDir = repoRoot + 'plugin/workflows/';
-const routerSkill = 'hivemind:route-workflow';
+const overlordText = readFileSync(repoRoot + 'plugin/agents/overlord.md', 'utf8').replace(/\r/g, '');
+const catalogIdsExpected = ['analysis-only', 'hatchery-dispatch', 'pr-feedback-remediation', 'standard-delivery'];
+const outcomeStatuses = ['selected', 'ambiguous', 'blocked'];
+const noFitSentence = 'A request that fits no catalog entry routes to `analysis-only` when it asks for no change to the repository, to `standard-delivery` when it asks for a change, and to `ambiguous` with those two candidates otherwise.';
+const anyOtherStatusPhrase = '`blocked` or any other status, surface it as `blocked` and stop';
 
 function readSection(text, heading) {
   const lines = text.split('\n');
@@ -28,31 +31,31 @@ function parseCatalogEntries(section) {
   return entries;
 }
 
-function isRouterDefinition(definition) {
-  const startState = definition.states?.[definition.start];
-  return startState?.skill === routerSkill;
-}
-
-function listRoutableWorkflowIds() {
-  const routableIds = [];
-  for (const fileName of readdirSync(workflowsDir)) {
-    if (!fileName.endsWith('.json')) {
-      continue;
-    }
-    const definition = JSON.parse(readFileSync(workflowsDir + fileName, 'utf8'));
-    if (!isRouterDefinition(definition)) {
-      routableIds.push(fileName.slice(0, -'.json'.length));
+function listSubheadings(section) {
+  const subheadings = [];
+  for (const line of section.split('\n')) {
+    const subheading = line.match(/^### `([^`]+)`$/);
+    if (subheading) {
+      subheadings.push(subheading[1]);
     }
   }
-  return routableIds.sort();
+  return subheadings;
+}
+
+function listStatusValues(section) {
+  return [...section.matchAll(/^status: (\S+)$/gm)].map((match) => match[1]);
+}
+
+function normalizeWhitespace(text) {
+  return text.replace(/\s+/g, ' ');
 }
 
 const catalogEntries = parseCatalogEntries(readSection(skillText, '## Workflow Catalog'));
 
 describe('route-workflow catalog', () => {
-  test('catalog ids equal the packaged workflow definitions minus the router', () => {
+  test('catalog holds exactly the four routable workflows', () => {
     const catalogIds = catalogEntries.map((entry) => entry.id).sort();
-    assert.deepEqual(catalogIds, listRoutableWorkflowIds());
+    assert.deepEqual(catalogIds, catalogIdsExpected);
   });
   test('catalog lists each id once', () => {
     const catalogIds = catalogEntries.map((entry) => entry.id);
@@ -71,5 +74,36 @@ describe('route-workflow reads no workflow file', () => {
   });
   test('skill does not ask the caller for available_workflows', () => {
     assert.equal(skillText.includes('available_workflows'), false);
+  });
+});
+
+describe('route-workflow outcomes', () => {
+  const outputsSection = readSection(skillText, '## Outputs');
+  test('outputs are exactly selected, ambiguous and blocked', () => {
+    assert.deepEqual(listSubheadings(outputsSection), outcomeStatuses);
+  });
+  test('every status value is a known outcome', () => {
+    const statusValues = listStatusValues(outputsSection);
+    assert.notEqual(statusValues.length, 0, 'outputs carry status values');
+    for (const statusValue of statusValues) {
+      assert.ok(outcomeStatuses.includes(statusValue), `status ${statusValue} is a known outcome`);
+    }
+  });
+  test('skill holds the no-fit rule', () => {
+    assert.ok(normalizeWhitespace(skillText).includes(noFitSentence));
+  });
+  test('skill names no exploratory path', () => {
+    assert.doesNotMatch(skillText, /exploratory/i);
+    assert.doesNotMatch(skillText, /§G/);
+    assert.doesNotMatch(skillText, /escape-hatch/);
+  });
+});
+
+describe('overlord routing outcome handling', () => {
+  test('overlord names no exploratory path', () => {
+    assert.doesNotMatch(overlordText, /exploratory/i);
+  });
+  test('overlord surfaces any other status as blocked', () => {
+    assert.ok(overlordText.includes(anyOtherStatusPhrase));
   });
 });

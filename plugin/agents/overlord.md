@@ -87,7 +87,7 @@ These rules hold for every wave, on any path.
 The generic loop. Per-workflow sequencing lives only in the workflow definition, which only the engine skills read.
 
 1. Select a non-Reflex request's workflow with `hivemind:route-workflow`.
-2. Act on the routing outcome by its name: `selected`, per `## Engine` when that applies, else advance into the chosen workflow; `ambiguous`, ask the user to choose between the candidates; `exploratory`, run `exploratory-intent-session`; `blocked`, surface and stop.
+2. Act on the routing outcome by its name: `selected`, per `## Engine` when that applies, else advance into the chosen workflow; `ambiguous`, ask the user to choose between the candidates; `blocked` or any other status, surface it as `blocked` and stop.
 3. Invoke `hivemind:init-run-ledger` for the selected workflow.
 4. Take the current state from the `current_state` and `state_definition` lines that `hivemind:init-run-ledger` and `hivemind:record-state-result` print, never from another read of the definition.
 5. Execute only the current state, by its `type`: `decision`, derive the named outcome by judgment (e.g. at a `validate` state, run validation per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure) and derive `passed` or `failed`); `agent`, spawn the named agent, picking the bioform for `allowed_agents` by intent from that static set, never by dynamic resolution; one `agent` state execution may dispatch a wave of concurrent delegations (`## Implement Loop (Wave Execution)`); `skill`, invoke the named skill; `user_gate`, stop for explicit user input, except a question the **Question gate** takes; `terminal`, stop.

@@ -225,7 +225,7 @@ One more agent, the **Synapse**, runs the committed runner scripts for the workf
 `hivemind:route-workflow` selects the workflow first, for every request that is not a Reflex. One of two engines, or Instinct, then runs it:
 
 - **Workflow scripts.** `analysis-only`, `standard-delivery` and `pr-feedback-remediation` launch as the `hivemind:analysis-only`, `hivemind:standard-delivery` and `hivemind:pr-feedback-remediation` Workflow scripts when Claude Code's Workflow tool is available. `analysis-only` has been a script since 6.0.0, `standard-delivery` since 7.0.0, and `pr-feedback-remediation` since 8.0.0.
-- **The workflow state machine.** Every other workflow (`hatchery-dispatch`, `exploratory-intent-session`) runs on its JSON state machine, and so does an `analysis-only` or `pr-feedback-remediation` request whose launch is refused.
+- **The workflow state machine.** Every other workflow (`hatchery-dispatch`) runs on its JSON state machine, and so does an `analysis-only` or `pr-feedback-remediation` request whose launch is refused.
 - **Instinct.** A `standard-delivery` request can also run on Instinct, a delivery path the overlord drives by judgment, with no workflow script and no run ledger. It keeps the plan, the working branch and every delivery gate. When a delivery request names neither the engine nor Instinct, the overlord asks you which to use; a brood child, whose task carries a `working_branch.base` ref, takes the engine. Instinct is also the engine's fallback for `standard-delivery` (ADR-0039).
 
 Launching a script:
@@ -285,7 +285,7 @@ You --> Overlord --> route-workflow --> standard-delivery
     question (asks only an Ask Set question, takes any other with its recommendation; the answer goes back to the state that asked)
 ```
 
-1. **Route.** `hivemind:route-workflow` picks the workflow: `standard-delivery`, `analysis-only`, `pr-feedback-remediation`, `hatchery-dispatch`, or `exploratory-intent-session`. The overlord checks for a **Reflex** first, a trivial task that meets every condition in `plugin/agents/overlord.md` (`## Reflex (Ledger-Skip)`); a Reflex takes the fast path and skips the router, the run ledger, and the cerebrate.
+1. **Route.** `hivemind:route-workflow` picks the workflow: `standard-delivery`, `analysis-only`, `pr-feedback-remediation`, or `hatchery-dispatch`. The overlord checks for a **Reflex** first, a trivial task that meets every condition in `plugin/agents/overlord.md` (`## Reflex (Ledger-Skip)`); a Reflex takes the fast path and skips the router, the run ledger, and the cerebrate.
 2. **Record.** The overlord writes a run ledger to `.hivemind/runs/<run-id>/state.json`. Each state result is normally validated against the workflow definition before the run advances (a resumed run on a changed workflow version can fall back to judgment instead).
 3. **Plan.** At `plan`, the cerebrate returns the directive. Before every cerebrate delegation, in every planning state and on every replan, the state machine runs `hivemind:gather-facts` and passes the facts file to the cerebrate. It stops before planning on a failed facts run, a cut field, or injection-suspect text.
 4. **Branch.** `git_preflight` checks git state, then `branch` creates or confirms a compliant working branch (`feature/`, `bugfix/`, `hotfix/`, `refactor/`, `chore/`, `docs/`, `test/`, `ci/`). Nothing is ever committed to trunk.
@@ -307,12 +307,11 @@ Workflow definitions (JSON state machines) and the generated workflow scripts li
 
 | Workflow | Purpose | Workflow script |
 |---|---|---|
-| `workflow-router.json` | Classifies a non-Reflex request (`selected`, `ambiguous`, `exploratory`, `blocked`) and initializes the run ledger | none |
+| `workflow-router.json` | Classifies a non-Reflex request (`selected`, `ambiguous`, `blocked`) and initializes the run ledger | none |
 | `standard-delivery.json` | Plan, branch, build in waves, gate, review, open the PR, and watch it | `standard-delivery.js` |
 | `analysis-only.json` | Analyze and report; no code changes | `analysis-only.js` |
 | `pr-feedback-remediation.json` | Remediate feedback on an existing PR. Intake picks `watch` (run the review loop) or `fix` (one-shot fix pass by `github-reviewer`), after checking out the PR branch | `pr-feedback-remediation.js` |
 | `hatchery-dispatch.json` | Brood plan, strain approval, spawn the brood, then monitor it | none |
-| `exploratory-intent-session.json` | Open-ended exploration with user checkpoints, ending in a report | none |
 
 A workflow with a script runs it when the launch goes ahead. Otherwise `standard-delivery` runs on Instinct, and `analysis-only` and `pr-feedback-remediation` on their JSON state machines (see [Two engines](#two-engines)). The scripts are built from `plugin/workflow-src/` by `tools/build_workflows.mjs`.
 
@@ -450,7 +449,7 @@ All skills are invoked using the namespaced form:
 | `hivemind:spawn-brood` | Dispatch parallel overlord sessions: spawns N Claude Code instances in separate git worktrees via tmux and writes the brood manifest |
 | `hivemind:brood-status` | Check status of broods under the current checkout, with per-strain status; reports per-strain tmux session state, branch existence, and PR status |
 | `hivemind:enable-brood-remote` | User-invoked. Spawn already turns remote control on for the strains that started; on request, this skill sends the Claude `/rc` remote-control command again to every live strain in a brood (tmux keystroke injection) |
-| `hivemind:route-workflow` | Sole workflow classifier: selects which workflow handles a non-Reflex request by judgment (never a keyword table); emits selected / ambiguous / exploratory / blocked |
+| `hivemind:route-workflow` | Sole workflow classifier: selects which workflow handles a non-Reflex request by judgment (never a keyword table); emits selected / ambiguous / blocked |
 | `hivemind:init-run-ledger` | State machine only. Initialize the run ledger for the current overlord instance: creates `.hivemind/runs/<run-id>/` and writes the initial `state.json` via the committed engine script |
 | `hivemind:record-state-result` | State machine only. Record the outcome of the current workflow state into the run ledger and advance `state.current` to the legal next state, validated against the workflow definition |
 | `hivemind:next-wave` | State machine only (the `standard-delivery` script computes its waves in code, in `plugin/workflow-src/lib/waves.js`, with parity tests against this engine). Read-only engine for the overlord's intra-run parallel implement loop: reads the run ledger and computes the ready WAVE (the maximal, file-disjoint set of dependency-satisfied plan steps) to dispatch as concurrent agent delegations this iteration |
