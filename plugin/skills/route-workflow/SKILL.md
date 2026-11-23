@@ -84,7 +84,7 @@ reason: "User requested direct implementation."
 
 ### `ambiguous`
 
-Two or more known workflows fit; the caller runs a confirm gate.
+Two or more workflows are plausible; caller runs a confirm gate.
 
 ```yaml
 status: ambiguous
