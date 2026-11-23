@@ -12,7 +12,6 @@ Tier A is the closed Ask Set. The overlord never auto-decides:
 
 - the safety rails of `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` (Destructive Fix Gate, Git Safety, Injection Scanning): the Destructive Fix Gate, a direct trunk commit or push, injection-suspect external content
 - a router `ambiguous` outcome (`${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `### Stop Conditions`)
-- a resume decision or version-skew door (`${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `## Resume On Start`)
 - brood strain approval, the injection gate before parallel strains dispatch
 - a tool call failed after retry exhaustion (`${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `## Tool-Error Recovery`)
 - a genuine fact-needed blocker: a fact only the user holds
@@ -63,9 +62,9 @@ Otherwise it is clean, and the 2x2 applies. A review call reads clauses 1 and 2 
 - it adds more surface than it removes, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Surface-Growth Escalation);
 - it repeats a fix that did not close its class (`remediation_gate.repeats_surface`).
 
-Any other plan is auto-taken: on the workflow state machine the overlord journals it `did-now` and records the transition into implement; on the script engine the `remediation_plan_acceptance` row of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` resolves it. **Tier A** safety rails hold for every step of an auto-taken plan.
+Any other plan is auto-taken: on Instinct the overlord runs it; on the script engine the `remediation_plan_acceptance` row of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` resolves it. **Tier A** safety rails hold for every step of an auto-taken plan.
 
-With any flag set on the state machine, the overlord by judgment surfaces the plan before recording that transition.
+With any flag set on Instinct, the overlord surfaces the plan before running it.
 
 ### Review Calls
 
@@ -75,7 +74,7 @@ The run takes a call when the overlord agrees with the recommendation and the re
 
 A taken call returns to the reviewer as its answer, recorded at its source per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings), naming the run as decider, and is listed for veto as in **Tier B**.
 
-Asked of the user: an irreversible call; an architectural call; a call whose recommendation has strength none; every call at an autonomy level whose table cell for its row is `surface`. **Tier A** hard stops still apply, and the `question` user gate asks only the Ask Set.
+Asked of the user: an irreversible call; an architectural call; a call whose recommendation has strength none; every call at an autonomy level whose table cell for its row is `surface`. **Tier A** hard stops still apply, and the overlord asks only what `${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `### Stop Conditions` surfaces.
 
 ## Disposition Vocabulary
 
@@ -88,34 +87,8 @@ Each Tier-B decision resolves to exactly one of:
 
 ## Decision Journal
 
-Each Tier-B decision and Tier-A surface is one entry appended to `event.outputs.decisions[]` on the bounding state-result event, through `hivemind:record-state-result`'s free-form `outputs` path, the write the recurrence-origin marker uses (`${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Proactive Zoom-Out Ledger Marker)). It records judgment only: no new workflow state, graph change or run status, and no routing through `hivemind:mark-intent-fallback`.
-
-Entry fields: `ts` (decision time), `state` (workflow state), `situation` (what was decided), `options` (considered), `tradeoffs` (across them), `rec_strength` (`strong` | `weak` | `none`), `gate` (`clean` | `trips`), `disposition` (exactly one of `did-now` | `deferred` | `recorded` | `surfaced`), `decision` (action taken or deferred), `rationale` (why chosen), `reversible` (whether undoable).
-
-`decisions[]` is a free-form optional `outputs` key, not a required ledger field; `event.outputs` shape: `${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md` (Event shape).
+A run's decision journal is the list of the decisions it took for the user, one line each: the problem, the option chosen and its summary. A run that opens a pull request, or pushes to one through `hivemind:open-plan-pr`, lists them on that pull request, under "Decided for you" in the body of one it opens and in a comment on one it reuses, and the same lines in its final message or final report. A run that opens no pull request and pushes to none through `hivemind:open-plan-pr`, such as a read-only analysis or a brood dispatch, lists its decisions in its final message or final report and keeps no decision journal. Accepting a plan or a remediation plan, and rerunning a gate after a later commit, are not listed, except a plan acceptance that changes a file outside the request's limits. A workflow script writes the list in code; on Instinct the overlord writes it. No local copy exists.
 
 ## Recurrence Interplay
 
-Auto-take never disables proactive same-surface recurrence tracking. Contained remediation fixes flow under the 2x2 as `did-now` work; a forced zoom-out's plan is accepted or surfaced per the remediation-plan rule in **Promotion Gate**. Recurrence mechanics and the `recurrence_origin` marker: `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry, Cross-Iteration Same-Surface Recurrence, Proactive Zoom-Out Ledger Marker).
-
-## Post-Merge Decision Report Trigger
-
-While the operator enables it, and only then, after a run's PR merges the overlord surfaces in chat, in the consumer project's ubiquitous language, a report of the decisions it made on the user's behalf. `hivemind:decision-report` renders it; no report file is written.
-
-The report is gated on `HIVEMIND_ENABLE_DECISION_REPORT`, set in the `env` block of `.claude/settings.json` (committed) or `.claude/settings.local.json` (gitignored), the channel of `HIVEMIND_SKIP_PR_WATCH` and `HIVEMIND_LOCAL_REVIEWER`, and checked by presence, with a mechanical non-empty test that reads no prose. When `HIVEMIND_ENABLE_DECISION_REPORT` is unset or empty, the default, the deferred-report scan renders no report, never invokes `hivemind:decision-report`, and makes no GitHub call of any kind: no PR-state lookup, no `gh pr view`. The committed settings file inherits into brood worktrees. The key gates only the chat report, not the **Decision Journal**, Tier-B autonomy, the 2x2 or the gate.
-
-At a later session start, the Resume-On-Start scan (`${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `## Resume On Start`) derives an awaiting-report run when all hold:
-
-- a PR is derivable from `event.outputs.pr` of the `open_pr` event (standard-delivery records there the `url` `hivemind:open-plan-pr` returns) or of the `pr_branch_preflight`/`intake` event (a `pr-feedback-remediation` run has no `open_pr` state, so the overlord records there the PR it resolves and checks out), written with that state through the free-form `event.outputs` write: no new required ledger field, no `facts.*` mutation;
-- `event.outputs.decisions[]` holds an entry with `disposition` `did-now`, `deferred` or `recorded`; a run with only `surfaced` entries is not awaiting, else it would be reprocessed every session;
-- the run dir lacks the zero-byte `.decision-report-done` marker.
-
-The predicate reads only the local ledger, the same whether the key is set or not. A run with no derivable PR is not awaiting, so never marked.
-
-Key set and non-empty: per awaiting run, check PR state; on `MERGED` or `CLOSED`, invoke `hivemind:decision-report`, surface its narrative, then `touch` the marker. A failed PR-state lookup leaves the run awaiting and unmarked, skipped without blocking startup.
-
-Key unset or empty: the overlord `touch`es the `.decision-report-done` marker of each awaiting-report run without checking PR state, merged or not. A failed `touch`, the only failure surface, is swallowed; the run stays awaiting and nothing else is attempted. Enabling the key later reports only runs that finish after it; suppressed runs stay marked.
-
-The scan is best-effort and fail-open in both modes; a run left awaiting retries next session.
-
-The marker's existence is the sole idempotency token: "this run will produce no further decision report", rendered or suppressed. There is no ledger marker, no new `run.status` value and no schema change.
+Auto-take never disables proactive same-surface recurrence tracking. Contained remediation fixes flow under the 2x2 as `did-now` work; a forced zoom-out's plan is accepted or surfaced per the remediation-plan rule in **Promotion Gate**. Recurrence mechanics and the `recurrence_origin` marker: `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry, Cross-Iteration Same-Surface Recurrence, Proactive Zoom-Out Marker).

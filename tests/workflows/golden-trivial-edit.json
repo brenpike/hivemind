@@ -1,9 +1,9 @@
 {
   "workflow": "trivial-edit",
-  "description": "Trivial change taken as a Reflex (ledger-skip), checked before the router: bypasses both the router and the run ledger, driving the short delivery tail by intent",
+  "description": "Trivial change taken as a Reflex (ledger-skip), checked before the router: bypasses the router, driving the short delivery tail by intent",
   "steps": [
     { "state": "Reflex Check Before Routing", "source": { "file": "plugin/agents/overlord.md", "pattern": "Check `## Reflex (Ledger-Skip)` first; a Reflex launches no workflow." } },
-    { "state": "Reflex Classification", "source": { "file": "plugin/agents/overlord.md", "pattern": "A Reflex is the trivial fast path: it skips the router and the run ledger" } },
+    { "state": "Reflex Classification", "source": { "file": "plugin/agents/overlord.md", "pattern": "A Reflex is the trivial fast path: it skips the router." } },
     { "state": "Git Preflight", "source": { "file": "plugin/agents/overlord.md", "pattern": "Never begin implementation before git preflight is established" } },
     { "state": "Branch", "source": { "file": "plugin/governance/workflow.md", "pattern": "## Branch Naming" } },
     { "state": "Implement", "source": { "file": "plugin/agents/overlord.md", "pattern": "## Delegation Format" } },

@@ -13,6 +13,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [13.0.0] - 2026-11-22
+
+### Changed
+
+- The overlord runs on one engine: Instinct in the main session. A refused workflow launch now has one fallback paragraph, with the level clause, in place of the per-workflow state-machine fallbacks.
+- Instinct runs the analysis and post-PR remediation paths. The local-review gate in `workflow.md` binds "workflow script or Instinct".
+- Safety Rails state the facts and PR-head rules.
+- The `Decisions:` line and the PR-list decision journal replace the post-merge report as the place a run's auto-decisions are recorded.
+- The PR watch reads the in-session request text.
+- Reviewer questions and exits are reworded, and the reviewer exit routes are pinned by the new `tests/workflow-scripts/reviewer-exit-routing.test.mjs`.
+- The cerebrate and workflow wording follows the one-engine overlord.
+- Tests: the pins are re-pointed to the one-engine overlord. `tests/policy/safety-decision-report-toggle.json` is deleted.
+- Prose budgets lowered: `overlord.md` 39286 to 29993, `cerebrate.md` 17165 to 16938, `decision-autonomy.md` 12173 to 8899, `remediation-doctrine.md` 19906 to 19578, `workflow.md` 2841 to 2812, `run-ledger-schema.md` 18987 to 17189. The `plugin/skills/decision-report/SKILL.md` budget entry is removed.
+
+### Removed
+
+- BREAKING: the post-merge decision report: the `hivemind:decision-report` skill, `HIVEMIND_ENABLE_DECISION_REPORT`, the `.decision-report-done` marker and the session-start scan. Migration: delete the key, which now has no effect, and review "Decided for you" on the PR or the Decisions in the final report before merge. Existing markers stay in place.
+- BREAKING: Resume On Start and the version-skew doors. Migration: give the request again, and it plans what is left from the branch. `.hivemind/runs/` is neither read nor deleted, so delete it by hand.
+- BREAKING: the state-machine fallback for refused `analysis-only` and `pr-feedback-remediation` launches. Migration: a `Workflow(hivemind:<id>)` deny entry now sends any workflow to Instinct.
+- BREAKING: four overlord sections and the `## Post-Merge Decision Report Trigger` section. Migration: none beyond the items above, since each section served a removed path.
+- BREAKING: `### Proactive Zoom-Out Ledger Marker` is renamed. Migration: cite `### Proactive Zoom-Out Marker`.
+
+No prose budget raised.
+
+Issue: #656.
+
 ## [12.0.0] - 2026-11-22
 
 ### Changed

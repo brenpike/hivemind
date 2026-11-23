@@ -42,7 +42,7 @@ Judge whether a change needs a version bump, and its type, by `${CLAUDE_PLUGIN_R
 
 Open PR only when: plan complete, validation passed, version bump included if required, branch pushed.
 
-Local review gate: if local review ran on the branch, a ready-for-review PR opens only when its last exit reason holds the gate. Gate-holding exits: `clean`, and `diminishing-returns` once its advisory exit is taken. Any other exit holds nothing and stops that PR on every path: workflow script, state machine, or any step outside both. Local review that did not run (the request skipped it, or a `skipped` exit) neither holds nor blocks the PR; the PR body and final report name a `skipped` exit and its reason.
+Local review gate: if local review ran on the branch, a ready-for-review PR opens only when its last exit reason holds the gate. Gate-holding exits: `clean`, and `diminishing-returns` once its advisory exit is taken. Any other exit holds nothing and stops that PR on every path: workflow script or Instinct. Local review that did not run (the request skipped it, or a `skipped` exit) neither holds nor blocks the PR; the PR body and final report name a `skipped` exit and its reason.
 
 Loop-cap draft: at a loop cap, only the workflow script opens the PR as a draft whose body says why and lists open findings; validation still passes. Other paths stop.
 
