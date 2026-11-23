@@ -217,8 +217,8 @@ Design review round 4 of the re-review corrects these details:
 
 - Decision 7: only a stamping record wave writes the blob ids the guide names; a failing record keeps its stamps.
 
-After round 3 and round 4 of the re-review, the maintainer approved a one-time fourth and fifth confirming round of it (answers A of 2026-11-23), recorded as D41 of the [solution design](../initiatives/idea-to-ready/solution-design.md); neither changes `rounds`, and decision 6's three-round cap stays the general rule.
+After round 3 and round 4 of the re-review, the maintainer approved a one-time fourth and fifth confirming round of it (answers A of 2026-11-23), recorded as D41 of the [solution design](../initiatives/idea-to-ready/solution-design.md); neither changes `rounds`, and decision 6's three-round cap stays the general rule; round 5 was recorded clean by the maintainer's one-time waiver after its two low findings were fixed.
 
 Reason: no stage settled a UI slice's look before it was built, and the Lair design moved where the docs-path protection and the claim-time call are built.
 
-This amends this ADR's decisions 1, 3, 5, 6, 7, 8, 10 and 11 and adds decision 12, renumbering none. Each detail is taken and listed for veto in the review record.
+This amends this ADR's decisions 1, 3, 5, 6, 7, 8, 10 and 11 and adds decision 12, renumbering none. Each detail of the amendment and of rounds 1 and 2 is taken and listed for veto in the review record; the round 3 to round 5 details and D41 were asked (answers of 2026-11-23; review record, Decisions asked).
