@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No migration is needed.
 
-No prose budget raised.
+No prose budget raised. The `hivemind:route-workflow` skill's prose budget is lowered from 6229 to its measured size of 5543 bytes.
 
 Issue: #653.
 
