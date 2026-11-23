@@ -208,6 +208,17 @@ Design review round 2 of the re-review corrects these details:
 - Decision 12: the Design section, seed reuse, the Prototype line and the slicing refusal apply only under the seed issue, not when `docs/initiatives/<slug>/` exists on trunk.
 - Residuals: the option not taken under auto-merge is named the weaker option.
 
+Design review round 3 of the re-review corrects these details:
+
+- Decision 7: the guide's script reads each stamp's blob id through the readiness check library, and the record step writes it as the guide names it.
+- Decision 12: slices outside the seed fail `epic_marker_missing` or `design_block_missing`; `subissue-ops.sh` tests the seed marker with the library's parse on the epic body it reads itself; the guide passes the seed number as `--existing-number`.
+
+Design review round 4 of the re-review corrects these details:
+
+- Decision 7: only a stamping record wave writes the blob ids the guide names; a failing record keeps its stamps.
+
+After round 3 and round 4 of the re-review, the maintainer approved a one-time fourth and fifth confirming round of it (answers A of 2026-11-23), recorded as D41 of the [solution design](../initiatives/idea-to-ready/solution-design.md); neither changes `rounds`, and decision 6's three-round cap stays the general rule.
+
 Reason: no stage settled a UI slice's look before it was built, and the Lair design moved where the docs-path protection and the claim-time call are built.
 
 This amends this ADR's decisions 1, 3, 5, 6, 7, 8, 10 and 11 and adds decision 12, renumbering none. Each detail is taken and listed for veto in the review record.
