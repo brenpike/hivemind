@@ -1235,102 +1235,81 @@ echo '=== brood-status-derive.sh: status derivation, bucket classification, aggr
 # row of the failed-precedence + tmux x PR table, the bucket classifier, and both aggregators.
 
 # ── 6a. hivemind_derive_strain_status — the FULL rule table ──
-# SIGNATURE (issue #213, 6-arity): <manifest_status> <session_alive> <pr_state> <pr_number>
-#   <state_current> <run_status>. The last two are tier-3 child-ledger started-evidence tokens; an
-# alive session derives `running` ONLY with a present, non-MISSING/non-MALFORMED state.current,
-# otherwise it demotes to the transient `starting` status. The dead/failed rows ignore them.
-STARTED="implement_step"   # a present, non-sentinel state.current = ground-truth started evidence.
+# SIGNATURE: <manifest_status> <session_alive> <pr_state> <pr_number> <facts_evidence>
+#   [<started_gate>]. An alive session derives `running` ONLY with facts_evidence exactly `yes` or
+# started_gate exactly `off`; otherwise it demotes to the transient `starting` status. The
+# dead/failed rows ignore both.
 
-# failed-precedence (manifest_status=failed beats tmux): alive vs dead. Ledger tokens are ignored
-# under failed-precedence (use MISSING to prove they cannot resurrect a failed strain to starting).
+# failed-precedence (manifest_status=failed beats tmux): alive vs dead. Facts evidence and an off
+# gate are passed to prove they cannot change a failed strain.
 assert_eq "derive:failed-alive" "failed (injection failed; session alive for debug)" \
-  "$(hivemind_derive_strain_status failed 1 none "" MISSING MISSING)" "failed + alive -> injection-failed debug"
+  "$(hivemind_derive_strain_status failed 1 none "" no)" "failed + alive -> injection-failed debug"
 assert_eq "derive:failed-dead" "failed (session ended, no PR)" \
-  "$(hivemind_derive_strain_status failed 0 none "" MISSING MISSING)" "failed + dead -> session ended"
+  "$(hivemind_derive_strain_status failed 0 none "" no)" "failed + dead -> session ended"
 # failed-precedence holds even when a PR is open (manifest failed wins over the table).
 assert_eq "derive:failed-alive-pr-open" "failed (injection failed; session alive for debug)" \
-  "$(hivemind_derive_strain_status failed 1 open 7 MISSING MISSING)" "failed + alive ignores PR state"
+  "$(hivemind_derive_strain_status failed 1 open 7 no)" "failed + alive ignores PR state"
+assert_eq "derive:failed-alive-facts-yes" "failed (injection failed; session alive for debug)" \
+  "$(hivemind_derive_strain_status failed 1 none "" yes)" "failed + alive + facts yes -> failed precedence kept"
+assert_eq "derive:failed-alive-gate-off" "failed (injection failed; session alive for debug)" \
+  "$(hivemind_derive_strain_status failed 1 none "" no off)" "failed + alive + gate off -> failed precedence kept"
 
 # tmux x PR observable table (manifest_status NOT failed; use the literal status spawn-brood writes).
-# Alive rows carry started-evidence (STARTED) so they derive `running` (not the demoted `starting`).
+# Alive rows carry facts evidence so they derive `running` (not the demoted `starting`).
 assert_eq "derive:alive-none" "running" \
-  "$(hivemind_derive_strain_status running 1 none "" "$STARTED" running)" "alive + started + none -> running"
+  "$(hivemind_derive_strain_status running 1 none "" yes)" "alive + facts yes + none -> running"
 assert_eq "derive:alive-open" "running (PR #42 open)" \
-  "$(hivemind_derive_strain_status running 1 open 42 "$STARTED" running)" "alive + started + open -> running (PR #N open)"
+  "$(hivemind_derive_strain_status running 1 open 42 yes)" "alive + facts yes + open -> running (PR #N open)"
 assert_eq "derive:dead-merged" "complete" \
-  "$(hivemind_derive_strain_status running 0 merged 13 "$STARTED" complete)" "dead + merged -> complete"
+  "$(hivemind_derive_strain_status running 0 merged 13 yes)" "dead + merged -> complete"
 assert_eq "derive:dead-open" "blocked (session ended, PR #99 still open)" \
-  "$(hivemind_derive_strain_status running 0 open 99 "$STARTED" running)" "dead + open -> blocked"
+  "$(hivemind_derive_strain_status running 0 open 99 yes)" "dead + open -> blocked"
 assert_eq "derive:dead-none" "failed (session ended, no PR)" \
-  "$(hivemind_derive_strain_status running 0 none "" "$STARTED" running)" "dead + none -> failed"
+  "$(hivemind_derive_strain_status running 0 none "" yes)" "dead + none -> failed"
 
 # unknown-PR handling: gh failed. Treated like none for derivation (the cell shows unknown via the
 # renderer; status derives from tmux + best-known PR). alive+unknown -> running; dead+unknown -> failed.
 assert_eq "derive:alive-unknown" "running" \
-  "$(hivemind_derive_strain_status running 1 unknown "" "$STARTED" running)" "alive + started + unknown PR -> running (unknown ~ none)"
+  "$(hivemind_derive_strain_status running 1 unknown "" yes)" "alive + facts yes + unknown PR -> running (unknown ~ none)"
 assert_eq "derive:dead-unknown" "failed (session ended, no PR)" \
-  "$(hivemind_derive_strain_status running 0 unknown "" "$STARTED" running)" "dead + unknown PR -> failed (unknown ~ none)"
+  "$(hivemind_derive_strain_status running 0 unknown "" yes)" "dead + unknown PR -> failed (unknown ~ none)"
 
-# ── 6a-bis. started-evidence gate (issue #213): alive session demotes to `starting` without it ──
+# ── 6a-bis. started-evidence gate: alive session demotes to `starting` without facts evidence ──
 STARTING="starting (session alive, workflow not yet started)"
-# alive + started-evidence-present -> running (the positive control; mirrors derive:alive-none).
-assert_eq "derive:alive-started-running" "running" \
-  "$(hivemind_derive_strain_status running 1 none "" "$STARTED" running)" "alive + present state.current -> running"
-# alive + MISSING state.current (child pasted but never submitted; no ledger) -> starting, NOT running.
-assert_eq "derive:alive-missing-starting" "$STARTING" \
-  "$(hivemind_derive_strain_status running 1 none "" MISSING MISSING)" "alive + MISSING state.current -> starting (not running)"
-# alive + MALFORMED state.current (fail-closed) -> starting, NOT running.
-assert_eq "derive:alive-malformed-starting" "$STARTING" \
-  "$(hivemind_derive_strain_status running 1 none "" MALFORMED MISSING)" "alive + MALFORMED state.current -> starting (fail-closed, not running)"
-# alive + empty state.current -> starting (defensive: empty is treated as no started-evidence).
-assert_eq "derive:alive-empty-starting" "$STARTING" \
-  "$(hivemind_derive_strain_status running 1 none "" "" "")" "alive + empty state.current -> starting"
-# The started-evidence gate does NOT promote a DEAD session: dead+merged stays complete even with no
-# state.current (the gate only DEMOTES alive sessions; it never touches the dead branch).
-assert_eq "derive:dead-merged-no-evidence" "complete" \
-  "$(hivemind_derive_strain_status running 0 merged 13 MISSING MISSING)" "dead + merged + MISSING -> complete (gate never touches dead branch)"
-# alive + started-evidence + open PR -> running (PR #N open), NOT starting (evidence present).
-assert_eq "derive:alive-started-open" "running (PR #7 open)" \
-  "$(hivemind_derive_strain_status running 1 open 7 "$STARTED" running)" "alive + started + open -> running (PR #N open)"
+assert_eq "derive:alive-facts-no-starting" "$STARTING" \
+  "$(hivemind_derive_strain_status running 1 none "" no)" "alive + facts no -> starting (not running)"
+assert_eq "derive:alive-facts-empty-starting" "$STARTING" \
+  "$(hivemind_derive_strain_status running 1 none "" "")" "alive + empty facts -> starting"
+assert_eq "derive:alive-facts-upper-starting" "$STARTING" \
+  "$(hivemind_derive_strain_status running 1 none "" YES)" "alive + facts 'YES' (not exact yes) -> starting"
+# A ledger-state token is not started-evidence: only the exact value `yes` counts.
+assert_eq "derive:alive-facts-ledger-token-starting" "$STARTING" \
+  "$(hivemind_derive_strain_status running 1 none "" implement_step)" "alive + facts 'implement_step' (ledger-state token) -> starting"
+assert_eq "derive:alive-facts-no-open-starting" "$STARTING" \
+  "$(hivemind_derive_strain_status running 1 open 7 no)" "alive + facts no + open PR -> starting"
 
-# ── legacy no-pointer fall-through: NO_LEDGER_POINTER bypasses the started-evidence gate ──
-# A legacy manifest has no run.suggested_id, so the projector emits NO_LEDGER_POINTER for
-# state.current. Started-evidence is structurally unavailable, so the gate must NOT apply: an alive
-# legacy strain keeps its observable status. This is the regression assertion.
-assert_eq "derive:alive-nopointer-running" "running" \
-  "$(hivemind_derive_strain_status running 1 none "" NO_LEDGER_POINTER MISSING)" "alive + NO_LEDGER_POINTER + no PR -> running (legacy fall-through, NOT starting)"
-# alive legacy strain + open PR -> running (PR #N open) (gate still bypassed; observable status kept).
-assert_eq "derive:alive-nopointer-open" "running (PR #7 open)" \
-  "$(hivemind_derive_strain_status running 1 open 7 NO_LEDGER_POINTER MISSING)" "alive + NO_LEDGER_POINTER + open PR -> running (PR #N open)"
-# dead legacy strain (session never resurrected) -> failed terminal; NO_LEDGER_POINTER never touches the dead branch.
-assert_eq "derive:dead-nopointer-failed" "failed (session ended, no PR)" \
-  "$(hivemind_derive_strain_status running 0 none "" NO_LEDGER_POINTER MISSING)" "dead + NO_LEDGER_POINTER + no PR -> failed (session ended, no PR)"
-
-# ── 6a-ter. optional 7th argument facts_evidence: script-engine started-evidence ──
-# An alive strain derives running when state.current is a valid token OR facts_evidence is yes;
-# absent the 7th argument it means no, so every 6-argument call above keeps its result.
-assert_eq "derive:alive-missing-facts-yes" "running" \
-  "$(hivemind_derive_strain_status running 1 none "" MISSING MISSING yes)" "alive + MISSING state.current + facts yes -> running"
-assert_eq "derive:alive-malformed-facts-yes" "running" \
-  "$(hivemind_derive_strain_status running 1 none "" MALFORMED MISSING yes)" "alive + MALFORMED state.current + facts yes -> running"
-assert_eq "derive:alive-empty-facts-yes-open" "running (PR #5 open)" \
-  "$(hivemind_derive_strain_status running 1 open 5 "" "" yes)" "alive + empty state.current + facts yes + open PR -> running (PR #N open)"
-assert_eq "derive:alive-missing-facts-no" "$STARTING" \
-  "$(hivemind_derive_strain_status running 1 none "" MISSING MISSING no)" "alive + MISSING state.current + facts no -> starting"
-assert_eq "derive:alive-missing-facts-empty" "$STARTING" \
-  "$(hivemind_derive_strain_status running 1 none "" MISSING MISSING "")" "alive + MISSING state.current + empty facts -> starting"
-assert_eq "derive:alive-missing-facts-other" "$STARTING" \
-  "$(hivemind_derive_strain_status running 1 none "" MISSING MISSING YES)" "alive + MISSING state.current + facts 'YES' (not exact yes) -> starting"
-assert_eq "derive:alive-started-facts-no" "running" \
-  "$(hivemind_derive_strain_status running 1 none "" "$STARTED" running no)" "alive + valid state.current + facts no -> running"
-assert_eq "derive:alive-nopointer-facts-no" "running" \
-  "$(hivemind_derive_strain_status running 1 none "" NO_LEDGER_POINTER MISSING no)" "alive + NO_LEDGER_POINTER + facts no -> running (exemption unchanged)"
+# ── 6a-ter. started_gate off: the strain is exempt from the gate ──
+assert_eq "derive:alive-gate-off-running" "running" \
+  "$(hivemind_derive_strain_status running 1 none "" no off)" "alive + facts no + gate off -> running"
+assert_eq "derive:alive-gate-off-open" "running (PR #7 open)" \
+  "$(hivemind_derive_strain_status running 1 open 7 no off)" "alive + facts no + gate off + open PR -> running (PR #N open)"
+assert_eq "derive:dead-gate-off-failed" "failed (session ended, no PR)" \
+  "$(hivemind_derive_strain_status running 0 none "" no off)" "dead + no PR + gate off -> failed (dead rows unchanged)"
+# Gate fail-closed: only the exact value `off` exempts; empty, `OFF`, `on` and absent all mean on.
+assert_eq "derive:alive-gate-empty-starting" "$STARTING" \
+  "$(hivemind_derive_strain_status running 1 none "" no "")" "alive + facts no + gate '' -> starting (fail-closed)"
+assert_eq "derive:alive-gate-upper-starting" "$STARTING" \
+  "$(hivemind_derive_strain_status running 1 none "" no OFF)" "alive + facts no + gate 'OFF' (not exact off) -> starting"
+assert_eq "derive:alive-gate-on-starting" "$STARTING" \
+  "$(hivemind_derive_strain_status running 1 none "" no on)" "alive + facts no + gate on -> starting"
+assert_eq "derive:alive-gate-absent-starting" "$STARTING" \
+  "$(hivemind_derive_strain_status running 1 none "" no)" "alive + facts no + gate absent -> starting"
+# The gate never promotes a DEAD strain: facts evidence leaves the dead rows unchanged, and no
+# facts evidence never demotes dead+merged out of complete.
 assert_eq "derive:dead-none-facts-yes" "failed (session ended, no PR)" \
-  "$(hivemind_derive_strain_status running 0 none "" MISSING MISSING yes)" "dead + no PR + facts yes -> failed (dead rows unchanged)"
-assert_eq "derive:dead-merged-facts-yes" "complete" \
-  "$(hivemind_derive_strain_status running 0 merged 13 MISSING MISSING yes)" "dead + merged + facts yes -> complete (dead rows unchanged)"
-assert_eq "derive:failed-alive-facts-yes" "failed (injection failed; session alive for debug)" \
-  "$(hivemind_derive_strain_status failed 1 none "" MISSING MISSING yes)" "failed + alive + facts yes -> failed precedence kept"
+  "$(hivemind_derive_strain_status running 0 none "" yes)" "dead + no PR + facts yes -> failed (dead rows unchanged)"
+assert_eq "derive:dead-merged-facts-no" "complete" \
+  "$(hivemind_derive_strain_status running 0 merged 13 no)" "dead + merged + facts no -> complete (gate never touches dead branch)"
 
 # ── 6b. hivemind_classify_status_bucket — every derived status maps to a bucket ──
 assert_eq "bucket:complete" "complete" \
