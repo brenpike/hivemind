@@ -201,7 +201,6 @@ SOURCE_ROWS=(
     "$(build_std_source_row plugin/skills/brood-status/scripts/brood-status-project.sh '$plugin_root/skills/_shared' containment.sh)"
     "$(build_std_source_row plugin/skills/brood-status/scripts/brood-status-project.sh '$plugin_root/skills/_shared' allowlist.sh)"
     "$(build_std_source_row plugin/skills/brood-status/scripts/brood-status-project.sh '$plugin_root/skills/_shared' manifest-json.sh)"
-    "$(build_std_source_row plugin/skills/brood-status/scripts/brood-status-project.sh '$plugin_root/skills/_shared' ledger-project.sh)"
     "$(build_std_source_row plugin/skills/brood-status/scripts/brood-status-project.sh '$plugin_root/skills/_shared' brood-state.sh)"
     "$(build_std_source_row plugin/skills/brood-status/scripts/brood-discover.sh '$plugin_root/skills/_shared' containment.sh)"
     "$(build_std_source_row plugin/skills/brood-status/scripts/brood-discover.sh '$plugin_root/skills/_shared' brood-state.sh)"

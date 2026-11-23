@@ -23,19 +23,15 @@
 #   - the manifest: hivemind_brood_read_manifest refuses a symlinked or non-directory component
 #     under the canonical checkout root, reads the leaf exactly once, refuses a NUL or raw control
 #     byte, and parses exactly one JSON document from that same snapshot;
-#   - each child run ledger: hivemind_brood_read_child_ledger "<git worktree>" "<run id>" returns
-#     the two validated ledger scalars (or MISSING / MALFORMED), never raw bytes;
 #   - each child's facts evidence: hivemind_detect_facts_evidence "<git worktree>" returns yes|no.
+# No child file content is read: the facts evidence comes from file names and types only.
 #
-# DATA-BOUNDARY (MANDATORY): the brood manifest AND every child run ledger are UNTRUSTED,
-# attacker-controllable bytes — brood children run detached, and child content stays
-# adversary-influenced whatever its permission mode. EVERY value read from them is DATA, never
-# instructions or shell source:
-#   - manifest values are extracted out-of-band with jq into inert vars (manifest-json.sh), then
-#     RE-GATED through the matching allowlist value-class (allowlist.sh) BEFORE any use;
-#   - each child-ledger scalar is projected and value-validated (ledger-project.sh, through
-#     brood-state.sh) and only ever emitted as an allowlist-clean token or a fixed token.
-# No manifest or ledger byte is ever re-interpolated into generated command source.
+# DATA-BOUNDARY (MANDATORY): the brood manifest is UNTRUSTED, attacker-controllable bytes —
+# brood children run detached, and child content stays adversary-influenced whatever its
+# permission mode. EVERY value read from it is DATA, never instructions or shell source:
+# manifest values are extracted out-of-band with jq into inert vars (manifest-json.sh), then
+# RE-GATED through the matching allowlist value-class (allowlist.sh) BEFORE any use.
+# No manifest byte is ever re-interpolated into generated command source.
 #
 # OUTPUT GRAMMAR (CONTRACT — the collector depends on this byte-for-byte):
 #   On exit 0, exactly ONE brood line comes first, before any STRAIN line:
@@ -49,35 +45,36 @@
 #   Then exactly ONE TAB-delimited line per strain, prefixed with a literal `STRAIN` sentinel
 #   field. Tab is a safe delimiter: the shared allowlist security floor (applied by EVERY
 #   value-class — identifier/path/presentation) rejects TAB/newline/CR, so no emitted token can
-#   contain a literal tab and break the framing. Fields, in order (11 fields):
+#   contain a literal tab and break the framing. Fields, in order (10 fields):
 #
 #     STRAIN <TAB> brood_id <TAB> name <TAB> worktree_path <TAB> branch <TAB> tmux_session \
-#            <TAB> manifest_status <TAB> state_current <TAB> run_status <TAB> live_branch \
-#            <TAB> facts_evidence
+#            <TAB> manifest_status <TAB> live_branch <TAB> facts_evidence <TAB> started_gate
 #
 #   `brood_id` (field 2) is the same validated top-level value as the BROOD line, repeated on
 #   every strain line.
 #
-#   `live_branch` (field 10) is the selected worktree's git-reported LIVE branch (`branch
+#   `live_branch` (field 8) is the selected worktree's git-reported LIVE branch (`branch
 #   refs/heads/<name>` from the porcelain parse), gated through the identifier value-class. It is
 #   DISTINCT from the display-only manifest `branch` column (field 5, the stale spawn-time scratch
 #   ref): the collector keys its `gh pr list --head` PR probe on THIS live branch (#270). A
 #   no-match/detached worktree yields MISSING; an identifier reject yields MALFORMED.
 #
-#   `facts_evidence` (field 11) is `yes` or `no`, from hivemind_detect_facts_evidence over the
-#   selected ground-truth worktree: the started-evidence of a script-engine child, which writes
-#   no run ledger. It is `no` whenever no ground-truth worktree was selected or the worktree is
-#   not resident under the checkout root. No file content is read.
+#   `facts_evidence` (field 9) is `yes` or `no`, from hivemind_detect_facts_evidence over the
+#   selected ground-truth worktree: the started-evidence of a child. It is `no` whenever no
+#   ground-truth worktree was selected or the worktree is not resident under the checkout root.
+#   No file content is read.
+#
+#   `started_gate` (field 10) is `on` or `off`: whether the collector's started-evidence gate
+#   applies. It is `off` ONLY when a ground-truth worktree was selected AND the manifest strain
+#   carries no `run.suggested_id` (a legacy manifest: the strain falls back to its observable
+#   status). Otherwise it is `on`: a valid suggested_id, a present-but-malformed one, or no
+#   selected worktree.
 #
 #   Each remaining value is either an allowlist-clean token OR one of the fixed tokens
-#   MALFORMED / MISSING / NO_LEDGER_POINTER. A raw, un-validated scalar is NEVER emitted.
-#   `state_current` carries the third fixed token NO_LEDGER_POINTER only when the manifest
-#   carries no ledger pointer (no `run.suggested_id`): started-evidence is then STRUCTURALLY
-#   unavailable and the downstream started-evidence gate does not apply. This is DISTINCT from
-#   MISSING (a pointer exists but the child has not yet written started-evidence) and from
-#   MALFORMED (a present-but-rejected ledger). Example (tabs shown as <TAB>):
+#   MALFORMED / MISSING. A raw, un-validated scalar is NEVER emitted. Example (tabs shown as
+#   <TAB>):
 #     BROOD<TAB>brood-1a2b
-#     STRAIN<TAB>brood-1a2b<TAB>auth<TAB>/abs/wt/auth<TAB>strain/brood-1a2b/auth<TAB>brood-1a2b-auth<TAB>spawned<TAB>implement_step<TAB>running<TAB>bugfix/auth-fix-9f3a<TAB>no
+#     STRAIN<TAB>brood-1a2b<TAB>auth<TAB>/abs/wt/auth<TAB>strain/brood-1a2b/auth<TAB>brood-1a2b-auth<TAB>spawned<TAB>bugfix/auth-fix-9f3a<TAB>no<TAB>on
 #
 #   INTEGRITY SENTINEL (distinct from any BROOD or STRAIN line): when the manifest is PRESENT but
 #   UNREADABLE — a NUL or raw control byte, invalid JSON, zero or several JSON documents, an open
@@ -102,7 +99,7 @@
 #   2  manifest PRESENT but UNREADABLE: the MANIFEST_UNREADABLE sentinel line on stdout (above).
 #
 # set -u: every value is read explicitly; an unset variable is a programming error here. We do
-# NOT use `set -e`: per-strain field/ledger problems are caught and rendered as tokens, never
+# NOT use `set -e`: per-strain field problems are caught and rendered as tokens, never
 # allowed to abort the whole read. There is no EXIT trap.
 #
 # P18 FLOOR EXCEPTION (ADR-0020 / CHECK13 allowlisted): `set -u` only — `set -e`/`pipefail`
@@ -139,7 +136,7 @@ blocker() { printf 'blocker: %s\n' "$1" >&2; exit 1; }
 #   2. Escape `|` (0x7C) -> `\|` (the Markdown cell escape), so an inert quoted `|` cannot forge a
 #      table column.
 # The TAB field SEPARATOR is NOT touched here: this operates WITHIN a single field value only; the
-# caller still joins fields with literal TABs, preserving the 11-field TAB-delimited STRAIN grammar.
+# caller still joins fields with literal TABs, preserving the 10-field TAB-delimited STRAIN grammar.
 encode_cell() {
   # `tr -d` drops C0 + DEL; `sed` escapes any remaining `|`. Order: strip controls first, then
   # escape `|`, so a stripped control byte can never split the `|` escape. Operates on stdin via a
@@ -159,16 +156,14 @@ plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev
 . "$plugin_root/skills/_shared/allowlist.sh" || blocker "failed to source skills/_shared/allowlist.sh (unparseable); refusing to proceed"
 [ -f "$plugin_root/skills/_shared/manifest-json.sh" ] || blocker "required shared library missing: skills/_shared/manifest-json.sh; refusing to proceed"
 . "$plugin_root/skills/_shared/manifest-json.sh" || blocker "failed to source skills/_shared/manifest-json.sh (unparseable); refusing to proceed"
-[ -f "$plugin_root/skills/_shared/ledger-project.sh" ] || blocker "required shared library missing: skills/_shared/ledger-project.sh; refusing to proceed"
-. "$plugin_root/skills/_shared/ledger-project.sh" || blocker "failed to source skills/_shared/ledger-project.sh (unparseable); refusing to proceed"
 [ -f "$plugin_root/skills/_shared/brood-state.sh" ] || blocker "required shared library missing: skills/_shared/brood-state.sh; refusing to proceed"
 . "$plugin_root/skills/_shared/brood-state.sh" || blocker "failed to source skills/_shared/brood-state.sh (unparseable); refusing to proceed"
 
 # ── Dependency check ────────────────────────────────────────────────────────────
-# jq is required (the child ledgers are JSON). tmux/claude/gh are NOT required — this read
+# jq is required (the brood manifest is JSON). tmux/claude/gh are NOT required — this read
 # path runs in CI with only jq.
 command -v jq >/dev/null 2>&1 \
-  || blocker "jq is required to project child run-ledgers but is not installed"
+  || blocker "jq is required to project the brood manifest but is not installed"
 
 # ── Argument validation ─────────────────────────────────────────────────────────
 BROOD_ID="${1:-}"
@@ -225,16 +220,16 @@ if [ "$manifest_read_status" -eq 5 ] || ! hivemind_manifest_validate_shape "$man
 fi
 
 # Canonical containment anchor for the per-strain GROUND-TRUTH worktree-containment chain below.
-# (locked OQ3, PATH-keyed for #270): the per-strain ledger anchor is the REAL worktree git itself
+# (locked OQ3, PATH-keyed for #270): the per-strain anchor is the REAL worktree git itself
 # reports — selected by EXACT-MATCH of the manifest's UNTRUSTED `worktree_path` against git's
 # trusted worktree-path set (the manifest path is ONLY a selector string, never a path anchor).
 # Path-keying is STABLE across a child branch switch (a brood child creates its compliant working
 # branch off the spawn-time scratch ref; the worktree PATH does not move), which is the whole point
-# — branch-keying broke the moment the child switched. The full containment chain is unchanged:
-# CHECKOUT_ROOT ⊇ git-worktree ⊇ ledger — the git-derived worktree must still canonically sit
-# beneath this checkout (git may report linked/sibling worktrees deliberately OUTSIDE the
-# checkout — those are fail-closed), and the ledger leaf must sit beneath that worktree. The git
-# path stays the SOLE confinement anchor; no manifest value reaches a path derivation un-anchored.
+# — branch-keying broke the moment the child switched. The containment chain is
+# CHECKOUT_ROOT ⊇ git-worktree — the git-derived worktree must canonically sit beneath this
+# checkout (git may report linked/sibling worktrees deliberately OUTSIDE the checkout — those are
+# fail-closed). The git path stays the SOLE confinement anchor; no manifest value reaches a path
+# derivation un-anchored.
 # Canonicalize CHECKOUT_ROOT once here.
 canon_checkout="$(hivemind_canon_root "$CHECKOUT_ROOT")"
 [ -n "$canon_checkout" ] \
@@ -292,7 +287,7 @@ printf 'BROOD\t%s\n' "$(encode_cell "$brood_id_out")"
 #
 # git is run against CHECKOUT_ROOT (-C) so we enumerate the worktrees of the checkout the manifest
 # belongs to. tmux/claude are not required on this path, but git is — if git is unavailable the
-# set is empty and every strain fails closed to MISSING worktree/ledger columns.
+# set is empty and every strain fails closed to MISSING worktree columns.
 #
 # Storage without associative arrays (portable to bash 3.2): a newline-delimited set of git
 # worktree paths, one per line. A manifest worktree_path is looked up by exact whole-line match.
@@ -363,9 +358,9 @@ EOF
 # For each strain, extract the manifest static fields out-of-band into inert vars, re-gate every
 # downstream value through the allowlist, select the strain's GROUND-TRUTH worktree from the
 # git-derived path set (keyed by EXACT-MATCH on the strain's untrusted worktree_path — STABLE
-# across a child branch switch, #270), confine the ledger path beneath that REAL worktree, and
-# project the two ledger scalars. Any per-strain problem renders the affected field(s) as a token
-# and CONTINUES — never aborts the whole read.
+# across a child branch switch, #270), and detect the facts evidence beneath that REAL worktree.
+# Any per-strain problem renders the affected field(s) as a token and CONTINUES — never aborts
+# the whole read.
 #
 # DELIMITER-INJECTION AVOIDANCE: the loop is driven by INDEX off the strain COUNT, not by
 # splitting a newline-delimited name stream. An untrusted strain name containing a newline is
@@ -414,8 +409,8 @@ while [ "$idx" -lt "$strain_count" ]; do
   # worktree_path is the WORKTREE LOOKUP SELECTOR (locked OQ3, re-keyed for #270): it keys the
   # strain's REAL git-reported worktree by EXACT-MATCH against the trusted git path set built above.
   # It is NEVER a path itself — it is ONLY ever compared as a string against git's set, so a
-  # tampered/non-matching value selects NOTHING and fails closed (it can never redirect the bounded
-  # ledger reader). Because git-set MEMBERSHIP is the validation (a value absent from git's trusted
+  # tampered/non-matching value selects NOTHING and fails closed (it can never redirect the facts
+  # evidence check). Because git-set MEMBERSHIP is the validation (a value absent from git's trusted
   # set selects nothing), the gate is the PATH-SELECTOR value-class (hivemind_assert_path_selector):
   # it rejects empty, leading '-', command-sub ($/backtick), and framing bytes (TAB/LF/CR) — the
   # bytes that could forge the TAB-delimited output grammar or expand in a command word — but it
@@ -471,8 +466,8 @@ while [ "$idx" -lt "$strain_count" ]; do
   # ── GROUND-TRUTH WORKTREE for this strain (locked OQ3 anchor, PATH-keyed) ─────────
   # Select the strain's REAL worktree from the git-derived path SET by EXACT-MATCH on the
   # path-class-clean wt_out. The manifest worktree_path is ONLY a selector string — a
-  # garbage/non-matching/absent path matches no set entry and fails closed (worktree/ledger
-  # columns become MISSING/unavailable). gt_worktree holds the matched real path (identical to
+  # garbage/non-matching/absent path matches no set entry and fails closed (worktree columns
+  # become MISSING/unavailable). gt_worktree holds the matched real path (identical to
   # wt_out on a hit, since both are the same git-reported path) or empty on a miss.
   #
   # git guarantees worktree-path uniqueness, so a path key cannot duplicate; the prior
@@ -511,8 +506,8 @@ EOF
   # ── RESIDENCY of the selected worktree under CHECKOUT_ROOT ────────────────────────
   # Assert the git-derived worktree is canonicalized + CONTAINED under CHECKOUT_ROOT. git may
   # report linked/sibling worktrees deliberately OUTSIDE the checkout; such an out-of-checkout
-  # worktree fails closed (no ledger read, no facts check). This is the CHECKOUT_ROOT ⊇
-  # git-worktree link of the full containment chain, shared by the ledger read and the facts check.
+  # worktree fails closed (no facts check). This is the CHECKOUT_ROOT ⊇ git-worktree link of the
+  # containment chain.
   canon_gt_wt=""
   gt_resident=0
   if [ -n "$gt_worktree" ]; then
@@ -524,109 +519,54 @@ EOF
     fi
   fi
 
-  # ── FACTS EVIDENCE for the selected worktree (script-engine started-evidence) ─────
+  # ── FACTS EVIDENCE for the selected worktree (started-evidence) ───────────────────
   # `no` unless a ground-truth worktree was selected AND it is resident under CHECKOUT_ROOT; then
   # hivemind_detect_facts_evidence (_shared/brood-state.sh) refuses a symlinked or non-directory
-  # facts folder and reports yes/no from file names and types only. Independent of the ledger pointer:
-  # a script-engine child may carry no run.suggested_id and still prove it started.
+  # facts folder and reports yes/no from file names and types only. Independent of
+  # run.suggested_id: a child may carry no run.suggested_id and still prove it started.
   facts_out="no"
   if [ "$gt_resident" -eq 1 ]; then
     facts_out="$(hivemind_detect_facts_evidence "$gt_worktree")"
     [ "$facts_out" = "yes" ] || facts_out="no"
   fi
 
-  # 3. Read the child ledger under the GROUND-TRUTH worktree, keyed by the run id. Only
-  #    <suggested_id> is manifest-sourced; gate it as a STRICT single-component identifier (no
-  #    slash, no space) so it cannot name anything outside the worktree's run folder. Default both
-  #    ledger scalars to tokens; only a CHECKOUT_ROOT-resident git worktree gets projected.
-  state_out="MISSING"
-  run_out="MISSING"
-
-  # Pre-validate suggested_id once via the exit-code contract; reused below.
-  sid_clean=0
-  case "$sid_rc" in
-    0) hivemind_assert_identifier "$suggested_id" && case "$suggested_id" in
-         */*) : ;;                       # reject any '/': must be a single component
-         *) sid_clean=1 ;;
-       esac ;;
-  esac
-
-  if [ -z "$gt_worktree" ]; then
-    # No live worktree matches this strain's worktree_path selector -> fail-closed: worktree/ledger
-    # unavailable. We NEVER fall back to the manifest worktree_path as a path anchor (it is only an
-    # exact-match selector into git's trusted set). "Nothing to anchor on" -> MISSING. (git
-    # guarantees path uniqueness, so there is no ambiguous-duplicate case to handle here.)
-    state_out="MISSING"
-    run_out="MISSING"
-  elif [ "$sid_rc" -eq 1 ]; then
-    # suggested_id absent (legacy manifest / no run block): there is NO ledger pointer to anchor
-    # on, so started-evidence is STRUCTURALLY unavailable — never read. Emit the distinct token
-    # NO_LEDGER_POINTER (NOT MISSING) so the started-evidence gate downstream does NOT apply and
-    # the strain falls back to its observable status (legacy no-pointer fall-through). MISSING is
-    # reserved for the modern case where a pointer EXISTS but the child has not yet written
-    # started-evidence. run_status has no legacy token of its own: leave it MISSING.
-    state_out="NO_LEDGER_POINTER"
-    run_out="MISSING"
-  elif [ "$sid_rc" -eq 2 ] || [ "$sid_clean" -ne 1 ]; then
-    # suggested_id present but rejected, or fails the strict single-component id charset: escape
-    # attempt -> MALFORMED, no path derivation.
-    state_out="MALFORMED"
-    run_out="MALFORMED"
-  else
-    # The CHECKOUT_ROOT ⊇ git-worktree residency (gt_resident) was computed once above for the
-    # selected worktree; an out-of-checkout worktree fails closed here (no read).
-    if [ "$gt_resident" -ne 1 ]; then
-      # git-worktree escapes (or fails to canonicalize beneath) CHECKOUT_ROOT: fail closed.
-      state_out="MALFORMED"
-      run_out="MALFORMED"
-    else
-      # Child-ledger read, delegated to hivemind_brood_read_child_ledger (_shared/brood-state.sh),
-      # the only code that reads brood state. It takes IDENTIFIERS — the git-derived worktree and
-      # the run id — derives the ledger location itself, refuses a symlinked or non-directory
-      # component, reads the leaf exactly once, refuses a NUL or raw control byte, and projects BOTH
-      # scalars from that ONE snapshot. gt_worktree is the git-derived worktree ALREADY proven
-      # resident under CHECKOUT_ROOT by the canon_gt_wt / gt_resident link above (the library has
-      # no CHECKOUT_ROOT notion, so that link stays inline in this script and runs FIRST).
-      #
-      # OUTPUT GRAMMAR (exactly two lines): line 1 = state.current result, line 2 = run.status
-      # result, each one of MISSING, MALFORMED or a validated value. Parse with a set-u-safe `read`
-      # pair from a process substitution so a short/empty read leaves the vars defined rather than
-      # tripping `set -u`.
-      state_out=""
-      run_out=""
-      { IFS= read -r state_out; IFS= read -r run_out; } \
-        < <(hivemind_brood_read_child_ledger "$gt_worktree" "$suggested_id")
-    fi
+  # ── STARTED GATE for this strain ────────────────────────────────────────────────
+  # `off` ONLY when a ground-truth worktree was selected AND the manifest strain carries no
+  # run.suggested_id (sid_rc 1, absent): a legacy manifest, so the collector keeps the strain's
+  # observable status. A valid suggested_id, a present-but-malformed one (sid_rc 2) or no
+  # selected worktree keeps the gate `on`, so it fails closed. The suggested_id value itself is
+  # never emitted and never reaches a path derivation; only its presence code is read.
+  gate_out="on"
+  if [ -n "$gt_worktree" ] && [ "$sid_rc" -eq 1 ]; then
+    gate_out="off"
   fi
 
-  # 5. Emit exactly one TAB-delimited STRAIN line. Field order:
-  #    brood_id, name, worktree_path, branch, tmux_session, manifest_status, state_current,
-  #    run_status, live_branch. brood_id is the single top-level value validated ONCE before the
-  #    loop and emitted verbatim on every strain line. live_branch (field 10) is APPENDED LAST so
-  #    existing 1-based field indices 2-9 are unchanged (#270 PR-probe re-anchor): it carries the
+  # 3. Emit exactly one TAB-delimited STRAIN line. Field order:
+  #    brood_id, name, worktree_path, branch, tmux_session, manifest_status, live_branch,
+  #    facts_evidence, started_gate. brood_id is the single top-level value validated ONCE before
+  #    the loop and emitted verbatim on every strain line. live_branch (field 8) carries the
   #    selected worktree's git-reported LIVE branch (or MISSING/MALFORMED), distinct from the
-  #    display-only manifest `branch` column (field 5). facts_evidence (field 11, yes|no) is
-  #    APPENDED after it so indices 1-10 stay unchanged.
+  #    display-only manifest `branch` column (field 5) (#270 PR-probe re-anchor).
+  #    facts_evidence (field 9) is yes|no; started_gate (field 10) is on|off.
   #
   #    ENCODE-AT-OUTPUT (see encode_cell above): every display column is run through encode_cell
   #    UNIFORMLY before emission — not per-class carve-outs. The strict columns (brood_id,
-  #    tmux/status/state/run identifier-class tokens, live_branch) and the fixed tokens (MISSING /
+  #    tmux/status identifier-class tokens, live_branch) and the fixed tokens (MISSING /
   #    MALFORMED) need no escaping, but applying the encoder to them too keeps the boundary uniform
   #    and self-documenting; encode_cell is a no-op on values that already lack `|` and controls.
   #    Only the value-classes that can carry a `|` as inert quoted data (worktree_path / branch —
   #    the FLOOR-ONLY path/identifier inputs) are materially affected. The literal TABs joining the
-  #    fields are added by printf AFTER per-field encoding, so the 11-field framing is preserved.
-  printf 'STRAIN\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  #    fields are added by printf AFTER per-field encoding, so the 10-field framing is preserved.
+  printf 'STRAIN\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$(encode_cell "$brood_id_out")" \
     "$(encode_cell "$name_out")" \
     "$(encode_cell "$wt_out")" \
     "$(encode_cell "$branch_out")" \
     "$(encode_cell "$tmux_out")" \
     "$(encode_cell "$status_out")" \
-    "$(encode_cell "$state_out")" \
-    "$(encode_cell "$run_out")" \
     "$(encode_cell "$live_branch_out")" \
-    "$(encode_cell "$facts_out")"
+    "$(encode_cell "$facts_out")" \
+    "$(encode_cell "$gate_out")"
 
   idx=$((idx + 1))
 done
