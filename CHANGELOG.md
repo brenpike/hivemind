@@ -13,6 +13,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [11.1.0] - 2026-11-22
+
+### Changed
+
+- Brood dispatch runs on Instinct in the main session. It is entered from a selected `hatchery-dispatch` or from an Instinct plan with delivery `brood`, and it spawns only after the Tier A strain approval. A declined approval spawns nothing.
+- `spawn-brood` ignores a hatchery input and writes no manifest hatchery block. `manifest_version` stays 4.
+- Turn-start verification counts only a `gather-facts` output file as started-evidence.
+- `tools/test_brood_compat.sh` Assertion 13 now promotes on a facts file.
+- The `plugin/skills/spawn-brood/SKILL.md` prose budget was lowered to 6974 bytes.
+
+### Removed
+
+- `RUN-OWNERSHIP-01` and the overlord's child-ledger clause.
+- The child-ledger branch of `verify_started_evidence` and `spawn-brood`'s `ledger-project.sh` source.
+
+No prose budget raised.
+
+Issue: #654.
+
 ## [11.0.0] - 2026-11-22
 
 ### Changed

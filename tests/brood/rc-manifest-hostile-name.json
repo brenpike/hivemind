@@ -4,11 +4,6 @@
   "created_at": "2026-06-21T00:00:00Z",
   "hatchery_session": "",
   "base": "main",
-  "hatchery": {
-    "run_id": "brood-feedface-0000-4000-8000-000000000002-hatchery",
-    "ledger": ".hivemind/runs/brood-feedface-0000-4000-8000-000000000002-hatchery/state.json",
-    "workflow": "hatchery-dispatch"
-  },
   "overlap_risk": "low",
   "overlap_details": "No shared file scopes detected.",
   "strains": [

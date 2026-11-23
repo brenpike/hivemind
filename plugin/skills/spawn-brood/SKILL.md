@@ -19,9 +19,8 @@ the inputs file and runs the script once.
 Rules: `GIT-01` (no trunk commits).
 
 The manifest (`.hivemind/broods/<brood-id>/manifest.json`) is a registry and
-coordination artifact, not the source of truth for child workflow state, which lives
-in each child's own run ledger. This skill never creates a child or hatchery ledger:
-`hatchery.ledger` only points at the hatchery ledger.
+coordination artifact. A strain counts as started only when its worktree holds the
+gather-facts output file the child writes.
 
 ## Required Inputs
 
@@ -34,9 +33,6 @@ The caller resolves and passes these; the skill does not resolve them.
   its commit.
 - `overlap_risk`: `low | medium | high`.
 - `overlap_details`: planner overlap-assessment text.
-- `hatchery` (optional): `{run_id, workflow}` for the coordinator's own run ledger.
-  `run_id` defaults to `<brood_id>-hatchery`; `workflow` defaults to
-  `hatchery-dispatch`. They only point at the hatchery ledger the coordinator owns.
 
 `brood_id` and per-strain `branch` are not inputs: the script generates the brood id
 (`brood-<uuidv4>`) and prints it on stdout, and creates no strain branch (each child
@@ -52,10 +48,6 @@ names and creates its own working branch).
      "base": "<resolved trunk/base branch>",
      "overlap_risk": "low | medium | high",
      "overlap_details": "<planner overlap-assessment text>",
-     "hatchery": {
-       "run_id": "<optional; defaults to <brood_id>-hatchery>",
-       "workflow": "<optional; defaults to hatchery-dispatch>"
-     },
      "strains": [
        {
          "name": "<strain name>",
@@ -70,7 +62,6 @@ names and creates its own working branch).
    - `strains` must be a non-empty array; a zero-strain array is a blocker.
    - `base`, `overlap_risk`, `overlap_details` are required top-level scalars.
    - Each strain requires `name` and `description`; `workflow_hint` is optional.
-   - `hatchery` is optional; both its fields default when omitted.
    - Include no `brood_id` and no per-strain `branch`; any caller-supplied value is
      ignored.
    - `name` is sanitized to `short` (`[a-z0-9-]`) for the worktree path
@@ -123,7 +114,7 @@ fail-closed: a non-numeric or non-positive value is rejected with a blocker.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `STARTED_EVIDENCE_TIMEOUT` | `180` (seconds) | Cold-boot grace period for an auto-mode child to write started-evidence: a run-ledger `state.current` or a gather-facts output file. Governs the Pass-3 per-strain verification deadline. Bare-Enter resends are periodic nudges within this window, not a fixed retry cap. A strain still without started-evidence when spawn ends stays `starting` and gets no remote control until the user asks for `hivemind:enable-brood-remote`. |
+| `STARTED_EVIDENCE_TIMEOUT` | `180` (seconds) | Cold-boot grace period for an auto-mode child to write started-evidence: a gather-facts output file. Governs the Pass-3 per-strain verification deadline. Bare-Enter resends are periodic nudges within this window, not a fixed retry cap. A strain still without started-evidence when spawn ends stays `starting` and gets no remote control until the user asks for `hivemind:enable-brood-remote`. |
 
 ## Silence Discipline
 

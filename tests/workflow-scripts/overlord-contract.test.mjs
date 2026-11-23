@@ -551,3 +551,49 @@ describe('overlord Reflex check before routing', () => {
     }
   });
 });
+
+// These check brood dispatch runs on Instinct in the main session and RUN-OWNERSHIP-01 is gone, never their meaning, per tests/policy/README.md (1. Honest capability statement); issue 654.
+describe('overlord brood dispatch on Instinct', () => {
+  const broodSection = readSection(body, '## Brood Execution');
+  const hatcheryParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('When `hivemind:route-workflow` selects `hatchery-dispatch`,')) ?? '';
+  test('Engine routes a selected hatchery-dispatch to ## Brood Execution and keeps it off the state machine', () => {
+    assert.notEqual(hatcheryParagraph, '', '## Engine has no paragraph starting When `hivemind:route-workflow` selects `hatchery-dispatch`,');
+    for (const phrase of ['launch no workflow', 'never enter the workflow state machine', 'run `## Brood Execution` in this session']) {
+      assert.ok(hatcheryParagraph.includes(phrase), `hatchery-dispatch paragraph lacks ${phrase}`);
+    }
+  });
+  test('Brood Execution states both entry conditions, facts and plan, the Tier A approval before spawn, relay and monitoring', () => {
+    assertSectionHasPhrases('## Brood Execution', [
+      'Brood dispatch runs on Instinct in the main session',
+      'entered when `hivemind:route-workflow` selects `hatchery-dispatch` or an Instinct plan returns delivery `brood`',
+      'Get facts from `hivemind:gather-facts` and a brood plan from `hivemind:cerebrate`',
+      'That approval is a Tier A item per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Tiers), never taken by recommendation',
+      '`${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Brood Spawn Bypass-Mode Mitigation)',
+      'Invoke `hivemind:spawn-brood` only after that approval',
+      'a declined approval spawns nothing, and the final report carries the brood plan',
+      'relay the script\'s `remote:` lines together with its `attach:` lines',
+      'monitor read-only via `hivemind:brood-status`',
+    ]);
+  });
+  test('Brood Execution seeks the strain approval before it invokes hivemind:spawn-brood', () => {
+    const sectionText = normalizeWhitespace(broodSection);
+    const approval = sectionText.indexOf('for the user\'s explicit approval');
+    const spawn = sectionText.indexOf('Invoke `hivemind:spawn-brood` only after that approval');
+    assert.notEqual(approval, -1, '## Brood Execution lacks the explicit approval');
+    assert.notEqual(spawn, -1, '## Brood Execution lacks the spawn after approval');
+    assert.ok(approval < spawn, '## Brood Execution spawns before it seeks the approval');
+  });
+  test('Brood Execution drops the state-machine dispatch and the child ledger rule', () => {
+    for (const phrase of ['`user_gate`', '`spawn_brood`', 'run ledger', 'RUN-OWNERSHIP-01']) {
+      assert.ok(!broodSection.includes(phrase), `## Brood Execution still contains ${phrase}`);
+    }
+  });
+  test('the overlord body no longer names RUN-OWNERSHIP-01', () => {
+    assert.ok(!body.includes('RUN-OWNERSHIP-01'), 'the overlord body still names RUN-OWNERSHIP-01');
+  });
+  test('decision-autonomy Tier A still lists brood strain approval', () => {
+    const autonomyText = readFileSync(repoRoot + 'plugin/governance/decision-autonomy.md', 'utf8').replace(/\r/g, '');
+    const tierA = readSection(autonomyText, '## Decision Tiers').split('### Tier B')[0];
+    assert.ok(tierA.includes('brood strain approval'), 'decision-autonomy Tier A no longer lists brood strain approval');
+  });
+});
