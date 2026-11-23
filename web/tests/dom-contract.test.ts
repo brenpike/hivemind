@@ -150,7 +150,8 @@ function listSkillNames(): string[] {
 
 function listWorkflowNames(): string[] {
   const routerSkill = readFileSync(join(REPO_ROOT, 'plugin', 'skills', 'route-workflow', 'SKILL.md'), 'utf8');
-  return [...routerSkill.matchAll(/^- `([a-z-]+)`: /gm)].map((match) => match[1]);
+  const catalog = routerSkill.replace(/\r/g, '').split(/^## /m).find((section) => section.startsWith('Workflow Catalog\n')) ?? '';
+  return [...catalog.matchAll(/^- `([a-z-]+)`: /gm)].map((match) => match[1]);
 }
 
 function sortedCopy(values: string[]): string[] {
