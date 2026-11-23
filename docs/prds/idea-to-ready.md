@@ -17,7 +17,7 @@ A guided, interactive path from idea to Ready Issues that the maintainer starts 
 - **Initiative track**, for features, epics and any change to a public contract or governance semantics: capture the idea, interrogate it, write the PRD, build and approve a **UI prototype** when the PRD's UI line says yes, write a **solution design** and the ADRs it needs, run a **design review**, merge the docs, slice into issues, triage, then a handoff check. Every step before the handoff check can run as one session.
 - **Standalone track**, for bugs, chores, docs and small refactors: an issue carrying a spec block (problem, evidence, acceptance criteria, scope boundary, no open questions), then triage.
 
-The **design review** is an adversarial review of the design against the current code, governance and ADRs, run by fresh reviewers who did not write the design. It ends only when no critical or high finding is open and one round found nothing new. Its record is stamped to the exact document versions it reviewed, so any later edit makes it stale.
+The **design review** is an adversarial review of the design against the current code, governance and ADRs, run by fresh reviewers who did not write the design. It ends only when no finding of any severity is open and one round found nothing new. Its record is stamped to the exact document versions it reviewed, so any later edit makes it stale.
 
 The **UI prototype** settles what a user-facing surface looks like before slices are cut. Interrogation records whether the initiative has a user-facing UI or UX surface, and the PRD carries the answer on a fixed UI line. When it says yes, a prototype of every screen the PRD's UI covers is built in several structurally different variants, the maintainer approves a variant or combination, and the prototype is refined into the one approved variant, which the design review covers, the review record stamps and every UI slice builds to.
 
@@ -50,7 +50,7 @@ A **readiness check** that a machine can repeat decides whether an issue may be 
   - the PRD's UI line, when present, reads yes or no;
   - every solution-design section present and filled, with open questions "None";
   - each listed ADR present and accepted;
-  - the review record passed, with zero open critical and high findings, and its stamped versions equal to the documents on trunk;
+  - the review record passed, with zero open findings of any severity, and its stamped versions equal to the documents on trunk;
   - every design section the issue names matches exactly one heading;
   - when the PRD's UI line says yes, the slice links the UI prototype, which is present on trunk and stamped by the review record.
 - **Readiness check output.** One result per issue naming its track, pass or fail, and reason codes. The check does not judge whether criteria or scope are right; that stays with the maintainer.
@@ -64,7 +64,7 @@ A **readiness check** that a machine can repeat decides whether an issue may be 
   - When the design touches a trust boundary, credentials or the merge path, one pass by the configured local review tool is added. With no tool configured, that pass is skipped and the record says so.
   - The confirming round reviews only the change since the previous round and the fixes to open findings, not the whole design again.
   - The reviewer's model is configurable. A maintainer with Fable can use it for the full pass; a model the maintainer cannot reach falls back to the default, and the record names the model each pass used.
-  - It exits only with zero open critical or high findings and one round with no new ones, capped at three rounds. Non-convergence reaches the maintainer as a signal to split the initiative.
+  - It exits only with zero open findings of any severity and one round with no new ones, capped at three rounds. Non-convergence reaches the maintainer as a signal to split the initiative.
   - Every finding gets exactly one disposition, and mediums follow the existing defer-or-record rules.
   - A round's findings land before the next round runs: each is fixed in the solution design, the PRD or an ADR in the same pull request, or gets a deferred, recorded or rejected disposition with its reason. A finding is never left open to be applied later.
 - **Review record.** The record stamps the exact versions of the PRD, the solution design and, when the PRD's UI line says yes, both UI prototype files it reviewed. Any later edit makes it stale until a review of the change restores it. The record ships in the same docs pull request, and a record with any open finding or a failed verdict cannot merge, so trunk never holds an unreviewed design or one with known open findings. An initiative that does not converge is split before its docs merge.
@@ -92,7 +92,7 @@ A **readiness check** that a machine can repeat decides whether an issue may be 
 - **A second model is used only when configured, never required.** The cross-model design pass reuses the configured local review tool, and Fable is an opt-in reviewer model. Neither Codex nor Fable is required. The record names each pass's reviewer and model.
 - **ADR-0045 is amended:** Lair admission excludes epics and requires the readiness check at claim time.
 - **The design-decision rule** extends Review Calls in the autonomy governance with the rule above: strong recommendations taken and listed for veto; besides the always-surfaced safety stops, a surface-growing remediation and the UI prototype approval, only two kinds are asked, weak or absent recommendations and actions irreversible now.
-- **The maintainer stays the only writer of `readiness:ready`.** The guide sends the maintainer to triage at that stage.
+- **Write permission authorizes `readiness:ready`.** The authority is write permission on the latest `readiness:ready` labeled event, with the title and body unedited since (ADR-0045 decision 10, as amended by #625); "maintainer" names that role. The guide and the Lair never apply the label. The guide sends the maintainer to triage at that stage.
 
 ## Testing Decisions
 
