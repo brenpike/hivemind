@@ -1,0 +1,1049 @@
+[
+  {
+    "name": "pass-one-slice-blocked",
+    "evidence": {
+      "slices": [
+        {
+          "number": 22,
+          "blocked_by": [
+            {
+              "number": 40,
+              "state": "OPEN"
+            },
+            {
+              "number": 41,
+              "state": "CLOSED"
+            }
+          ]
+        },
+        {
+          "number": 21
+        }
+      ]
+    },
+    "expect": {
+      "result": "pass",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "pass",
+          "claimable": true,
+          "reasons": []
+        },
+        {
+          "issue": 22,
+          "result": "pass",
+          "claimable": false,
+          "reasons": [
+            "blocked_by:40"
+          ]
+        }
+      ]
+    },
+    "derive": {
+      "stage": "handoff",
+      "status": "done",
+      "next": "deliver",
+      "reasons": []
+    }
+  },
+  {
+    "name": "slice-readiness-fails",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21
+        },
+        {
+          "number": 22,
+          "body": "## What to build\n\nNo design block.\n"
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "pass",
+          "claimable": true,
+          "reasons": []
+        },
+        {
+          "issue": 22,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "design_block_missing",
+            "no_acceptance_criteria"
+          ]
+        }
+      ]
+    },
+    "derive": {
+      "stage": "triage",
+      "status": "blocked",
+      "next": "resolve-blockers",
+      "reasons": [
+        "slice_failed:22"
+      ]
+    }
+  },
+  {
+    "name": "slice-record-stale",
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design-full"
+      },
+      "records": [
+        {
+          "stamps": [
+            "docs/prds/demo.md",
+            {
+              "path": "docs/initiatives/demo/solution-design.md",
+              "doc": "design"
+            }
+          ]
+        }
+      ]
+    },
+    "evidence": {
+      "slices": [
+        {
+          "number": 21
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [
+        "record_not_current"
+      ],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "record_stale:docs/initiatives/demo/solution-design.md"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "slice-closed",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21
+        },
+        {
+          "number": 22,
+          "state": "CLOSED"
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "pass",
+          "claimable": true,
+          "reasons": []
+        },
+        {
+          "issue": 22,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "issue_closed"
+          ]
+        }
+      ]
+    },
+    "derive": {
+      "stage": "handoff",
+      "status": "delivering",
+      "next": "deliver",
+      "reasons": []
+    }
+  },
+  {
+    "name": "slice-unrated-derive-slicing",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21
+        },
+        {
+          "number": 22,
+          "rated": false
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "pass",
+          "claimable": true,
+          "reasons": []
+        },
+        {
+          "issue": 22,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "rating_missing:difficulty",
+            "rating_missing:effort",
+            "rating_missing:moscow",
+            "rating_missing:priority",
+            "rating_missing:readiness",
+            "rating_missing:risk",
+            "ready_label_missing"
+          ]
+        }
+      ]
+    },
+    "derive": {
+      "stage": "slicing",
+      "status": "done",
+      "next": "triage",
+      "reasons": []
+    }
+  },
+  {
+    "name": "latest-event-non-writer-after-writer",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "ready_events": [
+            {
+              "created_at": "2026-02-01T00:00:00Z"
+            },
+            {
+              "created_at": "2026-03-01T00:00:00Z",
+              "actor": {
+                "login": "drive-by",
+                "__typename": "User"
+              },
+              "actor_can_write": false
+            }
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "ready_actor_not_writer"
+          ]
+        }
+      ]
+    },
+    "derive": {
+      "stage": "triage",
+      "status": "blocked",
+      "next": "resolve-blockers",
+      "reasons": [
+        "slice_failed:21"
+      ]
+    }
+  },
+  {
+    "name": "latest-event-writer-after-non-writer",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "ready_events": [
+            {
+              "created_at": "2026-01-15T00:00:00Z",
+              "actor": {
+                "login": "drive-by",
+                "__typename": "User"
+              },
+              "actor_can_write": false
+            },
+            {
+              "created_at": "2026-02-01T00:00:00Z"
+            }
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "result": "pass",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "pass",
+          "claimable": true,
+          "reasons": []
+        }
+      ]
+    }
+  },
+  {
+    "name": "latest-events-tied-one-bot",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "ready_events": [
+            {
+              "created_at": "2026-02-01T00:00:00Z"
+            },
+            {
+              "created_at": "2026-02-01T00:00:00Z",
+              "actor": {
+                "login": "triage-bot",
+                "__typename": "Bot"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "ready_actor_not_writer"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "event-actor-bot",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "ready_events": [
+            {
+              "created_at": "2026-02-01T00:00:00Z",
+              "actor": {
+                "login": "triage-bot",
+                "__typename": "Bot"
+              },
+              "actor_can_write": true
+            }
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "ready_actor_not_writer"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "event-actor-null",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "ready_events": [
+            {
+              "created_at": "2026-02-01T00:00:00Z",
+              "actor": null,
+              "actor_can_write": true
+            }
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "ready_actor_not_writer"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "label-without-event",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "ready_events": []
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "ready_actor_not_writer"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "ready-label-missing",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "labels": [
+            "readiness:blocked",
+            "type:enhancement",
+            "effort:s",
+            "moscow:must",
+            "priority:p1",
+            "risk:low",
+            "difficulty:easy"
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "ready_label_missing"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "body-edited-after-event",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "last_edited_at": "2026-02-02T00:00:00Z"
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "edited_since_ready"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "body-edited-at-event-time",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "last_edited_at": "2026-02-01T00:00:00Z"
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "edited_since_ready"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "body-edited-before-event",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "last_edited_at": "2026-01-31T23:59:59Z"
+        }
+      ]
+    },
+    "expect": {
+      "result": "pass",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "pass",
+          "claimable": true,
+          "reasons": []
+        }
+      ]
+    }
+  },
+  {
+    "name": "renamed-after-event",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "renamed_at": [
+            "2026-01-10T00:00:00Z",
+            "2026-02-03T00:00:00Z"
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "edited_since_ready"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "renamed-at-event-time",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "renamed_at": [
+            "2026-02-01T00:00:00Z"
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "edited_since_ready"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "renamed-before-event",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "renamed_at": [
+            "2026-01-20T00:00:00Z"
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "result": "pass",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "pass",
+          "claimable": true,
+          "reasons": []
+        }
+      ]
+    }
+  },
+  {
+    "name": "non-writer-and-edited",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "last_edited_at": "2026-02-02T00:00:00Z",
+          "ready_events": [
+            {
+              "created_at": "2026-02-01T00:00:00Z",
+              "actor_can_write": false
+            }
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "fail",
+          "claimable": false,
+          "reasons": [
+            "ready_actor_not_writer",
+            "edited_since_ready"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "seed-missing",
+    "evidence": {
+      "seeds": []
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [
+        "seed_missing",
+        "no_slices"
+      ],
+      "slices": []
+    }
+  },
+  {
+    "name": "seed-ambiguous",
+    "evidence": {
+      "seeds": [
+        {
+          "number": 1
+        },
+        {
+          "number": 2
+        }
+      ],
+      "slices": [
+        {
+          "number": 21
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [
+        "seed_ambiguous"
+      ],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "pass",
+          "claimable": true,
+          "reasons": []
+        }
+      ]
+    }
+  },
+  {
+    "name": "seed-ignored-named",
+    "evidence": {
+      "seeds": [
+        {
+          "number": 1
+        },
+        {
+          "number": 3,
+          "author_can_write": false
+        },
+        {
+          "number": 6,
+          "body": "Intro line.\n<!-- hivemind-initiative: demo -->\n"
+        }
+      ],
+      "slices": [
+        {
+          "number": 21
+        }
+      ]
+    },
+    "expect": {
+      "result": "pass",
+      "reasons": [],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "pass",
+          "claimable": true,
+          "reasons": []
+        }
+      ],
+      "ignored": [
+        {
+          "kind": "issue",
+          "number": 3,
+          "reason": "seed_author_not_writer"
+        },
+        {
+          "kind": "issue",
+          "number": 6,
+          "reason": "seed_marker_not_first_line"
+        }
+      ]
+    },
+    "derive": {
+      "stage": "handoff",
+      "status": "done",
+      "next": "deliver",
+      "reasons": []
+    }
+  },
+  {
+    "name": "design-delivered",
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design-delivered"
+      },
+      "records": [
+        {}
+      ]
+    },
+    "evidence": {},
+    "expect": {
+      "result": "fail",
+      "reasons": [
+        "design_delivered",
+        "no_slices"
+      ],
+      "slices": []
+    }
+  },
+  {
+    "name": "docs-not-on-trunk",
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd"
+      }
+    },
+    "evidence": {},
+    "expect": {
+      "result": "fail",
+      "reasons": [
+        "docs_not_on_trunk",
+        "no_slices"
+      ],
+      "slices": []
+    }
+  },
+  {
+    "name": "record-failing",
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design-full"
+      },
+      "records": [
+        {
+          "verdict": "fail",
+          "clean_round": false
+        }
+      ]
+    },
+    "evidence": {},
+    "expect": {
+      "result": "fail",
+      "reasons": [
+        "record_not_current",
+        "no_slices"
+      ],
+      "slices": []
+    }
+  },
+  {
+    "name": "record-missing",
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design-full"
+      }
+    },
+    "evidence": {},
+    "expect": {
+      "result": "fail",
+      "reasons": [
+        "record_not_current",
+        "no_slices"
+      ],
+      "slices": []
+    }
+  },
+  {
+    "name": "epic-closed",
+    "evidence": {
+      "epic": {
+        "number": 1,
+        "state": "CLOSED",
+        "sub_issue_total": 1,
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        }
+      },
+      "slices": [
+        {
+          "number": 21
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [
+        "epic_closed"
+      ],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "pass",
+          "claimable": true,
+          "reasons": []
+        }
+      ]
+    },
+    "derive": {
+      "stage": "triage",
+      "status": "blocked",
+      "next": "resolve-blockers",
+      "reasons": [
+        "epic_closed"
+      ]
+    }
+  },
+  {
+    "name": "epic-type-missing",
+    "evidence": {
+      "epic": {
+        "number": 1,
+        "state": "OPEN",
+        "sub_issue_total": 1,
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:enhancement"
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        }
+      },
+      "slices": [
+        {
+          "number": 21
+        }
+      ]
+    },
+    "expect": {
+      "result": "fail",
+      "reasons": [
+        "epic_type_missing"
+      ],
+      "slices": [
+        {
+          "issue": 21,
+          "result": "pass",
+          "claimable": true,
+          "reasons": []
+        }
+      ]
+    },
+    "derive": {
+      "stage": "triage",
+      "status": "blocked",
+      "next": "resolve-blockers",
+      "reasons": [
+        "epic_type_missing"
+      ]
+    }
+  },
+  {
+    "name": "no-slices",
+    "evidence": {},
+    "expect": {
+      "result": "fail",
+      "reasons": [
+        "no_slices"
+      ],
+      "slices": []
+    },
+    "derive": {
+      "stage": "docs-pull-request",
+      "status": "done",
+      "next": "slice",
+      "reasons": []
+    }
+  },
+  {
+    "name": "commit-malformed",
+    "evidence": {},
+    "error": "commit-malformed",
+    "no_git": true,
+    "trunk_arg": "main"
+  },
+  {
+    "name": "evidence-event-bad-actor",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "ready_events": [
+            {
+              "created_at": "2026-02-01T00:00:00Z",
+              "actor": "maintainer"
+            }
+          ]
+        }
+      ]
+    },
+    "error": "evidence-malformed",
+    "no_git": true
+  },
+  {
+    "name": "evidence-blocker-bad-state",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "blocked_by": [
+            {
+              "number": 40,
+              "state": "open"
+            }
+          ]
+        }
+      ]
+    },
+    "error": "evidence-malformed",
+    "no_git": true
+  },
+  {
+    "name": "truncated-epic-labels",
+    "evidence": {
+      "epic": {
+        "number": 1,
+        "state": "OPEN",
+        "sub_issue_total": 1,
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": true
+          }
+        }
+      },
+      "slices": [
+        {
+          "number": 21
+        }
+      ]
+    },
+    "error": "truncated",
+    "no_git": true
+  },
+  {
+    "name": "truncated-blocked-by",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "readiness_patch": {
+            "blockedBy": {
+              "nodes": [],
+              "pageInfo": {
+                "hasNextPage": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "error": "truncated",
+    "no_git": true
+  },
+  {
+    "name": "readiness-snapshot-malformed-translated",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "readiness_patch": {
+            "subIssues": {
+              "totalCount": -1
+            }
+          }
+        }
+      ]
+    },
+    "error": "evidence-malformed"
+  },
+  {
+    "name": "trunk-unfetched",
+    "evidence": {},
+    "error": "commit-unresolvable",
+    "trunk_arg": "{{unfetched}}"
+  }
+]

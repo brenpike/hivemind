@@ -2,8 +2,9 @@
 
 Fixture home for `tools/test_stage_derivation.sh`, the offline behavioral runner
 for the stage derivation library `plugin/skills/_shared/stage-derivation.sh`
-(issue #621, ADR-0046). The library's header holds its full contract, the
-evidence JSON v1 and the precedence; this file describes how the suite tests it.
+(issue #621, ADR-0046): `hivemind_stage_derive` and `hivemind_stage_handoff`.
+The library's header holds its full contract, the evidence JSON v1 and the
+precedence; this file describes how the suite tests it.
 
 The suite needs only bash, git and jq. It builds every commit in a scratch
 repository with plumbing (`hash-object`, `update-index --index-info`,
@@ -23,10 +24,11 @@ same stdout, stderr and exit status. Every git argv a case runs must start with
 ## docs.json
 
 A map from a document name to its content: PRDs whose `**UI:**` line is `yes`,
-`no`, `maybe` or missing, another initiative's PRD, a solution design and a
-delivered one, the UI prototype's `index.html`, `notes.md` with no `## Verdict`
-section, with an empty one and with a filled one (CRLF), and a malformed review
-record.
+`no`, `maybe` or missing, another initiative's PRD, a solution design, a
+delivered one and a full one (`design-full`, every template section, the one a
+passing slice's Design block links), the UI prototype's `index.html`,
+`notes.md` with no `## Verdict` section, with an empty one and with a filled one
+(CRLF), and a malformed review record.
 
 ## cases.json
 
@@ -66,9 +68,16 @@ each key optional:
   `acme/widgets` by a writer, not a draft, whose head is the docs head commit.
 - A `branches` entry defaults to the docs head commit, used by no pull request.
 - A `slices` entry is an open slice under issue 1 whose labels hold every rating
-  family; `rated` false keeps only the type label, and `labels_truncated` true
-  sets `hasNextPage`. The epic defaults to issue 1 with one sub-issue per slice.
-- `version` and `epic` may be given to break the evidence.
+  family; `rated` false keeps only the type label, `labels` replaces the label
+  names, and `labels_truncated` true sets `hasNextPage`. `body` replaces the
+  body, `blocked_by` gives the blocked-by nodes (`number`, `state`),
+  `readiness_patch` is merged over the snapshot, and `last_edited_at`,
+  `renamed_at` and `ready_events` default to none. A ready event needs
+  `created_at`; its `actor` defaults to a `User` and `actor_can_write` to true.
+  The epic defaults to issue 1, labeled `type:epic`, with one sub-issue per
+  slice.
+- `version` and `epic` may be given to break the evidence; a given epic carries
+  its own `labels`.
 
 `evidence_raw` instead gives the stdin bytes verbatim.
 
@@ -90,11 +99,34 @@ Derive runs with the trunk commit, `acme/widgets`, `main` and `demo`, unless
 - `lacks` lists text stdout must not hold, and `no_git_text` text no git argv
   may hold.
 
+## handoff-cases.json
+
+A list of handoff check cases, run with `hivemind_stage_handoff` and the
+arguments trunk commit, `acme/widgets`, `main` and `demo`; `trunk_arg`
+overrides the first. Each has a `name`, an optional `trunk` spec, `evidence`
+and either `expect` or `error`, with `no_git` as in cases.json.
+
+- `trunk` defaults to a current trunk: the PRD `prd`, the solution design
+  `design-full` and a passing record stamping both.
+- Each `slices` entry first takes two handoff defaults, then the cases.json
+  shorthand: a body whose Design block links that solution design, its
+  `Readiness check` heading and the record, and one `readiness:ready` labeled
+  event by a `User` writer at `2026-02-01T00:00:00Z`. An entry's own `body` or
+  `ready_events` replaces them.
+- `expect` gives `result`, `reasons` and `slices`, compared exactly, and
+  `ignored`, compared exactly and empty by default. The output must be one
+  compact object with the contract's keys in order, naming the slug and the
+  trunk commit.
+- `derive`, when given, also runs `hivemind_stage_derive` on the same evidence
+  and compares its `stage`, `status`, `next` and `reasons` exactly, and its
+  `ignored` with the case's `expect.ignored`.
+
 ## Cases in the script
 
 Cases that need no fixture run from the script itself: the library's form (no
 shebang, no `BASH_SOURCE`, no sourced file, the `P18 FLOOR EXCEPTION` marker,
 no `gh` command, `bash -n`, and sourcing twice changes no option or variable),
-argument-count `usage` with no git call, `missing-library` with no git call,
+argument-count `usage` with no git call for both functions, a path slug's
+`usage` for the handoff check, `missing-library` with no git call for both,
 `git-failed` for a deleted tree object, the same result from a subdirectory
 working directory, and that no case called `gh`.

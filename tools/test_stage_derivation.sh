@@ -13,7 +13,7 @@
 # proving the "no git call" cases and the global git flags on every call. A recording `gh` stub
 # beside it logs every gh argv and exits 1; the suite fails when any case called it.
 #
-# Fixture data lives in tests/stage-derivation/cases.json and docs.json;
+# Fixture data lives in tests/stage-derivation/cases.json, handoff-cases.json and docs.json;
 # tests/stage-derivation/README.md describes their layout. Sections are functions (test_<area>).
 # Mirrors tools/test_readiness_check.sh's pass/fail counter, exit 1 on any failure, exit 2 on
 # set-up failure and scratch dir removed on EXIT. Read-only: the only writes are in the scratch
@@ -33,8 +33,9 @@ RV_LIB="$REPO_ROOT/plugin/skills/_shared/record-verify.sh"
 SD_LIB="$REPO_ROOT/plugin/skills/_shared/stage-derivation.sh"
 CASES="$REPO_ROOT/tests/stage-derivation/cases.json"
 DOCS="$REPO_ROOT/tests/stage-derivation/docs.json"
+HANDOFF_CASES="$REPO_ROOT/tests/stage-derivation/handoff-cases.json"
 
-for required_file in "$RC_LIB" "$RV_LIB" "$SD_LIB" "$CASES" "$DOCS"; do
+for required_file in "$RC_LIB" "$RV_LIB" "$SD_LIB" "$CASES" "$DOCS" "$HANDOFF_CASES"; do
   [ -f "$required_file" ] || { echo "FAIL: file under test missing: $required_file" >&2; exit 2; }
 done
 command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite" >&2; exit 2; }
@@ -219,6 +220,14 @@ jq -e 'type == "array" and length > 0
                                 and has("reasons")) else true end))' "$CASES" >/dev/null 2>&1 \
   || setup_fail "cases file missing or off its shape: $CASES"
 
+jq -e 'type == "array" and length > 0
+  and all(.[]; (.name | type) == "string" and (has("expect") != has("error"))
+    and (keys - ["derive", "error", "evidence", "expect", "name", "no_git", "trunk", "trunk_arg"] == [])
+    and (if has("expect") then (.expect | has("result") and has("reasons") and has("slices")) else true end)
+    and (if has("derive") then (.derive | has("stage") and has("status") and has("next")
+                                and has("reasons")) else true end))' "$HANDOFF_CASES" >/dev/null 2>&1 \
+  || setup_fail "handoff cases file missing or off its shape: $HANDOFF_CASES"
+
 # ── Case commits ────────────────────────────────────────────────────────────────────
 #
 # SPEC_PLAN_JQ reads a case and prints one tab-separated line per tree entry of its trunk spec
@@ -328,7 +337,9 @@ build_spec_commit() {
 # seed defaults to issue 1 with the demo marker and a CRLF body, a pull request to an open
 # same-repository `docs/demo` pull request by a writer, a branch to an unused one, a slice to an
 # open slice under issue 1 whose labels hold every rating family (`rated` false keeps only the
-# type), and the epic to issue 1 with one sub-issue per slice.
+# type, `labels` replaces them), with no blocked-by edge, no ready event and no edit, and the epic
+# to issue 1, labeled `type:epic`, with one sub-issue per slice. A ready event defaults to a User
+# writer.
 
 # shellcheck disable=SC2016
 EVIDENCE_JQ='
@@ -342,20 +353,25 @@ def pull_request_full:
    author_can_write: default("author_can_write"; true), draft: default("draft"; false)};
 def branch_full:
   {name, oid: default("oid"; "{{docs}}"), pull_request_count: default("pull_request_count"; 0)};
-def rating_labels($rated):
-  (if $rated then ["readiness:ready", "type:enhancement", "effort:s", "moscow:must", "priority:p1",
-                   "risk:low", "difficulty:easy"]
-   else ["type:enhancement"] end)
-  | map({name: .});
+def rating_names($rated):
+  if $rated then ["readiness:ready", "type:enhancement", "effort:s", "moscow:must", "priority:p1",
+                  "risk:low", "difficulty:easy"]
+  else ["type:enhancement"] end;
+def ready_event_full:
+  {actor: default("actor"; {login: "maintainer", __typename: "User"}),
+   actor_can_write: default("actor_can_write"; true), created_at};
 def slice_full:
-  {readiness: {number, state: default("state"; "OPEN"),
-               body: "## Acceptance Criteria\n\n- [ ] It works.\n",
-               labels: {nodes: rating_labels(default("rated"; true)),
-                        pageInfo: {hasNextPage: default("labels_truncated"; false)}},
-               blockedBy: {nodes: []}, subIssues: {totalCount: 0},
-               parent: {number: 1, state: "OPEN", body: "<!-- hivemind-initiative: demo -->",
-                        labels: {nodes: [{name: "type:epic"}]}}},
-   last_edited_at: default("last_edited_at"; null), ready_events: [],
+  {readiness: ({number, state: default("state"; "OPEN"),
+                body: default("body"; "## Acceptance Criteria\n\n- [ ] It works.\n"),
+                labels: {nodes: (if has("labels") then .labels else rating_names(default("rated"; true)) end
+                                 | map({name: .})),
+                         pageInfo: {hasNextPage: default("labels_truncated"; false)}},
+                blockedBy: {nodes: default("blocked_by"; [])}, subIssues: {totalCount: 0},
+                parent: {number: 1, state: "OPEN", body: "<!-- hivemind-initiative: demo -->",
+                         labels: {nodes: [{name: "type:epic"}]}}}
+               + default("readiness_patch"; {})),
+   last_edited_at: default("last_edited_at"; null),
+   ready_events: (default("ready_events"; []) | map(ready_event_full)),
    renamed_at: default("renamed_at"; [])};
 (.evidence // {}) as $evidence
 | {version: ($evidence | default("version"; 1)),
@@ -364,7 +380,8 @@ def slice_full:
    branches: ($evidence.branches // [] | map(branch_full)),
    epic: (if ($evidence | has("epic")) then $evidence.epic
           elif ($evidence.slices // [] | length) > 0 then
-            {number: 1, state: "OPEN", sub_issue_total: ($evidence.slices | length)}
+            {number: 1, state: "OPEN", sub_issue_total: ($evidence.slices | length),
+             labels: {nodes: [{name: "type:epic"}], pageInfo: {hasNextPage: false}}}
           else null end),
    slices: ($evidence.slices // [] | map(slice_full))}'
 
@@ -539,6 +556,121 @@ test_cases() {
   done
 }
 
+# HANDOFF_PREP_JQ fills a handoff case's defaults: a trunk where the docs are current (the PRD,
+# the full solution design and a passing record), and per slice a body whose Design block links
+# them and one `readiness:ready` labeled event by a User writer.
+
+# shellcheck disable=SC2016
+HANDOFF_PREP_JQ='
+.trunk = (.trunk // {docs: {"docs/prds/demo.md": "prd", "docs/initiatives/demo/solution-design.md": "design-full"},
+                     records: [{}]})
+| .evidence = ((.evidence // {})
+    | if has("slices") then
+        .slices |= map({body: ("## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [ ] It works.\n\n"
+                               + "## Design\n\n"
+                               + "- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n"
+                               + "- Heading: Readiness check\n"
+                               + "- Review record: [docs/initiatives/demo/review-record.md](docs/initiatives/demo/review-record.md)\n"),
+                        ready_events: [{created_at: "2026-02-01T00:00:00Z"}]} + .)
+      else . end)'
+
+# handoff_verdict <out-file> <expect-json> <trunk>: prints `ok` when <out-file> holds one compact
+# handoff object with the expected values, else the first mismatch.
+handoff_verdict() {
+  jq -Rnr --argjson expect "$2" --arg trunk "$3" '
+[inputs] as $lines
+| if ($lines | length) != 1 then "\($lines | length) lines, want 1"
+  else ($lines[0] | try fromjson catch null) as $out
+  | if ($out | type) != "object" then "output does not parse"
+    elif $lines[0] != ($out | tojson) then "output is not compact JSON"
+    elif ($out | keys_unsorted) != ["slug", "commit", "result", "reasons", "slices", "ignored"]
+    then "keys \($out | keys_unsorted | tojson)"
+    elif $out.slug != "demo" or $out.commit != $trunk then "slug or commit \($lines[0])"
+    elif ($out | {result, reasons}) != ($expect | {result, reasons})
+    then "got \($out | {result, reasons} | tojson)"
+    elif $out.slices != $expect.slices then "slices \($out.slices | tojson)"
+    elif $out.ignored != ($expect.ignored // []) then "ignored \($out.ignored | tojson)"
+    else "ok" end
+  end' <"$1" 2>&1
+}
+
+# run_handoff_case <index>: builds handoff case <index>'s trunk commit and evidence, runs the
+# handoff check and, when the case gives `derive`, derive on the same evidence, and asserts both.
+run_handoff_case() {
+  local index="$1" case_file="$TMPDIR_TEST/handoff.$1" input="$TMPDIR_TEST/input.handoff-$1"
+  local case_name token no_git trunk_arg has_derive trunk_commit evidence expect verdict
+  jq -c --argjson i "$index" ".[\$i] | $HANDOFF_PREP_JQ" "$HANDOFF_CASES" >"$case_file" \
+    || setup_fail "handoff case file $index"
+  {
+    IFS= read -r case_name && IFS= read -r token && IFS= read -r no_git && IFS= read -r trunk_arg \
+      && IFS= read -r has_derive
+  } < <(jq -r '.name, (.error // ""), (.no_git // false), (.trunk_arg // "{{trunk}}"), has("derive")' \
+    "$case_file") || setup_fail "handoff case fields $index"
+  build_spec_commit trunk_commit "$case_file" trunk
+  evidence="$(jq -c "$EVIDENCE_JQ" "$case_file")" || setup_fail "handoff case evidence $index"
+  render_ids evidence "$evidence" "$trunk_commit" ""
+  printf '%s\n' "$evidence" >"$input" || setup_fail "handoff case input $index"
+  render_ids trunk_arg "$trunk_arg" "$trunk_commit" ""
+  lib_call "handoff:$case_name" "$REPO" "$input" hivemind_stage_handoff "$trunk_arg" acme/widgets main demo
+  if [ -n "$token" ]; then
+    expect_call "handoff:$case_name" 2 "" "stage-derivation-error: $token"$'\n'
+    if [ "$no_git" = true ]; then
+      expect_no_git "handoff:$case_name"
+    fi
+  else
+    expect="$(jq -c '.expect' "$case_file")" || setup_fail "handoff case expect $index"
+    verdict="$(handoff_verdict "$CALL_OUT" "$expect" "$trunk_commit")"
+    if [ "$CALL_RC" != 0 ] || [ -s "$CALL_ERR" ]; then
+      failed "handoff:$case_name" "rc $CALL_RC, stderr: $(cat "$CALL_ERR")"
+    elif [ "$verdict" != ok ]; then
+      failed "handoff:$case_name" "$verdict"
+    else
+      pass "handoff:$case_name" "result, reasons and slices match"
+    fi
+  fi
+  if [ -s "$GIT_LOG" ]; then
+    expect_git_flags "handoff:$case_name"
+  fi
+  if [ "$has_derive" = true ]; then
+    expect="$(jq -c '.derive + {ignored: (.expect.ignored // [])}' "$case_file")" \
+      || setup_fail "handoff case derive $index"
+    lib_call "handoff-derive:$case_name" "$REPO" "$input" hivemind_stage_derive "$trunk_arg" acme/widgets main demo
+    verdict="$(case_verdict "$CALL_OUT" "$expect" "$trunk_commit")"
+    if [ "$CALL_RC" != 0 ] || [ -s "$CALL_ERR" ]; then
+      failed "handoff-derive:$case_name" "rc $CALL_RC, stderr: $(cat "$CALL_ERR")"
+    elif [ "$verdict" != ok ]; then
+      failed "handoff-derive:$case_name" "$verdict"
+    else
+      pass "handoff-derive:$case_name" "derive's row matches"
+    fi
+  fi
+}
+
+test_handoff_cases() {
+  local count index
+  count="$(jq 'length' "$HANDOFF_CASES")" || setup_fail "cannot count handoff cases"
+  for ((index = 0; index < count; index++)); do
+    run_handoff_case "$index"
+  done
+}
+
+test_handoff_script_cases() {
+  local evidence trunk_commit
+  complete_trunk trunk_commit
+  evidence="$(write_input handoff-arguments '{"version":1,"seeds":[],"pull_requests":[],"branches":[],"epic":null,"slices":[]}')"
+  lib_call "handoff-arguments:none" "$REPO" "$evidence" hivemind_stage_handoff
+  expect_call "handoff-arguments:none" 2 "" $'stage-derivation-error: usage\n'
+  expect_no_git "handoff-arguments:none"
+  lib_call "handoff-arguments:slug-path" "$REPO" "$evidence" hivemind_stage_handoff "$trunk_commit" acme/widgets main ../demo
+  expect_call "handoff-arguments:slug-path" 2 "" $'stage-derivation-error: usage\n'
+  expect_no_git "handoff-arguments:slug-path"
+  CALL_LIBS=("$RC_LIB" "$SD_LIB")
+  lib_call "handoff-missing-library:no-verify" "$REPO" "$evidence" hivemind_stage_handoff "$trunk_commit" acme/widgets main demo
+  expect_call "handoff-missing-library:no-verify" 2 "" $'stage-derivation-error: missing-library\n'
+  expect_no_git "handoff-missing-library:no-verify"
+  CALL_LIBS=("$RC_LIB" "$RV_LIB" "$SD_LIB")
+}
+
 # complete_trunk <var>: builds the trunk commit of the cases file's trunk-current-no-slices case
 # and assigns its id to <var>.
 complete_trunk() {
@@ -615,6 +747,8 @@ test_no_gh() {
 
 test_library_form
 test_cases
+test_handoff_cases
+test_handoff_script_cases
 test_arguments
 test_missing_library
 test_git_failure

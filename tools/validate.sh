@@ -75,6 +75,7 @@ SUITE_TEST_WORKFLOW_SCRIPTS='test_workflow_scripts.sh'
 SUITE_TEST_SCRATCH='test_scratch.sh'
 SUITE_TEST_DESIGN_REVIEW='test_design_review.sh'
 SUITE_VERIFY_RECORDS='verify_records.sh'
+SUITE_TEST_STAGE_DERIVATION='test_stage_derivation.sh'
 
 # Full suite, in CI order. Used by --all and by every FAIL-CLOSED escalation.
 ALL_SUITES=(
@@ -112,6 +113,7 @@ ALL_SUITES=(
   "$SUITE_TEST_SCRATCH"
   "$SUITE_TEST_DESIGN_REVIEW"
   "$SUITE_VERIFY_RECORDS"
+  "$SUITE_TEST_STAGE_DERIVATION"
 )
 
 # KNOWN_SUITES: the tools/*.sh validation suites this dispatcher knows about. --self-test
@@ -151,6 +153,7 @@ KNOWN_SUITES=(
   test_scratch.sh
   test_design_review.sh
   verify_records.sh
+  test_stage_derivation.sh
 )
 
 # NON_SUITE_TOOLS: tools/*.sh files that are NOT validation suites (so --self-test does not
@@ -429,6 +432,10 @@ run_suites() {
 #   plugin/skills/_shared/{record-verify,readiness-check}.sh, docs/initiatives/**, docs/prds/**,
 #     docs/adr/**, tools/verify_records.sh
 #                                      -> verify_records (docs/adr/** ALSO -> policy_check)
+#   plugin/skills/_shared/{stage-derivation,readiness-check,record-verify}.sh, tests/stage-derivation/**,
+#     tools/test_stage_derivation.sh
+#                                      -> test_stage_derivation (the libraries keep their other routes
+#                                         by union)
 #   tools/**                           -> FULL suite (validator bootstrap)
 #   .github/**                         -> FULL suite (CI bootstrap — the gate harness itself)
 #   outside plugin|.claude-plugin|tools|tests|.github and not fixture-pinned above
@@ -540,6 +547,21 @@ map_path() {
      || "$p" == docs/adr/* \
      || "$p" == tools/verify_records.sh ]]; then
     add_selected "$SUITE_VERIFY_RECORDS" "$p (design review record/stamped doc/record verify library)"
+    matched=1
+  fi
+
+  # test_stage_derivation: the stage derivation library plugin/skills/_shared/stage-derivation.sh,
+  # the two libraries it sources (readiness-check.sh, record-verify.sh), its fixture dir and its
+  # behavior suite. The libraries have no plugin/skills/<s>/scripts entrypoint and policy_check never
+  # executes bash, so this leg self-routes the paths to the suite. The upstream libraries keep their
+  # other routes by union. It runs BEFORE (and does NOT return early from) the tools/** escalation
+  # below: a real edit to tools/test_stage_derivation.sh still fail-closes to the full suite.
+  if [[ "$p" == plugin/skills/_shared/stage-derivation.sh \
+     || "$p" == plugin/skills/_shared/readiness-check.sh \
+     || "$p" == plugin/skills/_shared/record-verify.sh \
+     || "$p" == tests/stage-derivation/* \
+     || "$p" == tools/test_stage_derivation.sh ]]; then
+    add_selected "$SUITE_TEST_STAGE_DERIVATION" "$p (stage derivation library/upstream libraries/fixture)"
     matched=1
   fi
 
@@ -1335,6 +1357,7 @@ self_test() {
     ["test_scratch.sh"]="tools/lib/scratch.sh"
     ["test_design_review.sh"]="tests/design-review/README.md"
     ["verify_records.sh"]="docs/initiatives/x/review-record.md"
+    ["test_stage_derivation.sh"]="tests/stage-derivation/README.md"
   )
   local script_name expected_suite suite_path probe_path hit
   for script_name in "${KNOWN_SUITES[@]}"; do
@@ -1573,7 +1596,7 @@ self_test() {
   #     test_rc_brood), the test_readiness_check library and harness legs, the test_design_review
   #     skill, library and harness legs, the test_merge_approved record gate library legs, the
   #     verify_records record, stamped doc, library and suite legs (and the docs/adr/**
-  #     policy_check leg it unions with), and the hooks.json json-manifests parse leg, that the
+  #     policy_check leg it unions with), the test_stage_derivation library and harness legs, and the hooks.json json-manifests parse leg, that the
   #     KNOWN_SUITES probe (#1) does not reach must route to its suite. #1 probes each entrypoint
   #     script, so it would stay green if the schema-chain, shared-lib, harness, push-branch child
   #     or parse-gate selector were dropped. Probe each <path>|<suite> pair directly so removing
@@ -1616,6 +1639,10 @@ self_test() {
     "docs/adr/0001-x.md|$SUITE_VERIFY_RECORDS" \
     "docs/adr/0001-x.md|$SUITE_POLICY_CHECK" \
     "tools/verify_records.sh|$SUITE_VERIFY_RECORDS" \
+    "plugin/skills/_shared/stage-derivation.sh|$SUITE_TEST_STAGE_DERIVATION" \
+    "plugin/skills/_shared/readiness-check.sh|$SUITE_TEST_STAGE_DERIVATION" \
+    "plugin/skills/_shared/record-verify.sh|$SUITE_TEST_STAGE_DERIVATION" \
+    "tools/test_stage_derivation.sh|$SUITE_TEST_STAGE_DERIVATION" \
     "plugin/hooks/hooks.json|$SUITE_JSON_MANIFESTS" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_BROOD" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_RC_BROOD"; do

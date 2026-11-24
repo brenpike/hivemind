@@ -36,10 +36,12 @@
 # FAILURE CONTRACT: status 2 leaves stdout empty and prints exactly one stderr line
 # `stage-derivation-error: <token>`. Tokens: usage, missing-library (a readiness check or record
 # verify function is not defined), commit-malformed, commit-unresolvable, evidence-malformed,
-# truncated, gh-failed, git-failed. gh-failed is reserved for the evidence read; derive itself
-# never gives it. The library never exits and never prints evidence or document text.
+# truncated, gh-failed, git-failed. gh-failed is reserved for the evidence read; neither function
+# gives it. A readiness check failure is translated: snapshot-malformed to evidence-malformed,
+# truncated, commit-unresolvable and usage kept, any other to git-failed. The library never exits
+# and never prints evidence or document text.
 #
-# PUBLIC API:
+# PUBLIC API (both functions share the failure contract):
 #   hivemind_stage_derive <trunk-commit> <owner/repo> <trunk-name> <slug>  (evidence on stdin)
 #       <trunk-commit> is the fetched remote trunk commit id, 40 or 64 lowercase hex, never a
 #       branch name or a local ref (commit-malformed, no git call). <owner/repo>, <trunk-name>
@@ -52,6 +54,28 @@
 #        "ignored": [{"kind": "issue"|"pull_request", "number", "reason"}...],
 #        "slices": [{"number", "state"}...]}
 #       A null stage comes with status `ambiguous` or `out-of-order` and next `ask`.
+#   hivemind_stage_handoff <trunk-commit> <owner/repo> <trunk-name> <slug>  (evidence on stdin)
+#       The handoff check, with derive's arguments, evidence and failures. Prints one compact
+#       JSON object and returns 0:
+#       {"slug", "commit": <trunk-commit>, "result": "pass"|"fail", "reasons": [<code>...],
+#        "slices": [{"issue", "result": "pass"|"fail", "claimable": <bool>,
+#                    "reasons": [<code>...]}...], "ignored": [as derive's]}
+#       Slices are sorted by number. `reasons` holds the initiative codes, a closed set, in this
+#       order: seed_missing (no seed), seed_ambiguous (two or more), design_delivered (the
+#       solution design at trunk), docs_not_on_trunk (the PRD or the solution design fails the
+#       existence test at trunk), record_not_current (trunk's review record is missing, malformed,
+#       fails the pass rule or is named by verify), epic_closed and epic_type_missing (the epic
+#       is closed, or has no `type:epic` label, so it could be claimed), no_slices. A slice's
+#       reasons are its readiness codes from one hivemind_readiness_check_snapshot call over every
+#       slice snapshot, then the label authority codes, then `blocked_by:<n>` per open blocked-by
+#       edge, ascending. Label authority (D29; ADR-0045 decision 10, as amended by #625): no
+#       `readiness:ready` label gives ready_label_missing; else the latest `readiness:ready`
+#       labeled event, every event at that latest time, must come from a writer, an actor of
+#       type User with write permission (a Bot or a null actor never is), else
+#       ready_actor_not_writer, also with no event; and last_edited_at or a title rename at or
+#       after that event gives edited_since_ready. A slice passes when it has no readiness or
+#       label authority code, and is claimable when it passes with no open blocked-by edge. The
+#       result is `pass` only with no initiative code and every slice passing.
 #
 # EVIDENCE JSON v1 (normalized by the caller's GitHub read; every key below is required, other
 # keys are ignored; a timestamp is `YYYY-MM-DDTHH:MM:SSZ`; an object id is 40 or 64 lowercase
@@ -66,21 +90,28 @@
 #    "branches": [{"name", "oid", "pull_request_count": <n>}...],
 #        every branch of <owner/repo> whose name starts with `docs/`, with the count of pull
 #        requests, open or closed, that used it as their head;
-#    "epic": null | {"number", "state", "sub_issue_total": <n>},
-#        the seed issue as epic with its sub-issue count; null when no seed was read;
-#    "slices": [{"readiness": <readiness check issue snapshot>, "last_edited_at": <timestamp or
-#                null>, "ready_events": [{"actor_can_write": <bool>, "created_at"}...],
+#    "epic": null | {"number", "state", "sub_issue_total": <n>,
+#                    "labels": {"nodes": [{"name"}...], "pageInfo": {"hasNextPage": <bool>}}},
+#        the seed issue as epic with its sub-issue count and labels; null when no seed was read;
+#    "slices": [{"readiness": <readiness check issue snapshot, its labels nodes holding each
+#                name and its blockedBy nodes each number and state>,
+#                "last_edited_at": <timestamp or null>,
+#                "ready_events": [{"actor": null | {"login", "__typename"}, "actor_can_write":
+#                                  <bool>, "created_at"}...],
 #                "renamed_at": [<timestamp>...]}...]}
-#        every sub-issue of the epic; the snapshot is the readiness check's snapshot mode input.
-#   Fewer slices than `sub_issue_total`, or any snapshot `pageInfo.hasNextPage` true, is
-#   truncated. Slices with a null epic, more slices than `sub_issue_total`, or an epic that is
-#   not the one seed, are evidence-malformed.
+#        every sub-issue of the epic; the snapshot is the readiness check's snapshot mode input;
+#        ready_events holds every `readiness:ready` labeled event, renamed_at every title rename.
+#   Fewer slices than `sub_issue_total`, any snapshot `pageInfo.hasNextPage` true, or the epic's
+#   labels `hasNextPage` true, is truncated. Slices with a null epic, more slices than
+#   `sub_issue_total`, or an epic that is not the one seed, are evidence-malformed.
 #
 # RESOLUTION: the seed is the one open issue whose body's first line, one ending CR removed, is
 # `<!-- hivemind-initiative: <slug> -->` and whose author has write permission. A marker-shaped
 # first line with a malformed slug is ignored as `seed_marker_malformed`, with no git call; a
-# closed one as `seed_closed`; a non-writer's as `seed_author_not_writer`; an issue whose first
-# line is no marker or another slug's marker is not this initiative's and is not named. A pull
+# closed one as `seed_closed`; a non-writer's as `seed_author_not_writer`. An issue whose first
+# line is no marker or another slug's marker, but a later line of whose body, one ending CR
+# removed, is this slug's marker, is ignored as `seed_marker_not_first_line`; with no such line
+# it is not this initiative's and is not named. A pull
 # request counts when its head ref matches `^docs/<slug>(-[a-z0-9]+(-[a-z0-9]+)*)?$`, its head
 # repository is <owner/repo> and its author has write permission; a matching fork is ignored as
 # `docs_pr_fork`, a non-writer's as `docs_pr_author_not_writer`. The docs head is the one
@@ -99,8 +130,9 @@
 #   4. Design delivered at the docs head: close-out / in-progress / merge-docs.
 #   5. Trunk current: no sub-issue: docs-pull-request / done / slice; every sub-issue closed:
 #      handoff / done / close-out; some closed: handoff / delivering / deliver; an open slice
-#      the readiness check gives a `rating_missing:` code: slicing / done / triage; else
-#      triage / done / handoff-check.
+#      the readiness check gives a `rating_missing:` code: slicing / done / triage; else the
+#      handoff check: a pass gives handoff / done / deliver, a fail triage / blocked /
+#      resolve-blockers [<initiative code>..., slice_failed:<n> per failing slice, ascending].
 #   6. Otherwise read at D, the docs head, else trunk:
 #      no PRD: interrogation / in-progress / interrogate at a docs head, capture / done /
 #      interrogate at trunk; a `**UI:**` value other than yes or no: null / ambiguous / ask
@@ -162,14 +194,21 @@ def sd_pull_request_ok:
   and (.author_can_write | sd_bool) and (.draft | sd_bool);
 def sd_branch_ok:
   type == "object" and (.name | sd_text) and (.oid | sd_hex) and (.pull_request_count | sd_count);
+def sd_names_ok: type == "object" and (.nodes | sd_list(type == "object" and (.name | sd_text)));
 def sd_epic_ok:
   . == null
   or (type == "object" and (.number | sd_number) and (.state | sd_state)
-      and (.sub_issue_total | sd_count));
-def sd_event_ok: type == "object" and (.actor_can_write | sd_bool) and (.created_at | sd_time);
+      and (.sub_issue_total | sd_count) and (.labels | sd_names_ok)
+      and (.labels.pageInfo | type) == "object" and (.labels.pageInfo.hasNextPage | sd_bool));
+def sd_actor_ok: . == null or (type == "object" and (.login | sd_text) and (.__typename | sd_text));
+def sd_event_ok:
+  type == "object" and has("actor") and (.actor | sd_actor_ok) and (.actor_can_write | sd_bool)
+  and (.created_at | sd_time);
+def sd_blocker_ok: type == "object" and (.number | sd_number) and (.state | sd_state);
 def sd_slice_ok:
   type == "object" and (.readiness | type) == "object" and (.readiness.number | sd_number)
-  and (.readiness.state | sd_state)
+  and (.readiness.state | sd_state) and (.readiness.labels | sd_names_ok)
+  and (.readiness.blockedBy | type) == "object" and (.readiness.blockedBy.nodes | sd_list(sd_blocker_ok))
   and has("last_edited_at") and (.last_edited_at == null or (.last_edited_at | sd_time))
   and (.ready_events | sd_list(sd_event_ok)) and (.renamed_at | sd_list(sd_time));
 def sd_evidence_ok:
@@ -182,19 +221,38 @@ def sd_evidence_ok:
   and (if .epic == null then (.slices | length) == 0
        else (.slices | length) <= .epic.sub_issue_total end);
 def sd_truncated:
-  (.epic != null and (.slices | length) < .epic.sub_issue_total)
+  (.epic != null and ((.slices | length) < .epic.sub_issue_total or .epic.labels.pageInfo.hasNextPage))
   or any(.slices[];
       [.readiness | .. | objects | select(has("pageInfo")) | .pageInfo]
       | any(.[]; type == "object" and .hasNextPage == true));
 def sd_seed_status($slug):
-  ((.body // "") | rc_lines | .[0] // "") as $first
-  | [$first | capture("\\A<!-- hivemind-initiative: (?<s>.*) -->\\z") | .s] as $found
-  | if ($found | length) == 0 then "unrelated"
-    elif ($found[0] | test("\\A" + rc_slug + "\\z") | not) then "seed_marker_malformed"
-    elif $found[0] != $slug then "unrelated"
-    elif .state != "OPEN" then "seed_closed"
-    elif (.author_can_write | not) then "seed_author_not_writer"
-    else "seed" end;
+  ((.body // "") | rc_lines) as $lines
+  | [($lines[0] // "") | capture("\\A<!-- hivemind-initiative: (?<s>.*) -->\\z") | .s] as $found
+  | if ($found | length) == 1 and ($found[0] | test("\\A" + rc_slug + "\\z") | not)
+    then "seed_marker_malformed"
+    elif ($found | length) == 1 and $found[0] == $slug then
+      if .state != "OPEN" then "seed_closed"
+      elif (.author_can_write | not) then "seed_author_not_writer"
+      else "seed" end
+    elif any($lines[1:][]; . == "<!-- hivemind-initiative: " + $slug + " -->")
+    then "seed_marker_not_first_line"
+    else "unrelated" end;
+def sd_writer_event: .actor != null and .actor.__typename == "User" and .actor_can_write;
+def sd_authority:
+  .readiness as $sn
+  | (.ready_events | map(.created_at) | max) as $latest
+  | [.ready_events[] | select(.created_at == $latest)] as $latest_events
+  | {issue: $sn.number,
+     codes: (if any($sn.labels.nodes[]; .name == "readiness:ready") | not then ["ready_label_missing"]
+             else
+               (if ($latest_events | length) == 0 or any($latest_events[]; sd_writer_event | not)
+                then ["ready_actor_not_writer"] else [] end)
+               + (if $latest != null
+                     and ((.last_edited_at != null and .last_edited_at >= $latest)
+                          or any(.renamed_at[]; . >= $latest))
+                  then ["edited_since_ready"] else [] end)
+             end),
+     blockers: ([$sn.blockedBy.nodes[] | select(.state == "OPEN") | .number] | unique)};
 def sd_pull_request_status($repo):
   if ((.head_repository // "") | ascii_downcase) != ($repo | ascii_downcase) then "docs_pr_fork"
   elif (.author_can_write | not) then "docs_pr_author_not_writer"
@@ -226,7 +284,10 @@ def sd_plan($repo; $slug):
                  + [$named[] | select(.status != "counts")
                     | {kind: "pull_request", number, reason: .status}]),
        slices: [$ev.slices[] | .readiness | {number, state}],
-       open_snapshots: [$ev.slices[] | .readiness | select(.state == "OPEN")]}
+       epic: (if $ev.epic == null then null
+              else {state: $ev.epic.state, typed: any($ev.epic.labels.nodes[]; .name == "type:epic")} end),
+       snapshots: [$ev.slices[] | .readiness],
+       authority: [$ev.slices[] | sd_authority]}
     end;
 '
 }
@@ -286,7 +347,7 @@ _hivemind_sd_args_ok() {
 
 # _hivemind_sd_plan <owner/repo> <slug>: reads the evidence on stdin, validates it and prints the
 # resolution plan as one compact JSON object; prints evidence-malformed or truncated and returns
-# 2 on a failure. The plan holds no evidence text but the open slices' snapshots.
+# 2 on a failure. The plan holds no evidence text but the slices' snapshots.
 _hivemind_sd_plan() {
   local plan="" program
   program="$(hivemind_readiness_jq_defs)$(_hivemind_sd_evidence_jq_defs)"'
@@ -397,7 +458,8 @@ _hivemind_sd_lines_hold() {
 }
 
 # _hivemind_sd_trunk_current <trunk> <slug>: prints `yes` when trunk is current for <slug>, else
-# `no`; returns 2 on a failure.
+# the initiative code naming why not, docs_not_on_trunk or record_not_current; returns 2 on a
+# failure.
 _hivemind_sd_trunk_current() {
   local trunk="$1" slug="$2" path="" entry_rc=0 record="" failing=""
   for path in "docs/prds/$slug.md" "docs/initiatives/$slug/solution-design.md"; do
@@ -406,7 +468,7 @@ _hivemind_sd_trunk_current() {
     case "$entry_rc" in
       0) ;;
       1)
-        printf 'no\n'
+        printf 'docs_not_on_trunk\n'
         return 0
         ;;
       *) return 2 ;;
@@ -414,23 +476,23 @@ _hivemind_sd_trunk_current() {
   done
   record="$(_hivemind_sd_read "$trunk" "docs/initiatives/$slug/review-record.md" sd_record)" || return 2
   if [ "$record" != pass ]; then
-    printf 'no\n'
+    printf 'record_not_current\n'
     return 0
   fi
   failing="$(_hivemind_sd_verify "$trunk" "$trunk")" || return 2
   if _hivemind_sd_lines_hold "$failing" "docs/initiatives/$slug/review-record.md"; then
-    printf 'no\n'
+    printf 'record_not_current\n'
   else
     printf 'yes\n'
   fi
 }
 
-# _hivemind_sd_rating_missing <trunk> <owner/repo> <trunk-name> <plan>: runs the readiness check
-# in snapshot mode on the plan's open slices and prints `yes` when any gives a `rating_missing:`
-# code, else `no`; returns 2 on a failure whose token it printed.
-_hivemind_sd_rating_missing() {
+# _hivemind_sd_readiness <trunk> <owner/repo> <trunk-name> <plan>: runs the readiness check once in
+# snapshot mode over every slice snapshot of the plan and prints its output lines; translates a
+# readiness check failure to this library's token and returns 2.
+_hivemind_sd_readiness() {
   local output="" check_rc=0 token=""
-  output="$(printf '%s\n' "$4" | jq -c '.open_snapshots' 2>/dev/null \
+  output="$(printf '%s\n' "$4" | jq -c '.snapshots' 2>/dev/null \
     | hivemind_readiness_check_snapshot "$1" "$2" "$3" 2>&1)" || check_rc=$?
   if [ "$check_rc" -ne 0 ]; then
     token="${output#readiness-check-error: }"
@@ -441,19 +503,72 @@ _hivemind_sd_rating_missing() {
     esac
     return 2
   fi
-  if ! printf '%s\n' "$output" \
-    | jq -nr '[inputs | .reasons[] | select(startswith("rating_missing:"))]
-      | if length > 0 then "yes" else "no" end' 2>/dev/null; then
+  if [ -n "$output" ]; then
+    printf '%s\n' "$output"
+  fi
+}
+
+# _hivemind_sd_initiative_git_codes <trunk> <slug>: prints the initiative codes read from git, one
+# per line: design_delivered, then docs_not_on_trunk or record_not_current; returns 2 on a
+# failure.
+_hivemind_sd_initiative_git_codes() {
+  local state="" current=""
+  state="$(_hivemind_sd_read "$1" "docs/initiatives/$2/solution-design.md" sd_delivered)" || return 2
+  if [ "$state" = delivered ]; then
+    printf 'design_delivered\n'
+  fi
+  current="$(_hivemind_sd_trunk_current "$1" "$2")" || return 2
+  if [ "$current" != yes ]; then
+    printf '%s\n' "$current"
+  fi
+}
+
+# _hivemind_sd_handoff <trunk> <owner/repo> <trunk-name> <slug> <plan> <git-codes>: prints the
+# handoff check's output object from the plan, the readiness check over every slice and the
+# initiative codes read from git (empty when none); returns 2 on a failure whose token it printed.
+_hivemind_sd_handoff() {
+  local checks="" program='
+[inputs] as $all
+| $all[0] as $plan
+| $all[1:] as $checks
+| if ($checks | length) != ($plan.authority | length) then error("readiness line count") else . end
+| ($plan.authority | map({key: (.issue | tostring), value: .}) | from_entries) as $authority
+| [$checks[] | . as $check | $authority[$check.issue | tostring] as $slice
+   | if $slice == null then error("readiness issue unknown") else . end
+   | (($check.reasons + $slice.codes) | length == 0) as $pass
+   | {issue: $check.issue, result: (if $pass then "pass" else "fail" end),
+      claimable: ($pass and ($slice.blockers | length) == 0),
+      reasons: ($check.reasons + $slice.codes + [$slice.blockers[] | "blocked_by:\(.)"])}]
+  | sort_by(.issue) as $slices
+| (($git_codes | split("\n") | map(select(length > 0)))
+   + (if $plan.seed_count == 0 then ["seed_missing"] else [] end)
+   + (if $plan.seed_count > 1 then ["seed_ambiguous"] else [] end)
+   + (if $plan.epic != null and $plan.epic.state != "OPEN" then ["epic_closed"] else [] end)
+   + (if $plan.epic != null and ($plan.epic.typed | not) then ["epic_type_missing"] else [] end)
+   + (if ($plan.slices | length) == 0 then ["no_slices"] else [] end)) as $found
+| [("seed_missing", "seed_ambiguous", "design_delivered", "docs_not_on_trunk", "record_not_current",
+    "epic_closed", "epic_type_missing", "no_slices") as $code
+   | select(any($found[]; . == $code)) | $code] as $reasons
+| {slug: $slug, commit: $trunk,
+   result: (if ($reasons | length) == 0 and all($slices[]; .result == "pass") then "pass" else "fail" end),
+   reasons: $reasons, slices: $slices, ignored: $plan.ignored}'
+  checks="$(_hivemind_sd_readiness "$1" "$2" "$3" "$5")" || return 2
+  if ! printf '%s\n%s\n' "$5" "$checks" \
+    | jq -nc --arg trunk "$1" --arg slug "$4" --arg git_codes "$6" "$program" 2>/dev/null; then
     _hivemind_sd_error git-failed
     return 2
   fi
 }
 
-# _hivemind_sd_slice_stage <trunk> <owner/repo> <trunk-name> <plan>: prints the result of a
-# current trunk from the slices (precedence row 5); returns 2 on a failure.
+# _hivemind_sd_slice_stage <trunk> <owner/repo> <trunk-name> <slug> <plan>: prints the result of
+# a current trunk from the slices (precedence row 5); returns 2 on a failure.
 _hivemind_sd_slice_stage() {
-  local total="" closed="" missing=""
-  read -r total closed < <(printf '%s\n' "$4" \
+  local total="" closed="" handoff="" program='
+if any(.slices[].reasons[]; startswith("rating_missing:")) then "slicing\tdone\ttriage"
+elif .result == "pass" then "handoff\tdone\tdeliver"
+else "triage\tblocked\tresolve-blockers", .reasons[],
+  (.slices[] | select(.result != "pass") | "slice_failed:\(.issue)") end'
+  read -r total closed < <(printf '%s\n' "$5" \
     | jq -r '[(.slices | length), ([.slices[] | select(.state == "CLOSED")] | length)] | @tsv' 2>/dev/null) \
     || true
   if [ -z "$total" ] || [ -z "$closed" ]; then
@@ -467,11 +582,10 @@ _hivemind_sd_slice_stage() {
   elif [ "$closed" -gt 0 ]; then
     printf 'handoff\tdelivering\tdeliver\n'
   else
-    missing="$(_hivemind_sd_rating_missing "$1" "$2" "$3" "$4")" || return 2
-    if [ "$missing" = yes ]; then
-      printf 'slicing\tdone\ttriage\n'
-    else
-      printf 'triage\tdone\thandoff-check\n'
+    handoff="$(_hivemind_sd_handoff "$1" "$2" "$3" "$4" "$5" "")" || return 2
+    if ! printf '%s\n' "$handoff" | jq -r "$program" 2>/dev/null; then
+      _hivemind_sd_error git-failed
+      return 2
     fi
   fi
 }
@@ -648,7 +762,7 @@ _hivemind_sd_stage() {
   fi
   current="$(_hivemind_sd_trunk_current "$trunk" "$slug")" || return 2
   if [ "$current" = yes ]; then
-    _hivemind_sd_slice_stage "$trunk" "$2" "$3" "$plan"
+    _hivemind_sd_slice_stage "$trunk" "$2" "$3" "$slug" "$plan"
     return
   fi
   _hivemind_sd_document_stage "$trunk" "$slug" "$docs_commit" "$docs_source" "$draft"
@@ -686,5 +800,25 @@ hivemind_stage_derive() {
   _hivemind_sd_resolves "$trunk" || return 2
   result="$(_hivemind_sd_stage "$trunk" "$owner_repo" "$trunk_name" "$slug" "$plan")" || return 2
   output="$(_hivemind_sd_emit "$trunk" "$slug" "$plan" "$result")" || return 2
+  printf '%s\n' "$output"
+}
+
+# hivemind_stage_handoff <trunk-commit> <owner/repo> <trunk-name> <slug>: runs the handoff check on
+# the evidence on stdin (see PUBLIC API).
+hivemind_stage_handoff() {
+  if [ "$#" -ne 4 ]; then
+    _hivemind_sd_error usage
+    return 2
+  fi
+  local trunk="${1-}" owner_repo="${2-}" trunk_name="${3-}" slug="${4-}" plan="" codes="" output=""
+  if ! _hivemind_sd_lib_ok; then
+    _hivemind_sd_error missing-library
+    return 2
+  fi
+  _hivemind_sd_args_ok "$trunk" "$owner_repo" "$trunk_name" "$slug" || return 2
+  plan="$(_hivemind_sd_plan "$owner_repo" "$slug")" || return 2
+  _hivemind_sd_resolves "$trunk" || return 2
+  codes="$(_hivemind_sd_initiative_git_codes "$trunk" "$slug")" || return 2
+  output="$(_hivemind_sd_handoff "$trunk" "$owner_repo" "$trunk_name" "$slug" "$plan" "$codes")" || return 2
   printf '%s\n' "$output"
 }

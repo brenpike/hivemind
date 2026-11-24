@@ -249,6 +249,106 @@
       "status": "not-started",
       "next": "capture",
       "reasons": [],
+      "seed": null,
+      "ignored": [
+        {
+          "kind": "issue",
+          "number": 6,
+          "reason": "seed_marker_not_first_line"
+        }
+      ]
+    }
+  },
+  {
+    "name": "seed-marker-later-line-crlf",
+    "evidence": {
+      "seeds": [
+        {
+          "number": 7,
+          "body": "Intro line.\r\n<!-- hivemind-initiative: demo -->\r\n"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "none",
+      "status": "not-started",
+      "next": "capture",
+      "reasons": [],
+      "seed": null,
+      "ignored": [
+        {
+          "kind": "issue",
+          "number": 7,
+          "reason": "seed_marker_not_first_line"
+        }
+      ]
+    }
+  },
+  {
+    "name": "seed-other-slug-first-demo-later",
+    "evidence": {
+      "seeds": [
+        {
+          "number": 1
+        },
+        {
+          "number": 8,
+          "body": "<!-- hivemind-initiative: other -->\n<!-- hivemind-initiative: demo -->\n"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "capture",
+      "status": "done",
+      "next": "interrogate",
+      "reasons": [],
+      "seed": 1,
+      "ignored": [
+        {
+          "kind": "issue",
+          "number": 8,
+          "reason": "seed_marker_not_first_line"
+        }
+      ]
+    }
+  },
+  {
+    "name": "seed-other-slug-later-line-unrelated",
+    "evidence": {
+      "seeds": [
+        {
+          "number": 9,
+          "body": "Intro line.\n<!-- hivemind-initiative: other -->\n"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "none",
+      "status": "not-started",
+      "next": "capture",
+      "reasons": [],
+      "seed": null
+    }
+  },
+  {
+    "name": "seed-marker-indented-later-line-unrelated",
+    "evidence": {
+      "seeds": [
+        {
+          "number": 10,
+          "body": "Intro line.\n  <!-- hivemind-initiative: demo -->\n"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "none",
+      "status": "not-started",
+      "next": "capture",
+      "reasons": [],
       "seed": null
     }
   },
@@ -752,7 +852,7 @@
     }
   },
   {
-    "name": "trunk-current-rated",
+    "name": "trunk-current-rated-handoff-fails",
     "evidence": {
       "slices": [
         {
@@ -774,9 +874,12 @@
     },
     "expect": {
       "stage": "triage",
-      "status": "done",
-      "next": "handoff-check",
-      "reasons": [],
+      "status": "blocked",
+      "next": "resolve-blockers",
+      "reasons": [
+        "slice_failed:11",
+        "slice_failed:12"
+      ],
       "slices": [
         {
           "number": 11,
@@ -2244,7 +2347,17 @@
       "epic": {
         "number": 9,
         "state": "OPEN",
-        "sub_issue_total": 0
+        "sub_issue_total": 0,
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        }
       }
     },
     "no_git": true,
@@ -2267,13 +2380,108 @@
     "error": "evidence-malformed"
   },
   {
+    "name": "evidence-epic-without-labels",
+    "trunk": {},
+    "evidence": {
+      "epic": {
+        "number": 1,
+        "state": "OPEN",
+        "sub_issue_total": 1
+      },
+      "slices": [
+        {
+          "number": 11
+        }
+      ]
+    },
+    "no_git": true,
+    "error": "evidence-malformed"
+  },
+  {
+    "name": "evidence-ready-event-actor-without-login",
+    "trunk": {},
+    "evidence": {
+      "slices": [
+        {
+          "number": 11,
+          "ready_events": [
+            {
+              "actor": {
+                "__typename": "User"
+              },
+              "created_at": "2026-02-01T00:00:00Z"
+            }
+          ]
+        }
+      ]
+    },
+    "no_git": true,
+    "error": "evidence-malformed"
+  },
+  {
+    "name": "evidence-blocker-without-state",
+    "trunk": {},
+    "evidence": {
+      "slices": [
+        {
+          "number": 11,
+          "blocked_by": [
+            {
+              "number": 40
+            }
+          ]
+        }
+      ]
+    },
+    "no_git": true,
+    "error": "evidence-malformed"
+  },
+  {
     "name": "truncated-sub-issues",
     "trunk": {},
     "evidence": {
       "epic": {
         "number": 1,
         "state": "OPEN",
-        "sub_issue_total": 3
+        "sub_issue_total": 3,
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        }
+      },
+      "slices": [
+        {
+          "number": 11
+        }
+      ]
+    },
+    "no_git": true,
+    "error": "truncated"
+  },
+  {
+    "name": "truncated-epic-labels",
+    "trunk": {},
+    "evidence": {
+      "epic": {
+        "number": 1,
+        "state": "OPEN",
+        "sub_issue_total": 1,
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": true
+          }
+        }
       },
       "slices": [
         {
