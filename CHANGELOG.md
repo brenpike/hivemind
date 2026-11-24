@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [13.1.0] - 2026-11-23
+
+### Added
+
+- The readiness check library `plugin/skills/_shared/readiness-check.sh`: gh mode and snapshot mode, the one Document existence test, a closed set of 40 reason codes, one JSON line per issue built with `jq`, plus seed-marker and review-record front-matter parsers. It has no caller yet: triage, the guide and the Lair adopt it in later slices.
+- The contract suite `tools/test_readiness_check.sh` with fixtures in `tests/readiness-check/`, registered in `tools/validate.sh`.
+
+### Changed
+
+- The Lair claim-integrity design's Snapshot list now holds the blocked-by issue numbers (`docs/initiatives/autonomous-ready-issue-loop/claim-integrity-design.md`).
+
+No prose budget raised.
+
+Issue: #615.
+
 ## [13.0.0] - 2026-11-22
 
 ### Changed
