@@ -1114,6 +1114,11 @@ hivemind_stage_evidence_gh() {
   fi
   seeds="$(_hivemind_sd_graphql sd_gh_seeds 0 -f query="$(_hivemind_sd_gh_query seeds)" \
     -f q="repo:$owner_repo is:issue in:body \"hivemind-initiative: $slug\"")" || return 2
+  # Recorded decision (pre-PR review, decided by the run per decision-autonomy.md Review Calls):
+  # keep head:docs/<slug> in this search. GitHub's head: qualifier matches branch names that begin
+  # with the term (GitHub search docs, confirmed by a live query returning hyphen-suffixed heads), so
+  # docs/<slug>-<suffix> pull requests are fetched and their heads are filtered locally. Do not
+  # replace it with an unfiltered list of every open pull request.
   prs="$(_hivemind_sd_graphql sd_gh_pull_requests 0 -f query="$(_hivemind_sd_gh_query pull-requests)" \
     -f q="repo:$owner_repo is:pr is:open head:docs/$slug")" || return 2
   refs="$(_hivemind_sd_graphql sd_gh_refs 0 -f query="$(_hivemind_sd_gh_query refs)" \
