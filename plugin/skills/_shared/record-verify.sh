@@ -44,11 +44,11 @@
 #       design is delivered: the front matter shape; a stamp of `docs/prds/<slug>.md`, whose
 #       first non-blank line after its title is exactly `**UI:** yes` or `**UI:** no` at <head>;
 #       the Findings table; each `recorded` Note's path; and the pass rule when `verdict` is
-#       pass. When `verdict` is pass, its stamps also include both UI prototype files when the
-#       PRD says yes and every ADR the pull request adds or edits, and each stamp equals its
-#       blob at <head>. Every other record at <head> whose `verdict` is pass and whose design is
-#       not delivered gets stamp equality only; any other record is skipped. The Residuals and
-#       History sections are never read.
+#       pass. When `verdict` is pass, its stamps also include the solution design, both UI
+#       prototype files when the PRD says yes and every ADR the pull request adds or edits, and
+#       each stamp equals its blob at <head>. Every other record at <head> whose `verdict` is
+#       pass and whose design is not delivered gets stamp equality only; any other record is
+#       skipped. The Residuals and History sections are never read.
 #   hivemind_record_verify_merge <head> <merge-base> <base-tip>
 #       Merge mode, the changes read from <merge-base> to <head>: every pull request mode check,
 #       and each record the pull request adds or edits, and the record of every
@@ -380,11 +380,12 @@ _hivemind_rv_recorded_ok() {
 }
 
 # _hivemind_rv_pass_stamps_ok <head> <slug> <ui> <summary> <required-adr>...: the checks of a
-# record whose verdict is pass: its stamps include both UI prototype files when <ui> is yes and
-# every <required-adr>, and each stamp equals its blob at <head>. 0, 1 or 2 on a failure.
+# record whose verdict is pass: its stamps include the solution design, both UI prototype files
+# when <ui> is yes and every <required-adr>, and each stamp equals its blob at <head>. 0, 1 or 2
+# on a failure.
 _hivemind_rv_pass_stamps_ok() {
   local head="$1" slug="$2" ui="$3" summary="$4" stamped="" path=""
-  local -a required=()
+  local -a required=("docs/initiatives/$slug/solution-design.md")
   shift 4
   if [ "$ui" = yes ]; then
     required+=("docs/initiatives/$slug/prototype/index.html" "docs/initiatives/$slug/prototype/notes.md")
