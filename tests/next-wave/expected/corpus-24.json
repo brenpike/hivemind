@@ -1,0 +1,7 @@
+{
+  "case": "case 24: dot component on unknown dependency",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps[1].depends_on[0]: unknown step id"
+  }
+}

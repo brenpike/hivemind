@@ -1,0 +1,11 @@
+{
+  "case": "malformed event skipped",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-002"
+    ],
+    "remaining": 2
+  }
+}

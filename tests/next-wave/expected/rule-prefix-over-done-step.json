@@ -1,0 +1,11 @@
+{
+  "case": "prefix over done step",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "B"
+    ],
+    "remaining": 2
+  }
+}

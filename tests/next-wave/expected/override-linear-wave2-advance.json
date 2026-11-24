@@ -1,0 +1,11 @@
+{
+  "case": "linear wave2 advance",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-002"
+    ],
+    "remaining": 2
+  }
+}

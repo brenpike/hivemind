@@ -1,9 +1,6 @@
-import { test, describe, after } from 'node:test';
+import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import vm from 'node:vm';
@@ -12,57 +9,14 @@ import { loadLibs } from './harness.mjs';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const libDir = repoRoot + 'plugin/workflow-src/lib/';
 const wavesPath = libDir + 'waves.js';
-const enginePath = repoRoot + 'plugin/skills/next-wave/scripts/next-wave.sh';
 const fixturesDir = repoRoot + 'tests/next-wave/';
+const expectedDir = fixturesDir + 'expected/';
 const lib = loadLibs([wavesPath]);
 
-const ORACLE_CONCURRENCY = 8;
 const DEFAULT_SEED = 20261021;
-const seedText = process.env.WAVES_PARITY_SEED;
-const SEED = seedText === undefined || seedText === '' ? DEFAULT_SEED : Number(seedText);
+const EXPECTED_CASE_COUNT = 89;
 
 const STEP_ID_PROBLEM = 'not a step id (1 to 64 of A-Z a-z 0-9 . _ -)';
-
-const workRoot = realpathSync(mkdtempSync(join(tmpdir(), 'hivemind-waves-parity-')));
-const gitRoot = join(workRoot, 'checkout');
-mkdirSync(gitRoot);
-const gitInit = spawnSync('git', ['init', '-q', gitRoot], { encoding: 'utf8' });
-let oracleRunCount = 0;
-
-after(() => {
-  rmSync(workRoot, { recursive: true, force: true });
-  assert.equal(existsSync(workRoot), false, `temp folder ${workRoot} was not removed`);
-});
-
-function runOracleRaw(ledger) {
-  oracleRunCount += 1;
-  const runId = 'parity-' + oracleRunCount;
-  const runDir = join(gitRoot, '.hivemind', 'runs', runId);
-  mkdirSync(runDir, { recursive: true });
-  writeFileSync(join(runDir, 'state.json'), JSON.stringify({ ...ledger, run: { id: runId } }));
-  return new Promise((resolve) => {
-    execFile('bash', [enginePath, runId], { cwd: gitRoot, encoding: 'utf8' }, (error, stdout, stderr) => {
-      resolve({ status: error === null ? 0 : error.code, stdout: stdout, stderr: stderr });
-    });
-  });
-}
-
-async function runOracle(ledger) {
-  const result = await runOracleRaw(ledger);
-  if (result.status === 0) {
-    const match = /^all_done: (true|false)\nwave: \[(.*)\]\nremaining: (\d+)\n$/.exec(result.stdout);
-    if (match === null) {
-      return { ok: 'unparsed', stdout: result.stdout };
-    }
-    const wave = match[2] === '' ? [] : match[2].split(', ');
-    return { ok: true, all_done: match[1] === 'true', wave: wave, remaining: Number(match[3]) };
-  }
-  const blocker = /^blocker: (.*)\n$/.exec(result.stderr);
-  if (result.status === 1 && result.stdout === '' && blocker !== null) {
-    return { ok: false, problem: blocker[1] };
-  }
-  return { ok: 'crash', status: result.status, stdout: result.stdout, stderr: result.stderr };
-}
 
 function readJqDefault(value) {
   return value === undefined || value === null || value === false ? 0 : value;
@@ -110,12 +64,17 @@ function stageLedger(ledger) {
   return JSON.parse(JSON.stringify(ledger));
 }
 
-async function assertParity(label, ledger, context = '') {
+function slugOf(label) {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function assertExpected(stem, label, ledger) {
+  const expected = JSON.parse(readFileSync(expectedDir + stem + '.json', 'utf8'));
+  assert.equal(expected.case, label, `${stem}.json names another case`);
   const staged = stageLedger(ledger);
-  const oracle = await runOracle(staged);
   const subject = runSubject(staged);
-  assert.deepEqual(subject, oracle, `${label}${context}\nledger: ${JSON.stringify(staged)}\nnext-wave.sh: ${JSON.stringify(oracle)}\nwaves.js: ${JSON.stringify(subject)}`);
-  return oracle;
+  assert.deepEqual(subject, expected.result, `${label}\nledger: ${JSON.stringify(staged)}\nexpected: ${JSON.stringify(expected.result)}\nwaves.js: ${JSON.stringify(subject)}`);
+  return expected.result;
 }
 
 function readFixture(name) {
@@ -323,8 +282,79 @@ function buildCorpus(seed) {
   return cases;
 }
 
-test('the oracle checkout was created', () => {
-  assert.equal(gitInit.status, 0, gitInit.stderr);
+const fixtureNames = readdirSync(fixturesDir).filter((name) => name.endsWith('.json')).sort();
+
+function fixtureStem(name) {
+  return 'fixture-' + name.replace(/\.json$/, '');
+}
+
+function buildOverrideCases() {
+  const linear = readFixture('ledger-linear.json');
+  const diamond = readFixture('ledger-diamond.json');
+  const replan = readFixture('ledger-replan-epoch.json');
+  return [
+    ['linear wave2 advance', withEvents(linear, [completedEvent(['STEP-001'])])],
+    ['diamond wave2 fan-out', withEvents(diamond, [completedEvent(['STEP-001'])])],
+    ['diamond wave3 join union', withEvents(diamond, [completedEvent(['STEP-001']), completedEvent(['STEP-002', 'STEP-003'])])],
+    ['diamond all done', withEvents(diamond, [completedEvent(['STEP-001']), completedEvent(['STEP-002', 'STEP-003']), completedEvent(['STEP-004'])])],
+    ['replan same-epoch credit', withEvents(replan, [completedEvent(['STEP-001'], { plan_epoch: 2 })])],
+    ['bad step id', mutateFixture(linear, (ledger) => { ledger.plan.steps[0].id = 'STEP-001]'; })],
+    ['non-object step', mutateFixture(linear, (ledger) => { ledger.plan.steps[0] = ['x']; })],
+    ['non-array depends_on', mutateFixture(linear, (ledger) => { ledger.plan.steps[1].depends_on = 'BAD]'; })],
+    ['non-array plan.steps', mutateFixture(linear, (ledger) => { ledger.plan.steps = 'BAD'; })],
+    ['non-string id', mutateFixture(linear, (ledger) => { ledger.plan.steps[0].id = 123; })],
+    ['malformed event skipped', withEvents(linear, ['junk', completedEvent(['STEP-001'])])]
+  ];
+}
+
+const overrideCases = buildOverrideCases();
+const corpus = buildCorpus(DEFAULT_SEED);
+
+function corpusStem(index) {
+  return 'corpus-' + String(index + 1).padStart(2, '0');
+}
+
+const RULE_LABELS = ['depends_on null', 'foreign done ids', 'same file twice', 'prefix over done step', 'late conflicts-with-all'];
+
+const VALIDATION_CASES = [
+  ['missing', undefined, 'plan.steps: missing'],
+  ['null', null, 'plan.steps: missing'],
+  ['not an array', 'BAD', 'plan.steps: not an array'],
+  ['shape before empty check', [7], 'plan.steps[0]: not an object'],
+  ['null step', [null], 'plan.steps[0]: not an object'],
+  ['every step an object before any id', [{ id: 'A]' }, 7], 'plan.steps[1]: not an object'],
+  ['empty', [], 'plan.steps: empty, nothing to schedule'],
+  ['empty id', [{ id: '', files: ['a'] }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
+  ['missing id', [{ id: 'A' }, { files: ['a'] }], 'plan.steps[1].id: missing'],
+  ['null id', [{ id: null }], 'plan.steps[0].id: missing'],
+  ['non-string id', [{ id: 123 }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
+  ['ids in ascending index', [{ id: 'A]' }, { id: '' }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
+  ['every id before any depends_on', [{ id: 'A', depends_on: 'x' }, { id: 'B]' }], 'plan.steps[1].id: ' + STEP_ID_PROBLEM],
+  ['every depends_on an array before any entry', [{ id: 'A', depends_on: ['B]'] }, { id: 'B', depends_on: 'x' }], 'plan.steps[1].depends_on: not an array'],
+  ['depends_on false is present', [{ id: 'A', depends_on: false }], 'plan.steps[0].depends_on: not an array'],
+  ['null depends_on entry', [{ id: 'A', depends_on: [null] }], 'plan.steps[0].depends_on[0]: ' + STEP_ID_PROBLEM],
+  ['entries in row-major order', [{ id: 'A', depends_on: ['B', 'C]'] }, { id: 'B', depends_on: ['D]'] }], 'plan.steps[0].depends_on[1]: ' + STEP_ID_PROBLEM],
+  ['step id before duplicate', [{ id: 'A' }, { id: 'A' }, { id: 'B]' }], 'plan.steps[2].id: ' + STEP_ID_PROBLEM],
+  ['step id before unknown', [{ id: 'A', depends_on: ['Z'] }, { id: 'B', depends_on: ['Y]'] }], 'plan.steps[1].depends_on[0]: ' + STEP_ID_PROBLEM],
+  ['step id before cycle', [{ id: 'A]', depends_on: ['A]'] }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
+  ['first repeat of an earlier id', [{ id: 'A' }, { id: 'B' }, { id: 'B' }, { id: 'A' }], 'plan.steps[2].id: duplicate step id'],
+  ['duplicate before unknown', [{ id: 'A', depends_on: ['Z'] }, { id: 'A' }], 'plan.steps[1].id: duplicate step id'],
+  ['first unknown in plan order', [{ id: 'A', depends_on: ['A', 'Z'] }, { id: 'B', depends_on: ['Y'] }], 'plan.steps[0].depends_on[1]: unknown step id'],
+  ['cycle', [{ id: 'A', depends_on: ['B'] }, { id: 'B', depends_on: ['A'] }], 'dependency cycle detected among plan steps']
+];
+
+function listCheckedStems() {
+  return fixtureNames.map(fixtureStem)
+    .concat(overrideCases.map(([label]) => 'override-' + slugOf(label)))
+    .concat(corpus.map((corpusCase, index) => corpusStem(index)))
+    .concat(RULE_LABELS.map((label) => 'rule-' + slugOf(label)))
+    .concat(VALIDATION_CASES.map(([label]) => 'rule-validation-' + slugOf(label)));
+}
+
+test('the expected folder holds exactly the cases this file checks', () => {
+  const checked = listCheckedStems().map((stem) => stem + '.json').sort();
+  assert.equal(checked.length, EXPECTED_CASE_COUNT);
+  assert.deepEqual(readdirSync(expectedDir).sort(), checked);
 });
 
 describe('computeWave rules', () => {
@@ -332,69 +362,43 @@ describe('computeWave rules', () => {
     { id: 'STEP-001', files: ['src/a.ts'], depends_on: [] },
     { id: 'STEP-002', files: ['src/b.ts'], depends_on: ['STEP-001'] }
   ];
-  test('depends_on null or absent means no dependencies', async () => {
+  test('depends_on null or absent means no dependencies', () => {
     const steps = [{ id: 'A', files: ['a'], depends_on: null }, { id: 'B', files: ['b'] }];
     assert.deepEqual(structuredClone(lib.computeWave(steps, [])), { ok: true, all_done: false, wave: ['A', 'B'], remaining: 2 });
-    await assertParity('depends_on null', ledgerWithDone(steps, []));
+    assertExpected('rule-depends-on-null', 'depends_on null', ledgerWithDone(steps, []));
   });
-  test('done ids that are not step ids, or not strings, are ignored', async () => {
+  test('done ids that are not step ids, or not strings, are ignored', () => {
     assert.deepEqual(structuredClone(lib.computeWave(chain, ['STEP-001', 'STEP-777', 5, null])), { ok: true, all_done: false, wave: ['STEP-002'], remaining: 1 });
-    await assertParity('foreign done ids', ledgerWithDone(chain, ['STEP-001', 'STEP-777', 5]));
+    assertExpected('rule-foreign-done-ids', 'foreign done ids', ledgerWithDone(chain, ['STEP-001', 'STEP-777', 5]));
   });
   test('every step done is all_done with an empty wave', () => {
     assert.deepEqual(structuredClone(lib.computeWave(chain, ['STEP-002', 'STEP-001'])), { ok: true, all_done: true, wave: [], remaining: 0 });
   });
-  test('a step may list the same file twice and still share a wave', async () => {
+  test('a step may list the same file twice and still share a wave', () => {
     const steps = [{ id: 'A', files: ['a', 'a'] }, { id: 'B', files: ['b'] }];
     assert.deepEqual(structuredClone(lib.computeWave(steps, [])).wave, ['A', 'B']);
-    await assertParity('same file twice', ledgerWithDone(steps, []));
+    assertExpected('rule-same-file-twice', 'same file twice', ledgerWithDone(steps, []));
   });
-  test('the directory prefix check counts done steps', async () => {
+  test('the directory prefix check counts done steps', () => {
     const steps = [{ id: 'A', files: ['lib/x.js'] }, { id: 'B', files: ['lib'] }, { id: 'C', files: ['docs/c.md'] }];
     assert.deepEqual(structuredClone(lib.computeWave(steps, ['A'])), { ok: true, all_done: false, wave: ['B'], remaining: 2 });
-    await assertParity('prefix over done step', ledgerWithDone(steps, ['A']));
+    assertExpected('rule-prefix-over-done-step', 'prefix over done step', ledgerWithDone(steps, ['A']));
   });
-  test('a conflicts-with-all step later in plan order waits', async () => {
+  test('a conflicts-with-all step later in plan order waits', () => {
     const steps = [{ id: 'A', files: ['a'] }, { id: 'B', files: ['src/*.ts'] }, { id: 'C', files: ['c'] }];
     assert.deepEqual(structuredClone(lib.computeWave(steps, [])).wave, ['A', 'C']);
-    await assertParity('late conflicts-with-all', ledgerWithDone(steps, []));
+    assertExpected('rule-late-conflicts-with-all', 'late conflicts-with-all', ledgerWithDone(steps, []));
   });
   test('done ids that are not an array is a problem', () => {
     const outcome = structuredClone(lib.computeWave(chain, null));
     assert.equal(outcome.ok, false);
     assert.match(outcome.problem, /done ids is not an array/);
   });
-  test('validation runs in next-wave order, with the same text in both', async () => {
-    const cases = [
-      ['missing', undefined, 'plan.steps: missing'],
-      ['null', null, 'plan.steps: missing'],
-      ['not an array', 'BAD', 'plan.steps: not an array'],
-      ['shape before empty check', [7], 'plan.steps[0]: not an object'],
-      ['null step', [null], 'plan.steps[0]: not an object'],
-      ['every step an object before any id', [{ id: 'A]' }, 7], 'plan.steps[1]: not an object'],
-      ['empty', [], 'plan.steps: empty, nothing to schedule'],
-      ['empty id', [{ id: '', files: ['a'] }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
-      ['missing id', [{ id: 'A' }, { files: ['a'] }], 'plan.steps[1].id: missing'],
-      ['null id', [{ id: null }], 'plan.steps[0].id: missing'],
-      ['non-string id', [{ id: 123 }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
-      ['ids in ascending index', [{ id: 'A]' }, { id: '' }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
-      ['every id before any depends_on', [{ id: 'A', depends_on: 'x' }, { id: 'B]' }], 'plan.steps[1].id: ' + STEP_ID_PROBLEM],
-      ['every depends_on an array before any entry', [{ id: 'A', depends_on: ['B]'] }, { id: 'B', depends_on: 'x' }], 'plan.steps[1].depends_on: not an array'],
-      ['depends_on false is present', [{ id: 'A', depends_on: false }], 'plan.steps[0].depends_on: not an array'],
-      ['null depends_on entry', [{ id: 'A', depends_on: [null] }], 'plan.steps[0].depends_on[0]: ' + STEP_ID_PROBLEM],
-      ['entries in row-major order', [{ id: 'A', depends_on: ['B', 'C]'] }, { id: 'B', depends_on: ['D]'] }], 'plan.steps[0].depends_on[1]: ' + STEP_ID_PROBLEM],
-      ['step id before duplicate', [{ id: 'A' }, { id: 'A' }, { id: 'B]' }], 'plan.steps[2].id: ' + STEP_ID_PROBLEM],
-      ['step id before unknown', [{ id: 'A', depends_on: ['Z'] }, { id: 'B', depends_on: ['Y]'] }], 'plan.steps[1].depends_on[0]: ' + STEP_ID_PROBLEM],
-      ['step id before cycle', [{ id: 'A]', depends_on: ['A]'] }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
-      ['first repeat of an earlier id', [{ id: 'A' }, { id: 'B' }, { id: 'B' }, { id: 'A' }], 'plan.steps[2].id: duplicate step id'],
-      ['duplicate before unknown', [{ id: 'A', depends_on: ['Z'] }, { id: 'A' }], 'plan.steps[1].id: duplicate step id'],
-      ['first unknown in plan order', [{ id: 'A', depends_on: ['A', 'Z'] }, { id: 'B', depends_on: ['Y'] }], 'plan.steps[0].depends_on[1]: unknown step id'],
-      ['cycle', [{ id: 'A', depends_on: ['B'] }, { id: 'B', depends_on: ['A'] }], 'dependency cycle detected among plan steps']
-    ];
-    for (const [label, steps, expectedProblem] of cases) {
+  test('validation runs in a fixed order, with fixed texts', () => {
+    for (const [label, steps, expectedProblem] of VALIDATION_CASES) {
       assert.deepEqual(structuredClone(lib.computeWave(steps, [])), { ok: false, problem: expectedProblem }, label);
       const plan = steps === undefined ? {} : { steps: steps };
-      await assertParity(label, { plan: plan, events: [] });
+      assertExpected('rule-validation-' + slugOf(label), label, { plan: plan, events: [] });
     }
   });
   test('a problem names positions only, never a model-written value', () => {
@@ -425,98 +429,73 @@ describe('computeWave rules', () => {
   });
 });
 
-describe('parity with next-wave.sh on its fixtures', { concurrency: ORACLE_CONCURRENCY }, () => {
-  const fixtureNames = readdirSync(fixturesDir).filter((name) => name.endsWith('.json')).sort();
+describe('frozen expectations for the tests/next-wave fixtures', () => {
   test('the fixture folder is not empty', () => {
     assert.ok(fixtureNames.length > 0);
   });
   for (const name of fixtureNames) {
-    test(`${name} with its own events`, async () => {
-      await assertParity(name, readFixture(name));
+    test(`${name} with its own events`, () => {
+      assertExpected(fixtureStem(name), name, readFixture(name));
     });
   }
 });
 
-describe('parity with next-wave.sh on the tools/test_next_wave.sh overrides and mutations', { concurrency: ORACLE_CONCURRENCY }, () => {
-  const linear = readFixture('ledger-linear.json');
-  const diamond = readFixture('ledger-diamond.json');
-  const replan = readFixture('ledger-replan-epoch.json');
-  const cases = [
-    ['linear wave2 advance', withEvents(linear, [completedEvent(['STEP-001'])])],
-    ['diamond wave2 fan-out', withEvents(diamond, [completedEvent(['STEP-001'])])],
-    ['diamond wave3 join union', withEvents(diamond, [completedEvent(['STEP-001']), completedEvent(['STEP-002', 'STEP-003'])])],
-    ['diamond all done', withEvents(diamond, [completedEvent(['STEP-001']), completedEvent(['STEP-002', 'STEP-003']), completedEvent(['STEP-004'])])],
-    ['replan same-epoch credit', withEvents(replan, [completedEvent(['STEP-001'], { plan_epoch: 2 })])],
-    ['bad step id', mutateFixture(linear, (ledger) => { ledger.plan.steps[0].id = 'STEP-001]'; })],
-    ['non-object step', mutateFixture(linear, (ledger) => { ledger.plan.steps[0] = ['x']; })],
-    ['non-array depends_on', mutateFixture(linear, (ledger) => { ledger.plan.steps[1].depends_on = 'BAD]'; })],
-    ['non-array plan.steps', mutateFixture(linear, (ledger) => { ledger.plan.steps = 'BAD'; })],
-    ['non-string id', mutateFixture(linear, (ledger) => { ledger.plan.steps[0].id = 123; })],
-    ['malformed event skipped', withEvents(linear, ['junk', completedEvent(['STEP-001'])])]
-  ];
-  for (const [label, ledger] of cases) {
-    test(label, async () => {
-      await assertParity(label, ledger);
+describe('frozen expectations for the override and mutation cases', () => {
+  for (const [label, ledger] of overrideCases) {
+    test(label, () => {
+      assertExpected('override-' + slugOf(label), label, ledger);
     });
   }
 });
 
-describe(`parity with next-wave.sh on a seeded corpus (seed ${SEED})`, { concurrency: ORACLE_CONCURRENCY }, () => {
-  test('the seed is a number', () => {
-    assert.ok(Number.isInteger(SEED), `WAVES_PARITY_SEED must be an integer, got ${seedText}`);
-  });
-  const corpus = Number.isInteger(SEED) ? buildCorpus(SEED) : [];
+describe(`frozen expectations for a seeded corpus (seed ${DEFAULT_SEED})`, () => {
   corpus.forEach((corpusCase, index) => {
-    test(`case ${index + 1}: ${corpusCase.name}`, async () => {
-      const oracle = await assertParity(`case ${index + 1}: ${corpusCase.name}`, corpusCase.ledger, `\nseed: ${SEED}`);
+    const label = `case ${index + 1}: ${corpusCase.name}`;
+    test(label, () => {
+      const expected = assertExpected(corpusStem(index), label, corpusCase.ledger);
       const expectOk = OK_SHAPES.includes(corpusCase.shape);
-      assert.equal(oracle.ok, expectOk, `seed ${SEED}: ${corpusCase.shape} should ${expectOk ? 'not ' : ''}block`);
+      assert.equal(expected.ok, expectOk, `seed ${DEFAULT_SEED}: ${corpusCase.shape} should ${expectOk ? 'not ' : ''}block`);
     });
   });
 });
 
-describe('parity with next-wave.sh on ids that carry a line feed, are unsafe or are oversized', () => {
-  test('an id ending in a line feed is not a step id in both', async () => {
+describe('ids that carry a line feed, are unsafe or are oversized', () => {
+  function assertWaveOutcome(label, ledger, expectedOutcome) {
+    assert.deepEqual(runSubject(stageLedger(ledger)), expectedOutcome, label);
+  }
+  test('an id ending in a line feed is not a step id', () => {
     const cases = [
       ['trailing line feed id', [{ id: 'STEP-001\n', files: ['src/a.ts'] }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
       ['trailing line feed dependency', [{ id: 'STEP-001', files: ['src/a.ts'] }, { id: 'STEP-002', files: ['src/b.ts'], depends_on: ['STEP-001\n'] }], 'plan.steps[1].depends_on[0]: ' + STEP_ID_PROBLEM]
     ];
     for (const [label, steps, expectedProblem] of cases) {
-      const oracle = await assertParity(label, { plan: { steps: steps }, events: [] });
-      assert.deepEqual(oracle, { ok: false, problem: expectedProblem }, label);
+      assertWaveOutcome(label, { plan: { steps: steps }, events: [] }, { ok: false, problem: expectedProblem });
     }
   });
-  test('an unsafe duplicate or unknown id is not a step id in both, on one line', async () => {
+  test('an unsafe duplicate or unknown id is not a step id, on one line', () => {
     const hostile = 'A\nforged: x\r\u001b[2J';
     const cases = [
       ['unsafe duplicate', [{ id: hostile }, { id: hostile }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
       ['unsafe unknown dependency', [{ id: 'A', depends_on: [hostile] }], 'plan.steps[0].depends_on[0]: ' + STEP_ID_PROBLEM]
     ];
     for (const [label, steps, expectedProblem] of cases) {
-      const oracle = await assertParity(label, { plan: { steps: steps }, events: [] });
-      assert.deepEqual(oracle, { ok: false, problem: expectedProblem }, label);
+      assertWaveOutcome(label, { plan: { steps: steps }, events: [] }, { ok: false, problem: expectedProblem });
     }
   });
-  test('a 65-char and a 5000-char id give the same bounded problem in both', async () => {
+  test('a 65-char and a 5000-char id give the same bounded problem', () => {
     for (const [where, buildSteps, expectedProblem] of [
       ['id', (longId) => [{ id: longId }, { id: longId }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
       ['dependency', (longId) => [{ id: 'A', depends_on: [longId] }], 'plan.steps[0].depends_on[0]: ' + STEP_ID_PROBLEM]
     ]) {
       for (const longId of ['Z'.repeat(65), 'S'.repeat(5000)]) {
         const label = `${longId.length}-char ${where}`;
-        const ledger = { plan: { steps: buildSteps(longId) }, events: [] };
-        const oracle = await assertParity(label, ledger);
-        assert.deepEqual(oracle, { ok: false, problem: expectedProblem }, label);
-        const raw = await runOracleRaw(ledger);
-        assert.equal(raw.stderr, 'blocker: ' + expectedProblem + '\n', label);
-        assert.ok(Buffer.byteLength(raw.stderr) <= 200, `${label}: ${Buffer.byteLength(raw.stderr)} bytes`);
+        assertWaveOutcome(label, { plan: { steps: buildSteps(longId) }, events: [] }, { ok: false, problem: expectedProblem });
       }
     }
   });
-  test('a 64-char id is a step id in both', async () => {
+  test('a 64-char id is a step id', () => {
     const steps = [{ id: 'Z'.repeat(64), files: ['src/a.ts'] }];
-    const oracle = await assertParity('64-char id', { plan: { steps: steps }, events: [] });
-    assert.deepEqual(oracle, { ok: true, all_done: false, wave: ['Z'.repeat(64)], remaining: 1 });
+    assertWaveOutcome('64-char id', { plan: { steps: steps }, events: [] }, { ok: true, all_done: false, wave: ['Z'.repeat(64)], remaining: 1 });
   });
 });
 
@@ -529,9 +508,10 @@ describe('waves.js is a plain workflow lib', () => {
     assert.doesNotMatch(source, /\u2014/);
     assert.doesNotMatch(source, /#\d/);
   });
-  test('opens with a contract header that names its parity oracle', () => {
+  test('opens with a contract header that names its frozen expectations', () => {
     assert.match(source, /^\/\*\n \* [a-z]+\.js: [\s\S]*?\n \* Inputs\n[\s\S]*?\n \* Outputs\n[\s\S]*?\n \* Invariants\n[\s\S]*?\n \* Why\n[\s\S]*?\*\//);
-    assert.match(source, /plugin\/skills\/next-wave\/scripts\/next-wave\.sh/);
+    assert.match(source, /tests\/next-wave\/expected\//);
+    assert.doesNotMatch(source, /next-wave\.sh/);
   });
   test('declares only top-level functions', () => {
     assert.doesNotMatch(source, /^(const|let|var|class)\s/m);

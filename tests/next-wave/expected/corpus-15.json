@@ -1,0 +1,11 @@
+{
+  "case": "case 15: empty string file on two chains",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-001"
+    ],
+    "remaining": 2
+  }
+}

@@ -56,21 +56,6 @@
   },
   {
     "rule": "CHECK13",
-    "path": "plugin/skills/init-run-ledger/scripts/init-run-ledger.sh",
-    "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — hivemind_check_json contract checks (rc 1 on a contract break), the hivemind_is_safe_id run-id check and `[ -e ] && blocker` value-tests return non-zero in normal flow; failures route through blocker() with explicit exit codes; an EXIT trap performs invocation-owned cleanup."
-  },
-  {
-    "rule": "CHECK13",
-    "path": "plugin/skills/mark-intent-fallback/scripts/mark-intent-fallback.sh",
-    "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — hivemind_check_json contract checks (rc 1 on a contract break), the reader and ledger-open return codes, and the `jq -e` run.status closeout probe return non-zero in normal flow; each status and `[ ]` test gates blocker() with explicit exit codes."
-  },
-  {
-    "rule": "CHECK13",
-    "path": "plugin/skills/record-state-result/scripts/record-state-result.sh",
-    "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — `jq -e has(...)` key-presence probes return non-zero in the normal absent-key flow; transition/binding validation routes through blocker() with explicit exit codes (ledger left byte-unchanged)."
-  },
-  {
-    "rule": "CHECK13",
     "path": "plugin/skills/spawn-brood/scripts/spawn-brood.sh",
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — per-strain failures are caught (`if ! git worktree add`) and routed to the failed-strain path so the manifest still records the partial brood; INT/TERM trap reports leaked resources."
   },
@@ -83,11 +68,6 @@
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/allowlist.sh",
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure value-class validators that return non-zero on reject; callers own set -u and error routing."
-  },
-  {
-    "rule": "CHECK13",
-    "path": "plugin/skills/_shared/ledger-project.sh",
-    "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure projection emitting validated values or MISSING/MALFORMED tokens; callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",
@@ -128,11 +108,6 @@
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/review-surface-shape.sh",
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure review-activity skeleton shape predicate (single GraphQL response body check) that prints one failure token and returns non-zero, never exits; callers own set -u and error routing."
-  },
-  {
-    "rule": "CHECK13",
-    "path": "plugin/skills/_shared/ledger-engine-io.sh",
-    "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Inputs-bootstrap + ledger-read/containment-orchestration readers (hivemind_read_inputs_file + hivemind_open_ledger) plus the whole-file JSON contract check (hivemind_check_json) and the whole-string argv safe-id predicate (hivemind_is_safe_id); functions return non-zero on failure (with a message on stdout or stderr per their contracts) and NEVER call exit; callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",

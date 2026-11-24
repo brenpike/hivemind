@@ -1,0 +1,7 @@
+{
+  "case": "depends_on false is present",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps[0].depends_on: not an array"
+  }
+}

@@ -6,9 +6,8 @@
 # sourced libraries the brood-status-project.sh entrypoint composes:
 #   - plugin/skills/_shared/allowlist.sh      (identifier / path / presentation)
 #   - plugin/skills/_shared/manifest-json.sh  (content-snapshot shape / count / field_at)
-#   - plugin/skills/_shared/ledger-project.sh (hivemind_project_run_status_content / _state_current_content)
 #   - plugin/skills/_shared/brood-state.sh    (the only reader of brood state: listing, manifest,
-#                                              child ledger, facts evidence, facts guard)
+#                                              facts evidence, facts guard)
 #
 # Each lib is SOURCED (these are sourced fragments, not executables) and its functions called
 # directly. Mirrors tools/test_brood_compat.sh's pass/fail counter + exit-nonzero-on-failure
@@ -25,8 +24,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 . "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 SHARED_DIR="$REPO_ROOT/plugin/skills/_shared"
-FIX_DIR="$REPO_ROOT/tests/brood"
-LEDGER_PRESENT="$FIX_DIR/child-ledger-present.json"
 
 CLASSIFY_FILTER="$REPO_ROOT/plugin/skills/github-review-loop/scripts/fix-history-classify.jq"
 FN_REVIEW_HANDLED="$REPO_ROOT/tests/fix-history/case01-handled-by-marker.json"
@@ -36,12 +33,11 @@ FN_EXPECTED_CI="$REPO_ROOT/tests/fetch-normalize/expected/ci-only.json"
 FN_OVERFLOW_THREADS="$REPO_ROOT/tests/fetch-normalize/overflow-threads.json"
 FN_MALFORMED="$REPO_ROOT/tests/fetch-normalize/malformed.json"
 
-for required in "$LEDGER_PRESENT" \
-                "$SHARED_DIR/allowlist.sh" "$SHARED_DIR/manifest-json.sh" "$SHARED_DIR/ledger-project.sh" \
+for required in "$SHARED_DIR/allowlist.sh" "$SHARED_DIR/manifest-json.sh" \
                 "$SHARED_DIR/brood-status-derive.sh" "$SHARED_DIR/containment.sh" \
                 "$SHARED_DIR/brood-state.sh" \
                 "$SHARED_DIR/ledger-reconstruct-parse.sh" "$SHARED_DIR/ledger-reconstruct-fold.sh" \
-                "$SHARED_DIR/fetch-normalize-core.sh" "$SHARED_DIR/ledger-engine-io.sh" \
+                "$SHARED_DIR/fetch-normalize-core.sh" \
                 "$SHARED_DIR/json-normalize.sh" \
                 "$SHARED_DIR/settings-merge.sh" "$SHARED_DIR/claude-mem-path.sh" \
                 "$SHARED_DIR/file-guard.sh" "$SHARED_DIR/test-detect.sh" \
@@ -60,14 +56,11 @@ command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite"
 # shellcheck source=/dev/null
 . "$SHARED_DIR/manifest-json.sh"
 # shellcheck source=/dev/null
-. "$SHARED_DIR/ledger-project.sh"
-# shellcheck source=/dev/null
 . "$SHARED_DIR/brood-status-derive.sh"
 # shellcheck source=/dev/null
 . "$SHARED_DIR/containment.sh"
-# brood-state.sh resolves roots with containment.sh hivemind_canon_root and projects child
-# ledgers with the ledger-project.sh content projectors; both are sourced above, satisfying its
-# caller contract before this source line.
+# brood-state.sh resolves roots with containment.sh hivemind_canon_root; containment.sh is sourced
+# above, satisfying its caller contract before this source line.
 # shellcheck source=/dev/null
 . "$SHARED_DIR/brood-state.sh"
 # shellcheck source=/dev/null
@@ -76,11 +69,6 @@ command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite"
 . "$SHARED_DIR/ledger-reconstruct-fold.sh"
 # shellcheck source=/dev/null
 . "$SHARED_DIR/fetch-normalize-core.sh"
-# ledger-engine-io.sh ORCHESTRATES the containment.sh helpers at call time and does NOT source
-# them itself — containment.sh is sourced above (L58), satisfying the dependency contract before
-# this source line.
-# shellcheck source=/dev/null
-. "$SHARED_DIR/ledger-engine-io.sh"
 # json-normalize.sh supplies the canon_obj/canon_arr container-shape def text that settings-merge.sh
 # splices into its jq program; settings-merge.sh SOURCE-OR-DIE-sources it transitively, but the
 # harness lists every lib under test explicitly (presence checked in the required-libs preamble), so
@@ -94,7 +82,7 @@ command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite"
 # shellcheck source=/dev/null
 . "$SHARED_DIR/file-guard.sh"
 # test-detect.sh DELEGATES the `## Validation` append to file-guard.sh's
-# hivemind_guard_validation_section; file-guard.sh is sourced above (L77), satisfying that
+# hivemind_guard_validation_section; file-guard.sh is sourced above (L83), satisfying that
 # dependency before this source line.
 # shellcheck source=/dev/null
 . "$SHARED_DIR/test-detect.sh"
@@ -454,214 +442,6 @@ assert_eq "snapshot:v3-field-ledger" "/repo/.claude/worktrees/api/.hivemind/runs
 # An object element missing `name`/run fields → field_at yields empty (// empty), never an error.
 assert_eq "snapshot:objnoname-field" "" \
   "$(hivemind_manifest_field_at '{"strains":[{}]}' 0 "branch")" "field_at on fieldless object → empty"
-
-# ── Section 3: ledger-project.sh ────────────────────────────────────────────────
-echo ''
-echo '=== ledger-project.sh: hivemind_project_run_status_content / hivemind_project_state_current_content ==='
-#
-# ledger-project.sh is pure projection over a content snapshot; the file reads (absent,
-# unreadable, NUL-bearing ledgers) are covered through hivemind_brood_read_child_ledger in 3b.
-
-# Valid fixture: status=running, state.current=implement_step.
-LEDGER_PRESENT_CONTENT="$(cat "$LEDGER_PRESENT")"
-assert_eq "ledger:valid-status" "running" \
-  "$(hivemind_project_run_status_content "$LEDGER_PRESENT_CONTENT")" "valid run.status from fixture"
-assert_eq "ledger:valid-state" "implement_step" \
-  "$(hivemind_project_state_current_content "$LEDGER_PRESENT_CONTENT")" "valid state.current from fixture"
-
-# status outside the enum → MALFORMED.
-bad_status='{"run":{"status":"frobnicate"},"state":{"current":"plan"}}'
-assert_eq "ledger:status-out-of-enum" "MALFORMED" \
-  "$(hivemind_project_run_status_content "$bad_status")" "status outside enum"
-# ...but the state.current in the SAME content is good → per-scalar independence.
-assert_eq "ledger:independence-state-good" "plan" \
-  "$(hivemind_project_state_current_content "$bad_status")" "good state.current despite bad status (independence)"
-
-# state.current with uppercase / space / metachars → MALFORMED; run.status good → independence.
-for bad_state in "Implement_Step" "implement step" "x\$(touch /tmp/should-not-run)"; do
-  bad_state_content="$(jq -n -c --arg s "$bad_state" '{run:{status:"running"},state:{current:$s}}')"
-  assert_eq "ledger:state-malformed" "MALFORMED" \
-    "$(hivemind_project_state_current_content "$bad_state_content")" "malformed state '$bad_state'"
-  assert_eq "ledger:independence-status-good" "running" \
-    "$(hivemind_project_run_status_content "$bad_state_content")" "good run.status despite bad state (independence)"
-done
-
-# state.current > 64 chars → MALFORMED (even though all-lowercase a-z0-9_).
-long_val="$(printf 'a%.0s' $(seq 1 65))"   # 65 lowercase 'a' chars
-long_state="$(jq -n -c --arg s "$long_val" '{run:{status:"complete"},state:{current:$s}}')"
-assert_eq "ledger:state-too-long" "MALFORMED" \
-  "$(hivemind_project_state_current_content "$long_state")" "state.current 65 chars (>64 cap)"
-# Exactly 64 chars must PASS (boundary).
-ok_val="$(printf 'a%.0s' $(seq 1 64))"
-ok_state="$(jq -n -c --arg s "$ok_val" '{run:{status:"complete"},state:{current:$s}}')"
-assert_eq "ledger:state-64-ok" "$ok_val" \
-  "$(hivemind_project_state_current_content "$ok_state")" "state.current exactly 64 chars passes"
-
-# Empty content → MISSING for both scalars.
-assert_eq "ledger:empty-content-status" "MISSING" \
-  "$(hivemind_project_run_status_content "")" "empty content run.status"
-assert_eq "ledger:empty-content-state" "MISSING" \
-  "$(hivemind_project_state_current_content "")" "empty content state.current"
-
-# Field present in a parseable document but empty/absent → MISSING (distinct from MALFORMED).
-empty_fields='{"run":{},"state":{}}'
-assert_eq "ledger:empty-status" "MISSING" \
-  "$(hivemind_project_run_status_content "$empty_fields")" "absent run.status field → MISSING"
-assert_eq "ledger:empty-state" "MISSING" \
-  "$(hivemind_project_state_current_content "$empty_fields")" "absent state.current field → MISSING"
-
-# Unparseable / torn JSON → MALFORMED for both scalars.
-torn='{"run":{"status":"run'
-assert_eq "ledger:torn-status" "MALFORMED" \
-  "$(hivemind_project_run_status_content "$torn")" "torn JSON run.status"
-assert_eq "ledger:torn-state" "MALFORMED" \
-  "$(hivemind_project_state_current_content "$torn")" "torn JSON state.current"
-
-# Each enum value round-trips.
-for st in running complete blocked cancelled; do
-  enum_content="$(printf '{"run":{"status":"%s"},"state":{"current":"plan"}}' "$st")"
-  assert_eq "ledger:enum-$st" "$st" \
-    "$(hivemind_project_run_status_content "$enum_content")" "enum value $st"
-done
-
-# ── Section 3b: hivemind_brood_read_child_ledger — two-line child-ledger read ────
-echo ''
-echo '=== brood-state.sh: hivemind_brood_read_child_ledger (two-line child-ledger read) ==='
-#
-# The child-ledger reader takes a worktree root and a run id, tests each component of
-# .hivemind/runs/<run_id> and reads state.json once. Each case builds a real temp worktree under
-# WORKDIR and asserts the two-line output (line1=state.current, line2=run.status).
-RCL_RUN_ID="2026-01-01T00-00-00Z--test"
-RCL_LEDGER='{"state":{"current":"implement_step"},"run":{"status":"running"}}'
-
-# assert_child_ledger <case> <worktree_root> <run_id> <expected_state> <expected_status> <msg>
-assert_child_ledger() {
-  local case_name="$1" ledger_wt="$2" ledger_run_id="$3" expected_state="$4" expected_status="$5" msg="$6"
-  local rcl_output rcl_state rcl_status
-  rcl_output="$(hivemind_brood_read_child_ledger "$ledger_wt" "$ledger_run_id" 2>/dev/null)"
-  rcl_state="$(sed -n 1p <<<"$rcl_output")"
-  rcl_status="$(sed -n 2p <<<"$rcl_output")"
-  assert_eq "$case_name-lines" "2" "$(wc -l <<<"$rcl_output" | tr -d ' ')" "$msg: exactly two lines"
-  assert_eq "$case_name-state" "$expected_state" "$rcl_state" "$msg: line1 = state.current"
-  assert_eq "$case_name-status" "$expected_status" "$rcl_status" "$msg: line2 = run.status"
-}
-
-# make_child_ledger <worktree_root>: a real chain holding RCL_LEDGER at the leaf.
-make_child_ledger() {
-  local ledger_wt="$1"
-  mkdir -p "$ledger_wt/.hivemind/runs/$RCL_RUN_ID"
-  printf '%s\n' "$RCL_LEDGER" > "$ledger_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
-}
-
-# 3b-1: valid ledger — both scalars present and well-formed.
-rcl1_wt="$WORKDIR/rcl1/checkout"
-make_child_ledger "$rcl1_wt"
-assert_child_ledger "rcl:valid" "$rcl1_wt" "$RCL_RUN_ID" "implement_step" "running" "valid ledger"
-
-# 3b-2: absent leaf and absent chain components → MISSING / MISSING.
-rcl2_wt="$WORKDIR/rcl2/checkout"
-mkdir -p "$rcl2_wt"
-assert_child_ledger "rcl:absent-hivemind" "$rcl2_wt" "$RCL_RUN_ID" "MISSING" "MISSING" "absent .hivemind"
-mkdir -p "$rcl2_wt/.hivemind"
-assert_child_ledger "rcl:absent-runs" "$rcl2_wt" "$RCL_RUN_ID" "MISSING" "MISSING" "absent runs"
-mkdir -p "$rcl2_wt/.hivemind/runs"
-assert_child_ledger "rcl:absent-run-dir" "$rcl2_wt" "$RCL_RUN_ID" "MISSING" "MISSING" "absent run dir"
-mkdir -p "$rcl2_wt/.hivemind/runs/$RCL_RUN_ID"
-assert_child_ledger "rcl:absent-leaf" "$rcl2_wt" "$RCL_RUN_ID" "MISSING" "MISSING" "absent leaf"
-
-# 3b-3: symlinked leaf (live, then dangling) → MALFORMED / MALFORMED, never followed.
-rcl3_wt="$WORKDIR/rcl3/checkout"
-rcl3_ext="$WORKDIR/rcl3/external"
-mkdir -p "$rcl3_wt/.hivemind/runs/$RCL_RUN_ID" "$rcl3_ext"
-printf '%s\n' "$RCL_LEDGER" > "$rcl3_ext/real-state.json"
-ln -s "$rcl3_ext/real-state.json" "$rcl3_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
-assert_child_ledger "rcl:symlink-leaf" "$rcl3_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "symlinked leaf"
-rm -f "$rcl3_ext/real-state.json"
-assert_child_ledger "rcl:dangling-leaf" "$rcl3_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "dangling symlinked leaf"
-
-# 3b-4: NUL-bearing ledger — a literal NUL in the middle, and a trailing NUL with no newline.
-# Refused from the one read (tr maps the NUL before any capture).
-rcl4_wt="$WORKDIR/rcl4/checkout"
-mkdir -p "$rcl4_wt/.hivemind/runs/$RCL_RUN_ID"
-printf '{"state":{"current":"implement_step"},\000"run":{"status":"running"}}\n' \
-  > "$rcl4_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
-assert_child_ledger "rcl:nul-mid" "$rcl4_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "NUL in the middle"
-printf '%s\000' "$RCL_LEDGER" > "$rcl4_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
-assert_child_ledger "rcl:nul-end" "$rcl4_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "trailing NUL, no newline"
-
-# 3b-5: symlinked ancestor at each level → MALFORMED / MALFORMED. Each symlink points at an
-# external tree holding a valid ledger, so following it would project real values.
-for rcl_level in hivemind runs run_dir; do
-  rcl5_wt="$WORKDIR/rcl5-$rcl_level/checkout"
-  rcl5_ext="$WORKDIR/rcl5-$rcl_level/external"
-  make_child_ledger "$rcl5_ext"
-  mkdir -p "$rcl5_wt"
-  case "$rcl_level" in
-    hivemind) ln -s "$rcl5_ext/.hivemind" "$rcl5_wt/.hivemind" ;;
-    runs)
-      mkdir -p "$rcl5_wt/.hivemind"
-      ln -s "$rcl5_ext/.hivemind/runs" "$rcl5_wt/.hivemind/runs" ;;
-    run_dir)
-      mkdir -p "$rcl5_wt/.hivemind/runs"
-      ln -s "$rcl5_ext/.hivemind/runs/$RCL_RUN_ID" "$rcl5_wt/.hivemind/runs/$RCL_RUN_ID" ;;
-  esac
-  assert_child_ledger "rcl:symlink-$rcl_level" "$rcl5_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "symlinked $rcl_level ancestor"
-done
-
-# 3b-6: non-directory ancestor at each level → MALFORMED / MALFORMED.
-for rcl_level in hivemind runs run_dir; do
-  rcl6_wt="$WORKDIR/rcl6-$rcl_level/checkout"
-  mkdir -p "$rcl6_wt"
-  case "$rcl_level" in
-    hivemind) printf 'x\n' > "$rcl6_wt/.hivemind" ;;
-    runs)
-      mkdir -p "$rcl6_wt/.hivemind"
-      printf 'x\n' > "$rcl6_wt/.hivemind/runs" ;;
-    run_dir)
-      mkdir -p "$rcl6_wt/.hivemind/runs"
-      printf 'x\n' > "$rcl6_wt/.hivemind/runs/$RCL_RUN_ID" ;;
-  esac
-  assert_child_ledger "rcl:nondir-$rcl_level" "$rcl6_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "non-directory $rcl_level ancestor"
-done
-
-# 3b-7: a DIRECTORY at the leaf, a multi-document ledger, invalid JSON and an empty file are all
-# present but unreadable → MALFORMED / MALFORMED.
-rcl7_wt="$WORKDIR/rcl7/checkout"
-mkdir -p "$rcl7_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
-assert_child_ledger "rcl:dir-leaf" "$rcl7_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "directory leaf"
-rcl8_wt="$WORKDIR/rcl8/checkout"
-make_child_ledger "$rcl8_wt"
-printf '%s\n%s\n' "$RCL_LEDGER" "$RCL_LEDGER" > "$rcl8_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
-assert_child_ledger "rcl:multi-doc" "$rcl8_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "two concatenated documents"
-printf '{"run":{"status":"run\n' > "$rcl8_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
-assert_child_ledger "rcl:invalid-json" "$rcl8_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "invalid JSON"
-: > "$rcl8_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
-assert_child_ledger "rcl:empty-file" "$rcl8_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "empty file (zero documents)"
-
-# 3b-8: present-but-unreadable leaf (mode 000) → MALFORMED, never MISSING. mode 000 does not
-# restrict root, so guard the assertion.
-if [ "$(id -u)" -ne 0 ]; then
-  rcl9_wt="$WORKDIR/rcl9/checkout"
-  make_child_ledger "$rcl9_wt"
-  chmod 000 "$rcl9_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
-  assert_child_ledger "rcl:unreadable" "$rcl9_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "mode-000 leaf"
-  chmod 644 "$rcl9_wt/.hivemind/runs/$RCL_RUN_ID/state.json" 2>/dev/null || true
-fi
-
-# 3b-9: unsafe run ids and an unresolvable worktree root → MALFORMED / MALFORMED. The ".." id
-# would otherwise reach a valid ledger one level up.
-for rcl_bad_id in "" "." ".." "a/b" "../$RCL_RUN_ID"; do
-  assert_child_ledger "rcl:bad-run-id" "$rcl1_wt" "$rcl_bad_id" "MALFORMED" "MALFORMED" "unsafe run id '$rcl_bad_id'"
-done
-assert_child_ledger "rcl:no-worktree" "$WORKDIR/rcl-absent/checkout" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "unresolvable worktree root"
-
-# 3b-10: a validated value never leaks raw content: a hostile state.current stays MALFORMED while
-# run.status projects on its own merit.
-rcl10_wt="$WORKDIR/rcl10/checkout"
-make_child_ledger "$rcl10_wt"
-printf '{"state":{"current":"x$(touch /tmp/pwn)"},"run":{"status":"blocked"}}\n' \
-  > "$rcl10_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
-assert_child_ledger "rcl:hostile-state" "$rcl10_wt" "$RCL_RUN_ID" "MALFORMED" "blocked" "hostile state.current"
 
 # ── Section 3c: hivemind_detect_facts_evidence — script-engine started-evidence ────
 echo ''
@@ -1037,19 +817,16 @@ echo '=== NUL + control-byte + single-document (Codex #172 root cluster) ==='
 #
 # ROOT (documented at each fix site): bash command substitution `$(...)` SILENTLY STRIPS NUL
 # bytes, so a value validated AFTER a `$(...)` round-trip differs from what jq produced. Defended
-# at TWO layers: (1) FILE-LEVEL — brood-state.sh refuses any manifest/ledger holding a LITERAL NUL
-# or raw control byte from its one read, before any capture can erase it (Sections 3b and 3d);
+# at TWO layers: (1) FILE-LEVEL — brood-state.sh refuses any manifest holding a LITERAL NUL
+# or raw control byte from its one read, before any capture can erase it (Section 3d);
 # (2) SCALAR-LEVEL — every jq field projection whose output bash consumes rejects a value
 # containing ANY C0 control byte INSIDE jq (so a JSON ` ` escape jq -r would decode to a real NUL
 # is caught while the bytes are intact). Plus: jq accepts a STREAM of documents, so shape
 # validation now requires EXACTLY ONE document.
 
-# ── 4a/4b. File-level: a literal NUL is refused from the one read (both readers) ──
+# ── 4a/4b. File-level: a literal NUL is refused from the one read ──
 nul_root="$WORKDIR/nul4/checkout"
-mkdir -p "$nul_root/.hivemind/runs/run-nul" "$nul_root/.hivemind/broods/brood-0f"
-printf '{"run":{"status":"running"},"state":{"current":"plan"}}\000' > "$nul_root/.hivemind/runs/run-nul/state.json"
-assert_eq "nul:ledger-literal" "$(printf 'MALFORMED\nMALFORMED')" \
-  "$(hivemind_brood_read_child_ledger "$nul_root" run-nul)" "literal-NUL ledger → MALFORMED / MALFORMED"
+mkdir -p "$nul_root/.hivemind/broods/brood-0f"
 printf '{"strains":[]}\000\n' > "$nul_root/.hivemind/broods/brood-0f/manifest.json"
 hivemind_brood_read_manifest "$nul_root" brood-0f >/dev/null 2>&1
 assert_eq "nul:manifest-literal" "5" "$?" "literal-NUL manifest → 5 (unreadable)"
@@ -1070,10 +847,6 @@ assert_eq "scalar:clean-branch-projects" "feature/api-slice" \
 tabesc_content="$(printf '%s' '{"strains":[{"name":"api","branch":"feat\u0009x","worktree_path":"/repo/wt","status":"running"}]}')"
 assert_eq "scalar:tab-escape-branch-empty" "" \
   "$(hivemind_manifest_field_at "$tabesc_content" 0 "branch")" "JSON \\u0009 (TAB) escape in branch → field_at empty"
-# A scalar NUL escape in a ledger state.current → MALFORMED (the in-jq charset gate sees it intact).
-nulesc_state="$(printf '%s' '{"run":{"status":"running"},"state":{"current":"impl\u0000ement"}}')"
-assert_eq "scalar:nul-escape-state-malformed" "MALFORMED" \
-  "$(hivemind_project_state_current_content "$nulesc_state")" "JSON \\u0000 escape in state.current → MALFORMED"
 
 # ── 4d. Single-document discipline: a multi-document file FAILS shape validation ──
 # jq accepts a STREAM of concatenated JSON documents; shape validation must require EXACTLY ONE.
@@ -1098,7 +871,7 @@ assert_eq "multidoc:single-field" "feature/api-slice" \
 
 # ── Section 5: #168 brood-namespacing + #178 hardening contract regressions ──────
 echo ''
-echo '=== #168/#178: floor-only path class + content projectors + field_at exit-code contract ==='
+echo '=== #168/#178: floor-only path class + field_at exit-code contract ==='
 
 # ── 5a. path class is FLOOR-ONLY (#177/#168): formerly-rejected inert bytes now PASS ──
 # allowlist.sh hivemind_assert_path is the FLOOR-ONLY class: any byte that survives the shared
@@ -1139,29 +912,6 @@ if hivemind_assert_presentation 'api|web'; then
 else
   pass "pres:pipe-rejected" "presentation rejects '|' by construction"
 fi
-
-# ── 5b. #178 F1: content projectors require EXACTLY ONE document ──────────────────
-# The _content projectors SLURP and require length==1. TWO concatenated valid ledger objects →
-# MALFORMED (both run.status + state.current), because the embedded newline of a two-document
-# emission would corrupt the one-line STRAIN frame. Single valid → value. Empty → MISSING.
-two_ledgers="$(printf '%s\n%s\n' \
-  '{"run":{"status":"running"},"state":{"current":"plan"}}' \
-  '{"run":{"status":"complete"},"state":{"current":"review"}}')"
-assert_eq "f1:multidoc-run-status" "MALFORMED" \
-  "$(hivemind_project_run_status_content "$two_ledgers")" "two concatenated ledger docs → run.status MALFORMED"
-assert_eq "f1:multidoc-state-current" "MALFORMED" \
-  "$(hivemind_project_state_current_content "$two_ledgers")" "two concatenated ledger docs → state.current MALFORMED"
-# A SINGLE valid document still projects its scalars (regression guard for the slurp predicate).
-one_ledger='{"run":{"status":"blocked"},"state":{"current":"implement_step"}}'
-assert_eq "f1:single-run-status" "blocked" \
-  "$(hivemind_project_run_status_content "$one_ledger")" "single ledger doc → run.status value"
-assert_eq "f1:single-state-current" "implement_step" \
-  "$(hivemind_project_state_current_content "$one_ledger")" "single ledger doc → state.current value"
-# Empty content → MISSING (nothing to report), for both scalars.
-assert_eq "f1:empty-run-status" "MISSING" \
-  "$(hivemind_project_run_status_content "")" "empty content → run.status MISSING"
-assert_eq "f1:empty-state-current" "MISSING" \
-  "$(hivemind_project_state_current_content "")" "empty content → state.current MISSING"
 
 # ── 5c. #178 F3: non-string manifest scalars → field_at exit 2 (MALFORMED), NOT coerced ──
 # Every supported manifest field is a STRING in a well-formed manifest. A present NON-STRING scalar
@@ -1643,67 +1393,6 @@ else
   failed "c7c:dangling-symlinked-leaf-reject" "inputs: dangling symlinked leaf must reject; got return 0"
 fi
 assert_eq "c7c:dangling-symlinked-leaf-empty-stdout" "" "$c7c6_out" "inputs: dangling symlinked leaf → empty stdout"
-
-# ── 7d. hivemind_assert_ledger_contained — symlinked-ledger-leaf read-guard ──────
-# 7d-1: real regular-file ledger inside the checkout .hivemind/runs/<id>/ → accept.
-c7d1="$WORKDIR/c7d1/checkout"
-mkdir -p "$c7d1/.hivemind/runs/run-1"
-c7d1_root="$(canon_dir "$c7d1")"
-c7d1_ledger="$c7d1/.hivemind/runs/run-1/state.json"
-: > "$c7d1_ledger"
-c7d1_out="$(hivemind_assert_ledger_contained "$c7d1" "$c7d1_ledger")"
-c7d1_rc=$?
-assert_eq "c7d:real-ledger-rc" "0" "$c7d1_rc" "ledger: real regular-file ledger inside checkout → return 0"
-assert_eq "c7d:real-ledger-root" "$c7d1_root" "$c7d1_out" "ledger: real ledger → canonical root"
-
-# 7d-2: ledger LEAF is a symlink to an external target → reject (leaf read oracle closed).
-# Every dir component is contained; only the leaf symlink ([ -L ] fires) escapes.
-c7d2="$WORKDIR/c7d2/checkout"
-c7d2_ext="$WORKDIR/c7d2/external"
-mkdir -p "$c7d2/.hivemind/runs/run-1" "$c7d2_ext"
-: > "$c7d2_ext/secret.json"
-c7d2_ledger="$c7d2/.hivemind/runs/run-1/state.json"
-ln -s "$c7d2_ext/secret.json" "$c7d2_ledger"
-c7d2_out="$(hivemind_assert_ledger_contained "$c7d2" "$c7d2_ledger" 2>/dev/null)"
-c7d2_rc=$?
-if [ "$c7d2_rc" -ne 0 ]; then
-  pass "c7d:symlinked-leaf-reject" "ledger: symlinked leaf → non-zero return"
-else
-  failed "c7d:symlinked-leaf-reject" "ledger: symlinked leaf must reject; got return 0"
-fi
-assert_eq "c7d:symlinked-leaf-empty-stdout" "" "$c7d2_out" "ledger: symlinked leaf → empty stdout"
-
-# 7d-3: ledger LEAF is a DANGLING symlink (target does not exist) → still reject.
-# Proves [ -L ] fires regardless of target existence.
-c7d3="$WORKDIR/c7d3/checkout"
-c7d3_ext="$WORKDIR/c7d3/external"
-mkdir -p "$c7d3/.hivemind/runs/run-1" "$c7d3_ext"
-c7d3_ledger="$c7d3/.hivemind/runs/run-1/state.json"
-ln -s "$c7d3_ext/missing.json" "$c7d3_ledger"
-c7d3_out="$(hivemind_assert_ledger_contained "$c7d3" "$c7d3_ledger" 2>/dev/null)"
-c7d3_rc=$?
-if [ "$c7d3_rc" -ne 0 ]; then
-  pass "c7d:dangling-symlinked-leaf-reject" "ledger: dangling symlinked leaf → non-zero return"
-else
-  failed "c7d:dangling-symlinked-leaf-reject" "ledger: dangling symlinked leaf must reject; got return 0"
-fi
-assert_eq "c7d:dangling-symlinked-leaf-empty-stdout" "" "$c7d3_out" "ledger: dangling symlinked leaf → empty stdout"
-
-# 7d-4: ledger ANCESTOR is a symlink resolving outside the checkout → reject.
-# The runs/<id> dir is reached through a symlinked .hivemind that escapes the root.
-c7d4="$WORKDIR/c7d4/checkout"
-c7d4_ext="$WORKDIR/c7d4/external"
-mkdir -p "$c7d4" "$c7d4_ext/runs/run-1"
-ln -s "$c7d4_ext" "$c7d4/.hivemind"
-c7d4_ledger="$c7d4/.hivemind/runs/run-1/state.json"
-: > "$c7d4_ledger"
-c7d4_out="$(hivemind_assert_ledger_contained "$c7d4" "$c7d4_ledger" 2>/dev/null)"
-c7d4_rc=$?
-if [ "$c7d4_rc" -ne 0 ]; then
-  pass "c7d:symlinked-ancestor-reject" "ledger: symlinked ancestor escaping root → non-zero return"
-else
-  failed "c7d:symlinked-ancestor-reject" "ledger: symlinked ancestor must reject; got return 0"
-fi
 
 # ── 7e. hivemind_remove_inputs_file — delete an engine's own inputs file ─────────
 # Every case asserts the return code, the file state after the call, and an empty stdout. The
@@ -2404,434 +2093,6 @@ else
   pass "fncore:overflow-empty-silent" "emit_overflow_tripwire treats empty payload as 0-node page (no OVERFLOW)"
 fi
 
-# ── Section 11: ledger-engine-io.sh — inputs-file bootstrap + ledger-open machinery ─
-echo ''
-echo '=== ledger-engine-io.sh: hivemind_read_inputs_file / hivemind_open_ledger ==='
-#
-# DIRECT unit coverage for the two shared engine-IO functions lifted VERBATIM from the three
-# ledger engines (init-run-ledger, record-state-result, mark-intent-fallback). Both functions
-# ORCHESTRATE the containment.sh helpers (sourced above) and NEVER exit — each returns non-zero
-# with a stderr message on failure. hivemind_read_inputs_file's read-guard resolves the checkout
-# via `git rev-parse --show-toplevel` INTERNALLY, so its contained-file ACCEPT case stages a real
-# inputs file UNDER the live repo root (cleaned up explicitly — the EXIT trap only removes the
-# /tmp WORKDIR). hivemind_open_ledger takes an EXPLICIT <repo_root>, so its fixtures live in
-# WORKDIR. Each containment-reject case is staged with a REAL on-disk symlink (mirroring the
-# Section 7 / engine-oracle symlink-escape staging).
-
-# ── 11a. hivemind_read_inputs_file — arg / existence / read-guard / JSON-validity ──
-# 11a-1: missing/empty arg → non-zero + the engine's exact missing-argument blocker.
-rif_missing_err="$(hivemind_read_inputs_file "" "run-ledger" 2>&1 >/dev/null)"; rif_missing_rc=$?
-if [ "$rif_missing_rc" -ne 0 ]; then
-  pass "engineio:rif-missing-rc" "empty inputs-file arg → non-zero return"
-else
-  failed "engineio:rif-missing-rc" "empty inputs-file arg must return non-zero; got 0"
-fi
-# NEW CONTRACT (R-STEP-001/002): hivemind_read_inputs_file emits NO stderr of its OWN — it
-# signals the missing-arg branch via return code 2, and the ENGINE owns the blocker text. Assert
-# the EXACT return code AND that the function's own stderr (captured above as $rif_missing_err,
-# which is 2>&1 with stdout discarded — i.e. fd2 only) is EMPTY, proving no self-emission.
-assert_eq "engineio:rif-missing-rc-code" "2" "$rif_missing_rc" \
-  "missing-arg branch returns the distinct code 2 (engine maps it to its blocker)"
-assert_eq "engineio:rif-missing-no-self-stderr" "" "$rif_missing_err" \
-  "missing-arg branch emits NO stderr of its own (engine owns the blocker line)"
-
-# 11a-2: non-existent file → non-zero + the engine's exact does-not-exist blocker.
-rif_absent="$WORKDIR/engineio-absent-inputs.json"   # never created
-rif_absent_err="$(hivemind_read_inputs_file "$rif_absent" "record-state-result" 2>&1 >/dev/null)"; rif_absent_rc=$?
-if [ "$rif_absent_rc" -ne 0 ]; then
-  pass "engineio:rif-absent-rc" "non-existent inputs file → non-zero return"
-else
-  failed "engineio:rif-absent-rc" "non-existent inputs file must return non-zero; got 0"
-fi
-# NEW CONTRACT: the does-not-exist branch signals via return code 3 and emits NO own stderr.
-assert_eq "engineio:rif-absent-rc-code" "3" "$rif_absent_rc" \
-  "non-existent-file branch returns the distinct code 3 (engine maps it to its blocker)"
-assert_eq "engineio:rif-absent-no-self-stderr" "" "$rif_absent_err" \
-  "non-existent-file branch emits NO stderr of its own (engine owns the blocker line)"
-
-# 11a-3: present-but-invalid JSON → non-zero + the engine's exact not-valid-JSON blocker. The file
-# MUST live inside the repo so it passes the read-guard and reaches the jq validity probe (an
-# external path would be rejected by the read-guard first, masking the JSON-validity branch).
-ENGINEIO_SCRATCH="$REPO_ROOT/.hivemind-engineio-test.$$"
-mkdir -p "$ENGINEIO_SCRATCH"
-engineio_scratch_cleanup() { rm -rf "$ENGINEIO_SCRATCH"; return 0; }
-trap 'cleanup; engineio_scratch_cleanup' EXIT
-rif_badjson="$ENGINEIO_SCRATCH/bad-inputs.json"
-printf '{"this is": not valid json\n' > "$rif_badjson"
-rif_badjson_err="$(hivemind_read_inputs_file "$rif_badjson" "mark-intent-fallback" 2>&1 >/dev/null)"; rif_badjson_rc=$?
-if [ "$rif_badjson_rc" -ne 0 ]; then
-  pass "engineio:rif-badjson-rc" "invalid-JSON inputs file → non-zero return"
-else
-  failed "engineio:rif-badjson-rc" "invalid-JSON inputs file must return non-zero; got 0"
-fi
-# NEW CONTRACT: the invalid-JSON branch signals via return code 5 and emits NO own stderr — the
-# internal `jq -e` probe runs with `2>&1` suppressed, so no jq diagnostic leaks to fd2 either.
-assert_eq "engineio:rif-badjson-rc-code" "5" "$rif_badjson_rc" \
-  "invalid-JSON branch returns the distinct code 5 (engine maps it to its blocker)"
-assert_eq "engineio:rif-badjson-no-self-stderr" "" "$rif_badjson_err" \
-  "invalid-JSON branch emits NO stderr of its own (jq diagnostic suppressed; engine owns the blocker)"
-
-# 11a-4: valid, contained JSON inputs file → returns 0 (read-guard passes, jq validity passes).
-rif_good="$ENGINEIO_SCRATCH/good-inputs.json"
-printf '{"run":{"id":"2026-01-01T00-00-00Z--ok"}}\n' > "$rif_good"
-hivemind_read_inputs_file "$rif_good" "run-ledger"; rif_good_rc=$?
-assert_eq "engineio:rif-valid-rc" "0" "$rif_good_rc" "valid contained JSON inputs file → return 0"
-
-# 11a-5: symlinked-ANCESTOR inputs path → rejected by the read-guard (mirrors the engine oracle).
-# A directory component of the inputs path is a REAL symlink resolving outside the repo; the
-# hivemind_assert_inputs_contained read-guard inside hivemind_read_inputs_file rejects BEFORE the
-# jq validity probe. The leaf target is valid JSON, proving the rejection is the read-guard, not jq.
-rif_link_dir="$ENGINEIO_SCRATCH/linkdir"
-ln -s "$WORKDIR" "$rif_link_dir"   # symlinked ancestor escaping the repo into /tmp WORKDIR
-printf '{"run":{"id":"x"}}\n' > "$WORKDIR/engineio-symlinked-inputs.json"
-rif_link_inputs="$rif_link_dir/engineio-symlinked-inputs.json"
-rif_link_err="$(hivemind_read_inputs_file "$rif_link_inputs" "run-ledger" 2>&1 >/dev/null)"; rif_link_rc=$?
-if [ "$rif_link_rc" -ne 0 ]; then
-  pass "engineio:rif-symlink-ancestor-reject" "symlinked-ancestor inputs path → read-guard rejects (non-zero)"
-else
-  failed "engineio:rif-symlink-ancestor-reject" "symlinked-ancestor inputs path must be rejected by the read-guard; got 0"
-fi
-# NEW CONTRACT: the containment reject is signalled by the DISTINCT code 4, and — unlike the other
-# branches — the INNER helper hivemind_assert_inputs_contained emits its OWN raw UNPREFIXED detail
-# line to fd2 (uncaptured passthrough); hivemind_read_inputs_file adds NO line of its own. The
-# engine maps code 4 to its blocker, so the detail line that reaches fd2 here is the inner helper's,
-# NOT a self-emitted message. Assert the exact code AND that the inner-helper detail line is present
-# on fd2 (captured above as $rif_link_err). The detail for an ancestor-escape is the helper's
-# "resolves outside the checkout" line (containment.sh), distinct from the engine's blocker text.
-assert_eq "engineio:rif-symlink-ancestor-rc-code" "4" "$rif_link_rc" \
-  "containment-reject branch returns the distinct code 4 (engine maps it to its blocker)"
-case "$rif_link_err" in
-  *"resolves outside the checkout"*)
-    pass "engineio:rif-symlink-ancestor-inner-detail-on-fd2" \
-      "inner-helper detail line reached fd2 as passthrough (uncaptured), proving read_inputs_file added none" ;;
-  *)
-    failed "engineio:rif-symlink-ancestor-inner-detail-on-fd2" \
-      "expected inner-helper detail line on fd2 containing 'resolves outside the checkout'; got: $rif_link_err" ;;
-esac
-
-# ── 11b. hivemind_open_ledger — derive / contain / read / coherence / canonical confirm ──
-# These take an EXPLICIT <repo_root>, so every fixture is a self-contained fake checkout in WORKDIR.
-
-# 11b-1: missing ledger file — the run dir exists but state.json was never written → non-zero.
-ol1_root="$WORKDIR/ol1/checkout"
-ol1_run_id="2026-01-01T00-00-00Z--ol1"
-mkdir -p "$ol1_root/.hivemind/runs/$ol1_run_id"
-# Do NOT create state.json.
-ol1_err="$(hivemind_open_ledger "$ol1_root" "$ol1_run_id" 2>&1 >/dev/null)"; ol1_rc=$?
-if [ "$ol1_rc" -ne 0 ]; then
-  pass "engineio:ol-missing-ledger-rc" "missing ledger file → non-zero return"
-else
-  failed "engineio:ol-missing-ledger-rc" "missing ledger file must return non-zero; got 0"
-fi
-
-# 11b-2: coherence mismatch — ledger .run.id differs from the passed run_id → non-zero.
-ol2_root="$WORKDIR/ol2/checkout"
-ol2_run_id="2026-01-01T00-00-00Z--ol2"
-mkdir -p "$ol2_root/.hivemind/runs/$ol2_run_id"
-printf '{"run":{"id":"2026-01-01T00-00-00Z--DIFFERENT"},"state":{"current":"plan"}}\n' \
-  > "$ol2_root/.hivemind/runs/$ol2_run_id/state.json"
-ol2_err="$(hivemind_open_ledger "$ol2_root" "$ol2_run_id" 2>&1 >/dev/null)"; ol2_rc=$?
-if [ "$ol2_rc" -ne 0 ]; then
-  pass "engineio:ol-coherence-mismatch-rc" "ledger .run.id != run_id → non-zero return"
-else
-  failed "engineio:ol-coherence-mismatch-rc" "coherence mismatch must return non-zero; got 0"
-fi
-# The coherence reason names no ledger value: only the caller's already-checked run_id.
-ol2_out="$(hivemind_open_ledger "$ol2_root" "$ol2_run_id" 2>/dev/null)"
-assert_eq "engineio:ol-coherence-mismatch-reason" \
-  "ledger run.id does not match run_id '$ol2_run_id'; ledger unchanged" "$ol2_out"
-
-# 11b-3: valid ledger — coherent .run.id, contained leaf → returns 0 with EMPTY stdout (new
-# contract: the lib no longer echoes the canonical ledger path / run dir; the consumer derives
-# them). We assert (a) rc == 0, (b) no stdout, and (c) that the consumer-side derivation
-# reproduces the exact canonical path the lib previously emitted (locks derive-in-consumer).
-ol3_root="$WORKDIR/ol3/checkout"
-ol3_run_id="2026-01-01T00-00-00Z--ol3"
-mkdir -p "$ol3_root/.hivemind/runs/$ol3_run_id"
-printf '{"run":{"id":"%s"},"state":{"current":"implement_step"}}\n' "$ol3_run_id" \
-  > "$ol3_root/.hivemind/runs/$ol3_run_id/state.json"
-ol3_out="$(hivemind_open_ledger "$ol3_root" "$ol3_run_id")"; ol3_rc=$?
-assert_eq "engineio:ol-valid-rc" "0" "$ol3_rc" "valid coherent ledger → return 0"
-if [ -z "$ol3_out" ]; then
-  pass "engineio:ol-valid-empty-stdout" "valid ledger → empty stdout (no canonical lines emitted)"
-else
-  failed "engineio:ol-valid-empty-stdout" \
-    "valid ledger must emit empty stdout; got: $ol3_out"
-fi
-# Consumer-side derivation must reproduce the canonical path the lib previously returned.
-# Canonical expectation: cd && pwd -P the on-disk run dir (handles a symlinked /tmp prefix on macOS).
-ol3_canon_dir="$(cd "$ol3_root/.hivemind/runs/$ol3_run_id" && pwd -P)"
-ol3_derived_dir="$(cd "$ol3_root/.hivemind/runs/$ol3_run_id" && pwd -P)"
-ol3_derived_ledger="$ol3_derived_dir/state.json"
-assert_eq "engineio:ol-valid-derived-dir" "$ol3_canon_dir" "$ol3_derived_dir" \
-  "consumer derivation reproduces canonical run dir"
-assert_eq "engineio:ol-valid-derived-ledger" "$ol3_canon_dir/state.json" "$ol3_derived_ledger" \
-  "consumer derivation reproduces canonical ledger path ending /state.json"
-
-# 11b-4: containment reject staged with a REAL symlink — the state.json LEAF is a symlink to an
-# external (out-of-checkout) target. hivemind_assert_ledger_contained [ -L ]-rejects the leaf
-# BEFORE any read → non-zero, and the on-disk ledger is never followed.
-ol4_root="$WORKDIR/ol4/checkout"
-ol4_ext="$WORKDIR/ol4/external"
-ol4_run_id="2026-01-01T00-00-00Z--ol4"
-mkdir -p "$ol4_root/.hivemind/runs/$ol4_run_id" "$ol4_ext"
-printf '{"run":{"id":"%s"},"state":{"current":"plan"}}\n' "$ol4_run_id" \
-  > "$ol4_ext/secret-state.json"
-ln -s "$ol4_ext/secret-state.json" "$ol4_root/.hivemind/runs/$ol4_run_id/state.json"
-ol4_err="$(hivemind_open_ledger "$ol4_root" "$ol4_run_id" 2>&1 >/dev/null)"; ol4_rc=$?
-if [ "$ol4_rc" -ne 0 ]; then
-  pass "engineio:ol-symlinked-leaf-reject" "symlinked state.json leaf → containment reject (non-zero)"
-else
-  failed "engineio:ol-symlinked-leaf-reject" "symlinked state.json leaf must be rejected; got 0"
-fi
-
-# ── 11c. hivemind_is_safe_id — whole-string safe id (#424) ──
-# Each row: <expected verdict>|<label>; the value comes from the parallel array. The check runs
-# under a UTF-8 locale, where an unpinned `[A-Za-z]` admits letters such as "é"; a missing locale
-# only warns, and the braces send that warning to /dev/null.
-safeid_values=('STEP-001' 'engine-case.v_1' '.' '..' $'STEP-001\n' $'ok\n../x' $'\nSTEP-001' '' 'a b' 'a]' 'a/b' $'\xc3\xa9')
-safeid_rows=('safe|plain' 'safe|every-class' 'safe|dot' 'safe|dotdot' 'unsafe|trailing-lf' 'unsafe|embedded-lf'
-  'unsafe|leading-lf' 'unsafe|empty' 'unsafe|space' 'unsafe|bracket' 'unsafe|slash' 'unsafe|non-ascii-letter')
-for safeid_index in "${!safeid_values[@]}"; do
-  IFS='|' read -r safeid_expected safeid_label <<<"${safeid_rows[$safeid_index]}"
-  safeid_value="${safeid_values[$safeid_index]}"
-  safeid_shell=unsafe
-  { LC_ALL=en_US.UTF-8 hivemind_is_safe_id "$safeid_value"; } 2>/dev/null && safeid_shell=safe
-  assert_eq "engineio:safe-id-shell-$safeid_label" "$safeid_expected" "$safeid_shell"
-done
-unset safeid_values safeid_rows safeid_index safeid_expected safeid_label safeid_value safeid_shell
-
-# ── 11d. hivemind_is_safe_id 255 cap (#424) ──
-safecap_64="$(printf '%*s' 64 '' | tr ' ' a)"
-safecap_255="$(printf '%*s' 255 '' | tr ' ' a)"
-safecap_256="$(printf '%*s' 256 '' | tr ' ' a)"
-safecap_5000="$(printf '%*s' 5000 '' | tr ' ' a)"
-for safecap_row in "safe|64|$safecap_64" "safe|255|$safecap_255" "unsafe|256|$safecap_256" "unsafe|5000|$safecap_5000"; do
-  IFS='|' read -r safecap_expected safecap_label safecap_value <<<"$safecap_row"
-  safecap_verdict=unsafe
-  hivemind_is_safe_id "$safecap_value" && safecap_verdict=safe
-  assert_eq "engineio:safe-id-cap-$safecap_label" "$safecap_expected" "$safecap_verdict"
-done
-unset safecap_64 safecap_255 safecap_256 safecap_5000 safecap_row safecap_expected safecap_label \
-  safecap_value safecap_verdict
-
-# ── 11e. hivemind_check_json — whole-file contract check on the intact JSON values (#424) ──
-# Every hostile string value carries the marker "zqx" (or a run of "q"), which no position or
-# problem word holds, so a message that echoed a value would contain the marker.
-cj_file="$WORKDIR/check-json.json"
-CJ_STEP='not a step id (1 to 64 of A-Z a-z 0-9 . _ -)'
-CJ_NAME='not a name (1 to 255 of A-Z a-z 0-9 . _ -, not . or ..)'
-CJ_BROOD='not a brood id (1 to 255 of A-Z a-z 0-9 . _ : -)'
-CJ_COUNT='not a whole number of 0 or more'
-
-# cj_doc <json text> — writes <json text> to $cj_file as is.
-cj_doc() { printf '%s' "$1" > "$cj_file"; }
-
-# cj_q_literal <count> — prints a JSON string literal of <count> "q" characters.
-cj_q_literal() { printf '"%s"' "$(printf '%*s' "$1" '' | tr ' ' q)"; }
-
-# cj_expect <case> <contract> <expected rc> <expected stdout> [<field>]
-# Runs hivemind_check_json on $cj_file. One PASS needs the exact rc and stdout, a stdout of at
-# most 200 bytes, and no value marker in stdout or stderr.
-cj_expect() {
-  local case_name="$1" contract_name="$2" expected_rc="$3" expected_out="$4"
-  shift 4
-  local actual_out actual_err actual_rc=0 out_bytes err_file="$WORKDIR/check-json.err"
-  actual_out="$(hivemind_check_json "$cj_file" "$contract_name" "$@" 2>"$err_file")" || actual_rc=$?
-  actual_err="$(cat "$err_file")"
-  out_bytes="$(printf '%s' "$actual_out" | LC_ALL=C wc -c | tr -d ' ')"
-  if [ "$actual_rc|$actual_out" != "$expected_rc|$expected_out" ]; then
-    failed "engineio:check-json-$case_name" "expected rc=$expected_rc out='$expected_out'; got rc=$actual_rc out='$actual_out'"
-  elif [ "$out_bytes" -gt 200 ]; then
-    failed "engineio:check-json-$case_name" "message is $out_bytes bytes, over 200"
-  elif [[ "$actual_out$actual_err" == *zqx* || "$actual_out$actual_err" == *qqq* ]]; then
-    failed "engineio:check-json-$case_name" "a message contains the value"
-  else
-    pass "engineio:check-json-$case_name" "rc=$actual_rc out='$actual_out'"
-  fi
-}
-
-# Kind matrix. Each value runs against one field of each kind; the verdict row lists, in value
-# order, ok (passes), miss (missing), bad (the kind's problem) or empty.
-cj_value_labels=(trailing-lf two-lf nul embedded-lf cr non-ascii dot dotdot len64 len65 len255 len256
-  len5000 number null empty)
-cj_value_literals=('"zqx\n"' '"zqx\n\n"' '"zq\u0000x"' '"zqx\nzqx"' '"zqx\r"' '"zqxé"' '"."' '".."'
-  "$(cj_q_literal 64)" "$(cj_q_literal 65)" "$(cj_q_literal 255)" "$(cj_q_literal 256)"
-  "$(cj_q_literal 5000)" '5' 'null' '""')
-cj_kind_rows=(
-  "step-id|wave-ledger|plan.steps[0].id|$CJ_STEP|bad bad bad bad bad bad ok ok ok bad bad bad bad bad miss bad"
-  "name|record-ledger|run.id|$CJ_NAME|bad bad bad bad bad bad bad bad ok ok ok bad bad bad miss bad"
-  "brood-id|init-brood-parent|parent.brood_id|$CJ_BROOD|bad bad bad bad bad bad ok ok ok ok ok bad bad bad miss bad"
-  "enum|intent-inputs|close_status|not one of cancelled, complete|bad bad bad bad bad bad bad bad bad bad bad bad bad bad ok bad"
-  "count|record-ledger|run.workflow_version|$CJ_COUNT|bad bad bad bad bad bad bad bad bad bad bad bad bad ok miss bad"
-  "text|init-brood-parent|parent.manifest|not a string|ok ok ok ok ok ok ok ok ok ok ok ok ok bad miss empty"
-  "object|intent-inputs|outputs|not an object|bad bad bad bad bad bad bad bad bad bad bad bad bad bad ok bad"
-  "array|record-inputs|outputs.completed_steps|not an array|bad bad bad bad bad bad bad bad bad bad bad bad bad bad ok bad"
-)
-cj_kind_templates=(
-  '{plan: {steps: [{id: $v}]}}'
-  '{run: {id: $v, workflow: "w", workflow_version: 1}, state: {current: "plan"}}'
-  '{parent: {run_id: "r", brood_id: $v, strain_id: "s", manifest: "m"}}'
-  '{run_id: "r", state: "s", summary: "x", close_status: $v}'
-  '{run: {id: "r", workflow: "w", workflow_version: $v}, state: {current: "plan"}}'
-  '{parent: {run_id: "r", brood_id: "b", strain_id: "s", manifest: $v}}'
-  '{run_id: "r", state: "s", summary: "x", outputs: $v}'
-  '{run_id: "r", state: "s", result: "ready", summary: "x", outputs: {completed_steps: $v}}'
-)
-for cj_kind_index in "${!cj_kind_rows[@]}"; do
-  IFS='|' read -r cj_kind cj_contract cj_position cj_problem cj_verdict_text <<<"${cj_kind_rows[$cj_kind_index]}"
-  read -r -a cj_verdicts <<<"$cj_verdict_text"
-  for cj_value_index in "${!cj_value_labels[@]}"; do
-    jq -n --argjson v "${cj_value_literals[$cj_value_index]}" "${cj_kind_templates[$cj_kind_index]}" > "$cj_file"
-    case "${cj_verdicts[$cj_value_index]}" in
-      ok) cj_rc=0; cj_out='' ;;
-      miss) cj_rc=1; cj_out="$cj_position: missing" ;;
-      empty) cj_rc=1; cj_out="$cj_position: empty" ;;
-      *) cj_rc=1; cj_out="$cj_position: $cj_problem" ;;
-    esac
-    cj_expect "$cj_kind-${cj_value_labels[$cj_value_index]}" "$cj_contract" "$cj_rc" "$cj_out"
-  done
-done
-
-# Kind controls: values each kind accepts or refuses beyond the matrix.
-cj_doc '{"plan":{"steps":[{"id":"STEP-001","depends_on":[]},{"id":"STEP-002","depends_on":["STEP-001"]}]}}'
-cj_expect step-id-control wave-ledger 0 ''
-cj_doc '{"parent":{"run_id":"r","brood_id":"2026-05-31T17:30:00Z","strain_id":"s","manifest":"m"}}'
-cj_expect brood-id-colon init-brood-parent 0 ''
-cj_doc '{"run_id":"r","state":"s","summary":"x","close_status":"complete"}'
-cj_expect enum-control intent-inputs 0 ''
-cj_doc '{"run_id":"r","state":"s","summary":"x","close_status":["complete"]}'
-cj_expect enum-array intent-inputs 1 'close_status: not one of cancelled, complete'
-for cj_count_row in '0|0|zero' '7|0|seven' '2.0|0|two-point-zero' '-1|1|negative' '1.5|1|fraction' '"5"|1|string' 'true|1|boolean'; do
-  IFS='|' read -r cj_count_literal cj_rc cj_label <<<"$cj_count_row"
-  jq -n --argjson v "$cj_count_literal" \
-    '{run: {id: "r", workflow: "w", workflow_version: $v}, state: {current: "plan"}}' > "$cj_file"
-  cj_out=''
-  [ "$cj_rc" = 1 ] && cj_out="run.workflow_version: $CJ_COUNT"
-  cj_expect "count-$cj_label" record-ledger "$cj_rc" "$cj_out"
-done
-cj_doc '{"run":{"workflow":"w","workflow_version":1},"state":{"current":"plan"}}'
-cj_expect name-key-missing record-ledger 1 'run.id: missing'
-cj_doc '{"workflow":"w","user_request":"x","normalized":"y","suggested_run_id":""}'
-cj_expect optional-name-empty-is-present init-inputs 1 "suggested_run_id: $CJ_NAME"
-cj_doc '{"workflow":"w","user_request":"x","normalized":"y","suggested_run_id":"zqx\n"}'
-cj_expect suggested-run-id-trailing-lf init-inputs 1 "suggested_run_id: $CJ_NAME"
-cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_path":""}'
-cj_expect optional-text-empty-passes init-inputs 0 ''
-cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_steps":[{"id":"A","depends_on":[null]}]}'
-cj_expect array-element-null-is-not-absent init-inputs 1 "plan_steps[0].depends_on[0]: $CJ_STEP"
-cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_steps":[null]}'
-cj_expect step-row-null-is-not-absent init-inputs 1 'plan_steps[0]: not an object'
-
-# Positions and row order.
-cj_doc '{"workflow":"w","workflow_version":3,"start_state":"plan","user_request":"do x\n","normalized":"x","parent":{"kind":"brood","run_id":"r","brood_id":"2026-05-31T17:30:00Z","strain_id":"s1","manifest":"/m"},"suggested_run_id":"2026-11-01T00-00-00Z--x","plan_steps":[{"id":"STEP-001"},{"id":"STEP-002","depends_on":["STEP-001"]}],"plan_path":"p.md"}'
-cj_expect init-inputs-full init-inputs 0 ''
-cj_expect field-count init-inputs 0 '3' workflow_version
-cj_expect field-enum init-inputs 0 'brood' parent.kind
-cj_expect field-brood-id init-inputs 0 '2026-05-31T17:30:00Z' parent.brood_id
-cj_expect field-name init-inputs 0 '2026-11-01T00-00-00Z--x' suggested_run_id
-cj_expect field-text-refused init-inputs 2 '' user_request
-cj_expect field-object-refused init-inputs 2 '' parent
-cj_expect field-array-refused init-inputs 2 '' plan_steps
-cj_expect field-element-refused init-inputs 2 '' plan_steps.id
-cj_expect field-element-path-refused init-inputs 2 '' 'plan_steps[].id'
-cj_expect field-unknown-refused init-inputs 2 '' no_such_field
-cj_expect field-empty-refused init-inputs 2 '' ''
-cj_expect unknown-contract no-such-contract 2 ''
-cj_expect field-unknown-contract no-such-contract 2 '' workflow
-cj_doc '{"workflow":"zqx\n"}'
-cj_expect first-row-wins init-inputs 1 "workflow: $CJ_NAME"
-cj_expect field-form-checks-whole-file init-inputs 1 "workflow: $CJ_NAME" workflow
-cj_doc '{"workflow":"w","normalized":"zqx\n"}'
-cj_expect missing-before-later-rows init-inputs 1 'user_request: missing'
-cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_steps":[{"id":"A","depends_on":["zqx\n"]},{"id":"zqx\n"}]}'
-cj_expect rows-before-indexes init-inputs 1 "plan_steps[1].id: $CJ_STEP"
-cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_steps":[{"id":"A"},{"id":"zqx\n"},{"id":"zqx\r"}]}'
-cj_expect ascending-index init-inputs 1 "plan_steps[1].id: $CJ_STEP"
-cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_steps":[{"id":"A","depends_on":["B","zqx\n"]},{"id":"B","depends_on":["zqx\r"]}]}'
-cj_expect nested-row-major init-inputs 1 "plan_steps[0].depends_on[1]: $CJ_STEP"
-cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_steps":{"id":"A"}}'
-cj_expect step-root-not-array init-inputs 1 'plan_steps: not an array'
-cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_steps":[{"id":"A","depends_on":"A"}]}'
-cj_expect depends-on-not-array init-inputs 1 'plan_steps[0].depends_on: not an array'
-cj_doc '{"workflow":"w","user_request":"x","normalized":"y","parent":"zqx","plan_steps":"zqx"}'
-cj_expect parent-row-before-children init-inputs 1 'parent: not an object'
-cj_doc '{"parent":"zqx"}'
-cj_expect parent-not-object-without-row init-brood-parent 1 'parent: not an object'
-cj_doc '{}'
-cj_expect parent-absent-children-missing init-brood-parent 1 'parent.run_id: missing'
-cj_expect wave-steps-missing wave-ledger 1 'plan.steps: missing'
-cj_expect record-ledger-run-missing record-ledger 1 'run.id: missing'
-cj_doc '{"plan":{"steps":[]}}'
-cj_expect wave-steps-empty wave-ledger 0 ''
-cj_doc '{"run":"zqx"}'
-cj_expect record-ledger-run-not-object record-ledger 1 'run: not an object'
-cj_doc '{"run_id":"r","state":"zqx\n","result":"zqx\n","summary":"x"}'
-cj_expect record-state-before-result record-inputs 1 "state: $CJ_NAME"
-cj_doc '{"run_id":"r","state":"s","result":"ready","summary":"x","outputs":"zqx"}'
-cj_expect record-outputs-not-object record-inputs 1 'outputs: not an object'
-cj_doc '{"run_id":"r","state":"s","result":"ready","summary":"x","outputs":{"completed_steps":["STEP-001"]},"plan_steps":[{"id":"STEP-001"}],"plan_path":"p.md"}'
-cj_expect record-inputs-full record-inputs 0 ''
-cj_expect field-record-run-id record-inputs 0 'r' run_id
-cj_doc '{"run_id":"r","state":"zqx\n","summary":""}'
-cj_expect intent-state-is-text intent-inputs 1 'summary: empty'
-cj_doc '{"run_id":"r","state":"s","summary":"x"}'
-cj_expect field-absent-prints-nothing intent-inputs 0 '' close_status
-cj_doc '{"run":{"id":"r","workflow":"w","workflow_version":2.0},"state":{"current":"plan"}}'
-cj_expect field-count-whole record-ledger 0 '2' run.workflow_version
-
-# Files that are not exactly one JSON object: rc 2, nothing on stdout.
-for cj_shape_row in 'two-documents|{}{}' 'array|[{}]' 'string|"zqx"' 'empty-file|' 'invalid|{"a":'; do
-  IFS='|' read -r cj_label cj_text <<<"$cj_shape_row"
-  cj_doc "$cj_text"
-  cj_expect "not-one-object-$cj_label" record-inputs 2 ''
-done
-cj_err="$(hivemind_check_json "$WORKDIR/check-json-absent.json" record-inputs 2>&1 >/dev/null)"; cj_rc=$?
-assert_eq "engineio:check-json-unreadable-file" "2|hivemind_check_json: jq failed" "$cj_rc|$cj_err"
-cj_doc '{}{}'
-cj_err="$(hivemind_check_json "$cj_file" record-inputs 2>&1 >/dev/null)"; cj_rc=$?
-assert_eq "engineio:check-json-two-documents-reason" "2|hivemind_check_json: not exactly one JSON object" "$cj_rc|$cj_err"
-cj_doc '{}'
-cj_err="$(hivemind_check_json "$cj_file" init-inputs user_request 2>&1 >/dev/null)"; cj_rc=$?
-assert_eq "engineio:check-json-text-field-reason" "2|hivemind_check_json: field is not a token kind" "$cj_rc|$cj_err"
-cj_err="$(hivemind_check_json "$cj_file" init-inputs no_such_field 2>&1 >/dev/null)"; cj_rc=$?
-assert_eq "engineio:check-json-unknown-field-reason" "2|hivemind_check_json: unknown field" "$cj_rc|$cj_err"
-cj_err="$(hivemind_check_json "$cj_file" no-such-contract 2>&1 >/dev/null)"; cj_rc=$?
-assert_eq "engineio:check-json-unknown-contract-reason" "2|hivemind_check_json: unknown contract" "$cj_rc|$cj_err"
-
-# The contract name and the field enter jq only as --arg data: program text in either is an
-# unknown contract or field, never code.
-cj_expect contract-is-data '"init-inputs"' 2 ''
-cj_expect field-is-data init-inputs 2 '' '"workflow") | halt_error(1) | ('
-
-unset -f cj_doc cj_q_literal cj_expect
-unset cj_file CJ_STEP CJ_NAME CJ_BROOD CJ_COUNT cj_value_labels cj_value_literals cj_kind_rows \
-  cj_kind_templates cj_kind_index cj_kind cj_contract cj_position cj_problem cj_verdict_text cj_verdicts \
-  cj_value_index cj_rc cj_out cj_count_row cj_count_literal cj_label cj_shape_row cj_text cj_err
-
-# ── 11f. both readers accept only exactly one JSON object (#424) ──
-for onejson_row in 'two-documents|{}{}' 'array|[{}]' 'string|"x"' 'null|null' 'empty-file|'; do
-  IFS='|' read -r onejson_label onejson_text <<<"$onejson_row"
-  printf '%s' "$onejson_text" > "$ENGINEIO_SCRATCH/onejson-inputs.json"
-  onejson_rc=0
-  hivemind_read_inputs_file "$ENGINEIO_SCRATCH/onejson-inputs.json" "run-ledger" 2>/dev/null || onejson_rc=$?
-  assert_eq "engineio:rif-not-one-object-$onejson_label" "5" "$onejson_rc"
-done
-onejson_root="$WORKDIR/onejson/checkout"
-onejson_run_id="2026-01-01T00-00-00Z--onejson"
-mkdir -p "$onejson_root/.hivemind/runs/$onejson_run_id"
-onejson_ledger="$onejson_root/.hivemind/runs/$onejson_run_id/state.json"
-for onejson_row in 'two-documents|{"run":{"id":"%s"}}{"run":{"id":"%s"}}' 'array|[{"run":{"id":"%s"}}]'; do
-  IFS='|' read -r onejson_label onejson_text <<<"$onejson_row"
-  # shellcheck disable=SC2059
-  printf "$onejson_text" "$onejson_run_id" "$onejson_run_id" > "$onejson_ledger"
-  onejson_rc=0
-  onejson_out="$(hivemind_open_ledger "$onejson_root" "$onejson_run_id" 2>/dev/null)" || onejson_rc=$?
-  assert_eq "engineio:ol-not-one-object-$onejson_label" \
-    "1|ledger file is not exactly one JSON object: $onejson_ledger" "$onejson_rc|$onejson_out"
-done
-unset onejson_row onejson_label onejson_text onejson_rc onejson_root onejson_run_id onejson_ledger onejson_out
-
 # ── Section 12: settings-merge.sh ───────────────────────────────────────────────
 echo ''
 echo '=== settings-merge.sh: frozen template + required-key merge core ==='
@@ -2843,12 +2104,12 @@ echo '=== settings-merge.sh: frozen template + required-key merge core ==='
 # seed-hive/SKILL.md step 6 + Merge Rules.
 
 # 12a. Frozen template is the SINGLE DATA source (P1): `hivemind_settings_permissions_template`
-# is the sole place the 28 rules live, so this case locks its literal content/order self-contained
+# is the sole place the 25 rules live, so this case locks its literal content/order self-contained
 # — no SKILL.md mirror. The lib emits LF; trailing whitespace is stripped for a clean compare.
 SM_LIB_TEMPLATE="$WORKDIR/lib-template.txt"
 hivemind_settings_permissions_template | sed 's/[[:space:]]*$//' > "$SM_LIB_TEMPLATE"
-assert_eq "settings:template-rule-count" "28" \
-  "$(wc -l < "$SM_LIB_TEMPLATE" | tr -d ' ')" "frozen template has 28 rules"
+assert_eq "settings:template-rule-count" "25" \
+  "$(wc -l < "$SM_LIB_TEMPLATE" | tr -d ' ')" "frozen template has 25 rules"
 read -r -d '' SM_EXPECTED_TEMPLATE <<'TEMPLATE'
 Bash(echo *)
 Bash(printf *)
@@ -2870,9 +2131,6 @@ Bash(git tag --list*)
 Bash(git stash list)
 Bash(git stash show *)
 Edit(.hivemind/review-loop/*)
-Edit(.hivemind/runs/.init-inputs-*.json)
-Edit(.hivemind/runs/.record-inputs-*.json)
-Edit(.hivemind/runs/.markfb-inputs-*.json)
 Edit(.hivemind/spawn-inputs.*.json)
 Edit(.hivemind/seed-inputs-*.json)
 Edit(.hivemind/molt-inputs-*.json)
@@ -2880,7 +2138,7 @@ Edit(.hivemind/pr-inputs-*.json)
 Skill(hivemind:route-workflow)
 TEMPLATE
 assert_eq "settings:template-content-order" "$SM_EXPECTED_TEMPLATE" \
-  "$(cat "$SM_LIB_TEMPLATE")" "frozen template emits the expected 28 rules in order"
+  "$(cat "$SM_LIB_TEMPLATE")" "frozen template emits the expected 25 rules in order"
 
 # ── caveman SubagentStart hook identity constants under test (issue #352) ──
 # The three commands below are the ONLY three this merge has ever authored, and they are NOT
@@ -2921,15 +2179,15 @@ assert_eq "settings:empty-hive-class" "added" \
 assert_eq "settings:empty-hive-value" "true" \
   "$(printf '%s' "$sm_from_empty" | jq -r '.settings.enabledPlugins["hivemind@brenpike"]')" "hivemind enabledPlugin = true"
 # 12b: absent permissions.allow → created in template ORDER (first rule = Bash(echo *)).
-assert_eq "settings:empty-allow-count" "28" \
-  "$(printf '%s' "$sm_from_empty" | jq -r '.settings.permissions.allow | length')" "absent allow → 28 template rules created"
+assert_eq "settings:empty-allow-count" "25" \
+  "$(printf '%s' "$sm_from_empty" | jq -r '.settings.permissions.allow | length')" "absent allow → 25 template rules created"
 assert_eq "settings:empty-allow-first" "Bash(echo *)" \
   "$(printf '%s' "$sm_from_empty" | jq -r '.settings.permissions.allow[0]')" "created allow is in template order (first rule)"
 assert_eq "settings:empty-allow-penultimate" "Edit(.hivemind/pr-inputs-*.json)" \
   "$(printf '%s' "$sm_from_empty" | jq -r '.settings.permissions.allow[-2]')" "created allow is in template order (second-to-last rule)"
 assert_eq "settings:empty-allow-last" "Skill(hivemind:route-workflow)" \
   "$(printf '%s' "$sm_from_empty" | jq -r '.settings.permissions.allow[-1]')" "created allow is in template order (last rule)"
-assert_eq "settings:empty-allow-report-count" "28" \
+assert_eq "settings:empty-allow-report-count" "25" \
   "$(printf '%s' "$sm_from_empty" | jq -r '.permissions_allow | length')" "permissions_allow reports one entry per template rule"
 assert_eq "settings:empty-allow-all-added" "added" \
   "$(printf '%s' "$sm_from_empty" | jq -r '[.permissions_allow[].result] | unique | .[0]')" "every template rule reported added from {}"
@@ -3552,14 +2810,14 @@ assert_eq "settings:malformed-approve-settings-null" "null" \
 
 # 12f. permissions.allow UNION preserves existing ORDER, appends only ABSENT rules.
 # Existing: a custom rule + one template rule (Bash(jq *)). Union must keep both in place, then
-# append the 27 absent template rules; Bash(jq *) reported already present, Bash(echo *) added.
+# append the 24 absent template rules; Bash(jq *) reported already present, Bash(echo *) added.
 sm_union="$(hivemind_settings_merge '{"permissions":{"allow":["Bash(custom *)","Bash(jq *)"]}}' 'hivemind:overlord' 'no' 'no' 'no' 'yes')"
 assert_eq "settings:union-first" "Bash(custom *)" \
   "$(printf '%s' "$sm_union" | jq -r '.settings.permissions.allow[0]')" "union preserves existing first entry order"
 assert_eq "settings:union-second" "Bash(jq *)" \
   "$(printf '%s' "$sm_union" | jq -r '.settings.permissions.allow[1]')" "union preserves existing second entry order"
-assert_eq "settings:union-total" "29" \
-  "$(printf '%s' "$sm_union" | jq -r '.settings.permissions.allow | length')" "union = 2 existing + 27 absent template rules"
+assert_eq "settings:union-total" "26" \
+  "$(printf '%s' "$sm_union" | jq -r '.settings.permissions.allow | length')" "union = 2 existing + 24 absent template rules"
 assert_eq "settings:union-existing-present" "already present" \
   "$(printf '%s' "$sm_union" | jq -r '.permissions_allow[] | select(.rule=="Bash(jq *)") | .result')" "template rule already in array → already present"
 assert_eq "settings:union-absent-added" "added" \
@@ -3572,8 +2830,8 @@ assert_eq "settings:union-custom-kept" "1" \
 sm_sibling="$(hivemind_settings_merge '{"permissions":{"deny":["Bash(rm *)"]}}' 'hivemind:overlord' 'no' 'no' 'no' 'yes')"
 assert_eq "settings:sibling-deny-kept" "Bash(rm *)" \
   "$(printf '%s' "$sm_sibling" | jq -r '.settings.permissions.deny[0]')" "sibling permissions.deny preserved"
-assert_eq "settings:sibling-allow-created" "28" \
-  "$(printf '%s' "$sm_sibling" | jq -r '.settings.permissions.allow | length')" "permissions without allow → allow created with 28 rules"
+assert_eq "settings:sibling-allow-created" "25" \
+  "$(printf '%s' "$sm_sibling" | jq -r '.settings.permissions.allow | length')" "permissions without allow → allow created with 25 rules"
 
 # 12h. seed_allowlist=no → permissions.allow left UNTOUCHED, permissions_allow report empty.
 sm_no_allow="$(hivemind_settings_merge '{"permissions":{"allow":["Bash(x *)"]}}' 'hivemind:overlord' 'no' 'no' 'no' 'no')"
@@ -3738,16 +2996,16 @@ assert_eq "settings:wrongtype-hooks-args" "[]" \
 sm_perm_array="$(hivemind_settings_merge '{"permissions":["x"]}' 'hivemind:overlord' 'no' 'no' 'no' 'yes')"
 assert_eq "settings:wrongtype-perm-status" "ok" \
   "$(printf '%s' "$sm_perm_array" | jq -r '.status')" "permissions as array → canonical {} → status ok (no jq abort)"
-assert_eq "settings:wrongtype-perm-allow-count" "28" \
-  "$(printf '%s' "$sm_perm_array" | jq -r '.settings.permissions.allow | length')" "wrong-typed permissions → allow seeded with 28 template rules"
+assert_eq "settings:wrongtype-perm-allow-count" "25" \
+  "$(printf '%s' "$sm_perm_array" | jq -r '.settings.permissions.allow | length')" "wrong-typed permissions → allow seeded with 25 template rules"
 
 # permissions.allow WRONG-TYPED (string) with seed_allowlist=yes → canon_arr → [] → template appended.
 sm_allow_string="$(hivemind_settings_merge '{"permissions":{"allow":"oops"}}' 'hivemind:overlord' 'no' 'no' 'no' 'yes')"
 assert_eq "settings:wrongtype-allow-status" "ok" \
   "$(printf '%s' "$sm_allow_string" | jq -r '.status')" "permissions.allow as string → canonical [] → status ok (no jq abort)"
-assert_eq "settings:wrongtype-allow-count" "28" \
-  "$(printf '%s' "$sm_allow_string" | jq -r '.settings.permissions.allow | length')" "wrong-typed permissions.allow → [] then 28 template rules appended"
-assert_eq "settings:wrongtype-allow-report-count" "28" \
+assert_eq "settings:wrongtype-allow-count" "25" \
+  "$(printf '%s' "$sm_allow_string" | jq -r '.settings.permissions.allow | length')" "wrong-typed permissions.allow → [] then 25 template rules appended"
+assert_eq "settings:wrongtype-allow-report-count" "25" \
   "$(printf '%s' "$sm_allow_string" | jq -r '.permissions_allow | length')" "every template rule reported over the canonical empty allow"
 
 # 12m. MULTI-DOCUMENT STREAM (JSON-stream sweep, STEP-005): a settings input that is a STREAM of TWO

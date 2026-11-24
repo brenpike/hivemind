@@ -95,12 +95,6 @@ const AUTONOMY_TABLE = {
 "low": "surface"
 },
 {
-"kind": "remediation_approach",
-"high": "auto",
-"balanced": "auto",
-"low": "surface"
-},
-{
 "kind": "planner_escalation_routing",
 "high": "auto",
 "balanced": "auto",
@@ -131,12 +125,6 @@ const AUTONOMY_TABLE = {
 "low": "surface"
 },
 {
-"kind": "version_bump_type",
-"high": "auto",
-"balanced": "auto",
-"low": "surface"
-},
-{
 "kind": "version_bump_indeterminable",
 "high": "surface",
 "balanced": "surface",
@@ -158,18 +146,6 @@ const AUTONOMY_TABLE = {
 "kind": "gate_rerun",
 "high": "auto",
 "balanced": "auto",
-"low": "surface"
-},
-{
-"kind": "route_ambiguous",
-"high": "surface",
-"balanced": "surface",
-"low": "surface"
-},
-{
-"kind": "resume_or_skew",
-"high": "surface",
-"balanced": "surface",
 "low": "surface"
 },
 {
@@ -692,7 +668,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'b391d56dcb793e29';
+const BUILD_ID = 'c1ff65e792a083c6';
 
 function supportedSchemaKeywords(){
 return[

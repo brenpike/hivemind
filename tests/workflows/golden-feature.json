@@ -1,14 +1,12 @@
 {
   "workflow": "feature",
-  "description": "Multi-file feature routed to standard-delivery: route-workflow classifies, cerebrate plans, then the state machine drives branch, per-step implement/checkpoint, version-bump decision, validation, and PR",
+  "description": "Multi-file feature routed to standard-delivery: route-workflow classifies, cerebrate plans, then the overlord drives branch, implement/checkpoint, validation and PR",
   "steps": [
     { "state": "Classify", "source": { "file": "plugin/skills/route-workflow/SKILL.md", "pattern": "the sole workflow classifier" } },
-    { "state": "Plan", "source": { "file": "plugin/workflows/standard-delivery.json", "pattern": "\"agent\": \"hivemind:cerebrate\"" } },
     { "state": "Git Preflight", "source": { "file": "plugin/agents/overlord.md", "pattern": "Never begin implementation before git preflight is established" } },
     { "state": "Branch", "source": { "file": "plugin/governance/workflow.md", "pattern": "## Branch Naming" } },
     { "state": "Implement Step", "source": { "file": "plugin/agents/overlord.md", "pattern": "## Delegation Format" } },
     { "state": "Checkpoint Commit", "source": { "file": "plugin/governance/workflow.md", "pattern": "## Commit Messages" } },
-    { "state": "Version Bump Decision", "source": { "file": "plugin/workflows/standard-delivery.json", "pattern": "version_bump_decision" } },
     { "state": "Validate", "source": { "file": "plugin/governance/definitions.md", "pattern": "## Validation Procedure" } },
     { "state": "PR", "source": { "file": "plugin/governance/workflow.md", "pattern": "Open PR only when: plan complete, validation passed" } },
     { "state": "Final Report", "source": { "file": "plugin/agents/overlord.md", "pattern": "Result: complete | partial | blocked" } }

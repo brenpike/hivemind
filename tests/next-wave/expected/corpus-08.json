@@ -1,0 +1,9 @@
+{
+  "case": "case 8: bracket glob on random dag",
+  "result": {
+    "ok": true,
+    "all_done": true,
+    "wave": [],
+    "remaining": 0
+  }
+}

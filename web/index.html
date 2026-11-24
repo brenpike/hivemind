@@ -117,7 +117,7 @@
             <li class="beat panel">
               <h3 class="xg">Route</h3>
               <p class="xs"><code>hivemind:route-workflow</code> picks standard-delivery, analysis-only, pr-feedback-remediation or hatchery-dispatch. The first three launch as the <code>hivemind:analysis-only</code>, <code>hivemind:standard-delivery</code> and <code>hivemind:pr-feedback-remediation</code> workflow scripts when Claude Code's Workflow tool is available. Brood dispatch, a refused or blocked launch, and a started standard-delivery run that fails, run on Instinct, with no script.</p>
-              <p class="xs">Analysis-only has been a script since 6.0.0, standard-delivery since 7.0.0. In manual mode the Workflow tool shows an approval prompt; in auto mode the launch goes ahead with no prompt. A No at the prompt interrupts the turn, with no fallback. To keep delivery off its script, add <code>Workflow(hivemind:standard-delivery)</code> to <code>permissions.deny</code>: the launch is refused with no prompt and the request runs on Instinct. The definitions live in <code>plugin/workflows/</code>: <code>.json</code> state machines plus the generated <code>.js</code> scripts.</p>
+              <p class="xs">Analysis-only has been a script since 6.0.0, standard-delivery since 7.0.0. In manual mode the Workflow tool shows an approval prompt; in auto mode the launch goes ahead with no prompt. A No at the prompt interrupts the turn, with no fallback. To keep delivery off its script, add <code>Workflow(hivemind:standard-delivery)</code> to <code>permissions.deny</code>: the launch is refused with no prompt and the request runs on Instinct. The generated <code>.js</code> workflow scripts live in <code>plugin/workflows/</code>.</p>
               <p class="xs">A trivial task, such as a one-file change or a version-only edit, is checked before routing and takes the Reflex fast path, which skips the router and the cerebrate.</p>
             </li>
             <li class="beat panel">
@@ -135,7 +135,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">Build in waves</h3>
-              <p class="xs">Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap. Drones and changelings build it in parallel, and a runner commits the wave's files with one checkpoint commit (molt) per wave (<code>hivemind:molt</code>). The script computes each wave in <code>plugin/workflow-src/lib/waves.js</code>; <code>hivemind:next-wave</code> reads it from the run ledger only on the state machine.</p>
+              <p class="xs">Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap. Drones and changelings build it in parallel, and a runner commits the wave's files with one checkpoint commit (molt) per wave (<code>hivemind:molt</code>). The script computes each wave in <code>plugin/workflow-src/lib/waves.js</code>; on Instinct the overlord forms each wave by the same rule.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Gate</h3>

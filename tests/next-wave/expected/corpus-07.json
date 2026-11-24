@@ -1,0 +1,11 @@
+{
+  "case": "case 7: question glob on diamond",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-001"
+    ],
+    "remaining": 4
+  }
+}

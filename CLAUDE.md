@@ -25,7 +25,7 @@ plugin/                           # plugin root (resolves to ${CLAUDE_PLUGIN_ROO
   skills/<skill-name>/SKILL.md
   skills/_shared/                 # cross-skill shared assets: reference docs (LANGUAGE.md, DEEPENING.md) plus shell libraries sourced by skill engine scripts
   governance/                     # *.md loaded by agents at runtime
-  workflows/                      # *.json current-engine definitions, *.js generated workflow scripts
+  workflows/                      # *.js generated workflow scripts, built from workflow-src/
   workflow-src/                   # workflow script sources, built by tools/build_workflows.mjs
 README.md
 CLAUDE.md
@@ -138,7 +138,7 @@ The merge after a clean post-PR watch is opt-in via `HIVEMIND_AUTO_MERGE`, set i
 The plugin supports parallel multi-overlord execution via spawn-brood and brood-status skills. Each brood session runs in its own git worktree as an independent Claude Code instance.
 
 - **Architecture decision:** `docs/adr/0007-fleet-children-unaware-coordinator-dashboard.md` — children have zero brood awareness; coordinator is a status dashboard
-- **Brood manifest:** `.hivemind/broods/<brood-id>/manifest.json` — one per brood, written by `spawn-brood.sh` and listed by `plugin/skills/_shared/brood-state.sh`, anchored to the spawning checkout root; already gitignored under `.hivemind/`. Layout reference: `docs/references/brood-ledger-model.md`.
+- **Brood manifest:** `.hivemind/broods/<brood-id>/manifest.json` — one per brood, written by `spawn-brood.sh` and listed by `plugin/skills/_shared/brood-state.sh`, anchored to the spawning checkout root; already gitignored under `.hivemind/`. Layout reference: `docs/references/brood-manifest-model.md`.
 - **Worktree sessions:** `.claude/worktrees/` (gitignored)
 
 Children are standard overlord sessions receiving a task description. No brood-specific code paths exist in child sessions.

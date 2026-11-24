@@ -16,10 +16,6 @@
     {
       "file": "plugin/agents/overlord.md",
       "pattern": "Decide per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Tiers, The Autonomy 2x2, Promotion Gate)"
-    },
-    {
-      "file": "plugin/references/run-ledger-schema.md",
-      "pattern": "decision-autonomy.md` (Decision Journal)"
     }
   ]
 }

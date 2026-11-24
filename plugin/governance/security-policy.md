@@ -34,13 +34,11 @@ A detached brood child runs unattended in `--permission-mode auto` with its task
 
 ## Trust-Boundary Discipline
 
-Committed engine and helper scripts that cross a trust boundary take identifiers, never paths; derive every path from ground truth; reduce hostile cross-boundary content to bounded allowlist-validated tokens, never Read whole, executed or emitted raw; and take transitions and authorization only from the packaged workflow definition, never a caller's.
+Committed engine and helper scripts that cross a trust boundary take identifiers, never paths; derive every path from ground truth; reduce hostile cross-boundary content to bounded allowlist-validated tokens, never Read whole, executed or emitted raw; and take authorization only from packaged data, never a caller's.
 
-Boundaries (rationale: ADR-0019, ADR-0037 slice 4 amendment); the third is content discipline only, not a security boundary:
+Boundary (rationale: ADR-0019, ADR-0037 slice 4 amendment, ADR-0048); it is content discipline only, not a security boundary:
 
-1. **overlord / navigator → engine.** `record-state-result.sh` takes a SAFE_ID_RE-validated `run_id` (`.`/`..` rejected), derives the ledger from the git checkout root, checks `ledger.run.id == run_id`, and derives the workflow definition from the ledger's `run.workflow` against its self-located packaged `workflows/` dir.
-2. **init → packaged definition.** `init-run-ledger.sh` checks the workflow id against its self-located packaged definition (exists, `.version`, `.start`) and fails on mismatch before creating the run dir.
-3. **brood child → coordinator.** Same-user brood children are not a security boundary against the coordinator: findings that assume a hostile same-user child, or its race, are outside the threat model, rejected, not hardened against. Every coordinator brood-state read goes through `${CLAUDE_PLUGIN_ROOT}/skills/_shared/brood-state.sh`, which takes identifiers (brood id, run id, git-derived checkout or worktree root), never a manifest path. The per-strain ledger anchor is the `git worktree list --porcelain` worktree exactly matching the manifest `worktree_path`, which only selects: never a path anchor, never traversed. Content reads are bounded projections, never echoed raw, and informational only: they never override observable status.
+- **brood child → coordinator.** Same-user brood children are not a security boundary against the coordinator: findings that assume a hostile same-user child, or its race, are outside the threat model, rejected, not hardened against. Every coordinator brood-state read goes through `${CLAUDE_PLUGIN_ROOT}/skills/_shared/brood-state.sh`, which takes identifiers (brood id, git-derived checkout or worktree root), never a manifest path. From a child it reads only a facts file's name and type, never content. spawn-brood checks the worktree it derived itself. brood-status takes the `git worktree list --porcelain` worktree exactly matching the manifest `worktree_path`, which only selects, never a path anchor and never traversed, and checks it only when it resolves inside the checkout root. A symlinked path component or a symlinked or non-regular leaf is rejected, and the name must match the fixed facts pattern. Manifest reads are bounded projections, never echoed raw, and informational only: they never override observable status.
 
 ## Shell Identifier Discipline
 
@@ -116,7 +114,7 @@ This policy binds every agent and skill that consumes external content, whether 
 
 ### Inert Inputs-File Navigator Pattern
 
-A navigator skill writes its inputs file only with the Write tool, to a fixed-literal `.hivemind/` path in the skill body (a fixed prefix plus a skill-body `<token>`), never derived from untrusted input. Only the content carries untrusted fields; the engine reads it only with `jq` into shell variables used as `"$var"`, so no field enters shell source or jq program source. "Inert" names that transport property only, not what a field means once read; each engine's own contract governs that (ADR-0017, ADR-0018, ADR-0019).
+A navigator skill writes its inputs file only with the Write tool, to a fixed-literal `.hivemind/` path in the skill body (a fixed prefix plus a skill-body `<token>`), never derived from untrusted input. Only the content carries untrusted fields; the engine reads it only with `jq` into shell variables used as `"$var"`, so no field enters shell source or jq program source. "Inert" names that transport property only, not what a field means once read; each engine's own contract governs that (ADR-0017, ADR-0019).
 
 **Tool grant.** Write comes from the calling agent's `tools:`. A skill's `allowed-tools` pre-approves a permission but never provisions a tool.
 

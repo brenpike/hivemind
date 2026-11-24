@@ -1,0 +1,11 @@
+{
+  "case": "case 29: bracket glob on diamond",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-002"
+    ],
+    "remaining": 2
+  }
+}

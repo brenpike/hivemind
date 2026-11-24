@@ -1,0 +1,7 @@
+{
+  "case": "case 31: double slash on self dependency",
+  "result": {
+    "ok": false,
+    "problem": "dependency cycle detected among plan steps"
+  }
+}

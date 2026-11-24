@@ -23,28 +23,24 @@
  *
  * Invariants
  *   Pure: no clock, no randomness, no I/O. Inputs are never changed.
- *   The rule's home and parity oracle is
- *   plugin/skills/next-wave/scripts/next-wave.sh: COMPUTATION items 3 to 5,
- *   its VALIDATION in the same order with the same texts, and its defensive
- *   stall check. The first check mirrors the step rows of the wave-ledger
- *   contract of hivemind_check_json: plan.steps a required array, each step
- *   an object, each id a required step id, each depends_on an optional
- *   array of step ids. Absent means undefined or null; an array element is
- *   never absent. Rows run in table order and positions in ascending index
- *   (row-major); the first failure is the problem. A step id is 1 to 64 of
- *   A-Z a-z 0-9 . _ -, all ASCII, so JS and jq count its length alike. Then
- *   come the empty, duplicate id, unknown dependency and cycle checks.
- *   tests/workflow-scripts/waves.test.mjs runs both on the same plans and
- *   requires the same outcome: the same wave, or the same problem text. A
- *   change to the rule lands in next-wave.sh and here together.
- *   Only one thing differs from next-wave.sh:
- *     The input is a list of done ids, not a run ledger. Deriving that list
- *     (epoch scope, event projection) is the caller's job.
+ *   This file is the wave rule's home. Validation runs first, in a fixed
+ *   order with fixed texts. The first check covers the step rows:
+ *   plan.steps a required array, each step an object, each id a required
+ *   step id, each depends_on an optional array of step ids. Absent means
+ *   undefined or null; an array element is never absent. Rows run in table
+ *   order and positions in ascending index (row-major); the first failure
+ *   is the problem. A step id is 1 to 64 of A-Z a-z 0-9 . _ -, all ASCII.
+ *   Then come the empty, duplicate id, unknown dependency and cycle checks,
+ *   the wave, and a defensive stall check.
+ *   The input is a list of done ids. Deriving that list (epoch scope, event
+ *   projection) is the caller's job.
  *
  * Why
- *   Both engines must dispatch the same waves from the same plan. The rule
- *   lives in one place, next-wave.sh, and this mirror is held to it by the
- *   parity test rather than by review.
+ *   Every path that runs steps in waves must dispatch the same waves from
+ *   the same plan, so the rule lives in one place.
+ *   tests/workflow-scripts/waves.test.mjs holds it to frozen expectations in
+ *   tests/next-wave/expected/, so a change that alters a wave fails a test
+ *   that review sees.
  */
 
 function computeWave(steps, doneIds) {

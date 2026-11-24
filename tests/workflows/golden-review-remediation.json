@@ -1,11 +1,8 @@
 {
   "workflow": "review-remediation",
-  "description": "Post-PR feedback routed to pr-feedback-remediation: intake selects the one-shot fix, the github-reviewer agent classifies and routes each comment, a complex item escalates via the planner-escalation transition into a remediation plan, then implement/checkpoint/validate run before returning to the loop",
+  "description": "Post-PR feedback routed to pr-feedback-remediation: the github-reviewer agent classifies and routes each comment, then checkpoint and validation run before the final report",
   "steps": [
-    { "state": "Intake Decision", "source": { "file": "plugin/workflows/pr-feedback-remediation.json", "pattern": "\"fix\": \"github_reviewer_fix\"" } },
-    { "state": "PR Branch Preflight", "source": { "file": "plugin/workflows/pr-feedback-remediation.json", "pattern": "\"pr_branch_preflight\"" } },
     { "state": "External Review", "source": { "file": "plugin/agents/github-reviewer.md", "pattern": "Classify and route" } },
-    { "state": "Planner Escalation", "source": { "file": "plugin/workflows/pr-feedback-remediation.json", "pattern": "\"planner-escalation\": \"review_remediation_plan\"" } },
     { "state": "Checkpoint Commit", "source": { "file": "plugin/governance/workflow.md", "pattern": "## Commit Messages" } },
     { "state": "Validate", "source": { "file": "plugin/governance/definitions.md", "pattern": "## Validation Procedure" } },
     { "state": "Final Report", "source": { "file": "plugin/agents/overlord.md", "pattern": "Result: complete | partial | blocked" } }
