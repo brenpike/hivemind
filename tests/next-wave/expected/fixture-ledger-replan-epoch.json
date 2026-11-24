@@ -1,0 +1,12 @@
+{
+  "case": "ledger-replan-epoch.json",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-001",
+      "STEP-002"
+    ],
+    "remaining": 2
+  }
+}

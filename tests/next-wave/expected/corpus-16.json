@@ -1,0 +1,12 @@
+{
+  "case": "case 16: same file twice on chain",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-002",
+      "STEP-006"
+    ],
+    "remaining": 3
+  }
+}

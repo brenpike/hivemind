@@ -1,0 +1,7 @@
+{
+  "case": "not an array",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps: not an array"
+  }
+}

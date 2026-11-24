@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-## [13.1.0] - 2026-11-23
+## [14.1.0] - 2026-11-23
 
 ### Added
 
@@ -27,6 +27,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 No prose budget raised.
 
 Issue: #615.
+
+## [14.0.0] - 2026-11-23
+
+### Changed
+
+- `plugin/workflow-src/lib/waves.js` is the one home of the wave rule. `tests/workflow-scripts/waves.test.mjs` holds it to frozen expectations in `tests/next-wave/expected/`, captured from `next-wave.sh` in their own validated commit before the engine was deleted.
+- The decision autonomy table names workflow script sites only, including the `analysis-only.analyze` and `pr-feedback-remediation` sites. The `when` clauses that named state-machine states are reworded.
+- `node tools/build_workflows.mjs --check` rejects any entry in `plugin/workflows/` that is not a generated `.js` script.
+- Trust-Boundary Discipline in `security-policy.md` takes authorization only from packaged data and keeps one boundary, the brood child to coordinator boundary.
+- `tools/policy_check.sh` CHECK 9 keeps only the inputs-file guard, and CHECK 15 scans `plugin/**/*.md` only.
+- Glossary: the Workflow State Machine section becomes Routing, and the Decision Report, Workflow Definition, Run Ledger, Exploratory Intent Session, Transition Engine, Run Ownership and Intent-Driven Fallback entries are retired.
+- `docs/references/brood-ledger-model.md` is renamed `docs/references/brood-manifest-model.md`.
+- ADR-0018 is superseded by ADR-0048.
+- Prose budgets lowered: `overlord.md` 29993 to 29992, `safety-rails.md` 5085 to 5073, `security-policy.md` 24145 to 23856, `bump-type/SKILL.md` 6311 to 6265, `analysis-only.js` 16050 to 15772, `pr-feedback-remediation.js` 38343 to 38065, `standard-delivery.js` 42362 to 42084. The budget entries of `run-ledger-schema.md` and of the `init-run-ledger`, `mark-intent-fallback`, `next-wave` and `record-state-result` SKILL.md files are removed.
+
+### Removed
+
+- BREAKING: the six `plugin/workflows/*.json` definitions (`analysis-only`, `exploratory-intent-session`, `hatchery-dispatch`, `pr-feedback-remediation`, `standard-delivery`, `workflow-router`). Migration: none; the workflow scripts and Instinct are the only paths.
+- BREAKING: the four run-ledger skills `hivemind:init-run-ledger`, `hivemind:record-state-result`, `hivemind:next-wave` and `hivemind:mark-intent-fallback`. Migration: stop invoking them; the workflow scripts compute their own waves, and on Instinct the overlord forms each wave by the same rule. An old `.hivemind/runs/` folder is neither read nor deleted, so delete it by hand.
+- BREAKING: `plugin/references/run-ledger-schema.md`. Migration: none; no run ledger is written.
+- BREAKING: `_shared/ledger-engine-io.sh`, `_shared/ledger-project.sh`, `hivemind_assert_ledger_contained` and `hivemind_brood_read_child_ledger`. Migration: brood readers use `brood-state.sh` and the manifest; no child run ledger is read.
+- BREAKING: the autonomy rows `remediation_approach`, `version_bump_type`, `route_ambiguous` and `resume_or_skew`, and every state-machine site in `resolved_at`. Migration: none; no script resolves them.
+- BREAKING: the three seeded `Edit(.hivemind/runs/...)` rules. Migration: delete them from the consumer's `.claude/settings.json` by hand; nothing removes them.
+- BREAKING: the engine tooling and tests: `tools/test_engine.sh`, `tools/test_next_wave.sh`, `tools/validate_workflows.sh`, `tests/engine/`, `tests/workflow-defs/`, `tests/workflow-scripts/state-machine-questions.test.mjs`, `tests/brood/child-ledger-present.json`, `tests/policy/safety-wave-completed-steps.json` and the engine cases of other suites. Migration: none for consumers; run `bash tools/validate.sh`.
+- BREAKING: `docs/references/workflow-state-machine.md`. Migration: read the workflow scripts' sources in `plugin/workflow-src/`.
+
+No prose budget raised.
+
+Issue: #657.
 
 ## [13.0.0] - 2026-11-22
 

@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { loadLibs } from './harness.mjs';
 
@@ -9,6 +9,7 @@ const table = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-aut
 const schema = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-brief-schema.json', 'utf8'));
 const briefSource = readFileSync(repoRoot + 'plugin/workflow-src/lib/brief.js', 'utf8');
 const lib = loadLibs([repoRoot + 'plugin/workflow-src/lib/schema.js', repoRoot + 'plugin/workflow-src/lib/decide.js']);
+const SCRIPT_IDS = readdirSync(repoRoot + 'plugin/workflows').filter((name) => name.endsWith('.js')).map((name) => name.slice(0, -'.js'.length));
 
 const SHOWN_FIELD_PATHS = {
   problem: ['problem'],
@@ -95,17 +96,17 @@ describe('autonomy table', () => {
       assert.deepEqual(verdict, { action: 'ask', reason: 'hard_stop' }, 'external_effect at ' + level);
     }
   });
-  test('gate_rerun takes at high and balanced, asks at low, and is resolved at the gates step', () => {
+  test('gate_rerun takes at high and balanced, asks at low, and is resolved at the gates step of each delivery script', () => {
     const row = table.rows.find((entry) => entry.kind === 'gate_rerun');
     assert.ok(row !== undefined, 'gate_rerun is not a row');
     assert.deepEqual([row.high, row.balanced, row.low], ['auto', 'auto', 'surface']);
-    assert.deepEqual(row.resolved_at, ['standard-delivery.gates']);
+    assert.deepEqual(row.resolved_at, ['standard-delivery.gates', 'pr-feedback-remediation.gates']);
   });
-  test('step_stop asks at every level and is resolved at the standard-delivery stop', () => {
+  test('step_stop asks at every level and is resolved at the stop of each delivery script', () => {
     const row = table.rows.find((entry) => entry.kind === 'step_stop');
     assert.ok(row !== undefined, 'step_stop is not a row');
     assert.deepEqual([row.high, row.balanced, row.low], ['surface', 'surface', 'surface']);
-    assert.deepEqual(row.resolved_at, ['standard-delivery.stop']);
+    assert.deepEqual(row.resolved_at, ['standard-delivery.stop', 'pr-feedback-remediation.stop']);
     assert.ok(row.when.includes('terminal') && row.when.includes('agent failure'), row.when);
     for (const level of table.levels) {
       const verdict = structuredClone(lib.decide({ kind: 'step_stop', level, brief: null }, table, schema));
@@ -124,9 +125,23 @@ describe('autonomy table', () => {
       assert.ok(row !== undefined, kind + ' is not a row');
       assert.deepEqual([row.high, row.balanced, row.low], ['auto', 'auto', 'surface']);
       assert.ok(row.resolved_at.includes('standard-delivery.local_review'), JSON.stringify(row.resolved_at));
-      assert.ok(row.resolved_at.some((site) => !site.startsWith('standard-delivery.')), 'its state-machine sites stay');
+      assert.ok(row.resolved_at.every((site) => SCRIPT_IDS.some((id) => site.startsWith(id + '.'))), 'every site starts with a workflow id that has a script');
     });
   }
+  test('every resolved_at site of every row starts with a workflow id that has a script', () => {
+    assert.ok(SCRIPT_IDS.length > 0, 'no workflow script found');
+    for (const row of table.rows) {
+      assert.ok(row.resolved_at.length > 0, row.kind + ' has no resolved_at site');
+      for (const site of row.resolved_at) {
+        assert.ok(SCRIPT_IDS.some((id) => site.startsWith(id + '.')), `${row.kind} site ${site} names no workflow script`);
+      }
+    }
+  });
+  test('the four rows no script resolves are gone', () => {
+    for (const kind of ['remediation_approach', 'version_bump_type', 'route_ambiguous', 'resume_or_skew']) {
+      assert.equal(table.rows.some((row) => row.kind === kind), false, kind + ' is still a row');
+    }
+  });
   test('row kinds and hard stop names are unique and disjoint', () => {
     const names = [...table.rows.map((row) => row.kind), ...table.hard_stops.map((stop) => stop.hard_stop)];
     assert.ok(names.every((name) => typeof name === 'string' && name !== ''));

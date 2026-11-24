@@ -1,0 +1,7 @@
+{
+  "case": "null step",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps[0]: not an object"
+  }
+}

@@ -1,10 +1,10 @@
 # shellcheck shell=bash
 #
-# containment.sh — shared symlink-write-escape containment idiom for the three
-# committed hivemind run-ledger / brood writers (init-run-ledger, record-state-result,
-# spawn-brood); it also provides the ledger-read leaf guard (hivemind_assert_ledger_contained)
-# for the ledger-reading engines (mark-intent-fallback, record-state-result, next-wave),
-# completing leaf-symmetry across inputs-file / write-target / ledger-read leaves.
+# containment.sh — shared symlink-write-escape containment idiom for the committed hivemind
+# scripts that write or read under the checkout: seed-hive, spawn-brood, molt, open-plan-pr,
+# gather-facts, rc-brood, run-review, the brood-status scripts, brood-state.sh and
+# synapse-gate.sh. Its leaf guards are symmetric across the two leaf classes: the inputs-file
+# leaf and the write-target leaf.
 #
 # THIS FILE IS SOURCED, NOT EXECUTED. No shebang: each caller sources it by absolute
 # path derived from its OWN script_dir (`. "$plugin_root/skills/_shared/containment.sh"`).
@@ -19,22 +19,24 @@
 # definitions); each caller owns its own `set -u` and error routing. Allowlisted under
 # CHECK13 as a P18 documented exception.
 #
-# WHY ONE SHARED HELPER: the three writers each DERIVE a write path textually from the git
-# checkout root (e.g. "$repo_root/.hivemind/runs/<run_id>"). Textual derivation does NOT
-# confine the write when an ANCESTOR component of the chain is a SYMLINK pointing outside
-# the checkout — a repo that commits .hivemind, .hivemind/runs, or a deeper component as a
-# symlink to an external dir makes the derived path resolve OUTSIDE the checkout, so a
-# subsequent mkdir/mktemp/mv/worktree-add writes EXTERNALLY. Previously each writer guarded
-# only a hand-enumerated set of ancestor names (.hivemind, .hivemind/runs), which left the
-# `<run_id>` leaf (and any future component) unguarded — the finding-1 escape vector. This
-# helper closes the class DEPTH-COMPLETELY (every component of the chain, generically, not
-# by name) in ONE place so the three writers cannot diverge again.
+# WHY ONE SHARED HELPER: the writers (spawn-brood, gather-facts, run-review) each DERIVE a
+# write path textually from the git checkout root (e.g. "$repo_root/.claude/worktrees").
+# Textual derivation does NOT confine the write when an ANCESTOR component of the chain is a
+# SYMLINK pointing outside the checkout — a repo that commits .claude, .claude/worktrees, or a
+# deeper component as a symlink to an external dir makes the derived path resolve OUTSIDE the
+# checkout, so a subsequent mkdir/mktemp/mv/worktree-add writes EXTERNALLY. Guarding only a
+# hand-enumerated set of ancestor names leaves the leaf (and any future component) unguarded —
+# the finding-1 escape vector. This helper closes the class DEPTH-COMPLETELY (every component
+# of the chain, generically, not by name) in ONE place so the callers cannot diverge. The
+# inputs-file guards serve the inputs-file navigators (seed-hive, spawn-brood, molt,
+# open-plan-pr, synapse-gate.sh); hivemind_canon_root serves the brood readers (rc-brood, the
+# brood-status scripts, brood-state.sh).
 #
 # CONTRACT
 #   hivemind_assert_contained <raw_repo_root> <relative_chain>
 #     <raw_repo_root>  the git checkout root (e.g. `git rev-parse --show-toplevel`).
 #     <relative_chain> a checkout-relative path whose write target lives at its leaf,
-#                      e.g. ".hivemind/runs/<run_id>" or ".claude/worktrees".
+#                      e.g. ".claude/worktrees".
 #     On success: echoes the CANONICAL checkout root (cd && pwd -P) to stdout and returns 0.
 #                 Callers MUST derive their write paths from this canonical root.
 #     On reject:  prints a human-readable reason to stderr and returns non-zero. The caller
@@ -138,8 +140,8 @@
 # DEPTH-COMPLETE: every component of <relative_chain> that ALREADY EXISTS is checked for
 #   being a symlink ([ -L ]); the deepest existing prefix is canonicalized and required to
 #   stay under "<canon_root>/<expected-sub-prefix>/". Non-existent leaf components are fine
-#   (init/spawn-brood CREATE them) — only existing components are checked. This covers
-#   .hivemind, .hivemind/runs, .hivemind/runs/<run_id>, .claude, .claude/worktrees, and any
+#   (spawn-brood and gather-facts CREATE them) — only existing components are checked. This covers
+#   .hivemind, .hivemind/brood, .claude, .claude/worktrees, and any
 #   deeper/future component generically, NOT by enumerated name.
 #
 # PORTABLE: canonicalization is `cd "$dir" && pwd -P` (pwd -P resolves EVERY symlink
@@ -296,81 +298,6 @@ hivemind_assert_file_contained() {
   return 0
 }
 
-# hivemind_assert_ledger_contained <raw_repo_root> <ledger_file_path>
-#
-# LEDGER-READ leaf guard for the ledger-reading engines (mark-intent-fallback,
-# record-state-result, next-wave). Those engines read the run-ledger state.json via
-# [ -f "$ledger" ], jq -e . "$ledger", and jq -r '.run.id' "$ledger" — all of which FOLLOW
-# SYMLINKS. Their existing hivemind_assert_contained "$repo_root" ".hivemind/runs/$run_id"
-# guard validates the chain only DOWN TO the <run_id> run-dir, NOT the state.json leaf below
-# it. When the run dir is real but state.json is itself a symlink, the ledger reads follow it
-# to an external target — a content/validity read oracle the ancestor guard never inspects.
-#
-# This function REFUSES TO READ such a leaf, mirroring hivemind_assert_inputs_contained's
-# read-guard structure exactly. It completes leaf-symmetry across the three leaf classes:
-# inputs-file leaf (hivemind_assert_inputs_contained), write-target leaf
-# (hivemind_assert_file_contained), and ledger-read leaf (this function).
-#
-# LEAF REJECT: rejects a symlinked LEAF (the ledger file itself) via [ -L ] on the RAW
-# passed path FIRST — fires even when the symlink target is dangling/non-existent, and
-# before any [ -f ]/jq read (which follow symlinks). Then canonicalizes the leaf's DIRNAME
-# (cd && pwd -P), re-appends the basename, and prefix-matches against the canonical root —
-# catching a symlinked ANCESTOR as well.
-#
-# CALLER CONTRACT: callers run this AFTER deriving repo_root/run_id and BEFORE the first
-# ledger read. It does NOT replace the existing ancestor/runs-dir containment guard or the
-# post-existence canonical confirmation — those remain in the callers as defense-in-depth.
-#
-# On success: echoes the canonical repo root and returns 0.
-# On reject:  prints a concise reason to stderr and returns non-zero. Never exits.
-hivemind_assert_ledger_contained() {
-  local raw_root="$1"
-  local ledger_file_path="$2"
-
-  local canon_root
-  canon_root="$(hivemind_canon_root "$raw_root")"
-  if [ -z "$canon_root" ]; then
-    printf 'failed to canonicalize repo root %s\n' "$raw_root" >&2
-    return 1
-  fi
-
-  # Reject a symlinked LEAF before any path resolution. Tests the RAW passed path so it fires
-  # even for a dangling symlink target, and before the [ -f ]/jq reads that follow symlinks.
-  # Mirrors hivemind_assert_inputs_contained's [ -L ] leaf reject. A regular-file leaf is
-  # [ -L ]-false and proceeds to the ancestor check below.
-  if [ -L "$ledger_file_path" ]; then
-    printf 'refusing symlinked ledger file leaf %s under %s\n' "$ledger_file_path" "$canon_root" >&2
-    return 1
-  fi
-
-  # Canonicalize the ledger file path using the same cd && pwd -P idiom as the rest of this
-  # file. We cd into dirname (which must already exist) and re-append the basename. This
-  # resolves every symlink component in the directory path.
-  local ledger_dir ledger_base canon_ledger
-  ledger_dir="$(dirname "$ledger_file_path")"
-  ledger_base="$(basename "$ledger_file_path")"
-  canon_ledger="$(cd "$ledger_dir" 2>/dev/null && pwd -P)"
-  if [ -z "$canon_ledger" ]; then
-    printf 'failed to canonicalize ledger file directory %s\n' "$ledger_dir" >&2
-    return 1
-  fi
-  canon_ledger="$canon_ledger/$ledger_base"
-
-  # Trailing-slash-guarded prefix match — mirrors hivemind_assert_inputs_contained's case
-  # pattern exactly so a sibling path like /repo-evil cannot prefix-match /repo.
-  case "$canon_ledger/" in
-    "$canon_root/"*)
-      ;;
-    *)
-      printf 'ledger file %s resolves outside the checkout: %s\n' "$ledger_file_path" "$canon_ledger" >&2
-      return 1
-      ;;
-  esac
-
-  printf '%s' "$canon_root"
-  return 0
-}
-
 # hivemind_assert_inputs_contained <raw_repo_root> <inputs_file_path>
 #
 # Defense-in-depth READ-guard for the inputs-file navigators. The model authors an inputs
@@ -383,7 +310,7 @@ hivemind_assert_ledger_contained() {
 # runs before any committed code executes, so a path escaped via symlink is already written
 # by the time this guard runs. What this guard does is REFUSE TO READ such a file, making
 # the violation loud (hard non-zero return) rather than silent. The PRIMARY fix for the
-# write-through-symlink class is the navigator transport-path correction (record's
+# write-through-symlink class is the navigator transport-path correction (the
 # fixed-literal-sibling path + token transport), not this guard. This guard is a
 # defense-in-depth backstop only.
 #

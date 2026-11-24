@@ -1,0 +1,7 @@
+{
+  "case": "step id before unknown",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps[1].depends_on[0]: not a step id (1 to 64 of A-Z a-z 0-9 . _ -)"
+  }
+}

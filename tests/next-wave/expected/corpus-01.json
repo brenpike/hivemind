@@ -1,0 +1,11 @@
+{
+  "case": "case 1: dot component on chain",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-001"
+    ],
+    "remaining": 2
+  }
+}

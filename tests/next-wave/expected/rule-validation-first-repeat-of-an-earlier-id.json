@@ -1,0 +1,7 @@
+{
+  "case": "first repeat of an earlier id",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps[2].id: duplicate step id"
+  }
+}

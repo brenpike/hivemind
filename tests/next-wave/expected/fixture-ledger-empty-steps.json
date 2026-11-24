@@ -1,0 +1,7 @@
+{
+  "case": "ledger-empty-steps.json",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps: empty, nothing to schedule"
+  }
+}

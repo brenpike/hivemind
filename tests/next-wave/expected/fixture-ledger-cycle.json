@@ -1,0 +1,7 @@
+{
+  "case": "ledger-cycle.json",
+  "result": {
+    "ok": false,
+    "problem": "dependency cycle detected among plan steps"
+  }
+}

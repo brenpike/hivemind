@@ -1,0 +1,11 @@
+{
+  "case": "diamond wave3 join union",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-004"
+    ],
+    "remaining": 1
+  }
+}

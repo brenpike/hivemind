@@ -1,0 +1,11 @@
+{
+  "case": "ledger-glob-scope.json",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-001"
+    ],
+    "remaining": 2
+  }
+}

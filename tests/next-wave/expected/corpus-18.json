@@ -1,0 +1,11 @@
+{
+  "case": "case 18: clean scopes on random dag",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-003"
+    ],
+    "remaining": 1
+  }
+}

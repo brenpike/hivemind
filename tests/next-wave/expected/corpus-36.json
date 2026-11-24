@@ -1,0 +1,7 @@
+{
+  "case": "case 36: bracket glob on self dependency",
+  "result": {
+    "ok": false,
+    "problem": "dependency cycle detected among plan steps"
+  }
+}

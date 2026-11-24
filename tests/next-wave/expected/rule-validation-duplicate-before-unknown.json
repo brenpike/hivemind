@@ -1,0 +1,7 @@
+{
+  "case": "duplicate before unknown",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps[1].id: duplicate step id"
+  }
+}

@@ -1,6 +1,6 @@
 # Declarative workflow state machine with intent-driven execution
 
-**Status:** accepted — 2026-05-30
+**Status:** superseded by ADR-0048 — 2026-11-22
 
 We are adding deterministic, resumable workflow execution to Hivemind by externalizing the *transition skeleton* of each workflow into declarative data (JSON workflow definitions + a per-run JSON ledger), while the *judgment inside each state* remains intent-driven by the agents and skills. This is an enhancement layered on top of intent-based execution (ADR-0006), not a replacement for it.
 

@@ -1,0 +1,11 @@
+{
+  "case": "case 13: string files on random dag",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-001"
+    ],
+    "remaining": 3
+  }
+}

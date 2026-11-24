@@ -1,0 +1,11 @@
+{
+  "case": "case 9: directory prefix on wide",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-001"
+    ],
+    "remaining": 5
+  }
+}

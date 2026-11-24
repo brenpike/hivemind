@@ -72,16 +72,16 @@ CANON_DEFS
 }
 
 # ── Single-document-validity primitive (P2 contract) ──────────────────────────────
-# SINGLE-DOCUMENT DISCIPLINE (root cause — mirrors ledger-project.sh and manifest-json.sh):
+# SINGLE-DOCUMENT DISCIPLINE (root cause — mirrors manifest-json.sh):
 # jq accepts a STREAM of concatenated JSON documents, so a bare `jq -e 'type=="object"'` over a
 # file holding TWO objects (`{"a":1}{"b":2}`) runs the predicate ONCE PER document and SUCCEEDS —
 # jq exits 0 on the last document. A downstream `--argjson`/per-object-write that assumed ONE
 # object then crashes or clobbers instead of taking the documented malformed path. We SLURP with
 # `jq -s` (collect the stream into an array), require `length == 1` (EXACTLY one top-level
 # document), and require that single element to be an object (`.[0] | type == "object"`). This is
-# the same `jq -s ... length == 1 and (.[0] | type == "object")` discipline ledger-project.sh's
-# _content projectors and manifest-json.sh's hivemind_manifest_validate_shape already enforce; this
-# primitive factors it into ONE reusable shape so every "exactly one JSON object" precheck shares it.
+# the same `jq -s ... length == 1 and (.[0] | type == "object")` discipline manifest-json.sh's
+# hivemind_manifest_validate_shape already enforces; this primitive factors it into ONE reusable
+# shape so every "exactly one JSON object" precheck shares it.
 #
 # DATA-BOUNDARY (MANDATORY — fixed program, NO value splice): both helpers run jq with a CONSTANT
 # program string (the single-document predicate). The input is BYTES ONLY — a file path passed as a

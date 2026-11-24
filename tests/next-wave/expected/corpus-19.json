@@ -1,0 +1,7 @@
+{
+  "case": "case 19: trailing slash on cycle",
+  "result": {
+    "ok": false,
+    "problem": "dependency cycle detected among plan steps"
+  }
+}

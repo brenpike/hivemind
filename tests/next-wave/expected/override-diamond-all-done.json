@@ -1,0 +1,9 @@
+{
+  "case": "diamond all done",
+  "result": {
+    "ok": true,
+    "all_done": true,
+    "wave": [],
+    "remaining": 0
+  }
+}

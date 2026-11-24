@@ -1,0 +1,11 @@
+{
+  "case": "case 34: star glob on two chains",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-001"
+    ],
+    "remaining": 3
+  }
+}

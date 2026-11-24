@@ -1,0 +1,7 @@
+{
+  "case": "first unknown in plan order",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps[0].depends_on[1]: unknown step id"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "case": "null id",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps[0].id: missing"
+  }
+}

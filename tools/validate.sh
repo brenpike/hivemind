@@ -9,8 +9,8 @@
 # This script gates correctness. A mis-mapped path that skips a relevant heavy suite is a
 # false-green. Every unmapped/unknown path therefore escalates to the FULL suite — never a
 # silent skip. The mapping globs below were derived by reading each tool to confirm the exact
-# inputs it exercises (test_engine.sh, test_brood_compat.sh, test_shared_libs.sh,
-# validate_reports.sh, validate_workflows.sh, policy_check.sh).
+# inputs it exercises (test_brood_compat.sh, test_shared_libs.sh, validate_reports.sh,
+# policy_check.sh).
 #
 # Usage:
 #   bash tools/validate.sh [--all]
@@ -44,9 +44,6 @@ cleanup_suites_scratch() {
 SUITE_JSON_MANIFESTS='json-manifests'   # special: four python3 json.load parses
 SUITE_POLICY_CHECK='policy_check.sh --strict'
 SUITE_VALIDATE_REPORTS='validate_reports.sh --batch tests/reports/'
-SUITE_WORKFLOWS_STRICT='validate_workflows.sh --strict'
-SUITE_WORKFLOWS_SELFTEST='validate_workflows.sh --self-test'
-SUITE_TEST_ENGINE='test_engine.sh'
 SUITE_TEST_SHARED='test_shared_libs.sh'
 SUITE_TEST_BROOD='test_brood_compat.sh'
 SUITE_TEST_FIX_HISTORY='test_fix_history_classify.sh'
@@ -62,7 +59,6 @@ SUITE_TEST_SUBISSUE_OPS='test_subissue_ops.sh'
 SUITE_TEST_READINESS_CHECK='test_readiness_check.sh'
 SUITE_TEST_SEED_HIVE='test_seed_hive.sh'
 SUITE_TEST_RC_BROOD='test_rc_brood.sh'
-SUITE_TEST_NEXT_WAVE='test_next_wave.sh'
 SUITE_TEST_BUMP_TYPE='test_bump_type.sh'
 SUITE_TEST_PUSH_BRANCH='test_push_branch.sh'
 SUITE_TEST_GATHER_FACTS='test_gather_facts.sh'
@@ -83,9 +79,6 @@ ALL_SUITES=(
   "$SUITE_JSON_MANIFESTS"
   "$SUITE_POLICY_CHECK"
   "$SUITE_VALIDATE_REPORTS"
-  "$SUITE_WORKFLOWS_STRICT"
-  "$SUITE_WORKFLOWS_SELFTEST"
-  "$SUITE_TEST_ENGINE"
   "$SUITE_TEST_SHARED"
   "$SUITE_TEST_BROOD"
   "$SUITE_TEST_FIX_HISTORY"
@@ -101,7 +94,6 @@ ALL_SUITES=(
   "$SUITE_TEST_READINESS_CHECK"
   "$SUITE_TEST_SEED_HIVE"
   "$SUITE_TEST_RC_BROOD"
-  "$SUITE_TEST_NEXT_WAVE"
   "$SUITE_TEST_BUMP_TYPE"
   "$SUITE_TEST_PUSH_BRANCH"
   "$SUITE_TEST_GATHER_FACTS"
@@ -124,8 +116,6 @@ ALL_SUITES=(
 KNOWN_SUITES=(
   policy_check.sh
   validate_reports.sh
-  validate_workflows.sh
-  test_engine.sh
   test_shared_libs.sh
   test_brood_compat.sh
   test_fix_history_classify.sh
@@ -141,7 +131,6 @@ KNOWN_SUITES=(
   test_readiness_check.sh
   test_seed_hive.sh
   test_rc_brood.sh
-  test_next_wave.sh
   test_bump_type.sh
   test_push_branch.sh
   test_gather_facts.sh
@@ -329,13 +318,7 @@ run_suites() {
 # FULLSUITE sentinel.
 #
 # Globs verified against each tool:
-#   plugin/workflows/*.json            -> validate_workflows --strict + --self-test
-#   plugin/skills/record-state-result/scripts/**, init-run-ledger/scripts/**, tests/engine/**,
-#     plugin/skills/_shared/{containment,brood-state}.sh
-#                                      -> test_engine  (also validate_workflows reads tests/engine;
-#                                         containment.sh and brood-state.sh are copied into
-#                                         test_engine's fake plugin)
-#   plugin/skills/spawn-brood/**, brood-status/**, init-run-ledger/scripts/**,
+#   plugin/skills/spawn-brood/**, brood-status/**,
 #     plugin/skills/_shared/{containment,brood-state}.sh,
 #     plugin/skills/enable-brood-remote/scripts/rc-brood.sh, tests/brood/**
 #                                      -> test_brood_compat
@@ -389,13 +372,13 @@ run_suites() {
 #                                      -> test_run_review (the libs and references keep their other
 #                                         routes by union)
 #   plugin/**/*.sh                     -> test_script_bootstrap (engine bootstrap/self-location contract)
-#   plugin/workflow-src/**, plugin/workflows/*.js, plugin/workflows/*.json,
+#   plugin/workflow-src/**, plugin/workflows/*.js,
 #     plugin/skills/route-workflow/SKILL.md,
 #     plugin/references/decision-autonomy-table.json, plugin/references/decision-brief-schema.json,
 #     plugin/references/facts-schema.json, plugin/references/plan-schema.json,
 #     plugin/skills/gather-facts/scripts/{gather-facts.sh,gather-facts.jq},
-#     plugin/skills/next-wave/scripts/next-wave.sh, tests/next-wave/**,
-#     plugin/skills/_shared/{containment,ledger-engine-io}.sh,
+#     tests/next-wave/** (the frozen fixtures and expectations waves.test.mjs reads),
+#     plugin/skills/_shared/containment.sh (sourced by gather-facts.sh, molt.sh and open-plan-pr.sh),
 #     plugin/skills/create-working-branch/scripts/create-working-branch.sh,
 #     plugin/skills/bump-type/scripts/bump-type.sh, tests/workflow-scripts/**,
 #     tests/policy/prose-byte-budget.json (the build reads each workflow's prose budget from it;
@@ -416,12 +399,9 @@ run_suites() {
 #       plugin/skills/push-branch/scripts/push-branch.sh (standard-delivery.test.mjs runs them),
 #     plugin/skills/_shared/bump-type-derive.sh (sourced by the bump-type.sh the node tests run)
 #                                      -> test_workflow_scripts (build drift check + node tests;
-#                                         every path except tests/workflow-scripts/** keeps its
-#                                         other routes by union)
+#                                         every path except tests/workflow-scripts/** and
+#                                         tests/next-wave/** keeps its other routes by union)
 #   tests/reports/**                                    -> validate_reports
-#   plugin/agents/{cerebrate,local-reviewer,github-reviewer}.md,
-#     plugin/skills/github-review-loop/SKILL.md         -> validate_workflows (exit_reason contracts)
-#   tests/workflow-defs/**                              -> validate_workflows
 #   plugin/**, .claude-plugin/**, tests/policy/**, tests/plugin/**, tests/workflows/**, *.md under plugin
 #                                      -> policy_check
 #   plugin/.claude-plugin/plugin.json, .claude-plugin/marketplace.json or plugin/hooks/hooks.json
@@ -538,55 +518,7 @@ map_path() {
     matched=1
   fi
 
-  # validate_workflows: workflow defs.
-  if [[ "$p" == plugin/workflows/*.json ]]; then
-    add_selected "$SUITE_WORKFLOWS_STRICT" "$p (workflow definition)"
-    add_selected "$SUITE_WORKFLOWS_SELFTEST" "$p (workflow definition)"
-    matched=1
-  fi
-  # validate_workflows: exit_reason contract documents.
-  case "$p" in
-    plugin/agents/cerebrate.md|plugin/agents/local-reviewer.md|plugin/agents/github-reviewer.md|plugin/skills/github-review-loop/SKILL.md)
-      add_selected "$SUITE_WORKFLOWS_STRICT" "$p (exit_reason / state contract source)"
-      add_selected "$SUITE_WORKFLOWS_SELFTEST" "$p (exit_reason / state contract source)"
-      matched=1
-      ;;
-  esac
-  # validate_workflows: workflow-def fixtures.
-  if [[ "$p" == tests/workflow-defs/* ]]; then
-    add_selected "$SUITE_WORKFLOWS_STRICT" "$p (workflow-def fixture)"
-    add_selected "$SUITE_WORKFLOWS_SELFTEST" "$p (workflow-def fixture)"
-    matched=1
-  fi
-
-  # test_engine: engine scripts + engine fixtures (validate_workflows also reads tests/engine).
-  # The three engine scripts (record-state-result, init-run-ledger, mark-intent-fallback) are the
-  # engine oracle's subjects: test_engine.sh is the behavior oracle for all three, so an edit to
-  # any of them must trigger test_engine or engine regressions go untested under --changed.
-  # Also containment.sh: test_engine.sh copies the shared containment guard into its fake plugin
-  # and exercises engine symlink/external-path containment cases, so a containment.sh change must
-  # trigger test_engine or record/init engine containment regressions go untested under --changed.
-  # Also ledger-engine-io.sh: sourced by the three ledger engine entrypoints; test_engine.sh is the
-  # behavior oracle for those engines, so a lib-only edit must trigger test_engine or engine
-  # regressions go untested under --changed (test_shared_libs alone is not sufficient).
-  # Also brood-state.sh: test_engine.sh copies the brood-state reader into its fake plugin for the
-  # spawn-brood.sh it drives, so a reader edit must trigger test_engine.
-  if [[ "$p" == plugin/skills/record-state-result/scripts/* \
-     || "$p" == plugin/skills/init-run-ledger/scripts/* \
-     || "$p" == plugin/skills/mark-intent-fallback/scripts/* \
-     || "$p" == plugin/skills/_shared/containment.sh \
-     || "$p" == plugin/skills/_shared/ledger-engine-io.sh \
-     || "$p" == plugin/skills/_shared/brood-state.sh \
-     || "$p" == tests/engine/* ]]; then
-    add_selected "$SUITE_TEST_ENGINE" "$p (engine script/fixture)"
-    matched=1
-  fi
-  if [[ "$p" == tests/engine/* ]]; then
-    add_selected "$SUITE_WORKFLOWS_STRICT" "$p (run-ledger fixture, validate_workflows)"
-    add_selected "$SUITE_WORKFLOWS_SELFTEST" "$p (run-ledger fixture, validate_workflows)"
-  fi
-
-  # test_brood_compat: spawn-brood / brood-status scripts + init engine + brood fixtures.
+  # test_brood_compat: spawn-brood / brood-status scripts + brood fixtures.
   # Also containment.sh: the shared containment guard's regressions are exercised ONLY by
   # test_brood_compat (via spawn-brood.sh / brood-status guards), not test_shared_libs — so a
   # containment.sh change must trigger this suite or its only relevant coverage is skipped.
@@ -596,7 +528,6 @@ map_path() {
   # script; test_brood_compat is the behavior oracle for those consumers.
   if [[ "$p" == plugin/skills/spawn-brood/* \
      || "$p" == plugin/skills/brood-status/* \
-     || "$p" == plugin/skills/init-run-ledger/scripts/* \
      || "$p" == plugin/skills/_shared/containment.sh \
      || "$p" == plugin/skills/_shared/brood-state.sh \
      || "$p" == plugin/skills/enable-brood-remote/scripts/rc-brood.sh \
@@ -629,24 +560,12 @@ map_path() {
     matched=1
   fi
 
-  # test_next_wave: the READ-ONLY ready-wave engine (next-wave.sh) + its ledger fixtures. The
-  # script is ALSO a plugin/* file (policy_check prose-lints it via the wholesale rule below),
-  # but policy_check NEVER EXECUTES bash — so without this rule a next-wave edit would only be
-  # prose-linted, never behaviorally exercised. Route both the skill dir and its fixture dir to
-  # the behavioral suite. (tools/test_next_wave.sh itself is covered by the tools/** full-suite
-  # leg.)
-  if [[ "$p" == plugin/skills/next-wave/* \
-     || "$p" == tests/next-wave/* ]]; then
-    add_selected "$SUITE_TEST_NEXT_WAVE" "$p (next-wave engine script/fixture)"
-    matched=1
-  fi
-
   # test_bump_type: the bump-type navigator skill (SKILL.md + scripts/bump-type.sh entrypoint) and
   # the deterministic derivation core it sources (_shared/bump-type-derive.sh). Both are ALSO
   # plugin/* files (policy_check prose-lints them via the wholesale rule below), but policy_check
   # NEVER EXECUTES bash — so without this rule a bump-type edit would only be prose-linted, never
   # behaviorally exercised. The derive core ALSO keeps its _shared/*.sh -> test_shared_libs routing
-  # above (same precedent as containment.sh / ledger-engine-io.sh / settings-merge.sh: a _shared lib
+  # above (same precedent as containment.sh / settings-merge.sh: a _shared lib
   # routed to more than one behavior oracle because test_shared_libs alone does not cover a contract
   # owned elsewhere). (tools/test_bump_type.sh itself is covered by the tools/** full-suite leg.)
   if [[ "$p" == plugin/skills/bump-type/* \
@@ -763,10 +682,9 @@ map_path() {
   # whose facts-file path pattern analysis-only.test.mjs cross-checks and the jq assembly program
   # facts-schema.test.mjs checks against the facts contract (the other gather-facts files route only
   # to test_gather_facts), the create-working-branch.sh and bump-type.sh enums plan-schema.test.mjs
-  # pins, the next-wave.sh engine waves.test.mjs runs as its parity oracle together with the two
-  # _shared libs that engine sources (containment.sh, ledger-engine-io.sh) and the tests/next-wave/*
-  # fixtures it replays, the route-workflow skill and the plugin/workflows/*.json definitions whose
-  # catalog parity route-catalog.test.mjs pins, the drone agent whose read-only and validation fix
+  # pins, the tests/next-wave/* frozen fixtures and expectations waves.test.mjs reads, the
+  # containment.sh _shared lib that gather-facts.sh, molt.sh and open-plan-pr.sh source, the
+  # route-workflow skill whose catalog route-catalog.test.mjs pins, the drone agent whose read-only and validation fix
   # task clauses standard-delivery.test.mjs matches against the runner sentences, the synapse agent
   # whose prompt words standard-delivery.test.mjs pins the runner prompts against, the synapse-gate
   # hook that must allow every runner command the engine builds, the cerebrate agent whose plan block
@@ -781,13 +699,12 @@ map_path() {
   # runner sentences are pinned against (these agent and governance files route by the plugin
   # Markdown glob),
   # and the node tests themselves. Every path here except the
-  # node tests keeps its other routes by union (for example *.json keeps validate_workflows,
+  # node tests and tests/next-wave/* keeps its other routes by union (for example
   # prose-byte-budget.json keeps policy_check,
-  # next-wave.sh and its fixtures keep test_next_wave, cerebrate.md and local-reviewer.md keep
-  # validate_workflows, synapse-gate.sh keeps test_synapse_gate, molt.sh keeps test_molt,
+  # synapse-gate.sh keeps test_synapse_gate, molt.sh keeps test_molt,
   # open-plan-pr.sh keeps test_open_plan_pr, push-branch.sh keeps test_push_branch and
   # test_open_plan_pr, bump-type-derive.sh keeps test_bump_type, the governance docs keep
-  # policy_check, the _shared libs keep test_engine, test_push_branch, test_create_working_branch,
+  # policy_check, the _shared libs keep test_brood_compat, test_push_branch, test_create_working_branch,
   # test_molt, test_gather_facts and the rest). Every one of these except tests/workflow-scripts/* and
   # tests/next-wave/* is ALSO a plugin/* file (policy_check prose-lints it via the wholesale rule
   # below), but policy_check NEVER RUNS node, so without this rule a source edit that leaves the
@@ -796,7 +713,6 @@ map_path() {
   # (tools/test_workflow_scripts.sh and tools/build_workflows.mjs are covered by the tools/** leg.)
   if [[ "$p" == plugin/workflow-src/* \
      || "$p" == plugin/workflows/*.js \
-     || "$p" == plugin/workflows/*.json \
      || "$p" == tests/policy/prose-byte-budget.json \
      || "$p" == plugin/skills/route-workflow/SKILL.md \
      || "$p" == plugin/references/decision-autonomy-table.json \
@@ -805,10 +721,8 @@ map_path() {
      || "$p" == plugin/references/plan-schema.json \
      || "$p" == plugin/skills/gather-facts/scripts/gather-facts.sh \
      || "$p" == plugin/skills/gather-facts/scripts/gather-facts.jq \
-     || "$p" == plugin/skills/next-wave/scripts/next-wave.sh \
      || "$p" == tests/next-wave/* \
      || "$p" == plugin/skills/_shared/containment.sh \
-     || "$p" == plugin/skills/_shared/ledger-engine-io.sh \
      || "$p" == plugin/skills/create-working-branch/scripts/create-working-branch.sh \
      || "$p" == plugin/skills/bump-type/scripts/bump-type.sh \
      || "$p" == plugin/*.md \
@@ -1058,8 +972,8 @@ map_path() {
   # `seed-hive apply` against a settings file holding a non-object hook element — a regression in
   # settings-merge.sh's element-access path. test_shared_libs alone does not exercise that contract,
   # so a settings-merge.sh-only edit must ALSO trigger test_seed_hive or that pin never fires under
-  # `--changed` (same precedent as containment.sh -> test_engine + test_brood_compat and
-  # ledger-engine-io.sh -> test_engine above: a _shared lib routed to more than one behavior oracle
+  # `--changed` (same precedent as containment.sh -> test_brood_compat and test_synapse_gate
+  # above: a _shared lib routed to more than one behavior oracle
   # because test_shared_libs alone does not cover a contract owned elsewhere).
   if [[ "$p" == plugin/skills/seed-hive/scripts/* \
      || "$p" == plugin/skills/_shared/settings-merge.sh ]]; then
@@ -1336,8 +1250,6 @@ self_test() {
   declare -A probe=(
     ["policy_check.sh"]="plugin/agents/overlord.md"
     ["validate_reports.sh"]="tests/reports/some-fixture.txt"
-    ["validate_workflows.sh"]="plugin/workflows/main.json"
-    ["test_engine.sh"]="tests/engine/ledger-x.json"
     ["test_shared_libs.sh"]="plugin/skills/_shared/allowlist.sh"
     ["test_brood_compat.sh"]="tests/brood/manifest-x.json"
     ["test_fix_history_classify.sh"]="tests/fix-history/case01-x.json"
@@ -1353,7 +1265,6 @@ self_test() {
     ["test_readiness_check.sh"]="tests/readiness-check/case-x.json"
     ["test_seed_hive.sh"]="plugin/skills/seed-hive/scripts/seed-hive.sh"
     ["test_rc_brood.sh"]="plugin/skills/enable-brood-remote/SKILL.md"
-    ["test_next_wave.sh"]="tests/next-wave/ledger-x.json"
     ["test_bump_type.sh"]="plugin/skills/bump-type/scripts/bump-type.sh"
     ["test_push_branch.sh"]="plugin/skills/push-branch/scripts/push-branch.sh"
     ["test_gather_facts.sh"]="plugin/skills/gather-facts/scripts/gather-facts.sh"
@@ -1382,7 +1293,7 @@ self_test() {
     hit=0
     for entry in "${SELECTED[@]:-}"; do
       suite_path="${entry%%$'\t'*}"
-      # suite_path is like "validate_workflows.sh --strict" or "json-manifests"; match prefix.
+      # suite_path is like "policy_check.sh --strict" or "json-manifests"; match prefix.
       if [[ "$suite_path" == "$script_name"* ]]; then hit=1; break; fi
     done
     if [[ "$hit" -eq 1 ]]; then
@@ -1537,29 +1448,6 @@ self_test() {
     fails=$((fails + 1))
   fi
 
-  # 8. All THREE engine SCRIPT paths must route to test_engine.sh. The KNOWN_SUITES probe (#1)
-  #    reaches test_engine.sh via a tests/engine/* fixture, so it would stay green even if a
-  #    script->oracle leg were dropped. Probe the three concrete engine-script paths directly so
-  #    that removing any one selector glob (especially the mark-intent-fallback leg) FAILS here.
-  local engine_script
-  for engine_script in \
-    "plugin/skills/record-state-result/scripts/record-state-result.sh" \
-    "plugin/skills/init-run-ledger/scripts/init-run-ledger.sh" \
-    "plugin/skills/mark-intent-fallback/scripts/mark-intent-fallback.sh"; do
-    SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''
-    map_path "$engine_script" >/dev/null
-    hit=0
-    for entry in "${SELECTED[@]:-}"; do
-      if [[ "${entry%%$'\t'*}" == "$SUITE_TEST_ENGINE"* ]]; then hit=1; break; fi
-    done
-    if [[ "$hit" -eq 1 ]]; then
-      echo "PASS: engine script $engine_script -> test_engine.sh"
-    else
-      echo "FAIL: engine script $engine_script did NOT route to test_engine.sh"
-      fails=$((fails + 1))
-    fi
-  done
-
   # 9. Each workflow-script input the KNOWN_SUITES probe (#1) does not reach must route to
   #    test_workflow_scripts.sh. #1 probes a plugin/workflow-src/* path, so it would stay green if
   #    the generated-script, data-file, prose budget file, plugin Markdown glob (agents overlord,
@@ -1567,7 +1455,7 @@ self_test() {
   #    definitions, security-policy, workflow, decision-autonomy, report-format; a skill SKILL.md, a
   #    skill references/*.md, a plugin/references/*.md), plugin JSON glob (plugin.json, outside
   #    references and workflows), route-workflow skill,
-  #    workflow-definition, node-test-read or node-test-run script/fixture (open-plan-pr.sh,
+  #    node-test-read or node-test-run script/fixture (open-plan-pr.sh,
   #    push-branch.sh, synapse-gate.sh), or sourced _shared lib (bump-type-derive.sh) selector were
   #    dropped. Probe each directly so removing any one selector FAILS here.
   local workflow_input
@@ -1579,10 +1467,9 @@ self_test() {
     "tests/policy/prose-byte-budget.json" \
     "plugin/skills/gather-facts/scripts/gather-facts.sh" \
     "plugin/skills/gather-facts/scripts/gather-facts.jq" \
-    "plugin/skills/next-wave/scripts/next-wave.sh" \
     "tests/next-wave/ledger-x.json" \
+    "tests/next-wave/expected/corpus-01.json" \
     "plugin/skills/_shared/containment.sh" \
-    "plugin/skills/_shared/ledger-engine-io.sh" \
     "plugin/skills/create-working-branch/scripts/create-working-branch.sh" \
     "plugin/skills/bump-type/scripts/bump-type.sh" \
     "plugin/workflows/analysis-only.js" \
@@ -1609,10 +1496,8 @@ self_test() {
     "plugin/governance/report-format.md" \
     "plugin/skills/molt/SKILL.md" \
     "plugin/skills/detect-remediation-signals/references/cluster-case-studies.md" \
-    "plugin/references/run-ledger-schema.md" \
     "plugin/.claude-plugin/plugin.json" \
-    "plugin/skills/route-workflow/SKILL.md" \
-    "plugin/workflows/analysis-only.json"; do
+    "plugin/skills/route-workflow/SKILL.md"; do
     SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''
     map_path "$workflow_input" >/dev/null
     hit=0
@@ -1628,9 +1513,9 @@ self_test() {
   done
 
   # 10. Each consumer leg of the gather-facts, create-working-branch, push-branch, molt,
-  #     open-plan-pr and synapse-gate suites, each brood-state.sh leg (test_engine,
-  #     test_brood_compat, test_rc_brood), the test_readiness_check library and harness legs, and the
-  #     hooks.json json-manifests parse leg, that the
+  #     open-plan-pr and synapse-gate suites, each brood-state.sh leg (test_brood_compat,
+  #     test_rc_brood), the test_readiness_check library and harness legs, and the hooks.json
+  #     json-manifests parse leg, that the
   #     KNOWN_SUITES probe (#1) does not reach must route to its suite. #1 probes each entrypoint
   #     script, so it would stay green if the schema-chain, shared-lib, harness, push-branch child
   #     or parse-gate selector were dropped. Probe each <path>|<suite> pair directly so removing
@@ -1663,8 +1548,7 @@ self_test() {
     "tools/test_readiness_check.sh|$SUITE_TEST_READINESS_CHECK" \
     "plugin/hooks/hooks.json|$SUITE_JSON_MANIFESTS" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_BROOD" \
-    "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_RC_BROOD" \
-    "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_ENGINE"; do
+    "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_RC_BROOD"; do
     consumer_path="${consumer_pair%%|*}"
     consumer_suite="${consumer_pair#*|}"
     SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''

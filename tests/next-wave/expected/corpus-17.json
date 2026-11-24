@@ -1,0 +1,11 @@
+{
+  "case": "case 17: shared file on diamond",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-001"
+    ],
+    "remaining": 4
+  }
+}

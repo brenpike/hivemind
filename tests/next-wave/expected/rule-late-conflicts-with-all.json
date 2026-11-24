@@ -1,0 +1,12 @@
+{
+  "case": "late conflicts-with-all",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "A",
+      "C"
+    ],
+    "remaining": 3
+  }
+}

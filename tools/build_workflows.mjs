@@ -152,11 +152,14 @@
  *   --check builds each draft in memory, so a draft that fails to build
  *   fails --check, and fails when plugin/workflows/<id>.js exists for a
  *   draft, so a stray DRAFT marker on a live workflow fails too.
- *   --check lists plugin/workflows/*.js, never the .json engine files, and
- *   names each one with no plugin/workflow-src/<id>/ directory as an orphan.
+ *   --check lists plugin/workflows/*.js and names each one with no
+ *   plugin/workflow-src/<id>/ directory as an orphan. plugin/workflows/
+ *   holds only generated <id>.js scripts: --check names each regular file
+ *   there whose name does not end in .js as foreign and exits 1.
  *   Every entry under plugin/workflows/ must be a regular file. --check
  *   names each one that is not (a symlink, a directory or anything else),
- *   whatever its name, .js, .json or other, and exits 1. It never reads
+ *   whatever its name, and exits 1, and reports it only as not regular,
+ *   never also as foreign. It never reads
  *   through such an entry, so it is not also reported stale. Write mode
  *   checks every target before it writes any, and throws when a target
  *   exists and is not a regular file, so it never writes through a symlink.
@@ -1346,6 +1349,22 @@ function describeNonRegularOutput(entry) {
   return entry.path + ' is ' + ENTRY_KIND_TEXT[entry.kind] + '. Every entry under ' + OUTPUT_DIR + '/ must be a regular file. Remove it, then rebuild with: ' + REBUILD_COMMAND;
 }
 
+/**
+ * Returns the sorted path of each regular file under plugin/workflows/ whose
+ * name does not end in .js. An entry that is not a regular file is left to
+ * findNonRegularOutputs.
+ */
+export function findForeignOutputs(root) {
+  return readdirSync(join(root, OUTPUT_DIR), { withFileTypes: true })
+    .filter((entry) => entry.isFile() && !entry.name.endsWith('.js'))
+    .map((entry) => OUTPUT_DIR + '/' + entry.name)
+    .sort();
+}
+
+function describeForeignOutput(path) {
+  return path + ' is not a generated workflow script: ' + OUTPUT_DIR + '/ holds only <id>.js scripts built from ' + SOURCE_DIR + '/<id>/. Remove it.';
+}
+
 function isStale(root, id) {
   const builtPath = builtPathFor(id);
   const kind = readEntryKind(root, builtPath);
@@ -1409,9 +1428,9 @@ function assertWritableTarget(root, builtPath) {
 
 /**
  * Runs the command line. Returns the exit code: 0 on success, 1 when --check
- * finds a stale or orphan script, a draft with a built script or an entry
- * under plugin/workflows/ that is not a regular file, 2 on an unknown
- * argument. A build error throws, as does a write through a target that is
+ * finds a stale or orphan script, a draft with a built script, a regular
+ * file under plugin/workflows/ whose name does not end in .js or an entry
+ * there that is not a regular file, 2 on an unknown argument. A build error throws, as does a write through a target that is
  * not a regular file.
  */
 export function runCli(argv, { root, stdout, stderr }) {
@@ -1426,11 +1445,13 @@ export function runCli(argv, { root, stdout, stderr }) {
     const orphanIds = findOrphanWorkflowIds(root);
     const builtDraftIds = findBuiltDraftIds(root);
     const nonRegular = findNonRegularOutputs(root);
+    const foreign = findForeignOutputs(root);
     stale.forEach((builtPath) => stderr.write(builtPath + ' is stale. Rebuild with: ' + REBUILD_COMMAND + '\n'));
     orphanIds.forEach((id) => stderr.write(describeOrphan(id) + '\n'));
     builtDraftIds.forEach((id) => stderr.write(describeBuiltDraft(id) + '\n'));
     nonRegular.forEach((entry) => stderr.write(describeNonRegularOutput(entry) + '\n'));
-    const failures = stale.length + orphanIds.length + builtDraftIds.length + nonRegular.length;
+    foreign.forEach((path) => stderr.write(describeForeignOutput(path) + '\n'));
+    const failures = stale.length + orphanIds.length + builtDraftIds.length + nonRegular.length + foreign.length;
     return failures > 0 ? 1 : 0;
   }
   writeWorkflows(root).forEach((builtPath) => stdout.write('wrote ' + builtPath + '\n'));
