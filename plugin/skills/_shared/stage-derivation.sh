@@ -82,7 +82,7 @@
 #       arguments are checked before any gh call (usage); it makes no git call. Each read is one
 #       `gh api graphql` call whose query is a constant taking every value as a GraphQL variable,
 #       each connection first:100, in this order: the seed marker search `repo:<owner/repo>
-#       is:issue is:open in:body "hivemind-initiative: <slug>"`, the docs pull request search
+#       is:issue in:body "hivemind-initiative: <slug>"`, the docs pull request search
 #       `repo:<owner/repo> is:pr is:open head:docs/<slug>`, the branches under refs/heads/ whose
 #       name holds `docs/<slug>` with their pull request counts; then, for the one resolved seed,
 #       its labels and sub-issues; then per sub-issue, in order, its snapshot through
@@ -1113,7 +1113,7 @@ hivemind_stage_evidence_gh() {
     return 2
   fi
   seeds="$(_hivemind_sd_graphql sd_gh_seeds 0 -f query="$(_hivemind_sd_gh_query seeds)" \
-    -f q="repo:$owner_repo is:issue is:open in:body \"hivemind-initiative: $slug\"")" || return 2
+    -f q="repo:$owner_repo is:issue in:body \"hivemind-initiative: $slug\"")" || return 2
   prs="$(_hivemind_sd_graphql sd_gh_pull_requests 0 -f query="$(_hivemind_sd_gh_query pull-requests)" \
     -f q="repo:$owner_repo is:pr is:open head:docs/$slug")" || return 2
   refs="$(_hivemind_sd_graphql sd_gh_refs 0 -f query="$(_hivemind_sd_gh_query refs)" \

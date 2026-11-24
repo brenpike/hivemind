@@ -858,7 +858,7 @@ route_argv() {
   local key="$1" owner_repo="$2" slug="$3" owner="${2%%/*}" name="${2#*/}"
   case "$key" in
     seeds)
-      printf '<api><graphql><-f><query=%s><-f><q=repo:%s is:issue is:open in:body "hivemind-initiative: %s">' \
+      printf '<api><graphql><-f><query=%s><-f><q=repo:%s is:issue in:body "hivemind-initiative: %s">' \
         "$Q_SEEDS" "$owner_repo" "$slug"
       ;;
     pull-requests)
