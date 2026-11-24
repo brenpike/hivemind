@@ -2,18 +2,21 @@
 
 Fixture home for `tools/test_stage_derivation.sh`, the offline behavioral runner
 for the stage derivation library `plugin/skills/_shared/stage-derivation.sh`
-(issue #621, ADR-0046): `hivemind_stage_derive` and `hivemind_stage_handoff`.
-The library's header holds its full contract, the evidence JSON v1 and the
-precedence; this file describes how the suite tests it.
+(issue #621, ADR-0046): `hivemind_stage_derive`, `hivemind_stage_handoff` and
+the evidence read `hivemind_stage_evidence_gh`. The library's header holds its
+full contract, the evidence JSON v1 and the precedence; this file describes how
+the suite tests it.
 
-The suite needs only bash, git and jq. It builds every commit in a scratch
-repository with plumbing (`hash-object`, `update-index --index-info`,
-`write-tree`, `mktree`, `commit-tree`), so every tree entry mode is exact. A
-case's docs head commit has its trunk commit as parent, so the merge-base that
-verify reads is real. A recording `git` wrapper first on `PATH` logs each git
-argv. A recording `gh` stub beside it logs each call and exits 1, and the suite
-fails when any case called it. `HOME` points into the scratch space and
-`GIT_CONFIG_NOSYSTEM` is set, so no user or system git config reaches a case.
+The suite needs only bash, git and jq, and makes no live `gh` call. It builds
+every commit in a scratch repository with plumbing (`hash-object`,
+`update-index --index-info`, `write-tree`, `mktree`, `commit-tree`), so every
+tree entry mode is exact. A case's docs head commit has its trunk commit as
+parent, so the merge-base that verify reads is real. A recording `git` wrapper
+first on `PATH` logs each git argv. A recording `gh` stub beside it logs each
+call's argv and serves a canned reply only for a call whose argv matches a
+route exactly, else exits 1; the suite fails when any derive or handoff case
+called it. `HOME` points into the scratch space and `GIT_CONFIG_NOSYSTEM` is
+set, so no user or system git config reaches a case.
 
 Each call sources the readiness check library, the record verify library and the
 stage derivation library, in that order, in a fresh `bash -c` twice, once under
@@ -121,12 +124,52 @@ and either `expect` or `error`, with `no_git` as in cases.json.
   and compares its `stage`, `status`, `next` and `reasons` exactly, and its
   `ignored` with the case's `expect.ignored`.
 
+## gh-cases.json
+
+Cases of the evidence read, run with `hivemind_stage_evidence_gh` and the
+arguments `acme/widgets` and `demo` through the recording `gh` stub. The file
+is one object:
+
+- `base` maps a reply key to a canned reply. A key names one call: `seeds`
+  (the seed marker search), `pull-requests` (the docs pull request search),
+  `refs` (the docs branches), `epic:<n>` (the seed's labels and sub-issues),
+  `snapshot:<n>` (the readiness check's snapshot read), `timeline:<n>` (the
+  slice's lastEditedAt, labeled and renamed events) or `permission:<login>` (the
+  REST permission read). A reply is `json`, written as one line, or `raw` text,
+  with `rc` gh's exit status, 0 by default. The suite pins each call's argv,
+  the constant GraphQL query and every variable as its own `-f` or `-F` entry,
+  so a call whose argv differs in any byte gets no reply and exits 1. The base
+  replies make one full read: a seed by a writer beside a malformed-marker
+  issue, a marker on a later line and a Bot's seed; same-repository, fork,
+  deleted-fork, Bot, unnamed and non-`docs/` pull requests; used, unused and
+  non-`docs/` branches; and two slices whose ready events have a non-latest
+  actor, a reader as latest actor, and a null actor, a Bot and a writer tied.
+- `cases` each run the read against `base` with the case's `replies` merged
+  over it (`null` removes one) and each `patch` (`reply`, `path`, `value`) set
+  in a reply's `json`. `calls` lists the reply keys of the calls one run must
+  make, in order, and nothing else; the suite checks the log of both shell
+  modes. Then exactly one of: `expect`, the whole evidence, compared exactly,
+  where `{"$reply": <key>}` stands for that reply's issue node; `checks`, a
+  list of `path` and `value` pairs the output must hold; or `error`, the
+  failure token, with stdout empty and one stderr line. `args` replaces the
+  arguments, `gh` false runs with no `gh` on `PATH`, and `libs` `stage-only`
+  sources this library alone. Every case also asserts no git call.
+- `pipes` each name a recorded fixture, from `cases.json` or (`fixture`
+  `handoff`) `handoff-cases.json`. The suite expands the fixture's evidence,
+  serves it as the replies gh would give for it (each seed author
+  `seed-author-<n>` and pull request author `pr-author-<n>`, a writer per the
+  fixture's flags), reads it back with the evidence read, and pipes the output
+  into derive, and for a handoff fixture also the handoff check, at the
+  fixture's commits: each must give the fixture's expected result, with no gh
+  call.
+
 ## Cases in the script
 
 Cases that need no fixture run from the script itself: the library's form (no
 shebang, no `BASH_SOURCE`, no sourced file, the `P18 FLOOR EXCEPTION` marker,
-no `gh` command, `bash -n`, and sourcing twice changes no option or variable),
+no `gh` command but the evidence read's GraphQL and permission calls, `bash -n`,
+and sourcing twice changes no option or variable),
 argument-count `usage` with no git call for both functions, a path slug's
 `usage` for the handoff check, `missing-library` with no git call for both,
 `git-failed` for a deleted tree object, the same result from a subdirectory
-working directory, and that no case called `gh`.
+working directory, and that no derive or handoff case called `gh`.

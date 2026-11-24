@@ -3,7 +3,7 @@
 # stage-derivation.sh — shared initiative stage derivation library (ADR-0046, solution design
 # "Stage derivation and handoff check"): a pure function from GitHub evidence and git to an
 # initiative's stage and next action. No progress state is stored (D2). Its caller is the guide's
-# script, which reads the evidence and passes it on stdin.
+# script, which reads the evidence with hivemind_stage_evidence_gh and passes it on stdin.
 #
 # THIS FILE IS SOURCED, NOT EXECUTED. No shebang: each caller sources the readiness check library
 # and the record verify library first, then this file, all by absolute path derived from its OWN
@@ -21,8 +21,9 @@
 # CHECK13 as a P18 documented exception.
 #
 # SINGLE RESPONSIBILITY: derive the stage, never judge a document's quality. It writes nothing:
-# no file, no scratch path. It makes no `gh` call: every GitHub fact arrives as evidence on
-# stdin. Every document (the PRD, both UI prototype files, the solution design and the review
+# no file, no scratch path. Derive and the handoff check make no `gh` call: every GitHub fact
+# arrives as evidence on stdin. The evidence read, hivemind_stage_evidence_gh, is the library's one
+# GitHub reader and makes no git call. Every document (the PRD, both UI prototype files, the solution design and the review
 # record) is read only through the readiness check library's Document existence test
 # (hivemind_doc_entry, hivemind_doc_read) at the trunk commit or at the evidence's docs head,
 # so a symlink, a submodule, a tree or a path under a symlinked directory is missing evidence.
@@ -36,12 +37,12 @@
 # FAILURE CONTRACT: status 2 leaves stdout empty and prints exactly one stderr line
 # `stage-derivation-error: <token>`. Tokens: usage, missing-library (a readiness check or record
 # verify function is not defined), commit-malformed, commit-unresolvable, evidence-malformed,
-# truncated, gh-failed, git-failed. gh-failed is reserved for the evidence read; neither function
-# gives it. A readiness check failure is translated: snapshot-malformed to evidence-malformed,
-# truncated, commit-unresolvable and usage kept, any other to git-failed. The library never exits
-# and never prints evidence or document text.
+# truncated, gh-failed, git-failed. gh-failed is given only by the evidence read; derive and the
+# handoff check never give it. A readiness check failure is translated: snapshot-malformed to
+# evidence-malformed, truncated, commit-unresolvable and usage kept, any other to git-failed. The
+# library never exits; derive and the handoff check never print evidence or document text.
 #
-# PUBLIC API (both functions share the failure contract):
+# PUBLIC API (every function shares the failure contract):
 #   hivemind_stage_derive <trunk-commit> <owner/repo> <trunk-name> <slug>  (evidence on stdin)
 #       <trunk-commit> is the fetched remote trunk commit id, 40 or 64 lowercase hex, never a
 #       branch name or a local ref (commit-malformed, no git call). <owner/repo>, <trunk-name>
@@ -76,6 +77,29 @@
 #       after that event gives edited_since_ready. A slice passes when it has no readiness or
 #       label authority code, and is claimable when it passes with no open blocked-by edge. The
 #       result is `pass` only with no initiative code and every slice passing.
+#   hivemind_stage_evidence_gh <owner/repo> <slug>
+#       The evidence read: prints evidence JSON v1 as one compact object and returns 0. Both
+#       arguments are checked before any gh call (usage); it makes no git call. Each read is one
+#       `gh api graphql` call whose query is a constant taking every value as a GraphQL variable,
+#       each connection first:100, in this order: the seed marker search `repo:<owner/repo>
+#       is:issue is:open in:body "hivemind-initiative: <slug>"`, the docs pull request search
+#       `repo:<owner/repo> is:pr is:open head:docs/<slug>`, the branches under refs/heads/ whose
+#       name holds `docs/<slug>` with their pull request counts; then, for the one resolved seed,
+#       its labels and sub-issues; then per sub-issue, in order, its snapshot through
+#       hivemind_readiness_fetch_snapshot and its lastEditedAt with its labeled and renamed-title
+#       timeline events. Any pageInfo.hasNextPage true is truncated. Write permission is one
+#       `gh api repos/<owner/repo>/collaborators/<login>/permission` read per distinct login,
+#       admin or write being a writer, made only for the author of an open seed whose first line
+#       is this slug's marker, the author of a same-repository pull request whose head ref counts,
+#       and each actor of a slice's latest `readiness:ready` events, and only for an account of
+#       type User whose login matches `^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`. author_can_write and
+#       actor_can_write are true only for a login such a read found a writer; any other account,
+#       a Bot, a null one or a malformed-marker issue's author, is no writer and costs no call.
+#       Seeds hold every search result; pull requests and branches only those named `docs/...`.
+#       gh missing from PATH, a non-zero gh exit (a 404 included), a reply that is not exactly one
+#       JSON object with `errors` null or [] and a `data` object, or a reply off its query's shape
+#       gives gh-failed; a snapshot's truncated stays truncated and any other snapshot failure is
+#       gh-failed. Failure tokens: usage, missing-library, truncated, gh-failed.
 #
 # EVIDENCE JSON v1 (normalized by the caller's GitHub read; every key below is required, other
 # keys are ignored; a timestamp is `YYYY-MM-DDTHH:MM:SSZ`; an object id is 40 or 64 lowercase
@@ -821,4 +845,308 @@ hivemind_stage_handoff() {
   codes="$(_hivemind_sd_initiative_git_codes "$trunk" "$slug")" || return 2
   output="$(_hivemind_sd_handoff "$trunk" "$owner_repo" "$trunk_name" "$slug" "$plan" "$codes")" || return 2
   printf '%s\n' "$output"
+}
+
+# _hivemind_sd_gh_jq_defs: prints the constant jq definitions that check each gh reply and build
+# the evidence from the replies; they need hivemind_readiness_jq_defs and
+# _hivemind_sd_evidence_jq_defs before them. Each sd_gh_<read> filter runs on a reply's `data`
+# object and gives the read's value, "truncated" or "gh-failed".
+_hivemind_sd_gh_jq_defs() {
+  printf '%s\n' '
+def sd_gh_envelope_ok: type == "object" and (.errors == null or .errors == []) and (.data | type) == "object";
+def sd_gh_page_ok(f): type == "object" and (.pageInfo | type) == "object" and (.pageInfo.hasNextPage | sd_bool)
+  and (.nodes | sd_list(f));
+def sd_gh_more: .pageInfo.hasNextPage;
+def sd_gh_login_ok: sd_text and test("\\A[A-Za-z0-9][A-Za-z0-9-]{0,38}\\z");
+def sd_gh_account_ok: . == null or (type == "object" and (.login | sd_text) and (.__typename | sd_text));
+def sd_gh_user: . != null and .__typename == "User" and (.login | sd_gh_login_ok);
+def sd_gh_writer($writers): sd_gh_user and ($writers[.login] // false) == true;
+def sd_gh_seed_ok:
+  type == "object" and (.number | sd_number) and (.state | sd_state) and has("body")
+  and (.body == null or (.body | sd_text)) and has("author") and (.author | sd_gh_account_ok);
+def sd_gh_pull_request_ok:
+  type == "object" and (.number | sd_number) and (.headRefName | sd_text) and (.headRefOid | sd_hex)
+  and (.isDraft | sd_bool) and has("headRepository")
+  and (.headRepository == null or (type == "object" and (.headRepository.nameWithOwner | sd_text)))
+  and has("author") and (.author | sd_gh_account_ok);
+def sd_gh_ref_ok:
+  type == "object" and (.name | sd_text) and (.target | type) == "object" and (.target.oid | sd_hex)
+  and (.associatedPullRequests | type) == "object" and (.associatedPullRequests.totalCount | sd_count);
+def sd_gh_labeled_ok:
+  type == "object" and (.createdAt | sd_time) and (.label | type) == "object" and (.label.name | sd_text)
+  and has("actor") and (.actor | sd_gh_account_ok);
+def sd_gh_search(f):
+  .search
+  | if sd_gh_page_ok(f) | not then "gh-failed" elif sd_gh_more then "truncated" else .nodes end;
+def sd_gh_seeds: sd_gh_search(sd_gh_seed_ok);
+def sd_gh_pull_requests: sd_gh_search(sd_gh_pull_request_ok);
+def sd_gh_refs:
+  .repository
+  | if type != "object" or (.refs | sd_gh_page_ok(sd_gh_ref_ok) | not) then "gh-failed"
+    elif .refs | sd_gh_more then "truncated" else .refs.nodes end;
+def sd_gh_epic($number):
+  .repository
+  | if type != "object" then "gh-failed"
+    else .issue
+    | if type != "object" or .number != $number or (.state | sd_state | not)
+         or (.labels | sd_gh_page_ok(type == "object" and (.name | sd_text)) | not)
+         or (.subIssues | sd_gh_page_ok(type == "object" and (.number | sd_number)) | not)
+         or (.subIssues.totalCount | sd_count | not) then "gh-failed"
+      elif (.labels | sd_gh_more) or (.subIssues | sd_gh_more) then "truncated"
+      else . end
+    end;
+def sd_gh_timeline($number):
+  .repository
+  | if type != "object" then "gh-failed"
+    else .issue
+    | if type != "object" or .number != $number or (has("lastEditedAt") | not)
+         or (.lastEditedAt != null and (.lastEditedAt | sd_time | not))
+         or (.labeled | sd_gh_page_ok(sd_gh_labeled_ok) | not)
+         or (.renamed | sd_gh_page_ok(type == "object" and (.createdAt | sd_time)) | not) then "gh-failed"
+      elif (.labeled | sd_gh_more) or (.renamed | sd_gh_more) then "truncated"
+      else . end
+    end;
+def sd_gh_ready_events: [.labeled.nodes[] | select(.label.name == "readiness:ready")];
+def sd_gh_latest_ready_logins:
+  sd_gh_ready_events as $events
+  | ($events | map(.createdAt) | max) as $latest
+  | $events[] | select(.createdAt == $latest) | .actor | select(sd_gh_user) | .login;
+def sd_gh_seed($writers):
+  {number, state, author_can_write: (.author | sd_gh_writer($writers)), body};
+def sd_gh_pull_request($writers):
+  {number, head_ref: .headRefName, head_oid: .headRefOid,
+   head_repository: (if .headRepository == null then null else .headRepository.nameWithOwner end),
+   author_can_write: (.author | sd_gh_writer($writers)), draft: .isDraft};
+def sd_gh_candidate_logins($repo; $slug):
+  ("\\Adocs/" + $slug + "(-" + rc_slug + ")?\\z") as $docs_name
+  | (.[0][] | select(.author | sd_gh_user)
+     | select((sd_gh_seed({}) + {author_can_write: true} | sd_seed_status($slug)) == "seed") | .author.login),
+    (.[1][] | select((.author | sd_gh_user) and (.headRefName | test($docs_name)))
+     | select((sd_gh_pull_request({}) + {author_can_write: true} | sd_pull_request_status($repo)) == "counts")
+     | .author.login);
+def sd_gh_writer_map:
+  split("\n") | map(select(length > 0) | split("\t") | {key: .[0], value: (.[1] == "true")}) | from_entries;
+def sd_gh_resolved_seed($slug; $writers):
+  [.[] | sd_gh_seed($writers) | select(sd_seed_status($slug) == "seed") | .number]
+  | if length == 1 then .[0] else empty end;
+def sd_gh_slice($writers):
+  .[1] as $timeline
+  | {readiness: .[0], last_edited_at: $timeline.lastEditedAt,
+     ready_events: [$timeline | sd_gh_ready_events[]
+                    | {actor: (if .actor == null then null
+                               else {login: .actor.login, __typename: .actor.__typename} end),
+                       actor_can_write: (.actor | sd_gh_writer($writers)), created_at: .createdAt}],
+     renamed_at: [$timeline.renamed.nodes[] | .createdAt]};
+def sd_gh_evidence($writers):
+  . as $all
+  | {version: 1,
+     seeds: [$all[0][] | sd_gh_seed($writers)],
+     pull_requests: [$all[1][] | select(.headRefName | startswith("docs/")) | sd_gh_pull_request($writers)],
+     branches: [$all[2][] | select(.name | startswith("docs/"))
+                | {name, oid: .target.oid, pull_request_count: .associatedPullRequests.totalCount}],
+     epic: ($all[3] | if . == null then null
+                      else {number, state, sub_issue_total: .subIssues.totalCount,
+                            labels: {nodes: [.labels.nodes[] | {name}],
+                                     pageInfo: {hasNextPage: .labels.pageInfo.hasNextPage}}} end),
+     slices: [$all[4:] as $rest | range(0; $rest | length; 2) | [$rest[.], $rest[. + 1]]
+              | sd_gh_slice($writers)]};
+'
+}
+
+# _hivemind_sd_gh_query <seeds|pull-requests|refs|epic|timeline>: prints the read's constant
+# GraphQL query; every value it reads arrives as a GraphQL variable.
+_hivemind_sd_gh_query() {
+  case "$1" in
+    seeds)
+      printf '%s\n' 'query($q:String!){search(query:$q,type:ISSUE,first:100){pageInfo{hasNextPage} nodes{... on Issue{number state body author{login __typename}}}}}'
+      ;;
+    pull-requests)
+      printf '%s\n' 'query($q:String!){search(query:$q,type:ISSUE,first:100){pageInfo{hasNextPage} nodes{... on PullRequest{number headRefName headRefOid isDraft headRepository{nameWithOwner} author{login __typename}}}}}'
+      ;;
+    refs)
+      printf '%s\n' 'query($owner:String!,$name:String!,$q:String!){repository(owner:$owner,name:$name){refs(refPrefix:"refs/heads/",query:$q,first:100){pageInfo{hasNextPage} nodes{name target{oid} associatedPullRequests(states:[OPEN,CLOSED,MERGED]){totalCount}}}}}'
+      ;;
+    epic)
+      printf '%s\n' 'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number state labels(first:100){pageInfo{hasNextPage} nodes{name}} subIssues(first:100){totalCount pageInfo{hasNextPage} nodes{number}}}}}'
+      ;;
+    timeline)
+      printf '%s\n' 'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number lastEditedAt labeled:timelineItems(itemTypes:[LABELED_EVENT],first:100){pageInfo{hasNextPage} nodes{... on LabeledEvent{createdAt label{name} actor{login __typename}}}} renamed:timelineItems(itemTypes:[RENAMED_TITLE_EVENT],first:100){pageInfo{hasNextPage} nodes{... on RenamedTitleEvent{createdAt}}}}}}'
+      ;;
+  esac
+}
+
+# _hivemind_sd_graphql <filter> <number> <gh-arg>...: runs one `gh api graphql <gh-arg>...` call
+# and prints the value <filter>, one sd_gh_<read> definition taking <number> (0 for a search),
+# gives on the reply's data. gh's output and exit status reach jq on stdin as one framed stream:
+# the body, a newline, then the status. Prints truncated or gh-failed and returns 2 on a failure.
+_hivemind_sd_graphql() {
+  local filter="$1" number="$2" reply="" gh_rc=0 program
+  shift 2
+  if ! command -v gh >/dev/null 2>&1; then
+    _hivemind_sd_error gh-failed
+    return 2
+  fi
+  program="$(hivemind_readiness_jq_defs)$(_hivemind_sd_evidence_jq_defs)$(_hivemind_sd_gh_jq_defs)"'
+[inputs] as $all
+| if ($all | length) != 2 or $all[1] != 0 or ($all[0] | sd_gh_envelope_ok | not) then "gh-failed"
+  else $all[0].data | '"$filter"' end'
+  if ! reply="$(
+    {
+      gh api graphql "$@" </dev/null 2>/dev/null || gh_rc=$?
+      printf '\n%s' "$gh_rc"
+    } 2>/dev/null | jq -nc --argjson number "$number" "$program" 2>/dev/null
+  )"; then
+    _hivemind_sd_error gh-failed
+    return 2
+  fi
+  case "$reply" in
+    '"gh-failed"' | '"truncated"' | '')
+      reply="${reply//\"/}"
+      _hivemind_sd_error "${reply:-gh-failed}"
+      return 2
+      ;;
+  esac
+  printf '%s\n' "$reply"
+}
+
+# _hivemind_sd_login_ok <login>: 0 when the argument matches `^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`.
+_hivemind_sd_login_ok() {
+  local alnum='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+  local pattern="^[${alnum}][${alnum}-]{0,38}\$"
+  [[ "$1" =~ $pattern ]]
+}
+
+# _hivemind_sd_writer <owner/repo> <login>: reads <login>'s permission on <owner/repo> through one
+# gh REST call and prints `true` for admin or write, else `false`; prints gh-failed and returns 2
+# on a failure. The caller checks <login> first.
+_hivemind_sd_writer() {
+  local verdict="" gh_rc=0 program='
+[inputs] as $all
+| if ($all | length) != 2 or $all[1] != 0 or ($all[0] | type) != "object"
+     or ($all[0].permission | type) != "string" then "gh-failed"
+  else ($all[0].permission == "admin" or $all[0].permission == "write") end'
+  if ! command -v gh >/dev/null 2>&1; then
+    _hivemind_sd_error gh-failed
+    return 2
+  fi
+  if ! verdict="$(
+    {
+      gh api "repos/$1/collaborators/$2/permission" </dev/null 2>/dev/null || gh_rc=$?
+      printf '\n%s' "$gh_rc"
+    } 2>/dev/null | jq -n "$program" 2>/dev/null
+  )"; then
+    _hivemind_sd_error gh-failed
+    return 2
+  fi
+  case "$verdict" in
+    true | false) printf '%s\n' "$verdict" ;;
+    *)
+      _hivemind_sd_error gh-failed
+      return 2
+      ;;
+  esac
+}
+
+# _hivemind_sd_writers <owner/repo> <known> <login>...: reads the permission of each <login> that
+# matches the login pattern and is not yet in <known>, the lines `<login>\t<true|false>` read so
+# far, once each, and prints one such line per new read; returns 2 on a failure.
+_hivemind_sd_writers() {
+  local owner_repo="$1" known="$2" login="" verdict=""
+  shift 2
+  for login in "$@"; do
+    if ! _hivemind_sd_login_ok "$login"; then
+      continue
+    fi
+    case $'\n'"$known" in
+      *$'\n'"$login"$'\t'*) continue ;;
+    esac
+    verdict="$(_hivemind_sd_writer "$owner_repo" "$login")" || return 2
+    known+="$login"$'\t'"$verdict"$'\n'
+    printf '%s\t%s\n' "$login" "$verdict"
+  done
+}
+
+# _hivemind_sd_jq_lines <program> <slug> <owner/repo> <writers>: runs one constant program over the
+# JSON values on stdin, with the gh jq definitions, and prints its raw lines; prints gh-failed and
+# returns 2 when jq fails.
+_hivemind_sd_jq_lines() {
+  local program
+  program="$(hivemind_readiness_jq_defs)$(_hivemind_sd_evidence_jq_defs)$(_hivemind_sd_gh_jq_defs)$1"
+  if ! jq -nr --arg slug "$2" --arg repo "$3" --arg writers "$4" "$program" 2>/dev/null; then
+    _hivemind_sd_error gh-failed
+    return 2
+  fi
+}
+
+# _hivemind_sd_snapshot <owner/repo> <number>: prints the issue's snapshot through
+# hivemind_readiness_fetch_snapshot; keeps its truncated and gives gh-failed for any other failure.
+_hivemind_sd_snapshot() {
+  local output="" fetch_rc=0
+  output="$(hivemind_readiness_fetch_snapshot "$1" "$2" 2>&1)" || fetch_rc=$?
+  if [ "$fetch_rc" -ne 0 ]; then
+    if [ "$output" = 'readiness-check-error: truncated' ]; then
+      _hivemind_sd_error truncated
+    else
+      _hivemind_sd_error gh-failed
+    fi
+    return 2
+  fi
+  printf '%s\n' "$output"
+}
+
+# hivemind_stage_evidence_gh <owner/repo> <slug>: reads the initiative's evidence from GitHub and
+# prints evidence JSON v1 (see PUBLIC API).
+hivemind_stage_evidence_gh() {
+  if [ "$#" -ne 2 ]; then
+    _hivemind_sd_error usage
+    return 2
+  fi
+  local owner_repo="${1-}" slug="${2-}" seeds="" prs="" refs="" logins="" writers="" new="" seed=""
+  local epic=null number="" snapshot="" timeline="" slices="" evidence=""
+  local -a login_list=() numbers=()
+  if ! declare -F hivemind_readiness_jq_defs hivemind_readiness_fetch_snapshot >/dev/null 2>&1; then
+    _hivemind_sd_error missing-library
+    return 2
+  fi
+  if ! _hivemind_sd_owner_repo_ok "$owner_repo" || ! _hivemind_sd_slug_ok "$slug"; then
+    _hivemind_sd_error usage
+    return 2
+  fi
+  seeds="$(_hivemind_sd_graphql sd_gh_seeds 0 -f query="$(_hivemind_sd_gh_query seeds)" \
+    -f q="repo:$owner_repo is:issue is:open in:body \"hivemind-initiative: $slug\"")" || return 2
+  prs="$(_hivemind_sd_graphql sd_gh_pull_requests 0 -f query="$(_hivemind_sd_gh_query pull-requests)" \
+    -f q="repo:$owner_repo is:pr is:open head:docs/$slug")" || return 2
+  refs="$(_hivemind_sd_graphql sd_gh_refs 0 -f query="$(_hivemind_sd_gh_query refs)" \
+    -f owner="${owner_repo%%/*}" -f name="${owner_repo#*/}" -f q="docs/$slug")" || return 2
+  logins="$(printf '%s\n%s\n' "$seeds" "$prs" \
+    | _hivemind_sd_jq_lines '[inputs] | sd_gh_candidate_logins($repo; $slug)' "$slug" "$owner_repo" "")" \
+    || return 2
+  mapfile -t login_list <<<"$logins"
+  writers="$(_hivemind_sd_writers "$owner_repo" "" "${login_list[@]}")" || return 2
+  seed="$(printf '%s\n' "$seeds" \
+    | _hivemind_sd_jq_lines 'input | sd_gh_resolved_seed($slug; $writers | sd_gh_writer_map)' \
+      "$slug" "$owner_repo" "$writers")" || return 2
+  if [ -n "$seed" ]; then
+    epic="$(_hivemind_sd_graphql 'sd_gh_epic($number)' "$seed" -f query="$(_hivemind_sd_gh_query epic)" \
+      -f owner="${owner_repo%%/*}" -f name="${owner_repo#*/}" -F number="$seed")" || return 2
+    mapfile -t numbers < <(printf '%s\n' "$epic" | jq -r '.subIssues.nodes[].number' 2>/dev/null)
+  fi
+  logins=""
+  for number in "${numbers[@]}"; do
+    snapshot="$(_hivemind_sd_snapshot "$owner_repo" "$number")" || return 2
+    timeline="$(_hivemind_sd_graphql 'sd_gh_timeline($number)' "$number" \
+      -f query="$(_hivemind_sd_gh_query timeline)" -f owner="${owner_repo%%/*}" \
+      -f name="${owner_repo#*/}" -F number="$number")" || return 2
+    slices+="$snapshot"$'\n'"$timeline"$'\n'
+    new="$(printf '%s\n' "$timeline" | _hivemind_sd_jq_lines 'input | sd_gh_latest_ready_logins' \
+      "$slug" "$owner_repo" "")" || return 2
+    logins+="$new"$'\n'
+  done
+  mapfile -t login_list <<<"$logins"
+  new="$(_hivemind_sd_writers "$owner_repo" "$writers"$'\n' "${login_list[@]}")" || return 2
+  writers+=$'\n'"$new"
+  evidence="$(printf '%s\n%s\n%s\n%s\n%s' "$seeds" "$prs" "$refs" "$epic" "$slices" \
+    | _hivemind_sd_jq_lines '[inputs] | sd_gh_evidence($writers | sd_gh_writer_map) | tojson' \
+      "$slug" "$owner_repo" "$writers")" || return 2
+  printf '%s\n' "$evidence"
 }

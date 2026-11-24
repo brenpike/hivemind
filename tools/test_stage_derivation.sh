@@ -11,9 +11,12 @@
 # symlink, 160000 gitlink, tree); a case's docs head commit has its trunk commit as parent, so the
 # merge-base verify reads is real. A recording `git` wrapper shadowed on PATH logs each git argv,
 # proving the "no git call" cases and the global git flags on every call. A recording `gh` stub
-# beside it logs every gh argv and exits 1; the suite fails when any case called it.
+# beside it logs every gh argv and serves only canned routes; the suite fails when any derive or
+# handoff case called it. The evidence read, hivemind_stage_evidence_gh, runs against that stub
+# alone, served from tests/stage-derivation/gh-cases.json: no live gh call.
 #
-# Fixture data lives in tests/stage-derivation/cases.json, handoff-cases.json and docs.json;
+# Fixture data lives in tests/stage-derivation/cases.json, handoff-cases.json, gh-cases.json and
+# docs.json;
 # tests/stage-derivation/README.md describes their layout. Sections are functions (test_<area>).
 # Mirrors tools/test_readiness_check.sh's pass/fail counter, exit 1 on any failure, exit 2 on
 # set-up failure and scratch dir removed on EXIT. Read-only: the only writes are in the scratch
@@ -34,8 +37,9 @@ SD_LIB="$REPO_ROOT/plugin/skills/_shared/stage-derivation.sh"
 CASES="$REPO_ROOT/tests/stage-derivation/cases.json"
 DOCS="$REPO_ROOT/tests/stage-derivation/docs.json"
 HANDOFF_CASES="$REPO_ROOT/tests/stage-derivation/handoff-cases.json"
+GH_CASES="$REPO_ROOT/tests/stage-derivation/gh-cases.json"
 
-for required_file in "$RC_LIB" "$RV_LIB" "$SD_LIB" "$CASES" "$DOCS" "$HANDOFF_CASES"; do
+for required_file in "$RC_LIB" "$RV_LIB" "$SD_LIB" "$CASES" "$DOCS" "$HANDOFF_CASES" "$GH_CASES"; do
   [ -f "$required_file" ] || { echo "FAIL: file under test missing: $required_file" >&2; exit 2; }
 done
 command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite" >&2; exit 2; }
@@ -54,19 +58,37 @@ mkdir -p "$HOME" || { echo "FAIL: cannot create scratch HOME" >&2; exit 2; }
 WRAP_DIR="$TMPDIR_TEST/wrap-bin"
 GIT_LOG="$TMPDIR_TEST/git-calls.log"
 GH_LOG="$TMPDIR_TEST/gh-calls.log"
-mkdir -p "$WRAP_DIR" || { echo "FAIL: cannot create wrapper dir" >&2; exit 2; }
+GH_SERVE_DIR="$TMPDIR_TEST/gh-serve"
+NO_GH_DIR="$TMPDIR_TEST/no-gh-bin"
+mkdir -p "$WRAP_DIR" "$GH_SERVE_DIR" "$NO_GH_DIR" || { echo "FAIL: cannot create wrapper dirs" >&2; exit 2; }
 : >"$GH_LOG" || { echo "FAIL: cannot create the gh log" >&2; exit 2; }
 printf '%s\n' '#!/bin/sh' \
   'printf "%s\n" "$*" >>"$SD_TEST_GIT_LOG"' \
   'exec "$SD_TEST_REAL_GIT" "$@"' >"$WRAP_DIR/git" \
   && chmod +x "$WRAP_DIR/git" \
   || { echo "FAIL: cannot write the recording git wrapper" >&2; exit 2; }
+# The recording gh stub logs each call's argv as one line of <arg> fields, then serves the canned
+# body and exit status of the route in SD_TEST_GH_DIR whose key is exactly that line, else exits 1.
+# shellcheck disable=SC2016
 printf '%s\n' '#!/bin/sh' \
-  'printf "%s\n" "$*" >>"$SD_TEST_GH_LOG"' \
+  'key="$(printf "<%s>" "$@")"' \
+  'printf "%s\n" "$key" >>"$SD_TEST_GH_LOG"' \
+  'id="$(printf "%s" "$key" | cksum | cut -d " " -f 1)"' \
+  'if [ -n "${SD_TEST_GH_DIR-}" ] && [ -f "$SD_TEST_GH_DIR/$id.key" ] \' \
+  '  && [ "$(cat "$SD_TEST_GH_DIR/$id.key")" = "$key" ]; then' \
+  '  cat "$SD_TEST_GH_DIR/$id.body"' \
+  '  exit "$(cat "$SD_TEST_GH_DIR/$id.rc")"' \
+  'fi' \
   'exit 1' >"$WRAP_DIR/gh" \
   && chmod +x "$WRAP_DIR/gh" \
   || { echo "FAIL: cannot write the recording gh stub" >&2; exit 2; }
 LIB_PATH="$WRAP_DIR:$PATH"
+# NO_GH_DIR is a PATH holding only bash and jq, for the case where gh is not installed.
+for tool_name in bash jq; do
+  tool_path="$(command -v "$tool_name")" && ln -s "$tool_path" "$NO_GH_DIR/$tool_name" \
+    || { echo "FAIL: cannot link $tool_name into the no-gh PATH" >&2; exit 2; }
+done
+CALL_PATH="$LIB_PATH"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -83,15 +105,15 @@ NO_INPUT="$TMPDIR_TEST/empty-input"
 : >"$NO_INPUT" || setup_fail "cannot create the empty input file"
 
 # run_lib_mode <prelude> <cwd> <stdin-file> <out> <err> <fn> [arg...]: sources CALL_LIBS in order,
-# then runs one library call, in a fresh bash under <prelude> with PATH set to LIB_PATH; prints
+# then runs one library call, in a fresh bash under <prelude> with PATH set to CALL_PATH; prints
 # its exit status.
 run_lib_mode() {
   local prelude="$1" cwd="$2" in_file="$3" out_file="$4" err_file="$5" status=0
   shift 5
   (
     cd "$cwd" || exit 97
-    PATH="$LIB_PATH" SD_TEST_GIT_LOG="$GIT_LOG" SD_TEST_REAL_GIT="$REAL_GIT" SD_TEST_GH_LOG="$GH_LOG" \
-      bash -c "$prelude"'; while [ "$1" != -- ]; do . "$1"; shift; done; shift; "$@"' \
+    PATH="$CALL_PATH" SD_TEST_GIT_LOG="$GIT_LOG" SD_TEST_REAL_GIT="$REAL_GIT" SD_TEST_GH_LOG="$GH_LOG" \
+      SD_TEST_GH_DIR="$GH_SERVE_DIR" bash -c "$prelude"'; while [ "$1" != -- ]; do . "$1"; shift; done; shift; "$@"' \
       stage-test "${CALL_LIBS[@]}" -- "$@"
   ) <"$in_file" >"$out_file" 2>"$err_file" || status=$?
   printf '%s' "$status"
@@ -427,10 +449,16 @@ test_library_form() {
   else
     failed "form:p18-marker" "P18 FLOOR EXCEPTION marker missing"
   fi
-  if grep -Eq '^[^#]*\bgh (api|pr|issue|search|repo)' "$SD_LIB"; then
-    failed "form:no-gh" "the library names a gh command outside comments"
+  local gh_lines want_gh_lines
+  gh_lines="$(grep -E '^[^#]*\bgh (api|pr|issue|search|repo)' "$SD_LIB" | sed 's/^[[:space:]]*//')"
+  # shellcheck disable=SC2016
+  want_gh_lines='gh api graphql "$@" </dev/null 2>/dev/null || gh_rc=$?'$'\n'
+  # shellcheck disable=SC2016
+  want_gh_lines+='gh api "repos/$1/collaborators/$2/permission" </dev/null 2>/dev/null || gh_rc=$?'
+  if [ "$gh_lines" = "$want_gh_lines" ]; then
+    pass "form:gh-calls" "only the evidence read's GraphQL and permission calls name gh"
   else
-    pass "form:no-gh" "no gh command"
+    failed "form:gh-calls" "gh command lines: $gh_lines"
   fi
   if bash -n "$SD_LIB"; then
     pass "form:syntax" "bash -n"
@@ -745,6 +773,324 @@ test_no_gh() {
   fi
 }
 
+# ── Evidence read (gh mode) ─────────────────────────────────────────────────────────
+#
+# gh-cases.json holds `base`, the canned replies of one full read, `cases`, each run with
+# hivemind_stage_evidence_gh against the base replies with its own `replies` and `patch` applied,
+# and `pipes`, recorded fixtures whose evidence is served as gh replies and read back. A reply is
+# `json` (its body, one line) or `raw` text, with `rc` gh's exit status, 0 by default. Its key names
+# the call: seeds, pull-requests, refs, epic:<n>, snapshot:<n>, timeline:<n> or permission:<login>.
+# The GraphQL queries below are pinned: a call whose argv differs in any byte finds no route.
+
+# shellcheck disable=SC2016
+Q_SEEDS='query($q:String!){search(query:$q,type:ISSUE,first:100){pageInfo{hasNextPage} nodes{... on Issue{number state body author{login __typename}}}}}'
+# shellcheck disable=SC2016
+Q_PULL_REQUESTS='query($q:String!){search(query:$q,type:ISSUE,first:100){pageInfo{hasNextPage} nodes{... on PullRequest{number headRefName headRefOid isDraft headRepository{nameWithOwner} author{login __typename}}}}}'
+# shellcheck disable=SC2016
+Q_REFS='query($owner:String!,$name:String!,$q:String!){repository(owner:$owner,name:$name){refs(refPrefix:"refs/heads/",query:$q,first:100){pageInfo{hasNextPage} nodes{name target{oid} associatedPullRequests(states:[OPEN,CLOSED,MERGED]){totalCount}}}}}'
+# shellcheck disable=SC2016
+Q_EPIC='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number state labels(first:100){pageInfo{hasNextPage} nodes{name}} subIssues(first:100){totalCount pageInfo{hasNextPage} nodes{number}}}}}'
+# shellcheck disable=SC2016
+Q_TIMELINE='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number lastEditedAt labeled:timelineItems(itemTypes:[LABELED_EVENT],first:100){pageInfo{hasNextPage} nodes{... on LabeledEvent{createdAt label{name} actor{login __typename}}}} renamed:timelineItems(itemTypes:[RENAMED_TITLE_EVENT],first:100){pageInfo{hasNextPage} nodes{... on RenamedTitleEvent{createdAt}}}}}}'
+# shellcheck disable=SC2016
+Q_SNAPSHOT='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number state body labels(first:100){pageInfo{hasNextPage} nodes{name}} blockedBy(first:100){pageInfo{hasNextPage} nodes{number state}} subIssues(first:100){totalCount pageInfo{hasNextPage}} parent{number state body labels(first:100){pageInfo{hasNextPage} nodes{name}}}}}}'
+SERVE_N=0
+
+jq -e 'type == "object" and (keys == ["base", "cases", "pipes"]) and (.base | type == "object")
+  and (.cases | type == "array" and length > 0)
+  and all(.cases[]; (.name | type) == "string" and (.calls | type) == "array"
+    and ([has("expect"), has("checks"), has("error")] | map(select(.)) | length) == 1
+    and (keys - ["args", "calls", "checks", "error", "expect", "gh", "libs", "name", "patch", "replies"] == []))
+  and (.pipes | type == "array" and length > 0)
+  and all(.pipes[]; (.name | type) == "string" and (.fixture == "cases" or .fixture == "handoff"))' \
+  "$GH_CASES" >/dev/null 2>&1 || setup_fail "gh cases file missing or off its shape: $GH_CASES"
+
+# shellcheck disable=SC2016
+ROUTE_LINES_JQ='to_entries[]
+| "\(.key)\t\(.value.rc // 0)\t\(.value | if has("raw") then .raw else (.json | tojson) + "\n" end | @base64)"'
+
+# EVIDENCE_GH_JQ turns expanded evidence JSON v1 into the replies gh would give for it: each seed's
+# author is the User `seed-author-<n>` and each pull request's `pr-author-<n>`, each a writer per
+# its author_can_write, and each ready event's actor a writer per its actor_can_write. A null epic,
+# which a recorded fixture gives when it has no slice, becomes an epic with no sub-issue for each
+# seed, as gh mode reads the resolved seed's epic.
+# shellcheck disable=SC2016
+EVIDENCE_GH_JQ='
+def page($nodes): {pageInfo: {hasNextPage: false}, nodes: $nodes};
+def paged: if has("pageInfo") then . else .pageInfo = {hasNextPage: false} end;
+def reply($data): {json: {data: $data}};
+def permission($writer): {json: {permission: (if $writer then "write" else "read" end)}};
+. as $ev
+| {seeds: reply({search: page([$ev.seeds[]
+     | {number, state, body, author: {login: "seed-author-\(.number)", __typename: "User"}}])}),
+   "pull-requests": reply({search: page([$ev.pull_requests[]
+     | {number, headRefName: .head_ref, headRefOid: .head_oid, isDraft: .draft,
+        headRepository: (if .head_repository == null then null else {nameWithOwner: .head_repository} end),
+        author: {login: "pr-author-\(.number)", __typename: "User"}}])}),
+   refs: reply({repository: {refs: page([$ev.branches[]
+     | {name, target: {oid}, associatedPullRequests: {totalCount: .pull_request_count}}])}})}
++ ([$ev.seeds[] | {key: "permission:seed-author-\(.number)", value: permission(.author_can_write)}]
+   | from_entries)
++ ([$ev.pull_requests[] | {key: "permission:pr-author-\(.number)", value: permission(.author_can_write)}]
+   | from_entries)
++ (if $ev.epic == null then
+     [$ev.seeds[] | {key: "epic:\(.number)", value: reply({repository: {issue: {number, state,
+        labels: page([{name: "type:epic"}]), subIssues: ({totalCount: 0} + page([]))}}})}] | from_entries
+   else {"epic:\($ev.epic.number)": reply({repository: {issue: {number: $ev.epic.number,
+           state: $ev.epic.state, labels: $ev.epic.labels,
+           subIssues: {totalCount: $ev.epic.sub_issue_total, pageInfo: {hasNextPage: false},
+                       nodes: [$ev.slices[] | {number: .readiness.number}]}}}})} end)
++ ([$ev.slices[] | {key: "snapshot:\(.readiness.number)",
+     value: reply({repository: {issue: (.readiness | .labels |= paged | .blockedBy |= paged
+       | .subIssues |= paged | if .parent == null then . else .parent.labels |= paged end)}})}]
+   | from_entries)
++ ([$ev.slices[] | {key: "timeline:\(.readiness.number)",
+     value: reply({repository: {issue: {number: .readiness.number, lastEditedAt: .last_edited_at,
+       labeled: page([.ready_events[] | {createdAt: .created_at, label: {name: "readiness:ready"}, actor}]),
+       renamed: page([.renamed_at[] | {createdAt: .}])}}})}]
+   | from_entries)
++ ([$ev.slices[].ready_events[] | select(.actor != null)
+    | {key: "permission:\(.actor.login)", value: permission(.actor_can_write)}] | from_entries)'
+
+# route_argv <key> <owner/repo> <slug>: prints the gh argv record, as the stub logs it, of the call
+# whose reply key is <key>.
+route_argv() {
+  local key="$1" owner_repo="$2" slug="$3" owner="${2%%/*}" name="${2#*/}"
+  case "$key" in
+    seeds)
+      printf '<api><graphql><-f><query=%s><-f><q=repo:%s is:issue is:open in:body "hivemind-initiative: %s">' \
+        "$Q_SEEDS" "$owner_repo" "$slug"
+      ;;
+    pull-requests)
+      printf '<api><graphql><-f><query=%s><-f><q=repo:%s is:pr is:open head:docs/%s>' \
+        "$Q_PULL_REQUESTS" "$owner_repo" "$slug"
+      ;;
+    refs)
+      printf '<api><graphql><-f><query=%s><-f><owner=%s><-f><name=%s><-f><q=docs/%s>' \
+        "$Q_REFS" "$owner" "$name" "$slug"
+      ;;
+    epic:*)
+      printf '<api><graphql><-f><query=%s><-f><owner=%s><-f><name=%s><-F><number=%s>' \
+        "$Q_EPIC" "$owner" "$name" "${key#epic:}"
+      ;;
+    snapshot:*)
+      printf '<api><graphql><-f><query=%s><-f><owner=%s><-f><name=%s><-F><number=%s>' \
+        "$Q_SNAPSHOT" "$owner" "$name" "${key#snapshot:}"
+      ;;
+    timeline:*)
+      printf '<api><graphql><-f><query=%s><-f><owner=%s><-f><name=%s><-F><number=%s>' \
+        "$Q_TIMELINE" "$owner" "$name" "${key#timeline:}"
+      ;;
+    permission:*)
+      printf '<api><repos/%s/collaborators/%s/permission>' "$owner_repo" "${key#permission:}"
+      ;;
+    *) setup_fail "unknown gh reply key $key" ;;
+  esac
+}
+
+# serve_replies <replies-file> <owner/repo> <slug>: points GH_SERVE_DIR at a new serve dir and
+# writes each reply of the JSON object in <replies-file> into it as the route of its call's argv.
+serve_replies() {
+  local key status encoded argv route_id body
+  SERVE_N=$((SERVE_N + 1))
+  GH_SERVE_DIR="$TMPDIR_TEST/gh-serve.$SERVE_N"
+  mkdir "$GH_SERVE_DIR" || setup_fail "cannot create the gh serve dir"
+  while IFS=$'\t' read -r key status encoded; do
+    argv="$(route_argv "$key" "$2" "$3")"
+    route_id="$(printf '%s' "$argv" | cksum | cut -d ' ' -f 1)" || setup_fail "cksum"
+    [ ! -e "$GH_SERVE_DIR/$route_id.key" ] || setup_fail "gh route id collision for $key"
+    decode_text body "$encoded"
+    { printf '%s' "$argv" >"$GH_SERVE_DIR/$route_id.key" \
+      && printf '%s' "$body" >"$GH_SERVE_DIR/$route_id.body" \
+      && printf '%s\n' "$status" >"$GH_SERVE_DIR/$route_id.rc"; } || setup_fail "gh route $key"
+  done < <(jq -r "$ROUTE_LINES_JQ" "$1")
+}
+
+# gh_call <case> <fn> [arg...]: clears the gh log, then runs lib_call from the scratch repo root
+# with no stdin.
+gh_call() {
+  local case_name="$1"
+  shift
+  : >"$GH_LOG"
+  lib_call "$case_name" "$REPO" "$NO_INPUT" "$@"
+}
+
+# expect_gh_calls <case> <owner/repo> <slug> <key>...: asserts the gh log holds, for each of the two
+# shell-mode runs, exactly the calls named by <key>..., in order.
+expect_gh_calls() {
+  local case_name="$1" owner_repo="$2" slug="$3" per_run="" key
+  shift 3
+  for key in "$@"; do
+    per_run+="$(route_argv "$key" "$owner_repo" "$slug")"$'\n'
+  done
+  if file_is "$GH_LOG" "$per_run$per_run"; then
+    pass "$case_name:gh-calls" "$# gh calls per run, in order"
+  else
+    failed "$case_name:gh-calls" "gh log: $(cat "$GH_LOG")"
+  fi
+}
+
+# gh_evidence_verdict <out-file> <expect> <checks> <replies>: prints `ok` when <out-file> holds one
+# compact evidence object equal to <expect> (a `{"$reply": <key>}` value stands for that reply's
+# issue node) when it is not null, and holding each check's value at its path; else the mismatch.
+gh_evidence_verdict() {
+  jq -Rnr --argjson expect "$2" --argjson checks "$3" --argjson replies "$4" '
+[inputs] as $lines
+| if ($lines | length) != 1 then "\($lines | length) lines, want 1"
+  else ($lines[0] | try fromjson catch null) as $out
+  | if ($out | type) != "object" then "output does not parse"
+    elif $lines[0] != ($out | tojson) then "output is not compact JSON"
+    elif ($out | keys_unsorted) != ["version", "seeds", "pull_requests", "branches", "epic", "slices"]
+    then "keys \($out | keys_unsorted | tojson)"
+    elif $expect != null
+      and $out != ($expect | walk(if type == "object" and has("$reply")
+                                  then $replies[.["$reply"]].json.data.repository.issue else . end))
+    then "evidence \($lines[0])"
+    else [$checks[] | .path as $path | select(($out | getpath($path)) != .value)
+          | "at \($path | tojson): \($out | getpath($path) | tojson)"]
+      | if length == 0 then "ok" else .[0] end end
+  end' <"$1" 2>&1
+}
+
+# run_gh_case <index>: serves gh case <index>'s replies, runs the evidence read and asserts its
+# result and its gh calls.
+run_gh_case() {
+  local index="$1" case_name token has_gh libs replies_file="$TMPDIR_TEST/gh-replies.$1"
+  local expect checks replies verdict call_repo=acme/widgets call_slug=demo
+  local -a args=() calls=()
+  jq -c --argjson i "$index" '.base as $base | .cases[$i] as $case
+    | ($base + ($case.replies // {})) | with_entries(select(.value != null))
+    | reduce ($case.patch // [])[] as $p (.; .[$p.reply].json |= setpath($p.path; $p.value))' \
+    "$GH_CASES" >"$replies_file" || setup_fail "gh case replies $index"
+  {
+    IFS= read -r case_name && IFS= read -r token && IFS= read -r has_gh && IFS= read -r libs
+  } < <(jq -r --argjson i "$index" '.cases[$i] | .name, (.error // ""), (if has("gh") then .gh else true end), (.libs // "all")' \
+    "$GH_CASES") || setup_fail "gh case fields $index"
+  mapfile -t args < <(jq -r --argjson i "$index" '.cases[$i] | .args // ["acme/widgets", "demo"] | .[]' "$GH_CASES")
+  mapfile -t calls < <(jq -r --argjson i "$index" '.cases[$i].calls[]' "$GH_CASES")
+  if [ "${#args[@]}" -eq 2 ]; then
+    call_repo="${args[0]}"
+    call_slug="${args[1]}"
+  fi
+  serve_replies "$replies_file" "$call_repo" "$call_slug"
+  if [ "$has_gh" = false ]; then
+    CALL_PATH="$NO_GH_DIR"
+  fi
+  if [ "$libs" = stage-only ]; then
+    CALL_LIBS=("$SD_LIB")
+  fi
+  gh_call "gh:$case_name" hivemind_stage_evidence_gh "${args[@]}"
+  CALL_PATH="$LIB_PATH"
+  CALL_LIBS=("$RC_LIB" "$RV_LIB" "$SD_LIB")
+  if [ -n "$token" ]; then
+    expect_call "gh:$case_name" 2 "" "stage-derivation-error: $token"$'\n'
+  else
+    expect="$(jq -c --argjson i "$index" '.cases[$i].expect // null' "$GH_CASES")" || setup_fail "gh expect $index"
+    checks="$(jq -c --argjson i "$index" '.cases[$i].checks // []' "$GH_CASES")" || setup_fail "gh checks $index"
+    replies="$(cat "$replies_file")" || setup_fail "gh replies $index"
+    verdict="$(gh_evidence_verdict "$CALL_OUT" "$expect" "$checks" "$replies")"
+    if [ "$CALL_RC" != 0 ] || [ -s "$CALL_ERR" ]; then
+      failed "gh:$case_name" "rc $CALL_RC, stderr: $(cat "$CALL_ERR")"
+    elif [ "$verdict" != ok ]; then
+      failed "gh:$case_name" "$verdict"
+    else
+      pass "gh:$case_name" "evidence matches"
+    fi
+  fi
+  expect_gh_calls "gh:$case_name" "$call_repo" "$call_slug" "${calls[@]}"
+  expect_no_git "gh:$case_name"
+}
+
+test_gh_cases() {
+  local count index
+  count="$(jq '.cases | length' "$GH_CASES")" || setup_fail "cannot count gh cases"
+  for ((index = 0; index < count; index++)); do
+    run_gh_case "$index"
+  done
+}
+
+# pipe_fixture_file <name> <cases|handoff> <out-file>: writes the named recorded fixture, a handoff
+# one with its handoff defaults, to <out-file>.
+pipe_fixture_file() {
+  if [ "$2" = handoff ]; then
+    jq -c --arg name "$1" "first(.[] | select(.name == \$name)) | $HANDOFF_PREP_JQ" "$HANDOFF_CASES" >"$3"
+  else
+    jq -c --arg name "$1" 'first(.[] | select(.name == $name))' "$CASES" >"$3"
+  fi
+  [ -s "$3" ] || setup_fail "pipe fixture $2:$1 not found"
+}
+
+# expect_derive_matches <case> <fixture-file> <cases|handoff> <trunk> <docs> <evidence-file>: runs
+# derive, and for a handoff fixture the handoff check, on <evidence-file> and asserts the fixture's
+# expectations, with no gh call.
+expect_derive_matches() {
+  local case_name="$1" case_file="$2" kind="$3" trunk_commit="$4" docs_commit="$5" input="$6"
+  local expect verdict has_derive=true
+  if [ "$kind" = handoff ]; then
+    has_derive="$(jq -r 'has("derive")' "$case_file")" || setup_fail "pipe derive $case_name"
+    : >"$GH_LOG"
+    lib_call "$case_name:handoff" "$REPO" "$input" hivemind_stage_handoff "$trunk_commit" acme/widgets main demo
+    expect="$(jq -c '.expect' "$case_file")" || setup_fail "pipe handoff expect $case_name"
+    verdict="$(handoff_verdict "$CALL_OUT" "$expect" "$trunk_commit")"
+    if [ "$CALL_RC" = 0 ] && [ ! -s "$CALL_ERR" ] && [ "$verdict" = ok ] && [ ! -s "$GH_LOG" ]; then
+      pass "$case_name:handoff" "the handoff check on gh evidence matches the fixture"
+    else
+      failed "$case_name:handoff" "rc $CALL_RC, $verdict, stderr: $(cat "$CALL_ERR")"
+    fi
+    expect="$(jq -c '.derive + {ignored: (.expect.ignored // [])}' "$case_file")" \
+      || setup_fail "pipe derive expect $case_name"
+  else
+    expect="$(jq -c '.expect' "$case_file")" || setup_fail "pipe expect $case_name"
+    render_ids expect "$expect" "$trunk_commit" "$docs_commit"
+  fi
+  if [ "$has_derive" != true ]; then
+    return 0
+  fi
+  : >"$GH_LOG"
+  lib_call "$case_name:derive" "$REPO" "$input" hivemind_stage_derive "$trunk_commit" acme/widgets main demo
+  verdict="$(case_verdict "$CALL_OUT" "$expect" "$trunk_commit")"
+  if [ "$CALL_RC" = 0 ] && [ ! -s "$CALL_ERR" ] && [ "$verdict" = ok ] && [ ! -s "$GH_LOG" ]; then
+    pass "$case_name:derive" "derive on gh evidence gives the fixture's stage"
+  else
+    failed "$case_name:derive" "rc $CALL_RC, $verdict, stderr: $(cat "$CALL_ERR")"
+  fi
+}
+
+# run_gh_pipe <index>: serves pipe <index>'s fixture evidence as gh replies, reads it back with the
+# evidence read and asserts derive on it gives the fixture's result.
+run_gh_pipe() {
+  local index="$1" name kind case_file="$TMPDIR_TEST/pipe.$1" replies_file="$TMPDIR_TEST/pipe-replies.$1"
+  local input="$TMPDIR_TEST/input.pipe-$1" trunk_commit docs_commit="" evidence
+  {
+    IFS= read -r name && IFS= read -r kind
+  } < <(jq -r --argjson i "$index" '.pipes[$i] | .name, .fixture' "$GH_CASES") || setup_fail "pipe fields $index"
+  pipe_fixture_file "$name" "$kind" "$case_file"
+  build_spec_commit trunk_commit "$case_file" trunk
+  if [ "$(jq -r 'has("docs")' "$case_file")" = true ]; then
+    build_spec_commit docs_commit "$case_file" docs "$trunk_commit"
+  fi
+  evidence="$(jq -c "$EVIDENCE_JQ" "$case_file")" || setup_fail "pipe evidence $name"
+  render_ids evidence "$evidence" "$trunk_commit" "$docs_commit"
+  printf '%s\n' "$evidence" | jq -c "$EVIDENCE_GH_JQ" >"$replies_file" || setup_fail "pipe replies $name"
+  serve_replies "$replies_file" acme/widgets demo
+  gh_call "gh-pipe:$kind:$name" hivemind_stage_evidence_gh acme/widgets demo
+  if [ "$CALL_RC" != 0 ] || [ -s "$CALL_ERR" ]; then
+    failed "gh-pipe:$kind:$name" "rc $CALL_RC, stderr: $(cat "$CALL_ERR")"
+    return 0
+  fi
+  pass "gh-pipe:$kind:$name" "the evidence read succeeds"
+  cp "$CALL_OUT" "$input" || setup_fail "pipe input $name"
+  expect_derive_matches "gh-pipe:$kind:$name" "$case_file" "$kind" "$trunk_commit" "$docs_commit" "$input"
+}
+
+test_gh_pipes() {
+  local count index
+  count="$(jq '.pipes | length' "$GH_CASES")" || setup_fail "cannot count pipes"
+  for ((index = 0; index < count; index++)); do
+    run_gh_pipe "$index"
+  done
+}
+
 test_library_form
 test_cases
 test_handoff_cases
@@ -754,6 +1100,8 @@ test_missing_library
 test_git_failure
 test_subdirectory
 test_no_gh
+test_gh_cases
+test_gh_pipes
 
 # ── Summary ───────────────────────────────────────────────────────────────────────
 echo
