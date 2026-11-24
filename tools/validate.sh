@@ -73,6 +73,8 @@ SUITE_TEST_SYNAPSE_GATE='test_synapse_gate.sh'
 SUITE_TEST_RUN_REVIEW='test_run_review.sh'
 SUITE_TEST_WORKFLOW_SCRIPTS='test_workflow_scripts.sh'
 SUITE_TEST_SCRATCH='test_scratch.sh'
+SUITE_TEST_DESIGN_REVIEW='test_design_review.sh'
+SUITE_VERIFY_RECORDS='verify_records.sh'
 
 # Full suite, in CI order. Used by --all and by every FAIL-CLOSED escalation.
 ALL_SUITES=(
@@ -108,6 +110,8 @@ ALL_SUITES=(
   "$SUITE_TEST_RUN_REVIEW"
   "$SUITE_TEST_WORKFLOW_SCRIPTS"
   "$SUITE_TEST_SCRATCH"
+  "$SUITE_TEST_DESIGN_REVIEW"
+  "$SUITE_VERIFY_RECORDS"
 )
 
 # KNOWN_SUITES: the tools/*.sh validation suites this dispatcher knows about. --self-test
@@ -145,6 +149,8 @@ KNOWN_SUITES=(
   test_run_review.sh
   test_workflow_scripts.sh
   test_scratch.sh
+  test_design_review.sh
+  verify_records.sh
 )
 
 # NON_SUITE_TOOLS: tools/*.sh files that are NOT validation suites (so --self-test does not
@@ -330,7 +336,8 @@ run_suites() {
 #                                                         test_shared_libs, test_change_detect_poll,
 #                                                         test_prefilter, test_react_marker,
 #                                                         test_merge_approved
-#   plugin/skills/github-review-loop/scripts/merge-approved.sh, tests/merge-approved/*
+#   plugin/skills/github-review-loop/scripts/merge-approved.sh, tests/merge-approved/*,
+#     plugin/skills/_shared/{readiness-check,record-verify}.sh
 #                                      -> test_merge_approved
 #   plugin/skills/github-review-loop/scripts/prefilter.sh, tests/fix-history/*
 #                                      -> test_prefilter
@@ -415,10 +422,18 @@ run_suites() {
 #                                         Grants heading)
 #   plugin/skills/_shared/readiness-check.sh, tests/readiness-check/**, tools/test_readiness_check.sh
 #                                      -> test_readiness_check
+#   plugin/skills/design-review/**, plugin/skills/_shared/{record-verify,readiness-check}.sh,
+#     tests/design-review/**, tools/test_design_review.sh
+#                                      -> test_design_review (the libraries keep their other routes
+#                                         by union)
+#   plugin/skills/_shared/{record-verify,readiness-check}.sh, docs/initiatives/**, docs/prds/**,
+#     docs/adr/**, tools/verify_records.sh
+#                                      -> verify_records (docs/adr/** ALSO -> policy_check)
 #   tools/**                           -> FULL suite (validator bootstrap)
 #   .github/**                         -> FULL suite (CI bootstrap — the gate harness itself)
 #   outside plugin|.claude-plugin|tools|tests|.github and not fixture-pinned above
-#     (docs/** other than docs/adr/** and docs/skill-authoring.md)
+#     (docs/** other than docs/adr/**, docs/initiatives/**, docs/prds/** and
+#     docs/skill-authoring.md)
 #                                      -> no code suites
 #   anything matching no rule          -> FULL suite
 
@@ -491,6 +506,40 @@ map_path() {
      || "$p" == tests/readiness-check/* \
      || "$p" == tools/test_readiness_check.sh ]]; then
     add_selected "$SUITE_TEST_READINESS_CHECK" "$p (readiness-check library)"
+    matched=1
+  fi
+
+  # test_design_review: the design-review skill (SKILL.md, references and the design-review.sh
+  # engine), the record verify library plugin/skills/_shared/record-verify.sh, the readiness-check
+  # library it needs sourced first, the fixture dir and the behavior suite. The skill and libraries
+  # are ALSO plugin/* files (policy_check prose-lints them via the wholesale rule below), but
+  # policy_check NEVER EXECUTES bash, so without this rule an edit would only be prose-linted, never
+  # behaviorally exercised. The libraries keep their other routes by union. It runs BEFORE (and does
+  # NOT return early from) the tools/** escalation below: a real edit to tools/test_design_review.sh
+  # still fail-closes to the full suite via that leg.
+  if [[ "$p" == plugin/skills/design-review/* \
+     || "$p" == plugin/skills/_shared/record-verify.sh \
+     || "$p" == plugin/skills/_shared/readiness-check.sh \
+     || "$p" == tests/design-review/* \
+     || "$p" == tools/test_design_review.sh ]]; then
+    add_selected "$SUITE_TEST_DESIGN_REVIEW" "$p (design-review skill/record verify library/fixture)"
+    matched=1
+  fi
+
+  # verify_records: this repository's record verify suite, which runs the record verify library
+  # over every design review record at HEAD's commit. A record (docs/initiatives/**), the PRD it
+  # stamps (docs/prds/**) or an ADR it stamps (docs/adr/**) lives outside every code tree, so
+  # without this rule a docs-only PR that leaves a record inconsistent or stale would select no
+  # suite. The two libraries and the suite itself route here too. docs/adr/** keeps its
+  # policy_check route below by union. It runs BEFORE (and does NOT return early from) the tools/**
+  # escalation below: a real edit to tools/verify_records.sh still fail-closes to the full suite.
+  if [[ "$p" == plugin/skills/_shared/record-verify.sh \
+     || "$p" == plugin/skills/_shared/readiness-check.sh \
+     || "$p" == docs/initiatives/* \
+     || "$p" == docs/prds/* \
+     || "$p" == docs/adr/* \
+     || "$p" == tools/verify_records.sh ]]; then
+    add_selected "$SUITE_VERIFY_RECORDS" "$p (design review record/stamped doc/record verify library)"
     matched=1
   fi
 
@@ -886,8 +935,12 @@ map_path() {
   # plugin/* file (policy_check prose-lints it via the wholesale rule below), but policy_check NEVER
   # EXECUTES bash — so without this rule a merge-approved edit would only be prose-linted, never
   # behaviorally exercised. Route both the script and its fixture dir to the behavioral suite.
+  # Also readiness-check.sh and record-verify.sh: merge-approved.sh sources both for its record
+  # gate, and the libraries keep their other routes by union.
   # (tools/test_merge_approved.sh itself is covered by the tools/** full-suite leg.)
   if [[ "$p" == plugin/skills/github-review-loop/scripts/merge-approved.sh \
+     || "$p" == plugin/skills/_shared/readiness-check.sh \
+     || "$p" == plugin/skills/_shared/record-verify.sh \
      || "$p" == tools/test_merge_approved.sh \
      || "$p" == tests/merge-approved/* ]]; then
     add_selected "$SUITE_TEST_MERGE_APPROVED" "$p (merge-approved script/fixture)"
@@ -1083,7 +1136,8 @@ map_path() {
   # fixture pins its Skill File-Tool Grants heading. A docs-only edit to it would otherwise select
   # no suite and merge with PR CI green, leaving a broken navigator list or heading pin to fire only
   # on the push-to-main full run. Literal path, matching the CLAUDE.md leg above: the rest of docs/
-  # stays unrouted because no check reads it.
+  # stays unrouted because no check reads it, except docs/adr/** (policy_check above) and the
+  # design review record and stamped doc dirs (verify_records near the top).
   if [[ "$p" == "docs/skill-authoring.md" ]]; then
     add_selected "$SUITE_POLICY_CHECK" "$p (Covered Navigators read by policy_check CHECK 14 and CHECK 16)"
     matched=1
@@ -1279,6 +1333,8 @@ self_test() {
     ["test_run_review.sh"]="tests/run-review/README.md"
     ["test_workflow_scripts.sh"]="plugin/workflow-src/lib/decide.js"
     ["test_scratch.sh"]="tools/lib/scratch.sh"
+    ["test_design_review.sh"]="tests/design-review/README.md"
+    ["verify_records.sh"]="docs/initiatives/x/review-record.md"
   )
   local script_name expected_suite suite_path probe_path hit
   for script_name in "${KNOWN_SUITES[@]}"; do
@@ -1514,8 +1570,10 @@ self_test() {
 
   # 10. Each consumer leg of the gather-facts, create-working-branch, push-branch, molt,
   #     open-plan-pr and synapse-gate suites, each brood-state.sh leg (test_brood_compat,
-  #     test_rc_brood), the test_readiness_check library and harness legs, and the hooks.json
-  #     json-manifests parse leg, that the
+  #     test_rc_brood), the test_readiness_check library and harness legs, the test_design_review
+  #     skill, library and harness legs, the test_merge_approved record gate library legs, the
+  #     verify_records record, stamped doc, library and suite legs (and the docs/adr/**
+  #     policy_check leg it unions with), and the hooks.json json-manifests parse leg, that the
   #     KNOWN_SUITES probe (#1) does not reach must route to its suite. #1 probes each entrypoint
   #     script, so it would stay green if the schema-chain, shared-lib, harness, push-branch child
   #     or parse-gate selector were dropped. Probe each <path>|<suite> pair directly so removing
@@ -1546,6 +1604,18 @@ self_test() {
     "plugin/skills/_shared/containment.sh|$SUITE_TEST_SYNAPSE_GATE" \
     "plugin/skills/_shared/readiness-check.sh|$SUITE_TEST_READINESS_CHECK" \
     "tools/test_readiness_check.sh|$SUITE_TEST_READINESS_CHECK" \
+    "plugin/skills/design-review/scripts/design-review.sh|$SUITE_TEST_DESIGN_REVIEW" \
+    "plugin/skills/_shared/record-verify.sh|$SUITE_TEST_DESIGN_REVIEW" \
+    "plugin/skills/_shared/readiness-check.sh|$SUITE_TEST_DESIGN_REVIEW" \
+    "tools/test_design_review.sh|$SUITE_TEST_DESIGN_REVIEW" \
+    "plugin/skills/_shared/record-verify.sh|$SUITE_TEST_MERGE_APPROVED" \
+    "plugin/skills/_shared/readiness-check.sh|$SUITE_TEST_MERGE_APPROVED" \
+    "plugin/skills/_shared/record-verify.sh|$SUITE_VERIFY_RECORDS" \
+    "plugin/skills/_shared/readiness-check.sh|$SUITE_VERIFY_RECORDS" \
+    "docs/prds/x.md|$SUITE_VERIFY_RECORDS" \
+    "docs/adr/0001-x.md|$SUITE_VERIFY_RECORDS" \
+    "docs/adr/0001-x.md|$SUITE_POLICY_CHECK" \
+    "tools/verify_records.sh|$SUITE_VERIFY_RECORDS" \
     "plugin/hooks/hooks.json|$SUITE_JSON_MANIFESTS" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_BROOD" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_RC_BROOD"; do
