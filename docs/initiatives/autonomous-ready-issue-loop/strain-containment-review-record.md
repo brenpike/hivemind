@@ -6,7 +6,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 2
+rounds: 3
 clean_round: false
 ---
 
@@ -24,6 +24,7 @@ How this record is kept:
 - The `hivemind:design-review` engine has no part-design mode. Its `round` and `stamps` read only the slug's `review-record.md`, and record verify reads only files named `review-record.md`.
 - So this record follows record-format's front matter and body rules by hand.
 - The round number, the pass rule and the 3-round cap come from this front matter.
+- The maintainer raised the cap to 4 for this review after round 3 (2026-11-24), for one confirming pass over the round-3 fixes. If round 4 is not clean, the review closes with verdict `fail` and no stamp; no fifth round runs. A pass at round 4 falls outside record-format's pass rule (rounds 2 to 3); this record is outside record verify (D1), and the exception is the maintainer's decision recorded here.
 - The pass stamp is `git rev-parse <reviewed>:<path>`.
 - The epic record is not edited.
 - Inherited findings join the Findings table at round 1 with IDs such as `integration R1-1`.
@@ -49,6 +50,14 @@ Confirming round. Reviewed commit `d1a0ec7ca49b890f42a4d0fd79cd02cd12c05b3a`; pr
 - Pass 2: reviewer the local review tool, preset `codex-plugin`, on the tool's own default model, base the previous round's commit, iteration 2, with the skill's fixed design-review focus. It raised 2 findings.
 - All seven findings were fixed in the part design in the same wave.
 - Diminishing-returns advisory: the signals are recurrence and trend. Recurrence: both high findings came from residuals that the S1-4 and S1-9 fixes created, and the medium came from the S1-T2 mach allowlist. Trend: cerebrate's severity fell from high to medium and low while the design grew from 74.5 KB to 100 KB. Options given: narrow the design and hand the lows to #604 and #608 as a tracked follow-up; accept the lows as recorded residuals; keep going. The maintainer's answer (2026-11-24): keep going (option 3), fixing all seven in one wave, the two high ones by a deny-by-default view of named binds.
+
+### Round 3
+
+Confirming round. Reviewed commit `7e36583da92f4a1eeb3949da5164767d7110488b`; previous `d1a0ec7ca49b890f42a4d0fd79cd02cd12c05b3a`.
+
+- Pass 1: reviewer cerebrate, on cerebrate's own model (`model=default`), a fresh read-only pass with "Memory context: none". It covered the diff from the previous commit and the round-2 fixes, and checked decisions D1-D9. It found every round-2 row closed (`unfixed: none`). It raised 4 findings.
+- Pass 2: reviewer the local review tool, preset `codex-plugin`, on the tool's own default model, base the previous round's commit, iteration 3, with the skill's fixed design-review focus. It raised 1 finding.
+- Diminishing-returns advisory: all three signals. Recurrence: S3-1 to S3-4 come from the round-2 file-view fix. Trend: high findings 5, 2, 0 while the design grew 74.5 KB, 100 KB, 102.9 KB. Bounded edge cases: S3-2 to S3-4 are bounded by existing safeguards; S3-1 is bounded at start by the probe's `control` case. Options given: narrow and hand off; accept residuals; keep going. The maintainer's answer (2026-11-24): fix all four design findings now (each has a strong, contained fix, so none is deferred), reject S3-T1, and raise the cap to 4 for one confirming pass.
 
 ## Findings
 
@@ -83,7 +92,12 @@ Confirming round. Reviewed commit `d1a0ec7ca49b890f42a4d0fd79cd02cd12c05b3a`; pr
 | S2-4 | 2 | confirm | low | fixed | Consumer degradation rows for `perl` (or #608's raw-syscall tool) and a macOS loopback proxy. |
 | S2-5 | 2 | confirm | low | fixed | D3 names its departure from ADR-0046 decisions 6 and 7 and its ground. |
 | S2-T1 | 2 | review | high | fixed | Deny-by-default view of named read-only binds on a fresh root: host FIFOs outside the binds are never visible; the probe case walks the view and fails closed on any FIFO, socket or device node outside the allowlist. |
-| S2-T2 | 2 | review | high | fixed | Same view: host mounts made after launch outside the named binds are never visible; only a root-made mount under a bound system directory remains, outside the threat model, as a residual. |
+| S2-T2 | 2 | review | high | fixed | Same view: host mounts made after launch outside the named binds are never visible. What remains is a special file or mount made after launch under a bound path by root or by the user's own processes outside the Lair, a named residual with ground and bound. |
+| S3-1 | 3 | confirm | medium | fixed | The builder refuses a read-only bind whose resolved source is or contains `/`, `$HOME`, the state root or the Claude Code folder; WSL2 Windows `PATH` entries are dropped; refusal and passing test cases; degradation row. |
+| S3-2 | 3 | confirm | low | fixed | The residual for a special file or mount made after launch is bounded as a kernel or sandbox bug: the 2026-11-21 amendment's forged marker and ADR-0045's prompt-injected strain residual. |
+| S3-3 | 3 | confirm | low | fixed | The head check lstats the loose ref as it does `HEAD`, a failed check keeps the worktree; the shared-store residual names the stall as a denial of service. |
+| S3-4 | 3 | confirm | low | fixed | Probe case `special-files` fails on FIFOs only and reports sockets and device nodes. |
+| S3-T1 | 3 | review | medium | rejected | Reason: ADR-0046's head binding exists so the merged design is the reviewed design. Here the pass stamp is the design's blob, checked against the final pull request head before merge, so the merged bytes are the reviewed bytes; every reviewed commit is in the pull request's history (D3). The later `solution-design.md` amendment (D4) is outside this part review and is flagged for the epic re-review. |
 
 ## Decisions taken, listed for veto
 
@@ -96,6 +110,7 @@ Confirming round. Reviewed commit `d1a0ec7ca49b890f42a4d0fd79cd02cd12c05b3a`; pr
 - **D7.** All round-1 medium and low findings are fixed now rather than deferred or recorded: each had a contained fix in the part design. Strength: strong. Touches: trust.
 - **D8.** S2-T1 and S2-T2 fix: the Linux view is a fresh root with named read-only binds, replacing the read-only bind of the whole host root and its per-submount binds. Strength: strong. Touches: trust.
 - **D9.** S2-1 fix: the macOS profile denies preference writes and the probe checks it. Strength: strong. Touches: trust.
+- **D10.** S3-T1 rejected on the blob-stamp ground. Strength: strong. Touches: scope (ADR-0046 process).
 
 ## Decisions asked
 
@@ -104,6 +119,7 @@ The first two are inputs, answered before this review.
 - The user's answer 1A of 2026-11-22 at #633's design review round 1, recorded in the epic's [review record](review-record.md). #604 builds per-platform containment of `control/` and the Lair's tmux servers. #608's probe `sandbox` stops the Lair when containment cannot be confirmed. The merge lane's cache sits under `control/`.
 - The user's choice of 2026-11-22 to split containment into its own part design with its own review, recorded in the epic's [review record](review-record.md).
 - Round 2 diminishing-returns advisory (2026-11-24): options narrow / accept residuals / keep going. Answer: keep going (3).
+- Round 3 cap and advisory (2026-11-24): fix all round-3 design findings, reject S3-T1, raise the cap to 4 for one confirming pass. Answer: A.
 
 ## Residuals
 
