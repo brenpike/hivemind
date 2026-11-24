@@ -1,0 +1,14 @@
+{
+  "prd": "# Demo PRD\n\n**UI:** no\n\n## Problem Statement\n\nThe demo initiative needs a stage.\n",
+  "prd-ui-yes": "# Demo PRD\n\n**UI:** yes\n\n## Problem Statement\n\nThe demo initiative needs a screen.\n",
+  "prd-ui-maybe": "# Demo PRD\n\n**UI:** maybe\n\n## Problem Statement\n\nThe demo initiative is unsure.\n",
+  "prd-no-ui-line": "# Demo PRD\n\n## Problem Statement\n\nA PRD written before the UI line.\n",
+  "prd-other": "# Other PRD\n\n**UI:** no\n\n## Problem Statement\n\nAnother initiative.\n",
+  "design": "# Solution design: Demo\n\n## Context and code truth\n\nThe demo context.\n\n## Open questions\n\nNone\n",
+  "design-delivered": "# Solution design: Demo\n\n**Status:** delivered\n\n## Context and code truth\n\nThe demo context.\n\n## As-built deltas\n\nNone.\n",
+  "index": "<!doctype html>\n<title>Demo prototype</title>\n<p>Variant A</p>\n",
+  "notes-no-verdict": "# Prototype notes\n\n## Variant A: Sidebar\n\nA sidebar layout.\n\n## Variant B: Tabs\n\nA tabbed layout.\n",
+  "notes-verdict-empty": "# Prototype notes\n\n## Variant A: Sidebar\n\nA sidebar layout.\n\n## Verdict\n\n### Feedback\n\n",
+  "notes-verdict-filled": "# Prototype notes\r\n\r\n## Variant A: Sidebar\r\n\r\nA sidebar layout.\r\n\r\n## Verdict\r\n\r\nVariant A, because the sidebar reads best.\r\n",
+  "record-malformed": "---\nverdict: pass\n---\n\n# Design review record\n"
+}

@@ -1,0 +1,2320 @@
+[
+  {
+    "name": "not-started",
+    "evidence": {
+      "seeds": []
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "none",
+      "status": "not-started",
+      "next": "capture",
+      "reasons": []
+    }
+  },
+  {
+    "name": "seed-missing-trunk-prd",
+    "evidence": {
+      "seeds": []
+    },
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd"
+      }
+    },
+    "expect": {
+      "stage": null,
+      "status": "ambiguous",
+      "next": "ask",
+      "reasons": [
+        "seed_missing"
+      ]
+    }
+  },
+  {
+    "name": "seed-missing-docs-pr",
+    "evidence": {
+      "seeds": [],
+      "pull_requests": [
+        {
+          "number": 5,
+          "head_oid": "{{unfetched}}"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": null,
+      "status": "ambiguous",
+      "next": "ask",
+      "reasons": [
+        "seed_missing"
+      ]
+    }
+  },
+  {
+    "name": "seed-missing-docs-branch",
+    "evidence": {
+      "seeds": [],
+      "branches": [
+        {
+          "name": "docs/demo-v2",
+          "oid": "{{unfetched}}"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": null,
+      "status": "ambiguous",
+      "next": "ask",
+      "reasons": [
+        "seed_missing"
+      ]
+    }
+  },
+  {
+    "name": "seed-ambiguous",
+    "evidence": {
+      "seeds": [
+        {
+          "number": 1
+        },
+        {
+          "number": 2
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": null,
+      "status": "ambiguous",
+      "next": "ask",
+      "reasons": [
+        "seed_ambiguous"
+      ],
+      "seed": null
+    }
+  },
+  {
+    "name": "seed-non-writer-ignored",
+    "evidence": {
+      "seeds": [
+        {
+          "number": 1
+        },
+        {
+          "number": 2,
+          "author_can_write": false
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "capture",
+      "status": "done",
+      "next": "interrogate",
+      "reasons": [],
+      "seed": 1,
+      "ignored": [
+        {
+          "kind": "issue",
+          "number": 2,
+          "reason": "seed_author_not_writer"
+        }
+      ]
+    }
+  },
+  {
+    "name": "seed-only-non-writer",
+    "evidence": {
+      "seeds": [
+        {
+          "number": 2,
+          "author_can_write": false
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "none",
+      "status": "not-started",
+      "next": "capture",
+      "reasons": [],
+      "seed": null,
+      "ignored": [
+        {
+          "kind": "issue",
+          "number": 2,
+          "reason": "seed_author_not_writer"
+        }
+      ]
+    }
+  },
+  {
+    "name": "seed-marker-malformed",
+    "evidence": {
+      "seeds": [
+        {
+          "number": 1
+        },
+        {
+          "number": 3,
+          "body": "<!-- hivemind-initiative: Bad_Slug -->\nPWNED-SEED-TEXT\n"
+        }
+      ]
+    },
+    "trunk": {},
+    "no_git_text": "Bad_Slug",
+    "lacks": [
+      "Bad_Slug",
+      "PWNED-SEED-TEXT"
+    ],
+    "expect": {
+      "stage": "capture",
+      "status": "done",
+      "next": "interrogate",
+      "reasons": [],
+      "seed": 1,
+      "ignored": [
+        {
+          "kind": "issue",
+          "number": 3,
+          "reason": "seed_marker_malformed"
+        }
+      ]
+    }
+  },
+  {
+    "name": "seed-closed",
+    "evidence": {
+      "seeds": [
+        {
+          "number": 1,
+          "state": "CLOSED"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "none",
+      "status": "not-started",
+      "next": "capture",
+      "reasons": [],
+      "seed": null,
+      "ignored": [
+        {
+          "kind": "issue",
+          "number": 1,
+          "reason": "seed_closed"
+        }
+      ]
+    }
+  },
+  {
+    "name": "seed-other-slug-unrelated",
+    "evidence": {
+      "seeds": [
+        {
+          "number": 1
+        },
+        {
+          "number": 4,
+          "body": "<!-- hivemind-initiative: other -->\n"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "capture",
+      "status": "done",
+      "next": "interrogate",
+      "reasons": [],
+      "seed": 1
+    }
+  },
+  {
+    "name": "seed-marker-not-first-line",
+    "evidence": {
+      "seeds": [
+        {
+          "number": 6,
+          "body": "Intro line.\n<!-- hivemind-initiative: demo -->\n"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "none",
+      "status": "not-started",
+      "next": "capture",
+      "reasons": [],
+      "seed": null
+    }
+  },
+  {
+    "name": "seed-marker-lf-body",
+    "evidence": {
+      "seeds": [
+        {
+          "number": 7,
+          "body": "<!-- hivemind-initiative: demo -->"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "capture",
+      "status": "done",
+      "next": "interrogate",
+      "reasons": [],
+      "seed": 7
+    }
+  },
+  {
+    "name": "docs-pr-fork-ignored",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "head_repository": "fork/widgets",
+          "head_oid": "{{unfetched}}"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "capture",
+      "status": "done",
+      "next": "interrogate",
+      "reasons": [],
+      "ignored": [
+        {
+          "kind": "pull_request",
+          "number": 5,
+          "reason": "docs_pr_fork"
+        }
+      ],
+      "docs": {
+        "commit": null,
+        "pull_request": null,
+        "draft": null,
+        "source": null
+      }
+    }
+  },
+  {
+    "name": "docs-pr-deleted-fork-ignored",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "head_repository": null,
+          "head_oid": "{{unfetched}}"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "capture",
+      "status": "done",
+      "next": "interrogate",
+      "reasons": [],
+      "ignored": [
+        {
+          "kind": "pull_request",
+          "number": 5,
+          "reason": "docs_pr_fork"
+        }
+      ]
+    }
+  },
+  {
+    "name": "docs-pr-non-writer-ignored",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 8,
+          "head_ref": "docs/demo-v2",
+          "author_can_write": false,
+          "head_oid": "{{unfetched}}"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "capture",
+      "status": "done",
+      "next": "interrogate",
+      "reasons": [],
+      "ignored": [
+        {
+          "kind": "pull_request",
+          "number": 8,
+          "reason": "docs_pr_author_not_writer"
+        }
+      ]
+    }
+  },
+  {
+    "name": "docs-pr-repo-case-insensitive",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "head_repository": "Acme/Widgets"
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd"
+      }
+    },
+    "expect": {
+      "stage": "prd",
+      "status": "done",
+      "next": "design",
+      "reasons": [],
+      "docs": {
+        "commit": "{{docs}}",
+        "pull_request": 5,
+        "draft": false,
+        "source": "pull_request"
+      }
+    }
+  },
+  {
+    "name": "docs-pr-ambiguous",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "head_oid": "{{unfetched}}"
+        },
+        {
+          "number": 6,
+          "head_ref": "docs/demo-v2",
+          "head_oid": "{{unfetched}}"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": null,
+      "status": "ambiguous",
+      "next": "ask",
+      "reasons": [
+        "docs_pr_ambiguous"
+      ]
+    }
+  },
+  {
+    "name": "docs-branch-ambiguous",
+    "evidence": {
+      "branches": [
+        {
+          "name": "docs/demo",
+          "oid": "{{unfetched}}"
+        },
+        {
+          "name": "docs/demo-two",
+          "oid": "{{unfetched}}"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": null,
+      "status": "ambiguous",
+      "next": "ask",
+      "reasons": [
+        "docs_branch_ambiguous"
+      ]
+    }
+  },
+  {
+    "name": "docs-branch-used-not-counted",
+    "evidence": {
+      "branches": [
+        {
+          "name": "docs/demo",
+          "oid": "{{unfetched}}",
+          "pull_request_count": 1
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "capture",
+      "status": "done",
+      "next": "interrogate",
+      "reasons": [],
+      "docs": {
+        "commit": null,
+        "pull_request": null,
+        "draft": null,
+        "source": null
+      }
+    }
+  },
+  {
+    "name": "docs-name-not-matching",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "head_ref": "docs/demox",
+          "head_oid": "{{unfetched}}"
+        },
+        {
+          "number": 6,
+          "head_ref": "docs/demo-",
+          "head_oid": "{{unfetched}}"
+        },
+        {
+          "number": 9,
+          "head_ref": "feature/demo",
+          "head_oid": "{{unfetched}}"
+        }
+      ],
+      "branches": [
+        {
+          "name": "docs/demo/x",
+          "oid": "{{unfetched}}"
+        },
+        {
+          "name": "docs/Demo",
+          "oid": "{{unfetched}}"
+        }
+      ]
+    },
+    "trunk": {},
+    "expect": {
+      "stage": "capture",
+      "status": "done",
+      "next": "interrogate",
+      "reasons": []
+    }
+  },
+  {
+    "name": "docs-pr-wins-over-branch",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ],
+      "branches": [
+        {
+          "name": "docs/demo-old",
+          "oid": "{{unfetched}}"
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd"
+      }
+    },
+    "expect": {
+      "stage": "prd",
+      "status": "done",
+      "next": "design",
+      "reasons": [],
+      "docs": {
+        "commit": "{{docs}}",
+        "pull_request": 5,
+        "draft": true,
+        "source": "pull_request"
+      }
+    }
+  },
+  {
+    "name": "docs-branch-source",
+    "evidence": {
+      "branches": [
+        {
+          "name": "docs/demo-v2"
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd"
+      }
+    },
+    "expect": {
+      "stage": "prd",
+      "status": "done",
+      "next": "design",
+      "reasons": [],
+      "docs": {
+        "commit": "{{docs}}",
+        "pull_request": null,
+        "draft": null,
+        "source": "branch"
+      }
+    }
+  },
+  {
+    "name": "delivered-at-trunk-before-stale",
+    "evidence": {
+      "seeds": []
+    },
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design-delivered"
+      },
+      "records": [
+        {
+          "stamps": [
+            "docs/prds/demo.md",
+            {
+              "path": "docs/initiatives/demo/solution-design.md",
+              "doc": "design"
+            }
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "stage": "close-out",
+      "status": "done",
+      "next": "none",
+      "reasons": [],
+      "seed": null
+    }
+  },
+  {
+    "name": "delivered-at-docs-head-before-stale",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5
+        }
+      ]
+    },
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ]
+    },
+    "docs": {
+      "docs": {
+        "docs/initiatives/demo/solution-design.md": "design-delivered"
+      },
+      "records": [
+        {
+          "stamps": [
+            "docs/prds/demo.md",
+            {
+              "path": "docs/initiatives/demo/solution-design.md",
+              "doc": "design"
+            }
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "stage": "close-out",
+      "status": "in-progress",
+      "next": "merge-docs",
+      "reasons": []
+    }
+  },
+  {
+    "name": "trunk-current-no-slices",
+    "evidence": {},
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ]
+    },
+    "expect": {
+      "stage": "docs-pull-request",
+      "status": "done",
+      "next": "slice",
+      "reasons": [],
+      "slices": []
+    }
+  },
+  {
+    "name": "trunk-current-all-closed",
+    "evidence": {
+      "slices": [
+        {
+          "number": 11,
+          "state": "CLOSED"
+        },
+        {
+          "number": 12,
+          "state": "CLOSED"
+        }
+      ]
+    },
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ]
+    },
+    "expect": {
+      "stage": "handoff",
+      "status": "done",
+      "next": "close-out",
+      "reasons": [],
+      "slices": [
+        {
+          "number": 11,
+          "state": "CLOSED"
+        },
+        {
+          "number": 12,
+          "state": "CLOSED"
+        }
+      ]
+    }
+  },
+  {
+    "name": "trunk-current-some-closed",
+    "evidence": {
+      "slices": [
+        {
+          "number": 11,
+          "state": "CLOSED"
+        },
+        {
+          "number": 12,
+          "rated": false
+        }
+      ]
+    },
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ]
+    },
+    "expect": {
+      "stage": "handoff",
+      "status": "delivering",
+      "next": "deliver",
+      "reasons": []
+    }
+  },
+  {
+    "name": "trunk-current-unrated",
+    "evidence": {
+      "slices": [
+        {
+          "number": 11
+        },
+        {
+          "number": 12,
+          "rated": false
+        }
+      ]
+    },
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ]
+    },
+    "expect": {
+      "stage": "slicing",
+      "status": "done",
+      "next": "triage",
+      "reasons": []
+    }
+  },
+  {
+    "name": "trunk-current-rated",
+    "evidence": {
+      "slices": [
+        {
+          "number": 11
+        },
+        {
+          "number": 12
+        }
+      ]
+    },
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ]
+    },
+    "expect": {
+      "stage": "triage",
+      "status": "done",
+      "next": "handoff-check",
+      "reasons": [],
+      "slices": [
+        {
+          "number": 11,
+          "state": "OPEN"
+        },
+        {
+          "number": 12,
+          "state": "OPEN"
+        }
+      ]
+    }
+  },
+  {
+    "name": "trunk-current-docs-pr-open",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5
+        }
+      ]
+    },
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ]
+    },
+    "docs": {},
+    "expect": {
+      "stage": "docs-pull-request",
+      "status": "done",
+      "next": "slice",
+      "reasons": []
+    }
+  },
+  {
+    "name": "trunk-stale-record",
+    "evidence": {},
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {
+          "stamps": [
+            "docs/prds/demo.md",
+            {
+              "path": "docs/initiatives/demo/solution-design.md",
+              "doc": "prd"
+            }
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "stage": "design-review",
+      "status": "stale",
+      "next": "re-review",
+      "reasons": []
+    }
+  },
+  {
+    "name": "trunk-record-failing",
+    "evidence": {},
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {
+          "verdict": "fail",
+          "clean_round": false,
+          "rounds": 1
+        }
+      ]
+    },
+    "expect": {
+      "stage": "design-review",
+      "status": "in-progress",
+      "next": "review",
+      "reasons": []
+    }
+  },
+  {
+    "name": "trunk-record-open-finding",
+    "evidence": {},
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {
+          "open": {
+            "low": 1
+          }
+        }
+      ]
+    },
+    "expect": {
+      "stage": "design-review",
+      "status": "in-progress",
+      "next": "review",
+      "reasons": []
+    }
+  },
+  {
+    "name": "docs-empty-interrogation",
+    "evidence": {
+      "branches": [
+        {
+          "name": "docs/demo"
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {},
+    "expect": {
+      "stage": "interrogation",
+      "status": "in-progress",
+      "next": "interrogate",
+      "reasons": []
+    }
+  },
+  {
+    "name": "docs-prd-next-design",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd"
+      }
+    },
+    "expect": {
+      "stage": "prd",
+      "status": "done",
+      "next": "design",
+      "reasons": []
+    }
+  },
+  {
+    "name": "docs-missing-ui-line-reads-no",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-no-ui-line"
+      }
+    },
+    "expect": {
+      "stage": "prd",
+      "status": "done",
+      "next": "design",
+      "reasons": []
+    }
+  },
+  {
+    "name": "docs-ui-maybe-ambiguous",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-maybe"
+      }
+    },
+    "expect": {
+      "stage": null,
+      "status": "ambiguous",
+      "next": "ask",
+      "reasons": [
+        "prd_ui_invalid"
+      ]
+    }
+  },
+  {
+    "name": "trunk-ui-maybe-ambiguous",
+    "evidence": {},
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-maybe"
+      }
+    },
+    "expect": {
+      "stage": null,
+      "status": "ambiguous",
+      "next": "ask",
+      "reasons": [
+        "prd_ui_invalid"
+      ]
+    }
+  },
+  {
+    "name": "docs-design-no-record",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      }
+    },
+    "expect": {
+      "stage": "solution-design",
+      "status": "done",
+      "next": "review",
+      "reasons": []
+    }
+  },
+  {
+    "name": "docs-record-malformed",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {
+          "raw": "record-malformed"
+        }
+      ]
+    },
+    "expect": {
+      "stage": null,
+      "status": "ambiguous",
+      "next": "ask",
+      "reasons": [
+        "record_malformed"
+      ]
+    }
+  },
+  {
+    "name": "docs-record-failing",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {
+          "verdict": "fail",
+          "clean_round": false,
+          "rounds": 1
+        }
+      ]
+    },
+    "expect": {
+      "stage": "design-review",
+      "status": "in-progress",
+      "next": "review",
+      "reasons": []
+    }
+  },
+  {
+    "name": "docs-record-stale",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {
+          "stamps": [
+            "docs/prds/demo.md",
+            {
+              "path": "docs/initiatives/demo/solution-design.md",
+              "doc": "prd"
+            }
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "stage": "design-review",
+      "status": "stale",
+      "next": "re-review",
+      "reasons": []
+    }
+  },
+  {
+    "name": "docs-verify-fails-other-record",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5
+        }
+      ]
+    },
+    "trunk": {
+      "docs": {
+        "docs/prds/other.md": "prd-other",
+        "docs/initiatives/other/solution-design.md": "design"
+      },
+      "records": [
+        {
+          "path": "docs/initiatives/other/review-record.md",
+          "stamps": [
+            "docs/prds/other.md",
+            {
+              "path": "docs/initiatives/other/solution-design.md",
+              "doc": "prd"
+            }
+          ]
+        }
+      ]
+    },
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {
+          "path": "docs/initiatives/other/review-record.md",
+          "stamps": [
+            "docs/prds/other.md",
+            {
+              "path": "docs/initiatives/other/solution-design.md",
+              "doc": "prd"
+            }
+          ]
+        },
+        {}
+      ]
+    },
+    "expect": {
+      "stage": "docs-pull-request",
+      "status": "verify-failed",
+      "next": "ask",
+      "reasons": [
+        "verify_failed:docs/initiatives/other/review-record.md"
+      ]
+    }
+  },
+  {
+    "name": "docs-no-pull-request",
+    "evidence": {
+      "branches": [
+        {
+          "name": "docs/demo"
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ]
+    },
+    "expect": {
+      "stage": "docs-pull-request",
+      "status": "no-pull-request",
+      "next": "ask",
+      "reasons": []
+    }
+  },
+  {
+    "name": "docs-draft-mark-ready",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ]
+    },
+    "expect": {
+      "stage": "docs-pull-request",
+      "status": "in-progress",
+      "next": "mark-ready",
+      "reasons": [],
+      "docs": {
+        "commit": "{{docs}}",
+        "pull_request": 5,
+        "draft": true,
+        "source": "pull_request"
+      }
+    }
+  },
+  {
+    "name": "docs-ready-merge",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ]
+    },
+    "expect": {
+      "stage": "docs-pull-request",
+      "status": "in-progress",
+      "next": "merge-docs",
+      "reasons": [],
+      "docs": {
+        "commit": "{{docs}}",
+        "pull_request": 5,
+        "draft": false,
+        "source": "pull_request"
+      }
+    }
+  },
+  {
+    "name": "docs-amendment-over-stale-trunk",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5
+        }
+      ]
+    },
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {
+          "stamps": [
+            "docs/prds/demo.md",
+            {
+              "path": "docs/initiatives/demo/solution-design.md",
+              "doc": "prd"
+            }
+          ]
+        }
+      ]
+    },
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ]
+    },
+    "expect": {
+      "stage": "docs-pull-request",
+      "status": "in-progress",
+      "next": "merge-docs",
+      "reasons": []
+    }
+  },
+  {
+    "name": "ui-no-prototype",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes"
+      }
+    },
+    "expect": {
+      "stage": "prd",
+      "status": "done",
+      "next": "build-prototype",
+      "reasons": []
+    }
+  },
+  {
+    "name": "ui-index-only",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/prototype/index.html": "index"
+      }
+    },
+    "expect": {
+      "stage": "ui-prototype",
+      "status": "incomplete",
+      "next": "build-prototype",
+      "reasons": []
+    }
+  },
+  {
+    "name": "ui-notes-only",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/prototype/notes.md": "notes-verdict-filled"
+      }
+    },
+    "expect": {
+      "stage": "ui-prototype",
+      "status": "incomplete",
+      "next": "build-prototype",
+      "reasons": []
+    }
+  },
+  {
+    "name": "ui-no-verdict-waits",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/prototype/index.html": "index",
+        "docs/initiatives/demo/prototype/notes.md": "notes-no-verdict"
+      }
+    },
+    "expect": {
+      "stage": "ui-prototype",
+      "status": "waiting-approval",
+      "next": "approve-prototype",
+      "reasons": []
+    }
+  },
+  {
+    "name": "ui-empty-verdict-waits",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/prototype/index.html": "index",
+        "docs/initiatives/demo/prototype/notes.md": "notes-verdict-empty"
+      }
+    },
+    "expect": {
+      "stage": "ui-prototype",
+      "status": "waiting-approval",
+      "next": "approve-prototype",
+      "reasons": []
+    }
+  },
+  {
+    "name": "ui-filled-verdict-done",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/prototype/index.html": "index",
+        "docs/initiatives/demo/prototype/notes.md": "notes-verdict-filled"
+      }
+    },
+    "expect": {
+      "stage": "ui-prototype",
+      "status": "done",
+      "next": "design",
+      "reasons": []
+    }
+  },
+  {
+    "name": "ui-design-before-prototype-docs",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/solution-design.md": "design"
+      }
+    },
+    "expect": {
+      "stage": null,
+      "status": "out-of-order",
+      "next": "ask",
+      "reasons": [
+        "design_before_prototype"
+      ]
+    }
+  },
+  {
+    "name": "ui-design-before-verdict-docs",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/prototype/index.html": "index",
+        "docs/initiatives/demo/prototype/notes.md": "notes-no-verdict",
+        "docs/initiatives/demo/solution-design.md": "design"
+      }
+    },
+    "expect": {
+      "stage": null,
+      "status": "out-of-order",
+      "next": "ask",
+      "reasons": [
+        "design_before_prototype"
+      ]
+    }
+  },
+  {
+    "name": "ui-design-on-trunk-before-prototype",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/solution-design.md": "design"
+      }
+    },
+    "docs": {
+      "docs": {
+        "docs/initiatives/demo/prototype/index.html": "index",
+        "docs/initiatives/demo/solution-design.md": null
+      }
+    },
+    "expect": {
+      "stage": null,
+      "status": "out-of-order",
+      "next": "ask",
+      "reasons": [
+        "design_before_prototype"
+      ]
+    }
+  },
+  {
+    "name": "ui-design-before-prototype-trunk",
+    "evidence": {},
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/solution-design.md": "design"
+      }
+    },
+    "expect": {
+      "stage": null,
+      "status": "out-of-order",
+      "next": "ask",
+      "reasons": [
+        "design_before_prototype"
+      ]
+    }
+  },
+  {
+    "name": "ui-complete-draft",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/prototype/index.html": "index",
+        "docs/initiatives/demo/prototype/notes.md": "notes-verdict-filled",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {
+          "stamps": [
+            "docs/prds/demo.md",
+            "docs/initiatives/demo/solution-design.md",
+            "docs/initiatives/demo/prototype/index.html",
+            "docs/initiatives/demo/prototype/notes.md"
+          ]
+        }
+      ]
+    },
+    "expect": {
+      "stage": "docs-pull-request",
+      "status": "in-progress",
+      "next": "mark-ready",
+      "reasons": []
+    }
+  },
+  {
+    "name": "ui-complete-without-prototype-stamps",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/prototype/index.html": "index",
+        "docs/initiatives/demo/prototype/notes.md": "notes-verdict-filled",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ]
+    },
+    "expect": {
+      "stage": "design-review",
+      "status": "stale",
+      "next": "re-review",
+      "reasons": []
+    }
+  },
+  {
+    "name": "ui-no-prd-ui-line-skips-prototype",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-no-ui-line",
+        "docs/initiatives/demo/solution-design.md": "design"
+      }
+    },
+    "expect": {
+      "stage": "solution-design",
+      "status": "done",
+      "next": "review",
+      "reasons": []
+    }
+  },
+  {
+    "name": "symlink-prd-docs",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd"
+      },
+      "objects": [
+        {
+          "type": "symlink",
+          "path": "docs/prds/demo.md",
+          "target": "real.md"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "interrogation",
+      "status": "in-progress",
+      "next": "interrogate",
+      "reasons": []
+    }
+  },
+  {
+    "name": "symlink-prd-trunk",
+    "evidence": {},
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd"
+      },
+      "objects": [
+        {
+          "type": "symlink",
+          "path": "docs/prds/demo.md",
+          "target": "real.md"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "capture",
+      "status": "done",
+      "next": "interrogate",
+      "reasons": []
+    }
+  },
+  {
+    "name": "symlink-index-docs",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/prototype/index.html": "index",
+        "docs/initiatives/demo/prototype/notes.md": "notes-verdict-filled"
+      },
+      "objects": [
+        {
+          "type": "symlink",
+          "path": "docs/initiatives/demo/prototype/index.html",
+          "target": "real.html"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "ui-prototype",
+      "status": "incomplete",
+      "next": "build-prototype",
+      "reasons": []
+    }
+  },
+  {
+    "name": "symlink-notes-docs",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/prototype/index.html": "index",
+        "docs/initiatives/demo/prototype/notes.md": "notes-verdict-filled"
+      },
+      "objects": [
+        {
+          "type": "symlink",
+          "path": "docs/initiatives/demo/prototype/notes.md",
+          "target": "real.md"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "ui-prototype",
+      "status": "incomplete",
+      "next": "build-prototype",
+      "reasons": []
+    }
+  },
+  {
+    "name": "symlink-index-trunk",
+    "evidence": {},
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/prototype/index.html": "index",
+        "docs/initiatives/demo/prototype/notes.md": "notes-verdict-filled"
+      },
+      "objects": [
+        {
+          "type": "symlink",
+          "path": "docs/initiatives/demo/prototype/index.html",
+          "target": "real.html"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "ui-prototype",
+      "status": "incomplete",
+      "next": "build-prototype",
+      "reasons": []
+    }
+  },
+  {
+    "name": "symlink-notes-trunk",
+    "evidence": {},
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/prototype/index.html": "index",
+        "docs/initiatives/demo/prototype/notes.md": "notes-verdict-filled"
+      },
+      "objects": [
+        {
+          "type": "symlink",
+          "path": "docs/initiatives/demo/prototype/notes.md",
+          "target": "real.md"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "ui-prototype",
+      "status": "incomplete",
+      "next": "build-prototype",
+      "reasons": []
+    }
+  },
+  {
+    "name": "symlink-design-docs",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "objects": [
+        {
+          "type": "symlink",
+          "path": "docs/initiatives/demo/solution-design.md",
+          "target": "real.md"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "prd",
+      "status": "done",
+      "next": "design",
+      "reasons": []
+    }
+  },
+  {
+    "name": "symlink-design-trunk",
+    "evidence": {},
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "objects": [
+        {
+          "type": "symlink",
+          "path": "docs/initiatives/demo/solution-design.md",
+          "target": "real.md"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "prd",
+      "status": "done",
+      "next": "design",
+      "reasons": []
+    }
+  },
+  {
+    "name": "symlink-delivered-design-trunk",
+    "evidence": {},
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design-delivered"
+      },
+      "objects": [
+        {
+          "type": "symlink",
+          "path": "docs/initiatives/demo/solution-design.md",
+          "target": "real.md"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "prd",
+      "status": "done",
+      "next": "design",
+      "reasons": []
+    }
+  },
+  {
+    "name": "symlink-record-docs",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ],
+      "objects": [
+        {
+          "type": "symlink",
+          "path": "docs/initiatives/demo/review-record.md",
+          "target": "real.md"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "solution-design",
+      "status": "done",
+      "next": "review",
+      "reasons": []
+    }
+  },
+  {
+    "name": "symlink-record-trunk",
+    "evidence": {},
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ],
+      "objects": [
+        {
+          "type": "symlink",
+          "path": "docs/initiatives/demo/review-record.md",
+          "target": "real.md"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "solution-design",
+      "status": "done",
+      "next": "review",
+      "reasons": []
+    }
+  },
+  {
+    "name": "symlinked-dir-docs",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ],
+      "objects": [
+        {
+          "type": "symlinked-dir",
+          "path": "docs/initiatives/demo",
+          "target": "demo-real"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "prd",
+      "status": "done",
+      "next": "design",
+      "reasons": []
+    }
+  },
+  {
+    "name": "symlinked-dir-trunk",
+    "evidence": {},
+    "trunk": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "records": [
+        {}
+      ],
+      "objects": [
+        {
+          "type": "symlinked-dir",
+          "path": "docs/initiatives/demo",
+          "target": "demo-real"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "prd",
+      "status": "done",
+      "next": "design",
+      "reasons": []
+    }
+  },
+  {
+    "name": "symlinked-prototype-dir-docs",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd-ui-yes",
+        "docs/initiatives/demo/prototype/index.html": "index",
+        "docs/initiatives/demo/prototype/notes.md": "notes-verdict-filled"
+      },
+      "objects": [
+        {
+          "type": "symlinked-dir",
+          "path": "docs/initiatives/demo/prototype",
+          "target": "real-prototype"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "prd",
+      "status": "done",
+      "next": "build-prototype",
+      "reasons": []
+    }
+  },
+  {
+    "name": "tree-prd-docs",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd"
+      },
+      "objects": [
+        {
+          "type": "tree",
+          "path": "docs/prds/demo.md"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "interrogation",
+      "status": "in-progress",
+      "next": "interrogate",
+      "reasons": []
+    }
+  },
+  {
+    "name": "gitlink-design-docs",
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "draft": true
+        }
+      ]
+    },
+    "trunk": {},
+    "docs": {
+      "docs": {
+        "docs/prds/demo.md": "prd",
+        "docs/initiatives/demo/solution-design.md": "design"
+      },
+      "objects": [
+        {
+          "type": "gitlink",
+          "path": "docs/initiatives/demo/solution-design.md"
+        }
+      ]
+    },
+    "expect": {
+      "stage": "prd",
+      "status": "done",
+      "next": "design",
+      "reasons": []
+    }
+  },
+  {
+    "name": "trunk-branch-name",
+    "trunk": {},
+    "trunk_arg": "main",
+    "no_git": true,
+    "error": "commit-malformed"
+  },
+  {
+    "name": "trunk-short-sha",
+    "trunk": {},
+    "trunk_arg": "{{short}}",
+    "no_git": true,
+    "error": "commit-malformed"
+  },
+  {
+    "name": "trunk-uppercase",
+    "trunk": {},
+    "trunk_arg": "{{upper}}",
+    "no_git": true,
+    "error": "commit-malformed"
+  },
+  {
+    "name": "trunk-head",
+    "trunk": {},
+    "trunk_arg": "HEAD",
+    "no_git": true,
+    "error": "commit-malformed"
+  },
+  {
+    "name": "slug-uppercase",
+    "trunk": {},
+    "slug_arg": "Demo",
+    "no_git": true,
+    "error": "usage"
+  },
+  {
+    "name": "slug-path",
+    "trunk": {},
+    "slug_arg": "../demo",
+    "no_git": true,
+    "error": "usage"
+  },
+  {
+    "name": "repo-malformed",
+    "trunk": {},
+    "repo_arg": "acme",
+    "no_git": true,
+    "error": "usage"
+  },
+  {
+    "name": "trunk-name-malformed",
+    "trunk": {},
+    "trunk_name_arg": "-x",
+    "no_git": true,
+    "error": "usage"
+  },
+  {
+    "name": "evidence-not-json",
+    "trunk": {},
+    "evidence_raw": "not json\n",
+    "no_git": true,
+    "error": "evidence-malformed"
+  },
+  {
+    "name": "evidence-empty",
+    "trunk": {},
+    "evidence_raw": "",
+    "no_git": true,
+    "error": "evidence-malformed"
+  },
+  {
+    "name": "evidence-two-values",
+    "trunk": {},
+    "evidence_raw": "{} {}\n",
+    "no_git": true,
+    "error": "evidence-malformed"
+  },
+  {
+    "name": "evidence-version-2",
+    "trunk": {},
+    "evidence": {
+      "version": 2
+    },
+    "no_git": true,
+    "error": "evidence-malformed"
+  },
+  {
+    "name": "evidence-branch-name-oid",
+    "trunk": {},
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "head_oid": "main"
+        }
+      ]
+    },
+    "no_git": true,
+    "error": "evidence-malformed"
+  },
+  {
+    "name": "evidence-short-oid",
+    "trunk": {},
+    "evidence": {
+      "branches": [
+        {
+          "name": "docs/demo",
+          "oid": "{{short}}"
+        }
+      ]
+    },
+    "no_git": true,
+    "error": "evidence-malformed"
+  },
+  {
+    "name": "evidence-duplicate-seed",
+    "trunk": {},
+    "evidence": {
+      "seeds": [
+        {
+          "number": 1
+        },
+        {
+          "number": 1
+        }
+      ]
+    },
+    "no_git": true,
+    "error": "evidence-malformed"
+  },
+  {
+    "name": "evidence-slices-without-epic",
+    "trunk": {},
+    "evidence": {
+      "epic": null,
+      "slices": [
+        {
+          "number": 11
+        }
+      ]
+    },
+    "no_git": true,
+    "error": "evidence-malformed"
+  },
+  {
+    "name": "evidence-epic-not-seed",
+    "trunk": {},
+    "evidence": {
+      "epic": {
+        "number": 9,
+        "state": "OPEN",
+        "sub_issue_total": 0
+      }
+    },
+    "no_git": true,
+    "error": "evidence-malformed"
+  },
+  {
+    "name": "evidence-bad-timestamp",
+    "trunk": {},
+    "evidence": {
+      "slices": [
+        {
+          "number": 11,
+          "renamed_at": [
+            "yesterday"
+          ]
+        }
+      ]
+    },
+    "no_git": true,
+    "error": "evidence-malformed"
+  },
+  {
+    "name": "truncated-sub-issues",
+    "trunk": {},
+    "evidence": {
+      "epic": {
+        "number": 1,
+        "state": "OPEN",
+        "sub_issue_total": 3
+      },
+      "slices": [
+        {
+          "number": 11
+        }
+      ]
+    },
+    "no_git": true,
+    "error": "truncated"
+  },
+  {
+    "name": "truncated-labels",
+    "trunk": {},
+    "evidence": {
+      "slices": [
+        {
+          "number": 11,
+          "labels_truncated": true
+        }
+      ]
+    },
+    "no_git": true,
+    "error": "truncated"
+  },
+  {
+    "name": "trunk-unfetched",
+    "trunk": {},
+    "trunk_arg": "{{unfetched}}",
+    "error": "commit-unresolvable"
+  },
+  {
+    "name": "docs-head-unfetched",
+    "trunk": {},
+    "evidence": {
+      "pull_requests": [
+        {
+          "number": 5,
+          "head_oid": "{{unfetched}}"
+        }
+      ]
+    },
+    "error": "commit-unresolvable"
+  }
+]
