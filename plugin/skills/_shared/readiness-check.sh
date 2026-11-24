@@ -62,14 +62,18 @@
 #   hivemind_readiness_check_snapshot <commit> <owner/repo> <trunk-name>  (snapshot on stdin)
 #       Snapshot mode: stdin is exactly one JSON array of issue snapshot objects (GitHub GraphQL
 #       Issue nodes); prints one line per element, in order,
-#       {"issue","commit","track","result","reasons"}, and makes no GitHub read. Failure tokens:
+#       {"issue","commit","track","result","reasons"}, and makes no GitHub read. A slice's
+#       documents (PRD, solution design, ADRs, review record, UI prototype files) are read at
+#       <commit> only through hivemind_doc_entry and hivemind_doc_read. Failure tokens:
 #       commit-malformed, usage, commit-unresolvable, snapshot-malformed, truncated and the
 #       document layer's git-failed.
 #
 # PARSING: the jq definitions in _hivemind_rc_jq_defs are the one implementation of the solution
 # design's Document parsing rules, shared by issue bodies and documents: rc_lines splits a text
 # into lines with one ending CR removed, rc_parse turns lines into line records
-# {text, fenced, level, title}, rc_section, rc_filled and rc_reads_none read sections.
+# {text, fenced, level, title}, rc_section, rc_filled and rc_reads_none read sections, and
+# rc_front_matter parses the review record front matter for hivemind_record_front_matter and the
+# document layer alike.
 
 # _hivemind_rc_error <token>: prints the one failure line to stderr.
 _hivemind_rc_error() {
@@ -130,6 +134,36 @@ def rc_reads_none: . != null and ([.[] | .text | select(rc_blank | not)] == ["No
 def rc_marker_slug:
   [.[0] // empty | capture("\\A<!-- hivemind-initiative: (?<slug>" + rc_slug + ") -->\\z") | .slug]
   | .[0];
+def rc_codes_if($condition; $code): if $condition then [$code] else [] end;
+def rc_path_slug: capture("\\Adocs/initiatives/(?<s>[^/]+)/").s;
+def rc_front_matter:
+  . as $lines
+  | [range(1; $lines | length) | select($lines[.] == "---")] as $closers
+  | select(($lines | length) > 0 and $lines[0] == "---" and ($closers | length) > 0)
+  | $lines[1:$closers[0]] as $fm
+  | ($fm | length) as $fm_len
+  | select($fm_len >= 9)
+  | $fm[1:$fm_len - 8] as $pairs
+  | $fm[$fm_len - 8:] as $tail
+  | select(($fm[0] == "stamps:" and ($pairs | length) > 0)
+      or ($fm[0] == "stamps: []" and ($pairs | length) == 0))
+  | select(($pairs | length) % 2 == 0)
+  | [range(0; $pairs | length; 2) as $i
+      | {path: ($pairs[$i] | capture("\\A  - path: (?<v>.*)\\z") | .v),
+         blob: ($pairs[$i + 1] | capture("\\A    blob: (?<v>[0-9a-f]{40}|[0-9a-f]{64})\\z") | .v)}]
+    as $stamps
+  | select(($stamps | length) * 2 == ($pairs | length))
+  | select(all($stamps[]; .path | rc_path_kind != null))
+  | select(($stamps | map(.path) | unique | length) == ($stamps | length))
+  | select($tail[1] == "open:")
+  | {stamps: $stamps,
+     verdict: ($tail[0] | capture("\\Averdict: (?<v>pass|fail)\\z") | .v),
+     open: {critical: rc_count($tail[2]; "  critical"),
+            high: rc_count($tail[3]; "  high"),
+            medium: rc_count($tail[4]; "  medium"),
+            low: rc_count($tail[5]; "  low")},
+     rounds: rc_count($tail[6]; "rounds"),
+     clean_round: ($tail[7] | capture("\\Aclean_round: (?<v>true|false)\\z") | .v == "true")};
 '
 }
 
@@ -318,33 +352,7 @@ hivemind_record_front_matter() {
   fi
   local parsed="" program
   program="$(_hivemind_rc_jq_defs)"'
-[inputs | sub("\r\\z"; "")] as $lines
-| [range(1; $lines | length) | select($lines[.] == "---")] as $closers
-| select(($lines | length) > 0 and $lines[0] == "---" and ($closers | length) > 0)
-| $lines[1:$closers[0]] as $fm
-| ($fm | length) as $fm_len
-| select($fm_len >= 9)
-| $fm[1:$fm_len - 8] as $pairs
-| $fm[$fm_len - 8:] as $tail
-| select(($fm[0] == "stamps:" and ($pairs | length) > 0)
-    or ($fm[0] == "stamps: []" and ($pairs | length) == 0))
-| select(($pairs | length) % 2 == 0)
-| [range(0; $pairs | length; 2) as $i
-    | {path: ($pairs[$i] | capture("\\A  - path: (?<v>.*)\\z") | .v),
-       blob: ($pairs[$i + 1] | capture("\\A    blob: (?<v>[0-9a-f]{40}|[0-9a-f]{64})\\z") | .v)}]
-  as $stamps
-| select(($stamps | length) * 2 == ($pairs | length))
-| select(all($stamps[]; .path | rc_path_kind != null))
-| select(($stamps | map(.path) | unique | length) == ($stamps | length))
-| select($tail[1] == "open:")
-| {stamps: $stamps,
-   verdict: ($tail[0] | capture("\\Averdict: (?<v>pass|fail)\\z") | .v),
-   open: {critical: rc_count($tail[2]; "  critical"),
-          high: rc_count($tail[3]; "  high"),
-          medium: rc_count($tail[4]; "  medium"),
-          low: rc_count($tail[5]; "  low")},
-   rounds: rc_count($tail[6]; "rounds"),
-   clean_round: ($tail[7] | capture("\\Aclean_round: (?<v>true|false)\\z") | .v == "true")}'
+[inputs | rc_strip_cr] | rc_front_matter'
   if ! parsed="$(jq -nRc "$program" 2>/dev/null)"; then
     return 1
   fi
@@ -387,7 +395,6 @@ def rc_truncated: .pageInfo.hasNextPage == true;
 def rc_snapshot_truncated:
   (.labels | rc_truncated) or (.blockedBy | rc_truncated) or (.subIssues | rc_truncated)
   or (.parent != null and (.parent.labels | rc_truncated));
-def rc_codes_if($condition; $code): if $condition then [$code] else [] end;
 def rc_has_checkbox:
   . != null and any(.[]; (.fenced | not) and (.text | test("\\A[ \t]*- \\[[ xX]\\]([ \t]|\\z)")));
 def rc_common_codes($sn; $names; $doc):
@@ -432,7 +439,6 @@ def rc_link_path($repo; $trunk; $kind):
     | ($link.target | rc_target_path($repo; $trunk)) as $path
     | if $path != null and $path == $link.text and ($path | rc_path_kind) == $kind then $path else null end
     end;
-def rc_path_slug: capture("\\Adocs/initiatives/(?<s>[^/]+)/").s;
 def rc_design_items:
   [.[] | select(.fenced | not) | .text
    | capture("\\A- (?<key>Solution design|Heading|ADR|Review record|Prototype):(?<rest>.*)\\z")
@@ -513,15 +519,242 @@ _hivemind_rc_trunk_ok() {
   return 0
 }
 
+# _hivemind_rc_doc_jq_defs: prints the constant jq definitions that plan and evaluate the slice
+# document layer; they need _hivemind_rc_jq_defs before them. rc_doc_eval reads one framed
+# document: a prefix line, the document's bytes, then one last line holding the read status, so
+# a document of any size reaches jq on stdin only.
+_hivemind_rc_doc_jq_defs() {
+  printf '%s\n' '
+def rc_template_sections:
+  [["context-and-code-truth", "Context and code truth"], ["components", "Components"],
+   ["state-and-ownership", "State and ownership"], ["contracts-and-seams", "Contracts and seams"],
+   ["trust-boundaries", "Trust boundaries"], ["lifecycle", "Lifecycle"],
+   ["existing-path-coverage", "Existing-path coverage"], ["failure-modes", "Failure modes"],
+   ["decisions", "Decisions"], ["verification-strategy", "Verification strategy"],
+   ["seam-order", "Seam order"], ["open-questions", "Open questions"], ["amendments", "Amendments"]];
+def rc_document_plan:
+  .documents as $docs
+  | if $docs == null or $docs.slug == null then empty
+    else $docs.slug as $slug
+    | ($docs.prototypes | length) as $count
+    | "slug\t" + $slug,
+      (if ($docs.solution_design | rc_path_slug) == $slug then "design\t" + $docs.solution_design
+       else empty end),
+      (if ($docs.review_record | rc_path_slug) == $slug then "record\t" + $docs.review_record
+       else empty end),
+      ($docs.adrs | unique | .[] | "adr\t" + .),
+      (if $count > 0 then "ui-no\tdesign_block_missing" else empty end),
+      (if $count == 0 then "ui-yes\tprototype_missing"
+       elif $count > 1 then "ui-yes\tdesign_block_missing"
+       elif $docs.prototypes[0] == null then "ui-yes\tdesign_link_invalid"
+       elif ($docs.prototypes[0] | rc_path_slug) != $slug then "ui-yes\tdesign_slug_mismatch"
+       else empty end)
+    end;
+def rc_doc_eval(f):
+  split("\n") as $all
+  | if $all[-1] == "0" then {prefix: $all[0], texts: ($all[1:-1] | map(rc_strip_cr))} | f
+    elif $all[-1] == "1" then "missing"
+    else "failed" end;
+def rc_after_title:
+  . as $records
+  | ([range(0; $records | length) | select($records[.].level == 1)] | .[0]) as $title
+  | if $title == null then null
+    else [$records[$title + 1:][] | .text | select(rc_blank | not)] | .[0] end;
+def rc_prd_ui:
+  .texts | rc_parse | rc_after_title
+  | if . == "**UI:** yes" then "yes"
+    elif . == "**UI:** no" then "no"
+    elif . != null and startswith("**UI:**") then "invalid"
+    else "no" end;
+def rc_adr_status:
+  [.texts | rc_parse | .[] | select((.fenced | not) and (.text | startswith("**Status:**"))) | .text]
+  | if length > 0 and (.[0] | test("\\A\\*\\*Status:\\*\\* *accepted")) then "accepted"
+    else "not-accepted" end;
+def rc_heading_codes($doc; $headings):
+  [$headings[] | .index as $index | .text as $text
+   | [$doc[] | select(.level > 0 and .title == $text)] as $matches
+   | if $text == "" or ($matches | length) == 0 then "heading_unmatched:\($index)"
+     elif ($matches | length) > 1 then "heading_ambiguous:\($index)"
+     elif ($doc | rc_section($matches[0].level; $text) | rc_filled) then empty
+     else "design_section_unfilled:\($index)" end];
+def rc_design_codes:
+  (.prefix | fromjson | .documents.headings) as $headings
+  | (.texts | rc_parse) as $doc
+  | [$doc[] | select(.level > 0) | .title] as $titles
+  | [$doc[] | select(.level == 2) | .title] as $sections
+  | [rc_template_sections[] | .[1] as $title
+     | {name: .[0], at: ([range(0; $sections | length) | select($sections[.] == $title)] | .[0])}]
+    as $template
+  | [$template[] | .at | select(. != null)] as $order
+  | ($doc | rc_section(2; "Open questions")) as $open
+  | (rc_codes_if(($doc | rc_after_title) == "**Status:** delivered"; "design_delivered")
+     + [$template[] | select(.at == null) | "template_section_missing:" + .name]
+     + rc_codes_if($order != ($order | sort); "template_order")
+     + rc_codes_if(($titles | length) != ($titles | unique | length); "heading_duplicate")
+     + rc_codes_if($open != null and ($open | rc_reads_none | not); "design_open_questions")
+     + rc_heading_codes($doc; $headings))[];
+def rc_record_codes:
+  [.texts | rc_front_matter] as $parsed
+  | if ($parsed | length) == 0 then "malformed"
+    else $parsed[0]
+    | (rc_codes_if(.verdict != "pass" or .clean_round != true or .rounds < 2; "record_not_passed")
+       + rc_codes_if(.rounds > 3; "record_rounds_exceeded")
+       + rc_codes_if(any(.open[]; . > 0); "record_open"))[],
+      (.stamps[] | "stamp\t" + .path + "\t" + .blob)
+    end;
+'
+}
+
+# _hivemind_rc_doc_eval <commit> <path> <prefix> <filter>: streams the line <prefix>, the bytes of
+# the document at <path> and its hivemind_doc_read status into one jq program running <filter>,
+# and prints its raw output: `missing` for a missing document, else the filter's lines. Returns 2
+# on a failure, whose token hivemind_doc_read or this function has printed.
+_hivemind_rc_doc_eval() {
+  local commit="$1" path="$2" prefix="$3" read_rc=0 output="" program
+  program="$(_hivemind_rc_jq_defs)$(_hivemind_rc_doc_jq_defs)$4"
+  if ! output="$(
+    {
+      printf '%s\n' "$prefix"
+      hivemind_doc_read "$commit" "$path" || read_rc=$?
+      printf '\n%s' "$read_rc"
+    } | jq -Rsr "$program" 2>/dev/null
+  )"; then
+    _hivemind_rc_error git-failed
+    return 2
+  fi
+  if [ "$output" = failed ]; then
+    return 2
+  fi
+  printf '%s\n' "$output"
+}
+
+# _hivemind_rc_record_codes <commit> <record-path> <required-path>...: prints the review record's
+# reason codes, one per line: its pass-rule codes, a stale code per stamp whose path fails the
+# Document existence test or holds another blob, and an unstamped code per required path.
+_hivemind_rc_record_codes() {
+  local commit="$1" record_path="$2" output="" line="" stamp="" path="" blob="" oid="" entry_rc=0
+  local stamped=" "
+  local -a lines=()
+  shift 2
+  output="$(_hivemind_rc_doc_eval "$commit" "$record_path" "" 'rc_doc_eval(rc_record_codes)')" || return 2
+  case "$output" in
+    missing | malformed)
+      printf 'record_%s\n' "$output"
+      return 0
+      ;;
+  esac
+  mapfile -t lines < <(printf '%s\n' "$output")
+  for line in "${lines[@]}"; do
+    case "$line" in
+      '') ;;
+      stamp$'\t'*)
+        stamp="${line#stamp$'\t'}"
+        path="${stamp%%$'\t'*}"
+        blob="${stamp#*$'\t'}"
+        stamped+="$path "
+        entry_rc=0
+        oid="$(hivemind_doc_entry "$commit" "$path")" || entry_rc=$?
+        if [ "$entry_rc" -eq 2 ]; then
+          return 2
+        fi
+        if [ "$entry_rc" -ne 0 ] || [ "$oid" != "$blob" ]; then
+          printf 'record_stale:%s\n' "$path"
+        fi
+        ;;
+      *) printf '%s\n' "$line" ;;
+    esac
+  done
+  for path in "$@"; do
+    case "$stamped" in
+      *" $path "*) ;;
+      *) printf 'record_unstamped:%s\n' "$path" ;;
+    esac
+  done
+}
+
+# _hivemind_rc_prototype_codes <commit> <slug>: prints `prototype_missing` when either UI prototype
+# file of <slug> fails the Document existence test; returns 2 on a failure.
+_hivemind_rc_prototype_codes() {
+  local commit="$1" slug="$2" path="" entry_rc=0
+  for path in "docs/initiatives/$slug/prototype/index.html" "docs/initiatives/$slug/prototype/notes.md"; do
+    entry_rc=0
+    hivemind_doc_entry "$commit" "$path" >/dev/null || entry_rc=$?
+    if [ "$entry_rc" -eq 2 ]; then
+      return 2
+    fi
+    if [ "$entry_rc" -eq 1 ]; then
+      printf 'prototype_missing\n'
+    fi
+  done
+}
+
 # _hivemind_rc_slice_document_codes <commit> <layer>: prints one JSON array of the slice document
 # layer's reason codes for one issue layer line. The layer's `documents` field is null unless the
 # issue is a slice whose Design block counts and Solution design, Review record and ADR links
 # passed; it then holds {slug (null when the epic marker is missing), solution_design,
-# review_record, adrs, headings: [{index, text}], prototypes: [path or null]}. The document layer
-# is not evaluated yet, so every layer gets `[]`. A non-zero return is a failure that has already
-# printed its token; the caller propagates it.
+# review_record, adrs, headings: [{index, text}], prototypes: [path or null]}. No document is read
+# without a slug, and a link is read only when it passed its shape and slug checks. A non-zero
+# return is a failure that has already printed its token; the caller propagates it.
 _hivemind_rc_slice_document_codes() {
-  printf '[]\n'
+  local commit="$1" layer="$2" plan="" line="" slug="" design="" record="" ui="" ui_yes="" ui_no=""
+  local prd="" path="" output="" codes="" program
+  local -a plan_lines=() adrs=() required=()
+  program="$(_hivemind_rc_jq_defs)$(_hivemind_rc_doc_jq_defs)"'
+rc_document_plan'
+  if ! plan="$(printf '%s\n' "$layer" | jq -r "$program" 2>/dev/null)"; then
+    _hivemind_rc_error snapshot-malformed
+    return 2
+  fi
+  mapfile -t plan_lines < <(printf '%s\n' "$plan")
+  for line in "${plan_lines[@]}"; do
+    case "$line" in
+      slug$'\t'*) slug="${line#*$'\t'}" ;;
+      design$'\t'*) design="${line#*$'\t'}" ;;
+      record$'\t'*) record="${line#*$'\t'}" ;;
+      adr$'\t'*) adrs+=("${line#*$'\t'}") ;;
+      ui-yes$'\t'*) ui_yes+="${line#*$'\t'}"$'\n' ;;
+      ui-no$'\t'*) ui_no+="${line#*$'\t'}"$'\n' ;;
+    esac
+  done
+  if [ -z "$slug" ]; then
+    printf '[]\n'
+    return 0
+  fi
+  prd="docs/prds/$slug.md"
+  required=("$prd" "docs/initiatives/$slug/solution-design.md")
+  ui="$(_hivemind_rc_doc_eval "$commit" "$prd" "" 'rc_doc_eval(rc_prd_ui)')" || return 2
+  case "$ui" in
+    missing) codes+=$'prd_missing\n' ;;
+    invalid) codes+=$'prd_ui_invalid\n' ;;
+    no) codes+="$ui_no" ;;
+    yes)
+      required+=("docs/initiatives/$slug/prototype/index.html" "docs/initiatives/$slug/prototype/notes.md")
+      output="$(_hivemind_rc_prototype_codes "$commit" "$slug")" || return 2
+      codes+="$ui_yes$output"$'\n'
+      ;;
+  esac
+  if [ -n "$design" ]; then
+    output="$(_hivemind_rc_doc_eval "$commit" "$design" "$layer" 'rc_doc_eval(rc_design_codes)')" || return 2
+    if [ "$output" = missing ]; then
+      output=design_missing
+    fi
+    codes+="$output"$'\n'
+  fi
+  for path in "${adrs[@]}"; do
+    output="$(_hivemind_rc_doc_eval "$commit" "$path" "" 'rc_doc_eval(rc_adr_status)')" || return 2
+    case "$output" in
+      missing) codes+="adr_missing:$path"$'\n' ;;
+      not-accepted) codes+="adr_not_accepted:$path"$'\n' ;;
+    esac
+  done
+  if [ -n "$record" ]; then
+    output="$(_hivemind_rc_record_codes "$commit" "$record" "${required[@]}")" || return 2
+    codes+="$output"$'\n'
+  fi
+  if ! printf '%s' "$codes" | jq -nRc '[inputs | select(length > 0)] | unique' 2>/dev/null; then
+    _hivemind_rc_error snapshot-malformed
+    return 2
+  fi
 }
 
 # _hivemind_rc_finish_layers <commit> <layers>: joins each issue layer line with its document

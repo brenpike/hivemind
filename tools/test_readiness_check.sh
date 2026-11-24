@@ -505,22 +505,160 @@ test_path_kind() {
 # ── Snapshot mode ──────────────────────────────────────────────────────────────────
 
 CASES="$REPO_ROOT/tests/readiness-check/cases.json"
+DOCS="$REPO_ROOT/tests/readiness-check/docs.json"
 SNAP_REPO_ARG='brenpike/hivemind'
 SNAP_TRUNK_ARG='main'
 SNAP_OUT_ALL="$TMPDIR_TEST/snapshot-lines.all"
 : >"$SNAP_OUT_ALL" || setup_fail "cannot create $SNAP_OUT_ALL"
 jq -e 'type == "array" and length > 0
-  and all(.[]; (keys == ["expected", "name", "snapshot"])
+  and all(.[]; has("expected") and has("name") and has("snapshot")
+    and (keys - ["docs", "expected", "name", "objects", "reads", "record", "snapshot"] == [])
     and (.expected | keys == ["reasons", "result", "track"]))' "$CASES" >/dev/null 2>&1 \
   || setup_fail "cases file missing or off its shape: $CASES"
+jq -e 'type == "object" and length > 0 and all(.[]; type == "string")' "$DOCS" >/dev/null 2>&1 \
+  || setup_fail "docs file missing or off its shape: $DOCS"
 
-# snapshot_call <case> <stdin-file> [arg...]: runs snapshot mode with the given arguments, or the
-# scratch commit, owner/repo and trunk when none are given.
+# ── Case documents ─────────────────────────────────────────────────────────────────
+#
+# docs.json maps repository paths to content. A case's `docs` overrides it (null deletes a path),
+# its `record` is a review record spec or a raw template written at the demo record path, and its
+# `objects` turn paths into a symlink, a gitlink, a tree or a symlinked directory. A document's
+# `{{blob:<path>}}` placeholder renders as the blob id of <path>'s content in the case, before any
+# object change, and `{{base:<path>}}` as the blob id of <path>'s content in docs.json.
+#
+# CASE_PLAN_JQ prints one tab-separated line per document: `map` lines give each placeholder-free
+# document's content before object changes, then `entry` and `gitlink` lines give the tree.
+
+# shellcheck disable=SC2016
+CASE_PLAN_JQ='
+def record_text:
+  if type == "string" then {path: "docs/initiatives/demo/review-record.md", text: .}
+  else (.path // "docs/initiatives/demo/review-record.md") as $path
+  | ($path | capture("\\Adocs/initiatives/(?<s>[^/]+)/").s) as $slug
+  | ({critical: 0, high: 0, medium: 0, low: 0} + (.open // {})) as $open
+  | ((.stamps // ["docs/prds/\($slug).md", "docs/initiatives/\($slug)/solution-design.md"])
+     | map(if type == "string" then {path: ., blob: "{{blob:\(.)}}"}
+           elif .base then {path, blob: "{{base:\(.path)}}"}
+           else {path, blob} end)) as $stamps
+  | {path: $path,
+     text: ("---\n"
+       + (if ($stamps | length) == 0 then "stamps: []\n"
+          else "stamps:\n" + ($stamps | map("  - path: \(.path)\n    blob: \(.blob)\n") | add) end)
+       + "verdict: \(.verdict // "pass")\nopen:\n  critical: \($open.critical)\n  high: \($open.high)\n"
+       + "  medium: \($open.medium)\n  low: \($open.low)\nrounds: \(.rounds // 2)\n"
+       + "clean_round: \(if has("clean_round") then .clean_round else true end)\n---\n\n"
+       + "# Design review record\n")}
+  end;
+def parent_dir: sub("/[^/]*\\z"; "");
+def apply_object($object):
+  if $object.type == "symlink" then
+    map(select(.path != $object.path)) + [{path: $object.path, mode: "120000", text: $object.target}]
+  elif $object.type == "gitlink" then
+    map(select(.path != $object.path)) + [{path: $object.path, mode: "160000", gitlink: true}]
+  elif $object.type == "tree" then
+    map(if .path == $object.path then .path += "/child.md" else . end)
+  elif $object.type == "symlinked-dir" then
+    map(if (.path | startswith($object.path + "/"))
+        then .path = ($object.path | parent_dir) + "/" + $object.target + .path[($object.path | length):]
+        else . end)
+    + [{path: $object.path, mode: "120000", text: $object.target}]
+  else error("unknown object type \($object.type)") end;
+. as $case
+| ($docs[0] + ($case.docs // {})
+   + (if $case.record == null then {} else ($case.record | record_text | {(.path): .text}) end)
+   | with_entries(select(.value != null))) as $merged
+| ($merged | to_entries | map(select(.value | contains("{{") | not))[]
+   | "map\t100644\t\(.key)\t\(.value | @base64)"),
+  (reduce ($case.objects // [])[] as $object
+     ($merged | to_entries | map({path: .key, mode: "100644", text: .value}); apply_object($object))
+   | .[]
+   | if .gitlink then "gitlink\t160000\t\(.path)\t-"
+     else "entry\t\(.mode)\t\(.path)\t\(.text | @base64)" end)'
+
+declare -A HASH_CACHE=() BASE_BLOBS=() CASE_BLOBS=()
+
+# decode_text <var> <base64>: assigns the decoded bytes, ending newlines kept, to <var>.
+decode_text() {
+  local decoded
+  decoded="$(printf '%s' "$2" | base64 -d && printf x)" || setup_fail "base64 decode"
+  printf -v "$1" '%s' "${decoded%x}"
+}
+
+# hash_encoded <var> <base64>: writes a blob of the decoded bytes once and assigns its id to <var>.
+hash_encoded() {
+  local text stored_id
+  if [ -z "${HASH_CACHE[$2]+set}" ]; then
+    decode_text text "$2"
+    store_blob stored_id "$text"
+    HASH_CACHE[$2]="$stored_id"
+  fi
+  printf -v "$1" '%s' "${HASH_CACHE[$2]}"
+}
+
+# render_text <var> <bytes>: assigns <bytes> with every placeholder rendered to <var>.
+render_text() {
+  local rendered="$2" path
+  for path in "${!CASE_BLOBS[@]}"; do
+    rendered="${rendered//"{{blob:$path}}"/${CASE_BLOBS[$path]}}"
+  done
+  for path in "${!BASE_BLOBS[@]}"; do
+    rendered="${rendered//"{{base:$path}}"/${BASE_BLOBS[$path]}}"
+  done
+  case "$rendered" in
+    *'{{'*) setup_fail "unrendered placeholder in a case document" ;;
+  esac
+  printf -v "$1" '%s' "$rendered"
+}
+
+# build_case_commit <var> <case-file>: builds the case's document tree as a commit and assigns its
+# id to <var>; CASE_BLOBS holds the case's placeholder blob ids afterwards.
+build_case_commit() {
+  local var="$1" plan_file="$TMPDIR_TEST/plan.$1" index_file="$TMPDIR_TEST/index.$1"
+  local kind mode path encoded oid text tree_id commit_id index_info=""
+  jq -r --slurpfile docs "$DOCS" "$CASE_PLAN_JQ" "$2" >"$plan_file" || setup_fail "case plan $2"
+  CASE_BLOBS=()
+  while IFS=$'\t' read -r kind mode path encoded; do
+    case "$kind" in
+      map)
+        hash_encoded oid "$encoded"
+        CASE_BLOBS[$path]="$oid"
+        ;;
+      gitlink) index_info+="$mode $SEED_COMMIT"$'\t'"$path"$'\n' ;;
+      entry)
+        decode_text text "$encoded"
+        if [[ "$text" == *'{{'* ]]; then
+          render_text text "$text"
+          store_blob oid "$text"
+        else
+          hash_encoded oid "$encoded"
+        fi
+        index_info+="$mode $oid"$'\t'"$path"$'\n'
+        ;;
+      *) setup_fail "case plan line kind $kind" ;;
+    esac
+  done <"$plan_file"
+  rm -f "$index_file"
+  printf '%s' "$index_info" | GIT_INDEX_FILE="$index_file" rgit update-index --index-info \
+    || setup_fail "update-index for $var"
+  tree_id="$(GIT_INDEX_FILE="$index_file" rgit write-tree)" || setup_fail "write-tree for $var"
+  commit_id="$(rgit commit-tree "$tree_id" -m "$var" </dev/null)" || setup_fail "commit-tree for $var"
+  printf -v "$var" '%s' "$commit_id"
+}
+
+EMPTY_CASE="$(write_input empty-case '{}')"
+build_case_commit BASE_COMMIT "$EMPTY_CASE"
+for path in "${!CASE_BLOBS[@]}"; do
+  BASE_BLOBS[$path]="${CASE_BLOBS[$path]}"
+done
+SNAP_COMMIT="$BASE_COMMIT"
+
+# snapshot_call <case> <stdin-file> [arg...]: runs snapshot mode with the given arguments, or
+# SNAP_COMMIT, the scratch owner/repo and trunk when none are given.
 snapshot_call() {
   local case_name="$1" in_file="$2"
   shift 2
   if [ "$#" -eq 0 ]; then
-    set -- "$C1" "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG"
+    set -- "$SNAP_COMMIT" "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG"
   fi
   lib_call "$case_name" "$REPO" "$in_file" hivemind_readiness_check_snapshot "$@"
 }
@@ -529,7 +667,7 @@ snapshot_call() {
 # stdout holds one compact five-key line per snapshot element with the expected values, else the
 # first mismatch.
 snapshot_lines_verdict() {
-  jq -Rnr --slurpfile input "$1" --argjson expected "$2" --arg commit "$C1" '
+  jq -Rnr --slurpfile input "$1" --argjson expected "$2" --arg commit "$SNAP_COMMIT" '
 [inputs] as $lines
 | if ($lines | length) != ($expected | length) then
     "\($lines | length) lines, want \($expected | length)"
@@ -548,10 +686,12 @@ snapshot_lines_verdict() {
   end' <"$CALL_OUT" 2>&1
 }
 
-# expect_snapshot_lines <case> <stdin-file> <expected-json-array>: asserts a passing run and its
-# output lines, and that its only git call is the one commit resolution per run.
+# expect_snapshot_lines <case> <stdin-file> <expected-json-array> [reads-json-array]: asserts a
+# passing run and its output lines, that each run resolves the commit once and makes no git call
+# but a document existence test or a blob read, and, when given, the exact set of paths tested.
 expect_snapshot_lines() {
-  local case_name="$1" verdict line bad=0
+  local case_name="$1" want_reads="${4-}" verdict line bad=0 resolves=0 reads=""
+  local flags='--no-replace-objects --literal-pathspecs'
   verdict="$(snapshot_lines_verdict "$2" "$3")"
   if [ "$CALL_RC" != 0 ] || [ -s "$CALL_ERR" ]; then
     failed "$case_name" "rc $CALL_RC, stderr: $(cat "$CALL_ERR")"
@@ -562,26 +702,44 @@ expect_snapshot_lines() {
   fi
   cat "$CALL_OUT" >>"$SNAP_OUT_ALL" || setup_fail "cannot append to $SNAP_OUT_ALL"
   while IFS= read -r line; do
-    [ "$line" = "--no-replace-objects --literal-pathspecs cat-file -t $C1" ] || bad=1
+    case "$line" in
+      "$flags cat-file -t $SNAP_COMMIT") resolves=$((resolves + 1)) ;;
+      "$flags ls-tree --full-tree -z $SNAP_COMMIT -- "*) reads+="${line##* -- }"$'\n' ;;
+      "$flags cat-file blob "*) ;;
+      *) bad=1 ;;
+    esac
   done <"$GIT_LOG"
-  if [ "$bad" -eq 0 ] && [ "$(wc -l <"$GIT_LOG")" -eq 2 ]; then
-    pass "$case_name:git" "only the commit resolution ran"
+  if [ "$bad" -eq 0 ] && [ "$resolves" -eq 2 ]; then
+    pass "$case_name:git" "one commit resolution per run, document reads only"
   else
     failed "$case_name:git" "git log: $(cat "$GIT_LOG")"
+  fi
+  if [ -n "$want_reads" ]; then
+    if [ "$(printf '%s' "$reads" | jq -Rnc '[inputs] | unique')" = "$want_reads" ]; then
+      pass "$case_name:reads" "exactly the expected paths tested"
+    else
+      failed "$case_name:reads" "paths tested: $(printf '%s' "$reads" | sort -u | tr '\n' ' ')want: $want_reads"
+    fi
   fi
 }
 
 test_snapshot_cases() {
-  local count index case_name input expected
+  local count index case_name case_file input expected reads snapshot
   count="$(jq 'length' "$CASES")" || setup_fail "cannot count cases"
   for ((index = 0; index < count; index++)); do
-    case_name="$(jq -r --argjson i "$index" '.[$i].name' "$CASES")" || setup_fail "case name $index"
+    case_file="$TMPDIR_TEST/case.$index"
+    jq -c --argjson i "$index" '.[$i]' "$CASES" >"$case_file" || setup_fail "case file $index"
     input="$TMPDIR_TEST/input.case-$index"
-    jq -c --argjson i "$index" '[.[$i].snapshot]' "$CASES" >"$input" || setup_fail "case input $index"
-    expected="$(jq -c --argjson i "$index" '[.[$i].expected]' "$CASES")" || setup_fail "case expected $index"
+    {
+      IFS= read -r case_name && IFS= read -r expected && IFS= read -r reads && IFS= read -r snapshot
+    } < <(jq -r '.name, ([.expected] | tojson), (.reads // null | if . == null then "" else unique | tojson end),
+      ([.snapshot] | tojson)' "$case_file") || setup_fail "case fields $index"
+    printf '%s\n' "$snapshot" >"$input" || setup_fail "case input $index"
+    build_case_commit SNAP_COMMIT "$case_file"
     snapshot_call "snapshot:$case_name" "$input"
-    expect_snapshot_lines "snapshot:$case_name" "$input" "$expected"
+    expect_snapshot_lines "snapshot:$case_name" "$input" "$expected" "$reads"
   done
+  SNAP_COMMIT="$BASE_COMMIT"
   if [ -z "$(find "$TMPDIR_TEST" -name pwned -print)" ]; then
     pass "snapshot:hostile-heading-inert" "no pwned file created"
   else
@@ -705,6 +863,72 @@ test_snapshot_code_bases() {
   else
     failed "snapshot:code-bases" "outside the closed set:$bad (seen $seen)"
   fi
+  bad=""
+  while IFS= read -r base; do
+    jq -e --arg base "$base" 'any(.[].expected.reasons[]; . == $base or startswith($base))' "$CASES" \
+      >/dev/null || bad="$bad $base"
+  done <"$codes_file"
+  if [ -z "$bad" ]; then
+    pass "snapshot:code-coverage" "the cases expect every base code"
+  else
+    failed "snapshot:code-coverage" "no case expects:$bad"
+  fi
+}
+
+# write_case_file <name> <jq-filter>: writes the slice-pass case changed by <jq-filter>, which may
+# read $docs, and prints its path.
+write_case_file() {
+  local case_file="$TMPDIR_TEST/case.$1"
+  jq -c --slurpfile docs "$DOCS" ".[] | select(.name == \"slice-pass\") | $2" "$CASES" >"$case_file" \
+    || setup_fail "case file $1"
+  printf '%s' "$case_file"
+}
+
+test_snapshot_subdirectory() {
+  local input root_out
+  input="$(write_input snapshot-subdir "$(jq -c '[.[] | select(.name == "slice-pass") | .snapshot]' "$CASES")")"
+  snapshot_call "snapshot:root-cwd" "$input"
+  expect_snapshot_lines "snapshot:root-cwd" "$input" '[{"track":"slice","result":"pass","reasons":[]}]'
+  root_out="$CALL_OUT"
+  lib_call "snapshot:subdirectory" "$REPO/docs/prds" "$input" hivemind_readiness_check_snapshot \
+    "$SNAP_COMMIT" "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG"
+  if [ "$CALL_RC" = 0 ] && [ -s "$CALL_OUT" ] && cmp -s "$root_out" "$CALL_OUT"; then
+    pass "snapshot:subdirectory" "the same line as from the work tree root"
+  else
+    failed "snapshot:subdirectory" "rc $CALL_RC, stdout: $(cat "$CALL_OUT")"
+  fi
+}
+
+test_snapshot_git_failure() {
+  local case_file input lost_blob
+  case_file="$(write_case_file blob-lost \
+    '.docs = {"docs/prds/demo.md": ($docs[0]["docs/prds/demo.md"] + "\nOnly in the lost blob.\n")}')"
+  build_case_commit SNAP_COMMIT "$case_file"
+  lost_blob="$(rgit rev-parse "$SNAP_COMMIT:docs/prds/demo.md")" || setup_fail "rev-parse lost blob"
+  rm -f "$(object_file "$lost_blob")" || setup_fail "cannot delete the PRD blob object"
+  input="$TMPDIR_TEST/input.blob-lost"
+  jq -c '[.snapshot]' "$case_file" >"$input" || setup_fail "blob-lost input"
+  snapshot_call "snapshot:deleted-blob" "$input"
+  expect_call "snapshot:deleted-blob" 2 "" $'readiness-check-error: git-failed\n'
+  SNAP_COMMIT="$BASE_COMMIT"
+}
+
+test_snapshot_large_design() {
+  local case_file input size
+  case_file="$(write_case_file large-design \
+    '.docs = {"docs/initiatives/demo/solution-design.md":
+       ($docs[0]["docs/initiatives/demo/solution-design.md"]
+        | sub("The initiative\u0027s context.\n"; "The initiative\u0027s context.\n"
+            + ([range(0; 4000) | "Filler line \(.) holds the context of a large solution design."]
+               | join("\n")) + "\n"))}')"
+  size="$(jq -r '.docs[] | utf8bytelength' "$case_file")" || setup_fail "large design size"
+  [ "$size" -gt 204800 ] || setup_fail "large design is only $size bytes"
+  build_case_commit SNAP_COMMIT "$case_file"
+  input="$TMPDIR_TEST/input.large-design"
+  jq -c '[.snapshot]' "$case_file" >"$input" || setup_fail "large-design input"
+  snapshot_call "snapshot:large-design" "$input"
+  expect_snapshot_lines "snapshot:large-design" "$input" '[{"track":"slice","result":"pass","reasons":[]}]'
+  SNAP_COMMIT="$BASE_COMMIT"
 }
 
 test_library_form
@@ -719,6 +943,9 @@ test_path_kind
 test_snapshot_cases
 test_snapshot_multi
 test_snapshot_failures
+test_snapshot_subdirectory
+test_snapshot_git_failure
+test_snapshot_large_design
 test_snapshot_no_gh
 test_snapshot_code_bases
 
