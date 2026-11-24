@@ -23,9 +23,10 @@
 # SINGLE RESPONSIBILITY: decide structure, existence and versions of initiative documents and
 # issue text, never their quality. It writes nothing: no file, no scratch path. Input reaches jq
 # only on stdin, never in argv or program text; only an argument the library has already checked
-# against its fixed pattern (commit, owner/repo, trunk name) is passed with `jq --arg`. Every
-# git call is `git --no-replace-objects --literal-pathspecs ...` and resolves no ref and makes no
-# network call; a commit argument must be a full lowercase object id before any git call. The
+# against its fixed pattern (commit, owner/repo, trunk name, issue number) is passed with
+# `jq --arg`. Every git call is `git --no-replace-objects --literal-pathspecs ...` and resolves no
+# ref and makes no network call; a commit argument must be a full lowercase object id before any
+# git call. The only GitHub read is hivemind_readiness_fetch_snapshot's `gh` call. The
 # functions behave the same under a caller's `set -euo pipefail` or `set -u` alone.
 #
 # FAILURE CONTRACT: a failure prints exactly one stderr line `readiness-check-error: <token>`
@@ -67,6 +68,19 @@
 #       <commit> only through hivemind_doc_entry and hivemind_doc_read. Failure tokens:
 #       commit-malformed, usage, commit-unresolvable, snapshot-malformed, truncated and the
 #       document layer's git-failed.
+#   hivemind_readiness_fetch_snapshot <owner/repo> <number>
+#       Reads one issue snapshot through exactly one `gh api graphql` call, whose query is a
+#       constant taking the owner, name and number as GraphQL variables, and prints the
+#       response's `.data.repository.issue` node as one compact JSON object. A bad argument gives
+#       usage with no gh call. gh missing from PATH, a non-zero gh exit, a body that is not exactly
+#       one JSON object, a non-empty `errors` or a non-object issue node give gh-failed. The node
+#       then takes snapshot mode's validation: snapshot-malformed, also for a node whose number
+#       is not <number>, then truncated.
+#   hivemind_readiness_check_gh <commit> <owner/repo> <trunk-name> <number>...
+#       gh mode: checks every argument before any git or gh call (commit-malformed, usage; each
+#       <number> matches `^[1-9][0-9]*$`), resolves the commit once (commit-unresolvable),
+#       fetches each issue with hivemind_readiness_fetch_snapshot, then evaluates the snapshots,
+#       in argument order, with snapshot mode's evaluator. Any failure leaves stdout empty.
 #
 # PARSING: the jq definitions in _hivemind_rc_jq_defs are the one implementation of the solution
 # design's Document parsing rules, shared by issue bodies and documents: rc_lines splits a text
@@ -789,28 +803,41 @@ _hivemind_rc_finish_layers() {
   fi
 }
 
-# hivemind_readiness_check_snapshot <commit> <owner/repo> <trunk-name>: snapshot mode; the issue
-# snapshot array is on stdin (see PUBLIC API).
-hivemind_readiness_check_snapshot() {
-  if [ "$#" -ne 3 ]; then
-    _hivemind_rc_error usage
-    return 2
-  fi
-  local commit="${1-}" owner_repo="${2-}" trunk="${3-}" object_type="" layers="" output="" program
-  if ! hivemind_readiness_commit_ok "$commit"; then
+# _hivemind_rc_number_ok <number>: 0 when the argument is an issue number `^[1-9][0-9]*$`, else 1.
+_hivemind_rc_number_ok() {
+  [[ "$1" =~ ^[123456789][0123456789]*$ ]]
+}
+
+# _hivemind_rc_target_ok <commit> <owner/repo> <trunk-name>: checks the arguments both modes share,
+# with no git call; prints commit-malformed or usage and returns 2 on the first bad one.
+_hivemind_rc_target_ok() {
+  if ! hivemind_readiness_commit_ok "$1"; then
     _hivemind_rc_error commit-malformed
     return 2
   fi
-  if ! _hivemind_rc_owner_repo_ok "$owner_repo" || ! _hivemind_rc_trunk_ok "$trunk"; then
+  if ! _hivemind_rc_owner_repo_ok "$2" || ! _hivemind_rc_trunk_ok "$3"; then
     _hivemind_rc_error usage
     return 2
   fi
-  object_type="$(git --no-replace-objects --literal-pathspecs cat-file -t "$commit" </dev/null 2>/dev/null)" \
+}
+
+# _hivemind_rc_commit_resolves <commit>: 0 when <commit> names a commit object in the repository,
+# else prints commit-unresolvable and returns 2.
+_hivemind_rc_commit_resolves() {
+  local object_type=""
+  object_type="$(git --no-replace-objects --literal-pathspecs cat-file -t "$1" </dev/null 2>/dev/null)" \
     || object_type=""
   if [ "$object_type" != commit ]; then
     _hivemind_rc_error commit-unresolvable
     return 2
   fi
+}
+
+# _hivemind_rc_evaluate <commit> <owner/repo> <trunk-name>: the one evaluator of snapshot mode and
+# gh mode. Reads one JSON array of issue snapshots on stdin, validates every element, and prints
+# the output contract lines only when it returns 0; returns 2 on a failure whose token it printed.
+_hivemind_rc_evaluate() {
+  local commit="$1" owner_repo="$2" trunk="$3" layers="" output="" program
   program="$(_hivemind_rc_jq_defs)$(_hivemind_rc_issue_jq_defs)"'
 [inputs] as $input
 | if ($input | length) != 1 or ($input[0] | type) != "array" then "snapshot-malformed"
@@ -833,4 +860,88 @@ hivemind_readiness_check_snapshot() {
   if [ -n "$output" ]; then
     printf '%s\n' "$output"
   fi
+}
+
+# hivemind_readiness_check_snapshot <commit> <owner/repo> <trunk-name>: snapshot mode; the issue
+# snapshot array is on stdin (see PUBLIC API).
+hivemind_readiness_check_snapshot() {
+  if [ "$#" -ne 3 ]; then
+    _hivemind_rc_error usage
+    return 2
+  fi
+  local commit="${1-}" owner_repo="${2-}" trunk="${3-}"
+  _hivemind_rc_target_ok "$commit" "$owner_repo" "$trunk" || return 2
+  _hivemind_rc_commit_resolves "$commit" || return 2
+  _hivemind_rc_evaluate "$commit" "$owner_repo" "$trunk"
+}
+
+# hivemind_readiness_fetch_snapshot <owner/repo> <number>: reads one issue snapshot through one gh
+# GraphQL call and prints its issue node (see PUBLIC API). gh's output and exit status reach jq
+# on stdin as one framed stream: the body, a newline, then the status.
+hivemind_readiness_fetch_snapshot() {
+  if [ "$#" -ne 2 ]; then
+    _hivemind_rc_error usage
+    return 2
+  fi
+  local owner_repo="${1-}" number="${2-}" node="" gh_rc=0 query program
+  if ! _hivemind_rc_owner_repo_ok "$owner_repo" || ! _hivemind_rc_number_ok "$number"; then
+    _hivemind_rc_error usage
+    return 2
+  fi
+  if ! command -v gh >/dev/null 2>&1; then
+    _hivemind_rc_error gh-failed
+    return 2
+  fi
+  query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number state body labels(first:100){pageInfo{hasNextPage} nodes{name}} blockedBy(first:100){pageInfo{hasNextPage} nodes{number state}} subIssues(first:100){totalCount pageInfo{hasNextPage}} parent{number state body labels(first:100){pageInfo{hasNextPage} nodes{name}}}}}}'
+  program="$(_hivemind_rc_jq_defs)$(_hivemind_rc_issue_jq_defs)"'
+[inputs] as $all
+| if ($all | length) != 2 or $all[1] != 0 or ($all[0] | type) != "object" then "gh-failed"
+  elif ($all[0].errors | . != null and . != []) then "gh-failed"
+  else ($all[0] | try .data.repository.issue catch null) as $sn
+  | if ($sn | type) != "object" then "gh-failed"
+    elif ($sn | rc_snapshot_ok | not) or ($sn.number | tostring) != $number then "snapshot-malformed"
+    elif ($sn | rc_snapshot_truncated) then "truncated"
+    else $sn end
+  end'
+  if ! node="$(
+    {
+      gh api graphql -f query="$query" -f owner="${owner_repo%%/*}" -f name="${owner_repo#*/}" \
+        -F number="$number" </dev/null 2>/dev/null || gh_rc=$?
+      printf '\n%s' "$gh_rc"
+    } | jq -nc --arg number "$number" "$program" 2>/dev/null
+  )"; then
+    _hivemind_rc_error gh-failed
+    return 2
+  fi
+  case "$node" in
+    '"gh-failed"' | '"snapshot-malformed"' | '"truncated"')
+      _hivemind_rc_error "${node//\"/}"
+      return 2
+      ;;
+  esac
+  printf '%s\n' "$node"
+}
+
+# hivemind_readiness_check_gh <commit> <owner/repo> <trunk-name> <number>...: gh mode; reads each
+# issue through gh and evaluates the snapshots with snapshot mode's evaluator (see PUBLIC API).
+hivemind_readiness_check_gh() {
+  if [ "$#" -lt 4 ]; then
+    _hivemind_rc_error usage
+    return 2
+  fi
+  local commit="${1-}" owner_repo="${2-}" trunk="${3-}" number="" node="" nodes=""
+  shift 3
+  _hivemind_rc_target_ok "$commit" "$owner_repo" "$trunk" || return 2
+  for number in "$@"; do
+    if ! _hivemind_rc_number_ok "$number"; then
+      _hivemind_rc_error usage
+      return 2
+    fi
+  done
+  _hivemind_rc_commit_resolves "$commit" || return 2
+  for number in "$@"; do
+    node="$(hivemind_readiness_fetch_snapshot "$owner_repo" "$number")" || return 2
+    nodes+="${nodes:+,}$node"
+  done
+  printf '[%s]\n' "$nodes" | _hivemind_rc_evaluate "$commit" "$owner_repo" "$trunk"
 }

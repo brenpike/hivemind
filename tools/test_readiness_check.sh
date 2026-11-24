@@ -9,7 +9,8 @@
 # fixtures are scratch repositories built with plumbing only, so every tree entry mode is exact
 # (100644, 100755, 120000 symlink, 160000 gitlink, tree). A recording `git` wrapper shadowed on
 # PATH logs each git argv the library runs, proving the "no git call" cases and the global git
-# flags on every call.
+# flags on every call. A recording `gh` stub beside it logs each gh argv and serves canned
+# GraphQL responses from tests/readiness-check/gh-cases.json, so gh mode runs offline too.
 #
 # Sections are functions (test_<area>), so later steps add their own sections beside these.
 # Mirrors tools/test_triage_ops.sh's pass/fail counter, exit 1 on any failure, exit 2 on set-up
@@ -49,11 +50,26 @@ printf '%s\n' '#!/bin/sh' \
   && chmod +x "$WRAP_DIR/git" \
   || { echo "FAIL: cannot write the recording git wrapper" >&2; exit 2; }
 GH_LOG="$TMPDIR_TEST/gh-calls.log"
+GH_SERVE_DIR="$TMPDIR_TEST/gh-serve"
+mkdir -p "$GH_SERVE_DIR" || { echo "FAIL: cannot create the gh serve dir" >&2; exit 2; }
+# The recording gh stub logs each call's argv as one line of <arg> fields, then serves the canned
+# body and exit status for the call's `number=` argv entry from RC_TEST_GH_DIR, else exits 1.
+# shellcheck disable=SC2016
 printf '%s\n' '#!/bin/sh' \
-  'printf "%s\n" "$*" >>"$RC_TEST_GH_LOG"' \
+  'printf "<%s>" "$@" >>"$RC_TEST_GH_LOG"' \
+  'printf "\n" >>"$RC_TEST_GH_LOG"' \
+  'number=""' \
+  'for arg in "$@"; do' \
+  '  case "$arg" in number=*) number="${arg#number=}" ;; esac' \
+  'done' \
+  'if [ -n "${RC_TEST_GH_DIR-}" ] && [ -n "$number" ] && [ -f "$RC_TEST_GH_DIR/$number.rc" ]; then' \
+  '  cat "$RC_TEST_GH_DIR/$number.body"' \
+  '  exit "$(cat "$RC_TEST_GH_DIR/$number.rc")"' \
+  'fi' \
   'exit 1' >"$WRAP_DIR/gh" \
   && chmod +x "$WRAP_DIR/gh" \
-  || { echo "FAIL: cannot write the failing recording gh stub" >&2; exit 2; }
+  || { echo "FAIL: cannot write the recording gh stub" >&2; exit 2; }
+LIB_PATH="$WRAP_DIR:$PATH"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -69,14 +85,15 @@ NO_INPUT="$TMPDIR_TEST/empty-input"
 : >"$NO_INPUT" || setup_fail "cannot create the empty input file"
 
 # run_lib_mode <prelude> <cwd> <stdin-file> <out> <err> <fn> [arg...]: runs one library call in
-# a fresh bash under <prelude>; prints its exit status.
+# a fresh bash under <prelude> with PATH set to LIB_PATH; prints its exit status.
 run_lib_mode() {
   local prelude="$1" cwd="$2" in_file="$3" out_file="$4" err_file="$5" status=0
   shift 5
   (
     cd "$cwd" || exit 97
-    PATH="$WRAP_DIR:$PATH" RC_TEST_GIT_LOG="$GIT_LOG" RC_TEST_REAL_GIT="$REAL_GIT" \
-      RC_TEST_GH_LOG="$GH_LOG" bash -c "$prelude"'; . "$1"; shift; "$@"' readiness-test "$LIB" "$@"
+    PATH="$LIB_PATH" RC_TEST_GIT_LOG="$GIT_LOG" RC_TEST_REAL_GIT="$REAL_GIT" \
+      RC_TEST_GH_LOG="$GH_LOG" RC_TEST_GH_DIR="$GH_SERVE_DIR" \
+      bash -c "$prelude"'; . "$1"; shift; "$@"' readiness-test "$LIB" "$@"
   ) <"$in_file" >"$out_file" 2>"$err_file" || status=$?
   printf '%s' "$status"
 }
@@ -931,6 +948,246 @@ test_snapshot_large_design() {
   SNAP_COMMIT="$BASE_COMMIT"
 }
 
+# ── gh mode ────────────────────────────────────────────────────────────────────────
+#
+# gh-cases.json holds gh mode cases. Each names its issue numbers, the canned response per number
+# and either `lines`, the cases.json cases whose expected lines it gives, or `token`, its failure
+# token. A response is `raw` body text, a `json` body, or an `issue` response wrapping a cases.json
+# snapshot with `del` paths removed, `set` paths set, `extra` top-level keys and `copies` bodies;
+# `rc` is gh's exit status, 0 by default. `commit` names the cases.json case whose documents the
+# evaluated commit holds; absent, the base documents.
+
+GH_CASES="$REPO_ROOT/tests/readiness-check/gh-cases.json"
+# shellcheck disable=SC2016
+GH_QUERY='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number state body labels(first:100){pageInfo{hasNextPage} nodes{name}} blockedBy(first:100){pageInfo{hasNextPage} nodes{number state}} subIssues(first:100){totalCount pageInfo{hasNextPage}} parent{number state body labels(first:100){pageInfo{hasNextPage} nodes{name}}}}}}'
+jq -e 'type == "array" and length > 0
+  and all(.[]; has("name") and (.numbers | type == "array" and length > 0)
+    and (.responses | type == "object")
+    and ((has("lines") and (has("token") | not)) or (has("token") and (has("lines") | not)))
+    and (keys - ["commit", "lines", "name", "numbers", "responses", "token"] == []))' \
+  "$GH_CASES" >/dev/null 2>&1 || setup_fail "gh cases file missing or off its shape: $GH_CASES"
+
+# shellcheck disable=SC2016
+GH_RESPONSE_JQ='
+def case_node($name): first($cases[0][] | select(.name == $name) | .snapshot);
+def node_of:
+  . as $response
+  | case_node($response.issue)
+  | reduce ($response.del // [])[] as $path (.; delpaths([$path]))
+  | reduce ($response.set // [])[] as $change (.; setpath($change.path; $change.value));
+def body_of:
+  if has("raw") then .raw
+  elif has("json") then (.json | tojson) + "\n"
+  else . as $response
+  | (({data: {repository: {issue: node_of}}} + ($response.extra // {})) | tojson + "\n") as $body
+  | [range(0; $response.copies // 1) | $body] | add end;'
+
+# gh_call <case> <fn> [arg...]: clears the gh log, then runs lib_call from the scratch repo root
+# with no stdin.
+gh_call() {
+  local case_name="$1"
+  shift
+  : >"$GH_LOG"
+  lib_call "$case_name" "$REPO" "$NO_INPUT" "$@"
+}
+
+# serve_gh_case <case-file>: writes the case's canned gh responses into the serve dir.
+serve_gh_case() {
+  local number status encoded body
+  rm -f "$GH_SERVE_DIR"/* || setup_fail "cannot clear the gh serve dir"
+  while IFS=$'\t' read -r number status encoded; do
+    decode_text body "$encoded"
+    printf '%s' "$body" >"$GH_SERVE_DIR/$number.body" || setup_fail "gh body $number"
+    printf '%s\n' "$status" >"$GH_SERVE_DIR/$number.rc" || setup_fail "gh status $number"
+  done < <(jq -r --slurpfile cases "$CASES" "$GH_RESPONSE_JQ"'
+.responses | to_entries[] | "\(.key)\t\(.value.rc // 0)\t\(.value | body_of | @base64)"' "$1")
+}
+
+# expect_gh_argv <case> <number>...: asserts the gh log holds, for each of the two shell-mode runs,
+# exactly one call per <number> in order, each with the constant query and separate variables.
+expect_gh_argv() {
+  local case_name="$1" per_run="" number
+  shift
+  for number in "$@"; do
+    per_run+="<api><graphql><-f><query=$GH_QUERY><-f><owner=${SNAP_REPO_ARG%%/*}>"
+    per_run+="<-f><name=${SNAP_REPO_ARG#*/}><-F><number=$number>"$'\n'
+  done
+  if file_is "$GH_LOG" "$per_run$per_run"; then
+    pass "$case_name:gh-argv" "one gh call per number per run, variables as separate entries"
+  else
+    failed "$case_name:gh-argv" "gh log: $(cat "$GH_LOG")"
+  fi
+}
+
+# expect_no_gh <case>: asserts the last gh_call ran no gh command.
+expect_no_gh() {
+  if [ -s "$GH_LOG" ]; then
+    failed "$1:no-gh" "gh ran: $(head -n 1 "$GH_LOG")"
+  else
+    pass "$1:no-gh" "no gh call"
+  fi
+}
+
+test_gh_query_constant() {
+  if [[ "$GH_QUERY" == *'issue(number:$number)'* ]] && ! [[ "$GH_QUERY" =~ number:[[:space:]]*[0-9] ]] \
+    && [[ "$GH_QUERY" == 'query($owner:String!,$name:String!,$number:Int!)'* ]]; then
+    pass "gh:query-constant" "variables declared, no literal issue number"
+  else
+    failed "gh:query-constant" "query: $GH_QUERY"
+  fi
+}
+
+# run_gh_lines_case <case-name> <case-file> <number>...: runs a passing gh mode case and asserts
+# its lines, that snapshot mode gives the same bytes for the served nodes, and the fetch output.
+run_gh_lines_case() {
+  local case_name="$1" case_file="$2" input expected gh_out node_out
+  shift 2
+  input="$TMPDIR_TEST/input.gh-$CALL_N"
+  jq -c --slurpfile cases "$CASES" "$GH_RESPONSE_JQ"'
+. as $case | [.numbers[] | tostring | $case.responses[.] | node_of]' "$case_file" >"$input" \
+    || setup_fail "gh snapshot input $case_name"
+  expected="$(jq -c --slurpfile cases "$CASES" '[.lines[] as $line
+    | first($cases[0][] | select(.name == $line) | .expected)]' "$case_file")" \
+    || setup_fail "gh expected $case_name"
+  gh_call "gh:$case_name" hivemind_readiness_check_gh "$SNAP_COMMIT" "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG" "$@"
+  gh_out="$CALL_OUT"
+  expect_gh_argv "gh:$case_name" "$@"
+  expect_snapshot_lines "gh:$case_name" "$input" "$expected"
+  snapshot_call "gh:$case_name:snapshot" "$input"
+  if [ "$CALL_RC" = 0 ] && [ -s "$gh_out" ] && cmp -s "$gh_out" "$CALL_OUT"; then
+    pass "gh:$case_name:same-as-snapshot" "gh mode output equals snapshot mode output"
+  else
+    failed "gh:$case_name:same-as-snapshot" "gh: $(cat "$gh_out") snapshot: $(cat "$CALL_OUT")"
+  fi
+  if [ "$#" -eq 1 ]; then
+    node_out="$(jq -c '.[0]' "$input")" || setup_fail "gh node $case_name"
+    gh_call "gh:$case_name:fetch" hivemind_readiness_fetch_snapshot "$SNAP_REPO_ARG" "$1"
+    expect_call "gh:$case_name:fetch" 0 "$node_out"$'\n' ""
+    expect_no_git "gh:$case_name:fetch"
+  fi
+}
+
+# run_gh_token_case <case-name> <token> <number>...: runs a failing gh mode case and asserts its
+# token, empty stdout and gh calls; a one-number case also runs the fetch alone.
+run_gh_token_case() {
+  local case_name="$1" token="$2"
+  shift 2
+  gh_call "gh:$case_name" hivemind_readiness_check_gh "$SNAP_COMMIT" "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG" "$@"
+  expect_call "gh:$case_name" 2 "" "readiness-check-error: $token"$'\n'
+  expect_gh_argv "gh:$case_name" "$@"
+  if [ "$#" -eq 1 ]; then
+    gh_call "gh:$case_name:fetch" hivemind_readiness_fetch_snapshot "$SNAP_REPO_ARG" "$1"
+    expect_call "gh:$case_name:fetch" 2 "" "readiness-check-error: $token"$'\n'
+    expect_gh_argv "gh:$case_name:fetch" "$1"
+  fi
+}
+
+test_gh_cases() {
+  local count index case_file case_name commit_case token commit_file
+  local -a numbers=()
+  count="$(jq 'length' "$GH_CASES")" || setup_fail "cannot count gh cases"
+  for ((index = 0; index < count; index++)); do
+    case_file="$TMPDIR_TEST/gh-case.$index"
+    jq -c --argjson i "$index" '.[$i]' "$GH_CASES" >"$case_file" || setup_fail "gh case file $index"
+    {
+      IFS= read -r case_name && IFS= read -r commit_case && IFS= read -r token
+    } < <(jq -r '.name, (.commit // ""), (.token // "")' "$case_file") || setup_fail "gh case fields $index"
+    mapfile -t numbers < <(jq -r '.numbers[]' "$case_file")
+    serve_gh_case "$case_file"
+    SNAP_COMMIT="$BASE_COMMIT"
+    if [ -n "$commit_case" ]; then
+      commit_file="$TMPDIR_TEST/gh-commit.$index"
+      jq -c --arg name "$commit_case" 'first(.[] | select(.name == $name))' "$CASES" >"$commit_file" \
+        || setup_fail "gh commit case $commit_case"
+      build_case_commit SNAP_COMMIT "$commit_file"
+    fi
+    if [ -n "$token" ]; then
+      run_gh_token_case "$case_name" "$token" "${numbers[@]}"
+    else
+      run_gh_lines_case "$case_name" "$case_file" "${numbers[@]}"
+    fi
+  done
+  SNAP_COMMIT="$BASE_COMMIT"
+}
+
+test_gh_absent() {
+  local no_gh_dir="$TMPDIR_TEST/no-gh-bin" case_file tool
+  mkdir -p "$no_gh_dir" || setup_fail "cannot create the no-gh PATH dir"
+  ln -sf "$WRAP_DIR/git" "$no_gh_dir/git" || setup_fail "cannot link git"
+  for tool in jq bash; do
+    ln -sf "$(command -v "$tool")" "$no_gh_dir/$tool" || setup_fail "cannot link $tool"
+  done
+  case_file="$(write_input gh-absent-case \
+    '{"responses": {"101": {"issue": "standalone-pass"}}}')"
+  serve_gh_case "$case_file"
+  LIB_PATH="$no_gh_dir"
+  gh_call "gh:absent" hivemind_readiness_check_gh "$BASE_COMMIT" "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG" 101
+  expect_call "gh:absent" 2 "" $'readiness-check-error: gh-failed\n'
+  expect_no_gh "gh:absent"
+  gh_call "gh:absent:fetch" hivemind_readiness_fetch_snapshot "$SNAP_REPO_ARG" 101
+  expect_call "gh:absent:fetch" 2 "" $'readiness-check-error: gh-failed\n'
+  expect_no_gh "gh:absent:fetch"
+  LIB_PATH="$WRAP_DIR:$PATH"
+  gh_call "gh:present" hivemind_readiness_check_gh "$BASE_COMMIT" "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG" 101
+  if [ "$CALL_RC" = 0 ] && [ -s "$CALL_OUT" ]; then
+    pass "gh:present" "the same call passes with the gh stub on PATH"
+  else
+    failed "gh:present" "rc $CALL_RC, stderr: $(cat "$CALL_ERR")"
+  fi
+}
+
+test_gh_arguments() {
+  local entry case_file
+  case_file="$(write_input gh-args-case '{"responses": {"101": {"issue": "standalone-pass"}}}')"
+  serve_gh_case "$case_file"
+  for entry in 0 01 -1 +1 1a '' ' 1' '1 ' $'1\n' 1.0 0x1 '٣' x; do
+    gh_call "gh:bad-number" hivemind_readiness_check_gh "$BASE_COMMIT" "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG" "$entry"
+    expect_call "gh:bad-number:$(printf '%q' "$entry")" 2 "" $'readiness-check-error: usage\n'
+    expect_no_gh "gh:bad-number:$(printf '%q' "$entry")"
+    expect_no_git "gh:bad-number:$(printf '%q' "$entry")"
+    gh_call "gh:fetch-bad-number" hivemind_readiness_fetch_snapshot "$SNAP_REPO_ARG" "$entry"
+    expect_call "gh:fetch-bad-number:$(printf '%q' "$entry")" 2 "" $'readiness-check-error: usage\n'
+    expect_no_gh "gh:fetch-bad-number:$(printf '%q' "$entry")"
+  done
+  gh_call "gh:bad-second-number" hivemind_readiness_check_gh "$BASE_COMMIT" "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG" 101 0
+  expect_call "gh:bad-second-number" 2 "" $'readiness-check-error: usage\n'
+  expect_no_gh "gh:bad-second-number"
+  expect_no_git "gh:bad-second-number"
+  for entry in '' brenpike -x/y x/.y x/y/z 'x/y..z' 'x y/z' $'x/y\n' 'x/y;z'; do
+    gh_call "gh:bad-owner-repo" hivemind_readiness_check_gh "$BASE_COMMIT" "$entry" "$SNAP_TRUNK_ARG" 101
+    expect_call "gh:bad-owner-repo:$(printf '%q' "$entry")" 2 "" $'readiness-check-error: usage\n'
+    expect_no_gh "gh:bad-owner-repo:$(printf '%q' "$entry")"
+    expect_no_git "gh:bad-owner-repo:$(printf '%q' "$entry")"
+    gh_call "gh:fetch-bad-owner-repo" hivemind_readiness_fetch_snapshot "$entry" 101
+    expect_call "gh:fetch-bad-owner-repo:$(printf '%q' "$entry")" 2 "" $'readiness-check-error: usage\n'
+    expect_no_gh "gh:fetch-bad-owner-repo:$(printf '%q' "$entry")"
+  done
+  for entry in '' -main 'a..b' 'main;x'; do
+    gh_call "gh:bad-trunk" hivemind_readiness_check_gh "$BASE_COMMIT" "$SNAP_REPO_ARG" "$entry" 101
+    expect_call "gh:bad-trunk:$(printf '%q' "$entry")" 2 "" $'readiness-check-error: usage\n'
+    expect_no_gh "gh:bad-trunk:$(printf '%q' "$entry")"
+    expect_no_git "gh:bad-trunk:$(printf '%q' "$entry")"
+  done
+  gh_call "gh:malformed-commit" hivemind_readiness_check_gh HEAD "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG" 101
+  expect_call "gh:malformed-commit" 2 "" $'readiness-check-error: commit-malformed\n'
+  expect_no_gh "gh:malformed-commit"
+  expect_no_git "gh:malformed-commit"
+  gh_call "gh:no-number" hivemind_readiness_check_gh "$BASE_COMMIT" "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG"
+  expect_call "gh:no-number" 2 "" $'readiness-check-error: usage\n'
+  expect_no_gh "gh:no-number"
+  expect_no_git "gh:no-number"
+  gh_call "gh:fetch-one-arg" hivemind_readiness_fetch_snapshot "$SNAP_REPO_ARG"
+  expect_call "gh:fetch-one-arg" 2 "" $'readiness-check-error: usage\n'
+  expect_no_gh "gh:fetch-one-arg"
+  gh_call "gh:fetch-three-args" hivemind_readiness_fetch_snapshot "$SNAP_REPO_ARG" 101 101
+  expect_call "gh:fetch-three-args" 2 "" $'readiness-check-error: usage\n'
+  expect_no_gh "gh:fetch-three-args"
+  gh_call "gh:unknown-commit" hivemind_readiness_check_gh "$(printf '%040d' 0)" "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG" 101
+  expect_call "gh:unknown-commit" 2 "" $'readiness-check-error: commit-unresolvable\n'
+  expect_no_gh "gh:unknown-commit"
+  expect_git_flags "gh:unknown-commit"
+}
+
 test_library_form
 test_codes
 test_commit_forms
@@ -948,6 +1205,10 @@ test_snapshot_git_failure
 test_snapshot_large_design
 test_snapshot_no_gh
 test_snapshot_code_bases
+test_gh_query_constant
+test_gh_cases
+test_gh_absent
+test_gh_arguments
 
 # ── Summary ───────────────────────────────────────────────────────────────────────
 echo
