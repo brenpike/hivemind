@@ -1,0 +1,3626 @@
+[
+  {
+    "name": "standalone-pass",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "pass",
+      "reasons": []
+    }
+  },
+  {
+    "name": "standalone-pass-crlf",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\r\n\r\nThe parser drops the last line.\r\n\r\n## Evidence\r\n\r\nIssue #12 shows the log.\r\n\r\n## Acceptance Criteria\r\n\r\n- [ ] The last line parses.\r\n- [x] A test covers it.\r\n\r\n## Scope boundary\r\n\r\nOnly the parser.\r\n\r\n## Open questions\r\n\r\nNone\r\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "pass",
+      "reasons": []
+    }
+  },
+  {
+    "name": "standalone-pass-fenced-subsections",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n### Detail\n\n```\n## Evidence\n```\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n### Note\n\n\n## Open questions ##\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "pass",
+      "reasons": []
+    }
+  },
+  {
+    "name": "issue-closed",
+    "snapshot": {
+      "number": 101,
+      "state": "CLOSED",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "issue_closed"
+      ]
+    }
+  },
+  {
+    "name": "two-ratings-missing",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "rating_missing:moscow",
+        "rating_missing:risk"
+      ]
+    }
+  },
+  {
+    "name": "is-epic",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:epic"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "is_epic",
+        "promote_type"
+      ]
+    }
+  },
+  {
+    "name": "is-idea",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:idea"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "is_idea",
+        "promote_type"
+      ]
+    }
+  },
+  {
+    "name": "has-subissues",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 2
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "has_subissues"
+      ]
+    }
+  },
+  {
+    "name": "no-acceptance-criteria-section",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "no_acceptance_criteria"
+      ]
+    }
+  },
+  {
+    "name": "checkbox-only-in-fence",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n```\n- [ ] Fenced item.\n```\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "no_acceptance_criteria"
+      ]
+    }
+  },
+  {
+    "name": "checkbox-wrong-form",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [] Empty box.\n* [ ] Star item.\n- [y] Other mark.\n-[ ] No space.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "no_acceptance_criteria"
+      ]
+    }
+  },
+  {
+    "name": "evidence-only-subheading",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\n### Logs\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "spec_evidence_missing"
+      ]
+    }
+  },
+  {
+    "name": "problem-missing",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "spec_problem_missing"
+      ]
+    }
+  },
+  {
+    "name": "scope-boundary-missing",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "spec_scope_missing"
+      ]
+    }
+  },
+  {
+    "name": "problem-level-three",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "### Problem\n\nText.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "spec_problem_missing"
+      ]
+    }
+  },
+  {
+    "name": "open-questions-none-yet",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone yet\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "open_questions_not_none"
+      ]
+    }
+  },
+  {
+    "name": "open-questions-two-lines",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "open_questions_not_none"
+      ]
+    }
+  },
+  {
+    "name": "open-questions-missing",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "open_questions_not_none"
+      ]
+    }
+  },
+  {
+    "name": "open-questions-indented-none",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\n None\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "open_questions_not_none"
+      ]
+    }
+  },
+  {
+    "name": "type-feature",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:feature"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "promote_type"
+      ]
+    }
+  },
+  {
+    "name": "effort-l",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:refactor"
+          },
+          {
+            "name": "effort:l"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "promote_effort"
+      ]
+    }
+  },
+  {
+    "name": "effort-xl",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:documentation"
+          },
+          {
+            "name": "effort:xl"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "promote_effort"
+      ]
+    }
+  },
+  {
+    "name": "no-type-label",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": "## Problem\n\nThe parser drops the last line.\n\n## Evidence\n\nIssue #12 shows the log.\n\n## Acceptance Criteria\n\n- [ ] The last line parses.\n- [x] A test covers it.\n\n## Scope boundary\n\nOnly the parser.\n\n## Open questions\n\nNone\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "rating_missing:type"
+      ]
+    }
+  },
+  {
+    "name": "null-body",
+    "snapshot": {
+      "number": 101,
+      "state": "OPEN",
+      "body": null,
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:bug"
+          },
+          {
+            "name": "effort:s"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": null
+    },
+    "expected": {
+      "track": "standalone",
+      "result": "fail",
+      "reasons": [
+        "no_acceptance_criteria",
+        "open_questions_not_none",
+        "spec_evidence_missing",
+        "spec_problem_missing",
+        "spec_scope_missing"
+      ]
+    }
+  },
+  {
+    "name": "slice-pass",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "pass",
+      "reasons": []
+    }
+  },
+  {
+    "name": "slice-ignores-promote-and-spec",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:feature"
+          },
+          {
+            "name": "effort:xl"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "pass",
+      "reasons": []
+    }
+  },
+  {
+    "name": "slice-epic-closed",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "CLOSED",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "epic_closed"
+      ]
+    }
+  },
+  {
+    "name": "slice-parent-not-epic",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:enhancement"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "parent_not_epic"
+      ]
+    }
+  },
+  {
+    "name": "slice-epic-marker-missing",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "# Epic\n\n<!-- hivemind-initiative: demo -->\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "epic_marker_missing"
+      ]
+    }
+  },
+  {
+    "name": "slice-epic-marker-null-body",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": null,
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "epic_marker_missing"
+      ]
+    }
+  },
+  {
+    "name": "slice-epic-marker-crlf",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\r\n\r\n# Epic\r\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "pass",
+      "reasons": []
+    }
+  },
+  {
+    "name": "slice-crlf-body",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\r\n\r\nThe slice.\r\n\r\n## Acceptance Criteria\r\n\r\n- [x] Slices pass the issue layer.\r\n\r\n## Dependencies\r\n\r\n- #150\r\n- Blocked by #151.\r\n\r\n## Design\r\n\r\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\r\n- Heading: Readiness check\r\n- Heading: Track fact\r\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\r\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\r\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "pass",
+      "reasons": []
+    }
+  },
+  {
+    "name": "slice-design-zero",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_block_missing"
+      ]
+    }
+  },
+  {
+    "name": "slice-design-two",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_block_missing"
+      ]
+    }
+  },
+  {
+    "name": "slice-design-level-three",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n### Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_block_missing"
+      ]
+    }
+  },
+  {
+    "name": "slice-design-in-fence",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n```\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n```\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_block_missing"
+      ]
+    }
+  },
+  {
+    "name": "slice-solution-design-zero",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_block_missing"
+      ]
+    }
+  },
+  {
+    "name": "slice-solution-design-two",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_block_missing"
+      ]
+    }
+  },
+  {
+    "name": "slice-review-record-zero",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_block_missing"
+      ]
+    }
+  },
+  {
+    "name": "slice-review-record-two",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_block_missing"
+      ]
+    }
+  },
+  {
+    "name": "slice-heading-zero",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_block_missing"
+      ]
+    }
+  },
+  {
+    "name": "slice-items-indented-ignored",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n  - Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_block_missing"
+      ]
+    }
+  },
+  {
+    "name": "slice-other-slug",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/other/solution-design.md](docs/initiatives/other/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/other/review-record.md](docs/initiatives/other/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_slug_mismatch"
+      ]
+    }
+  },
+  {
+    "name": "slice-other-slug-no-marker",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/other/solution-design.md](docs/initiatives/other/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "epic_marker_missing"
+      ]
+    }
+  },
+  {
+    "name": "hostile-link-dotdot",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [../../etc/passwd](../../etc/passwd)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_link_invalid"
+      ]
+    }
+  },
+  {
+    "name": "hostile-link-absolute",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [/etc/passwd](/etc/passwd)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_link_invalid"
+      ]
+    }
+  },
+  {
+    "name": "hostile-link-inner-dotdot",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/../../x](docs/initiatives/demo/../../x)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_link_invalid"
+      ]
+    }
+  },
+  {
+    "name": "hostile-link-query",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](https://github.com/brenpike/hivemind/blob/main/docs/initiatives/demo/solution-design.md?plain=1)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_link_invalid"
+      ]
+    }
+  },
+  {
+    "name": "hostile-link-http",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](http://github.com/brenpike/hivemind/blob/main/docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_link_invalid"
+      ]
+    }
+  },
+  {
+    "name": "hostile-link-other-repo",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](https://github.com/attacker/hivemind/blob/main/docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_link_invalid"
+      ]
+    }
+  },
+  {
+    "name": "hostile-link-other-trunk",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](https://github.com/brenpike/hivemind/blob/Main/docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_link_invalid"
+      ]
+    }
+  },
+  {
+    "name": "hostile-link-bracket-differs",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/review-record.md](https://github.com/brenpike/hivemind/blob/main/docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_link_invalid"
+      ]
+    }
+  },
+  {
+    "name": "hostile-link-other-scheme",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](file://docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_link_invalid"
+      ]
+    }
+  },
+  {
+    "name": "hostile-link-wrong-kind",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/review-record.md](docs/initiatives/demo/review-record.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_link_invalid"
+      ]
+    }
+  },
+  {
+    "name": "hostile-link-trailing-text",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md) extra\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_link_invalid"
+      ]
+    }
+  },
+  {
+    "name": "hostile-link-bare-path",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: docs/initiatives/demo/solution-design.md\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_link_invalid"
+      ]
+    }
+  },
+  {
+    "name": "hostile-adr-link",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/46-x.md](docs/adr/46-x.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_link_invalid"
+      ]
+    }
+  },
+  {
+    "name": "hostile-heading-text",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: $(touch pwned)\n- Heading: `touch pwned`\n- Heading: \"quoted\" 'single' ; rm -rf pwned\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "pass",
+      "reasons": []
+    }
+  },
+  {
+    "name": "dependency-edge-missing",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "dependency_edge_missing:151"
+      ]
+    }
+  },
+  {
+    "name": "dependency-ref-forms",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n(#160) abc#161 &#162; o/r#163 _#164 #165a #0166 #167_ #42\n```\n#168\n```\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          },
+          {
+            "number": 42
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "dependency_edge_missing:160"
+      ]
+    }
+  },
+  {
+    "name": "dependency-outside-section",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- ADR: [docs/adr/0046-idea-to-ready-process.md](https://github.com/brenpike/hivemind/blob/main/docs/adr/0046-idea-to-ready-process.md)\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n\n## Notes\n\nSee #170.\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "pass",
+      "reasons": []
+    }
+  }
+]

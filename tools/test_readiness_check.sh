@@ -48,6 +48,12 @@ printf '%s\n' '#!/bin/sh' \
   'exec "$RC_TEST_REAL_GIT" "$@"' >"$WRAP_DIR/git" \
   && chmod +x "$WRAP_DIR/git" \
   || { echo "FAIL: cannot write the recording git wrapper" >&2; exit 2; }
+GH_LOG="$TMPDIR_TEST/gh-calls.log"
+printf '%s\n' '#!/bin/sh' \
+  'printf "%s\n" "$*" >>"$RC_TEST_GH_LOG"' \
+  'exit 1' >"$WRAP_DIR/gh" \
+  && chmod +x "$WRAP_DIR/gh" \
+  || { echo "FAIL: cannot write the failing recording gh stub" >&2; exit 2; }
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -70,7 +76,7 @@ run_lib_mode() {
   (
     cd "$cwd" || exit 97
     PATH="$WRAP_DIR:$PATH" RC_TEST_GIT_LOG="$GIT_LOG" RC_TEST_REAL_GIT="$REAL_GIT" \
-      bash -c "$prelude"'; . "$1"; shift; "$@"' readiness-test "$LIB" "$@"
+      RC_TEST_GH_LOG="$GH_LOG" bash -c "$prelude"'; . "$1"; shift; "$@"' readiness-test "$LIB" "$@"
   ) <"$in_file" >"$out_file" 2>"$err_file" || status=$?
   printf '%s' "$status"
 }
@@ -496,6 +502,211 @@ test_path_kind() {
   expect_call "path-kind:trailing-newline" 1 "" ""
 }
 
+# ── Snapshot mode ──────────────────────────────────────────────────────────────────
+
+CASES="$REPO_ROOT/tests/readiness-check/cases.json"
+SNAP_REPO_ARG='brenpike/hivemind'
+SNAP_TRUNK_ARG='main'
+SNAP_OUT_ALL="$TMPDIR_TEST/snapshot-lines.all"
+: >"$SNAP_OUT_ALL" || setup_fail "cannot create $SNAP_OUT_ALL"
+jq -e 'type == "array" and length > 0
+  and all(.[]; (keys == ["expected", "name", "snapshot"])
+    and (.expected | keys == ["reasons", "result", "track"]))' "$CASES" >/dev/null 2>&1 \
+  || setup_fail "cases file missing or off its shape: $CASES"
+
+# snapshot_call <case> <stdin-file> [arg...]: runs snapshot mode with the given arguments, or the
+# scratch commit, owner/repo and trunk when none are given.
+snapshot_call() {
+  local case_name="$1" in_file="$2"
+  shift 2
+  if [ "$#" -eq 0 ]; then
+    set -- "$C1" "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG"
+  fi
+  lib_call "$case_name" "$REPO" "$in_file" hivemind_readiness_check_snapshot "$@"
+}
+
+# snapshot_lines_verdict <stdin-file> <expected-json-array>: prints `ok` when the last call's
+# stdout holds one compact five-key line per snapshot element with the expected values, else the
+# first mismatch.
+snapshot_lines_verdict() {
+  jq -Rnr --slurpfile input "$1" --argjson expected "$2" --arg commit "$C1" '
+[inputs] as $lines
+| if ($lines | length) != ($expected | length) then
+    "\($lines | length) lines, want \($expected | length)"
+  else
+    [range(0; $expected | length) as $i
+     | ($lines[$i] | try fromjson catch null) as $line
+     | if ($line | type) != "object" then "line \($i + 1) does not parse"
+       elif $lines[$i] != ($line | tojson) then "line \($i + 1) is not compact JSON"
+       elif ($line | keys_unsorted) != ["issue", "commit", "track", "result", "reasons"] then
+         "line \($i + 1) keys \($line | keys_unsorted | tojson)"
+       elif $line.issue != $input[0][$i].number then "line \($i + 1) issue \($line.issue)"
+       elif $line.commit != $commit then "line \($i + 1) commit \($line.commit)"
+       elif ($line | {track, result, reasons}) != $expected[$i] then "line \($i + 1): \($lines[$i])"
+       else empty end]
+    | if length == 0 then "ok" else .[0] end
+  end' <"$CALL_OUT" 2>&1
+}
+
+# expect_snapshot_lines <case> <stdin-file> <expected-json-array>: asserts a passing run and its
+# output lines, and that its only git call is the one commit resolution per run.
+expect_snapshot_lines() {
+  local case_name="$1" verdict line bad=0
+  verdict="$(snapshot_lines_verdict "$2" "$3")"
+  if [ "$CALL_RC" != 0 ] || [ -s "$CALL_ERR" ]; then
+    failed "$case_name" "rc $CALL_RC, stderr: $(cat "$CALL_ERR")"
+  elif [ "$verdict" != ok ]; then
+    failed "$case_name" "$verdict"
+  else
+    pass "$case_name" "lines match"
+  fi
+  cat "$CALL_OUT" >>"$SNAP_OUT_ALL" || setup_fail "cannot append to $SNAP_OUT_ALL"
+  while IFS= read -r line; do
+    [ "$line" = "--no-replace-objects --literal-pathspecs cat-file -t $C1" ] || bad=1
+  done <"$GIT_LOG"
+  if [ "$bad" -eq 0 ] && [ "$(wc -l <"$GIT_LOG")" -eq 2 ]; then
+    pass "$case_name:git" "only the commit resolution ran"
+  else
+    failed "$case_name:git" "git log: $(cat "$GIT_LOG")"
+  fi
+}
+
+test_snapshot_cases() {
+  local count index case_name input expected
+  count="$(jq 'length' "$CASES")" || setup_fail "cannot count cases"
+  for ((index = 0; index < count; index++)); do
+    case_name="$(jq -r --argjson i "$index" '.[$i].name' "$CASES")" || setup_fail "case name $index"
+    input="$TMPDIR_TEST/input.case-$index"
+    jq -c --argjson i "$index" '[.[$i].snapshot]' "$CASES" >"$input" || setup_fail "case input $index"
+    expected="$(jq -c --argjson i "$index" '[.[$i].expected]' "$CASES")" || setup_fail "case expected $index"
+    snapshot_call "snapshot:$case_name" "$input"
+    expect_snapshot_lines "snapshot:$case_name" "$input" "$expected"
+  done
+  if [ -z "$(find "$TMPDIR_TEST" -name pwned -print)" ]; then
+    pass "snapshot:hostile-heading-inert" "no pwned file created"
+  else
+    failed "snapshot:hostile-heading-inert" "a pwned file exists"
+  fi
+}
+
+test_snapshot_multi() {
+  local input expected
+  input="$TMPDIR_TEST/input.multi"
+  jq -c '[(.[] | select(.name == "slice-pass")), (.[] | select(.name == "issue-closed"))] | map(.snapshot)' \
+    "$CASES" >"$input" || setup_fail "multi input"
+  expected="$(jq -c '[(.[] | select(.name == "slice-pass")), (.[] | select(.name == "issue-closed"))]
+    | map(.expected)' "$CASES")" || setup_fail "multi expected"
+  snapshot_call "snapshot:two-elements" "$input"
+  expect_snapshot_lines "snapshot:two-elements" "$input" "$expected"
+  snapshot_call "snapshot:empty-array" "$(write_input snapshot-empty '[]')"
+  expect_call "snapshot:empty-array" 0 "" ""
+}
+
+test_snapshot_failures() {
+  local base entry path_json input truncated
+  base="$(jq -c '.[] | select(.name == "slice-pass") | .snapshot' "$CASES")" || setup_fail "base snapshot"
+  for path_json in '["number"]' '["state"]' '["body"]' '["labels"]' '["labels","nodes"]' \
+    '["labels","nodes",0,"name"]' '["blockedBy"]' '["blockedBy","nodes"]' \
+    '["blockedBy","nodes",0,"number"]' '["subIssues"]' '["subIssues","totalCount"]' '["parent"]' \
+    '["parent","number"]' '["parent","state"]' '["parent","body"]' '["parent","labels"]' \
+    '["parent","labels","nodes"]' '["parent","labels","nodes",0,"name"]'; do
+    input="$TMPDIR_TEST/input.missing-$CALL_N"
+    printf '%s' "$base" | jq -c --argjson p "$path_json" '[delpaths([$p])]' >"$input" \
+      || setup_fail "missing-field input $path_json"
+    snapshot_call "snapshot:missing:$path_json" "$input"
+    expect_call "snapshot:missing:$path_json" 2 "" $'readiness-check-error: snapshot-malformed\n'
+  done
+  for entry in '.number = "201"' '.number = 0' '.number = 1.5' '.state = "open"' '.body = 5' \
+    '.labels.nodes[0].name = 5' '.labels.nodes[0] = null' '.blockedBy.nodes[0].number = "150"' \
+    '.subIssues.totalCount = -1' '.subIssues.totalCount = null' '.parent = "200"' \
+    '.parent.body = false' '.parent.state = null' '.labels.pageInfo = "x"' \
+    '.labels.pageInfo.hasNextPage = "true"' '5'; do
+    input="$TMPDIR_TEST/input.wrong-$CALL_N"
+    printf '%s' "$base" | jq -c "[$entry]" >"$input" || setup_fail "wrong-type input $entry"
+    snapshot_call "snapshot:wrong-type:$entry" "$input"
+    expect_call "snapshot:wrong-type:$entry" 2 "" $'readiness-check-error: snapshot-malformed\n'
+  done
+  for entry in '{}' '"x"' '' '[] []' '[' 'null'; do
+    snapshot_call "snapshot:not-array:$entry" "$(write_input "not-array-$CALL_N" "$entry")"
+    expect_call "snapshot:not-array:$entry" 2 "" $'readiness-check-error: snapshot-malformed\n'
+  done
+  for entry in labels blockedBy subIssues parent.labels; do
+    input="$TMPDIR_TEST/input.truncated-$CALL_N"
+    printf '%s' "$base" | jq -c --arg c "$entry" \
+      '[setpath(($c | split(".")) + ["pageInfo", "hasNextPage"]; true)]' >"$input" \
+      || setup_fail "truncated input $entry"
+    snapshot_call "snapshot:truncated:$entry" "$input"
+    expect_call "snapshot:truncated:$entry" 2 "" $'readiness-check-error: truncated\n'
+  done
+  input="$TMPDIR_TEST/input.not-truncated"
+  printf '%s' "$base" | jq -c '[.labels.pageInfo.hasNextPage = false | .blockedBy.pageInfo = null
+    | .subIssues.pageInfo = {} | .parent.labels.pageInfo.hasNextPage = false]' >"$input" \
+    || setup_fail "not-truncated input"
+  snapshot_call "snapshot:has-next-page-false" "$input"
+  expect_snapshot_lines "snapshot:has-next-page-false" "$input" \
+    '[{"track":"slice","result":"pass","reasons":[]}]'
+  truncated="$(printf '%s' "$base" | jq -c '.labels.pageInfo.hasNextPage = true')" \
+    || setup_fail "truncated element"
+  input="$TMPDIR_TEST/input.malformed-first"
+  printf '%s' "$base" | jq -c --argjson t "$truncated" '[$t, del(.state)]' >"$input" \
+    || setup_fail "malformed-first input"
+  snapshot_call "snapshot:malformed-before-truncated" "$input"
+  expect_call "snapshot:malformed-before-truncated" 2 "" $'readiness-check-error: snapshot-malformed\n'
+
+  input="$(write_input snapshot-base "[$base]")"
+  snapshot_call "snapshot:unknown-commit" "$input" "$(printf '%040d' 0)" "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG"
+  expect_call "snapshot:unknown-commit" 2 "" $'readiness-check-error: commit-unresolvable\n'
+  expect_git_flags "snapshot:unknown-commit"
+  snapshot_call "snapshot:blob-commit" "$input" "$PRD_BLOB" "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG"
+  expect_call "snapshot:blob-commit" 2 "" $'readiness-check-error: commit-unresolvable\n'
+  snapshot_call "snapshot:malformed-commit" "$input" HEAD "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG"
+  expect_call "snapshot:malformed-commit" 2 "" $'readiness-check-error: commit-malformed\n'
+  expect_no_git "snapshot:malformed-commit"
+  for entry in '' brenpike -x/y x/-y .x/y x/.y x/y/z x//y 'x/y..z' 'x y/z' $'x/y\n' 'x/y;z' 'ü/y'; do
+    snapshot_call "snapshot:bad-owner-repo" "$input" "$C1" "$entry" "$SNAP_TRUNK_ARG"
+    expect_call "snapshot:bad-owner-repo:$(printf '%q' "$entry")" 2 "" $'readiness-check-error: usage\n'
+    expect_no_git "snapshot:bad-owner-repo:$(printf '%q' "$entry")"
+  done
+  for entry in '' -main 'a..b' 'ma in' 'main;x' $'main\n' 'main~1' 'main^' 'mäin'; do
+    snapshot_call "snapshot:bad-trunk" "$input" "$C1" "$SNAP_REPO_ARG" "$entry"
+    expect_call "snapshot:bad-trunk:$(printf '%q' "$entry")" 2 "" $'readiness-check-error: usage\n'
+    expect_no_git "snapshot:bad-trunk:$(printf '%q' "$entry")"
+  done
+  snapshot_call "snapshot:two-args" "$input" "$C1" "$SNAP_REPO_ARG"
+  expect_call "snapshot:two-args" 2 "" $'readiness-check-error: usage\n'
+  expect_no_git "snapshot:two-args"
+}
+
+test_snapshot_no_gh() {
+  local stub_rc=0
+  PATH="$WRAP_DIR:$PATH" RC_TEST_GH_LOG="$GH_LOG.probe" gh probe >/dev/null 2>&1 || stub_rc=$?
+  if [ "$stub_rc" -ne 0 ] && [ -s "$GH_LOG.probe" ]; then
+    pass "snapshot:gh-stub" "the stub on PATH fails and records"
+  else
+    failed "snapshot:gh-stub" "stub rc $stub_rc did not fail and record"
+  fi
+  if [ -s "$GH_LOG" ]; then
+    failed "snapshot:no-gh" "gh ran: $(head -n 1 "$GH_LOG")"
+  else
+    pass "snapshot:no-gh" "no gh call in any snapshot run"
+  fi
+}
+
+test_snapshot_code_bases() {
+  local codes_file="$TMPDIR_TEST/codes.list" base bad="" seen=0
+  lib_call "snapshot:codes" "$REPO" "$NO_INPUT" hivemind_readiness_codes
+  cp "$CALL_OUT" "$codes_file" || setup_fail "cannot copy the code list"
+  while IFS= read -r base; do
+    seen=$((seen + 1))
+    grep -qxF -- "$base" "$codes_file" || bad="$bad $base"
+  done < <(jq -r '.reasons[] | if test(":") then sub(":.*"; ":") else . end' "$SNAP_OUT_ALL" | sort -u)
+  if [ -z "$bad" ] && [ "$seen" -gt 0 ]; then
+    pass "snapshot:code-bases" "$seen emitted code bases all in the closed set"
+  else
+    failed "snapshot:code-bases" "outside the closed set:$bad (seen $seen)"
+  fi
+}
+
 test_library_form
 test_codes
 test_commit_forms
@@ -505,6 +716,11 @@ test_sha256_repo
 test_seed_marker
 test_record_front_matter
 test_path_kind
+test_snapshot_cases
+test_snapshot_multi
+test_snapshot_failures
+test_snapshot_no_gh
+test_snapshot_code_bases
 
 # ── Summary ───────────────────────────────────────────────────────────────────────
 echo

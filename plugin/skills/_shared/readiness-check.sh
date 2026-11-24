@@ -22,10 +22,11 @@
 #
 # SINGLE RESPONSIBILITY: decide structure, existence and versions of initiative documents and
 # issue text, never their quality. It writes nothing: no file, no scratch path. Input reaches jq
-# only on stdin, never in argv or program text. Every git call is
-# `git --no-replace-objects --literal-pathspecs ...` and resolves no ref and makes no network
-# call; a commit argument must be a full lowercase object id before any git call. The functions
-# behave the same under a caller's `set -euo pipefail` or `set -u` alone.
+# only on stdin, never in argv or program text; only an argument the library has already checked
+# against its fixed pattern (commit, owner/repo, trunk name) is passed with `jq --arg`. Every
+# git call is `git --no-replace-objects --literal-pathspecs ...` and resolves no ref and makes no
+# network call; a commit argument must be a full lowercase object id before any git call. The
+# functions behave the same under a caller's `set -euo pipefail` or `set -u` alone.
 #
 # FAILURE CONTRACT: a failure prints exactly one stderr line `readiness-check-error: <token>`
 # and returns non-zero; the library never exits and never echoes its input. Tokens: usage,
@@ -58,6 +59,17 @@
 #       {"stamps":[{"path","blob"}...],"verdict","open":{"critical","high","medium","low"},
 #       "rounds","clean_round"} and returns 0; any other shape returns 1 with no output. The
 #       zero-stamp form is the line `stamps: []`; a bare `stamps:` needs at least one stamp.
+#   hivemind_readiness_check_snapshot <commit> <owner/repo> <trunk-name>  (snapshot on stdin)
+#       Snapshot mode: stdin is exactly one JSON array of issue snapshot objects (GitHub GraphQL
+#       Issue nodes); prints one line per element, in order,
+#       {"issue","commit","track","result","reasons"}, and makes no GitHub read. Failure tokens:
+#       commit-malformed, usage, commit-unresolvable, snapshot-malformed, truncated and the
+#       document layer's git-failed.
+#
+# PARSING: the jq definitions in _hivemind_rc_jq_defs are the one implementation of the solution
+# design's Document parsing rules, shared by issue bodies and documents: rc_lines splits a text
+# into lines with one ending CR removed, rc_parse turns lines into line records
+# {text, fenced, level, title}, rc_section, rc_filled and rc_reads_none read sections.
 
 # _hivemind_rc_error <token>: prints the one failure line to stderr.
 _hivemind_rc_error() {
@@ -78,6 +90,46 @@ def rc_path_kind:
   else null end;
 def rc_count($line; $key):
   $line | capture("\\A" + $key + ": (?<v>0|[1-9][0-9]*)\\z") | .v | tonumber;
+def rc_strip_cr: if endswith("\r") then .[:-1] else . end;
+def rc_lines: split("\n") | map(rc_strip_cr);
+def rc_trim: capture("\\A[ \t]*(?<t>.*?)[ \t]*\\z").t;
+def rc_blank: test("\\A[ \t]*\\z");
+def rc_fence_run: [capture("\\A {0,3}(?<run>`{3,}|~{3,})")] | if length == 0 then null else .[0].run end;
+def rc_line_record:
+  . as $text
+  | [capture("\\A(?<hashes>#{1,6}) (?<rest>.*)\\z")]
+  | if length == 0 then {text: $text, fenced: false, level: 0, title: null}
+    else .[0] as $heading
+    | {text: $text, fenced: false, level: ($heading.hashes | length),
+          title: ($heading.rest | rc_trim | capture("\\A(?<t>.*?)#*\\z").t | rc_trim)} end;
+def rc_parse:
+  reduce .[] as $text ({fence: null, records: []};
+    .fence as $fence
+    | if $fence != null then
+        .records += [{text: $text, fenced: true, level: 0, title: null}]
+        | if ($text | test("\\A {0,3}" + $fence.char + "{" + ($fence.len | tostring) + ",}[ \t]*\\z"))
+          then .fence = null else . end
+      else
+        ($text | rc_fence_run) as $run
+        | if $run != null then
+            .fence = {char: $run[0:1], len: ($run | length)}
+            | .records += [{text: $text, fenced: true, level: 0, title: null}]
+          else .records += [$text | rc_line_record] end
+      end)
+  | .records;
+def rc_section($level; $title):
+  . as $records
+  | [range(0; $records | length) | select($records[.].level == $level and $records[.].title == $title)]
+  | if length == 0 then null
+    else (.[0] + 1) as $start
+    | ([range($start; $records | length) | select($records[.].level > 0 and $records[.].level <= $level)]
+       | .[0] // ($records | length)) as $stop
+    | $records[$start:$stop] end;
+def rc_filled: . != null and any(.[]; .level == 0 and (.text | rc_blank | not));
+def rc_reads_none: . != null and ([.[] | .text | select(rc_blank | not)] == ["None"]);
+def rc_marker_slug:
+  [.[0] // empty | capture("\\A<!-- hivemind-initiative: (?<slug>" + rc_slug + ") -->\\z") | .slug]
+  | .[0];
 '
 }
 
@@ -247,8 +299,7 @@ hivemind_seed_marker_slug() {
   fi
   local slug="" program
   program="$(_hivemind_rc_jq_defs)"'
-[inputs] | select(length > 0) | .[0] | sub("\r\\z"; "")
-| capture("\\A<!-- hivemind-initiative: (?<slug>" + rc_slug + ") -->\\z") | .slug'
+[inputs] | map(rc_strip_cr) | rc_marker_slug // empty'
   if ! slug="$(jq -nRr "$program" 2>/dev/null)"; then
     return 1
   fi
@@ -301,4 +352,252 @@ hivemind_record_front_matter() {
     return 1
   fi
   printf '%s\n' "$parsed"
+}
+
+# _hivemind_rc_issue_jq_defs: prints the constant jq definitions that validate an issue snapshot
+# and evaluate its issue layer; they need _hivemind_rc_jq_defs before them.
+_hivemind_rc_issue_jq_defs() {
+  printf '%s\n' '
+def rc_number_ok: type == "number" and . == floor and . > 0;
+def rc_page_ok:
+  .pageInfo == null
+  or ((.pageInfo | type) == "object"
+      and (.pageInfo.hasNextPage == null or (.pageInfo.hasNextPage | type) == "boolean"));
+def rc_labels_ok:
+  type == "object" and (.nodes | type) == "array"
+  and all(.nodes[]; type == "object" and (.name | type) == "string") and rc_page_ok;
+def rc_parent_ok:
+  . == null
+  or (type == "object" and (.number | rc_number_ok) and (.state == "OPEN" or .state == "CLOSED")
+      and has("body") and (.body == null or (.body | type) == "string") and (.labels | rc_labels_ok));
+def rc_snapshot_ok:
+  type == "object"
+  and (.number | rc_number_ok)
+  and (.state == "OPEN" or .state == "CLOSED")
+  and has("body") and (.body == null or (.body | type) == "string")
+  and (.labels | rc_labels_ok)
+  and ((.blockedBy | type) == "object" and (.blockedBy.nodes | type) == "array"
+       and all(.blockedBy.nodes[]; type == "object" and (.number | type) == "number" and .number == (.number | floor))
+       and (.blockedBy | rc_page_ok))
+  and ((.subIssues | type) == "object" and (.subIssues.totalCount | type) == "number"
+       and .subIssues.totalCount == (.subIssues.totalCount | floor) and .subIssues.totalCount >= 0
+       and (.subIssues | rc_page_ok))
+  and has("parent") and (.parent | rc_parent_ok);
+def rc_truncated: .pageInfo.hasNextPage == true;
+def rc_snapshot_truncated:
+  (.labels | rc_truncated) or (.blockedBy | rc_truncated) or (.subIssues | rc_truncated)
+  or (.parent != null and (.parent.labels | rc_truncated));
+def rc_codes_if($condition; $code): if $condition then [$code] else [] end;
+def rc_has_checkbox:
+  . != null and any(.[]; (.fenced | not) and (.text | test("\\A[ \t]*- \\[[ xX]\\]([ \t]|\\z)")));
+def rc_common_codes($sn; $names; $doc):
+  rc_codes_if($sn.state != "OPEN"; "issue_closed")
+  + [("readiness", "type", "effort", "moscow", "priority", "risk", "difficulty") as $family
+     | select(any($names[]; startswith($family + ":") and length > ($family | length) + 1) | not)
+     | "rating_missing:" + $family]
+  + rc_codes_if(any($names[]; . == "type:epic"); "is_epic")
+  + rc_codes_if(any($names[]; . == "type:idea"); "is_idea")
+  + rc_codes_if($sn.subIssues.totalCount > 0; "has_subissues")
+  + rc_codes_if($doc | rc_section(2; "Acceptance Criteria") | rc_has_checkbox | not; "no_acceptance_criteria");
+def rc_standalone_codes($names; $doc):
+  rc_codes_if($doc | rc_section(2; "Problem") | rc_filled | not; "spec_problem_missing")
+  + rc_codes_if($doc | rc_section(2; "Evidence") | rc_filled | not; "spec_evidence_missing")
+  + rc_codes_if($doc | rc_section(2; "Scope boundary") | rc_filled | not; "spec_scope_missing")
+  + rc_codes_if($doc | rc_section(2; "Open questions") | rc_reads_none | not; "open_questions_not_none")
+  + rc_codes_if(any($names[]; startswith("type:") and length > 5
+      and (.[5:] as $type | any("bug", "chore", "documentation", "refactor", "enhancement"; . == $type) | not));
+      "promote_type")
+  + rc_codes_if(any($names[]; . == "effort:l" or . == "effort:xl"); "promote_effort");
+def rc_dependency_codes($sn; $doc):
+  [($doc | rc_section(2; "Dependencies") // [])[] | select(.fenced | not) | .text
+   | match("(?<![A-Za-z0-9_/&])#([1-9][0-9]*)(?![A-Za-z0-9_])"; "g") | .captures[0].string]
+  | unique
+  | [$sn.blockedBy.nodes[].number | tostring] as $edges
+  | [.[] | select(. as $ref | any($edges[]; . == $ref) | not) | "dependency_edge_missing:" + .];
+def rc_target_path($repo; $trunk):
+  ("https://github.com/" | length) as $host_len
+  | ($repo | length) as $repo_len
+  | ("/blob/" + $trunk + "/") as $blob
+  | if startswith("https://") then
+      if startswith("https://github.com/")
+         and (.[$host_len:$host_len + $repo_len] | ascii_downcase) == ($repo | ascii_downcase)
+         and (.[$host_len + $repo_len:] | startswith($blob))
+      then .[$host_len + $repo_len + ($blob | length):] else null end
+    elif contains("://") then null
+    else . end;
+def rc_link_path($repo; $trunk; $kind):
+  [capture("\\A\\[(?<text>[^\\]\\[]*)\\]\\((?<target>[^()[:space:]]*)\\)\\z")]
+  | if length == 0 then null
+    else .[0] as $link
+    | ($link.target | rc_target_path($repo; $trunk)) as $path
+    | if $path != null and $path == $link.text and ($path | rc_path_kind) == $kind then $path else null end
+    end;
+def rc_path_slug: capture("\\Adocs/initiatives/(?<s>[^/]+)/").s;
+def rc_design_items:
+  [.[] | select(.fenced | not) | .text
+   | capture("\\A- (?<key>Solution design|Heading|ADR|Review record|Prototype):(?<rest>.*)\\z")
+   | select(.rest == "" or (.rest | startswith(" ")))
+   | {key: .key, value: (.rest | rc_trim)}];
+def rc_design($slug; $repo; $trunk):
+  . as $doc
+  | ([$doc[] | select(.level == 2 and .title == "Design")] | length) as $blocks
+  | ($doc | rc_section(2; "Design") // [] | rc_design_items) as $items
+  | [$items[] | select(.key == "Solution design") | .value] as $design_values
+  | [$items[] | select(.key == "Review record") | .value] as $record_values
+  | [$items[] | select(.key == "Heading") | .value] as $headings
+  | if $blocks != 1 or ($design_values | length) != 1 or ($record_values | length) != 1
+       or ($headings | length) == 0 then
+      {codes: ["design_block_missing"], documents: null}
+    else
+      ($design_values[0] | rc_link_path($repo; $trunk; "solution-design")) as $design_path
+      | ($record_values[0] | rc_link_path($repo; $trunk; "review-record")) as $record_path
+      | [$items[] | select(.key == "ADR") | .value | rc_link_path($repo; $trunk; "adr")] as $adr_paths
+      | ($design_path == null or $record_path == null or any($adr_paths[]; . == null)) as $invalid
+      | {codes: (rc_codes_if($invalid; "design_link_invalid")
+                 + rc_codes_if($slug != null
+                     and any($design_path, $record_path; . != null and rc_path_slug != $slug);
+                     "design_slug_mismatch")),
+         documents: (if $invalid then null
+           else {slug: $slug, solution_design: $design_path, review_record: $record_path,
+                 adrs: $adr_paths,
+                 headings: [range(0; $headings | length) as $i | {index: ($i + 1), text: $headings[$i]}],
+                 prototypes: [$items[] | select(.key == "Prototype") | .value
+                              | rc_link_path($repo; $trunk; "prototype-index")]} end)}
+    end;
+def rc_issue_layer($repo; $trunk):
+  . as $sn
+  | [$sn.labels.nodes[].name] as $names
+  | ($sn.body // "" | rc_lines | rc_parse) as $doc
+  | rc_common_codes($sn; $names; $doc) as $common
+  | if $sn.parent == null then
+      {issue: $sn.number, track: "standalone", reasons: ($common + rc_standalone_codes($names; $doc)),
+       documents: null}
+    else
+      ($sn.parent.body // "" | rc_lines | rc_marker_slug) as $slug
+      | ($doc | rc_design($slug; $repo; $trunk)) as $design
+      | {issue: $sn.number, track: "slice",
+         reasons: ($common
+           + rc_codes_if($sn.parent.state != "OPEN"; "epic_closed")
+           + rc_codes_if(any($sn.parent.labels.nodes[]; .name == "type:epic") | not; "parent_not_epic")
+           + rc_codes_if($slug == null; "epic_marker_missing")
+           + rc_dependency_codes($sn; $doc)
+           + $design.codes),
+         documents: $design.documents}
+    end;
+'
+}
+
+# _hivemind_rc_owner_repo_ok <owner/repo>: 0 when the argument is a safe owner/repo pair, else 1.
+_hivemind_rc_owner_repo_ok() {
+  local value="$1" name_chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-'
+  local pattern="^[${name_chars}]+/[${name_chars}]+\$"
+  if ! [[ "$value" =~ $pattern ]]; then
+    return 1
+  fi
+  case "$value" in
+    -* | .* | */-* | */.* | *..*) return 1 ;;
+  esac
+  return 0
+}
+
+# _hivemind_rc_trunk_ok <trunk-name>: 0 when the argument is a safe trunk branch name, else 1.
+_hivemind_rc_trunk_ok() {
+  local value="$1"
+  local pattern='^[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._/-]+$'
+  if ! [[ "$value" =~ $pattern ]]; then
+    return 1
+  fi
+  case "$value" in
+    -* | *..*) return 1 ;;
+  esac
+  return 0
+}
+
+# _hivemind_rc_slice_document_codes <commit> <layer>: prints one JSON array of the slice document
+# layer's reason codes for one issue layer line. The layer's `documents` field is null unless the
+# issue is a slice whose Design block counts and Solution design, Review record and ADR links
+# passed; it then holds {slug (null when the epic marker is missing), solution_design,
+# review_record, adrs, headings: [{index, text}], prototypes: [path or null]}. The document layer
+# is not evaluated yet, so every layer gets `[]`. A non-zero return is a failure that has already
+# printed its token; the caller propagates it.
+_hivemind_rc_slice_document_codes() {
+  printf '[]\n'
+}
+
+# _hivemind_rc_finish_layers <commit> <layers>: joins each issue layer line with its document
+# layer codes and prints the output contract lines; returns 2 on a failure.
+_hivemind_rc_finish_layers() {
+  local commit="$1" rest="$2" layer="" codes="" pairs="" program
+  while [ -n "$rest" ]; do
+    layer="${rest%%$'\n'*}"
+    if [ "$layer" = "$rest" ]; then
+      rest=""
+    else
+      rest="${rest#*$'\n'}"
+    fi
+    if ! codes="$(_hivemind_rc_slice_document_codes "$commit" "$layer")"; then
+      return 2
+    fi
+    pairs+="$layer"$'\n'"$codes"$'\n'
+  done
+  if [ -z "$pairs" ]; then
+    return 0
+  fi
+  program='
+[inputs] as $all
+| range(0; $all | length; 2) as $i
+| $all[$i] as $layer
+| ($layer.reasons + $all[$i + 1] | unique) as $reasons
+| {issue: $layer.issue, commit: $commit, track: $layer.track,
+   result: (if ($reasons | length) == 0 then "pass" else "fail" end), reasons: $reasons}'
+  if ! printf '%s' "$pairs" | jq -nc --arg commit "$commit" "$program" 2>/dev/null; then
+    _hivemind_rc_error snapshot-malformed
+    return 2
+  fi
+}
+
+# hivemind_readiness_check_snapshot <commit> <owner/repo> <trunk-name>: snapshot mode; the issue
+# snapshot array is on stdin (see PUBLIC API).
+hivemind_readiness_check_snapshot() {
+  if [ "$#" -ne 3 ]; then
+    _hivemind_rc_error usage
+    return 2
+  fi
+  local commit="${1-}" owner_repo="${2-}" trunk="${3-}" object_type="" layers="" output="" program
+  if ! hivemind_readiness_commit_ok "$commit"; then
+    _hivemind_rc_error commit-malformed
+    return 2
+  fi
+  if ! _hivemind_rc_owner_repo_ok "$owner_repo" || ! _hivemind_rc_trunk_ok "$trunk"; then
+    _hivemind_rc_error usage
+    return 2
+  fi
+  object_type="$(git --no-replace-objects --literal-pathspecs cat-file -t "$commit" </dev/null 2>/dev/null)" \
+    || object_type=""
+  if [ "$object_type" != commit ]; then
+    _hivemind_rc_error commit-unresolvable
+    return 2
+  fi
+  program="$(_hivemind_rc_jq_defs)$(_hivemind_rc_issue_jq_defs)"'
+[inputs] as $input
+| if ($input | length) != 1 or ($input[0] | type) != "array" then "snapshot-malformed"
+  elif any($input[0][]; rc_snapshot_ok | not) then "snapshot-malformed"
+  elif any($input[0][]; rc_snapshot_truncated) then "truncated"
+  else $input[0][] | rc_issue_layer($owner_repo; $trunk) end'
+  if ! layers="$(jq -nc --arg owner_repo "$owner_repo" --arg trunk "$trunk" "$program" 2>/dev/null)"; then
+    _hivemind_rc_error snapshot-malformed
+    return 2
+  fi
+  case "$layers" in
+    '"snapshot-malformed"' | '"truncated"')
+      _hivemind_rc_error "${layers//\"/}"
+      return 2
+      ;;
+  esac
+  if ! output="$(_hivemind_rc_finish_layers "$commit" "$layers")"; then
+    return 2
+  fi
+  if [ -n "$output" ]; then
+    printf '%s\n' "$output"
+  fi
 }
