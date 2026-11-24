@@ -59,6 +59,7 @@ SUITE_TEST_MERGE_APPROVED='test_merge_approved.sh'
 SUITE_TEST_LEDGER_RECONSTRUCT='test_ledger_reconstruct.sh'
 SUITE_TEST_TRIAGE_OPS='test_triage_ops.sh'
 SUITE_TEST_SUBISSUE_OPS='test_subissue_ops.sh'
+SUITE_TEST_READINESS_CHECK='test_readiness_check.sh'
 SUITE_TEST_SEED_HIVE='test_seed_hive.sh'
 SUITE_TEST_RC_BROOD='test_rc_brood.sh'
 SUITE_TEST_NEXT_WAVE='test_next_wave.sh'
@@ -97,6 +98,7 @@ ALL_SUITES=(
   "$SUITE_TEST_LEDGER_RECONSTRUCT"
   "$SUITE_TEST_TRIAGE_OPS"
   "$SUITE_TEST_SUBISSUE_OPS"
+  "$SUITE_TEST_READINESS_CHECK"
   "$SUITE_TEST_SEED_HIVE"
   "$SUITE_TEST_RC_BROOD"
   "$SUITE_TEST_NEXT_WAVE"
@@ -136,6 +138,7 @@ KNOWN_SUITES=(
   test_ledger_reconstruct.sh
   test_triage_ops.sh
   test_subissue_ops.sh
+  test_readiness_check.sh
   test_seed_hive.sh
   test_rc_brood.sh
   test_next_wave.sh
@@ -430,6 +433,8 @@ run_suites() {
 #   docs/skill-authoring.md            -> policy_check (CHECK 14 and CHECK 16 read its Covered
 #                                         Navigators section; a fixture pins its Skill File-Tool
 #                                         Grants heading)
+#   plugin/skills/_shared/readiness-check.sh, tests/readiness-check/**, tools/test_readiness_check.sh
+#                                      -> test_readiness_check
 #   tools/**                           -> FULL suite (validator bootstrap)
 #   .github/**                         -> FULL suite (CI bootstrap — the gate harness itself)
 #   outside plugin|.claude-plugin|tools|tests|.github and not fixture-pinned above
@@ -494,6 +499,18 @@ map_path() {
   # escalation below: a real edit to either file still fail-closes to the full suite via that leg.
   if [[ "$p" == tools/test_scratch.sh || "$p" == tools/lib/scratch.sh ]]; then
     add_selected "$SUITE_TEST_SCRATCH" "$p (scratch helper)"
+    matched=1
+  fi
+
+  # test_readiness_check: the readiness-check library plugin/skills/_shared/readiness-check.sh, its
+  # fixture dir and its behavior suite. The library has no plugin/skills/<s>/scripts entrypoint, so
+  # this leg self-routes the three paths to the suite so --self-test check #1 finds it reachable. It
+  # runs BEFORE (and does NOT return early from) the tools/** escalation below: a real edit to
+  # tools/test_readiness_check.sh still fail-closes to the full suite via that leg.
+  if [[ "$p" == plugin/skills/_shared/readiness-check.sh \
+     || "$p" == tests/readiness-check/* \
+     || "$p" == tools/test_readiness_check.sh ]]; then
+    add_selected "$SUITE_TEST_READINESS_CHECK" "$p (readiness-check library)"
     matched=1
   fi
 
@@ -1333,6 +1350,7 @@ self_test() {
     ["test_ledger_reconstruct.sh"]="tests/ledger-reconstruct/README.md"
     ["test_triage_ops.sh"]="tests/triage-backlog/case-x.json"
     ["test_subissue_ops.sh"]="tests/prd-to-issues/case-x.json"
+    ["test_readiness_check.sh"]="tests/readiness-check/case-x.json"
     ["test_seed_hive.sh"]="plugin/skills/seed-hive/scripts/seed-hive.sh"
     ["test_rc_brood.sh"]="plugin/skills/enable-brood-remote/SKILL.md"
     ["test_next_wave.sh"]="tests/next-wave/ledger-x.json"
@@ -1611,7 +1629,8 @@ self_test() {
 
   # 10. Each consumer leg of the gather-facts, create-working-branch, push-branch, molt,
   #     open-plan-pr and synapse-gate suites, each brood-state.sh leg (test_engine,
-  #     test_brood_compat, test_rc_brood), and the hooks.json json-manifests parse leg, that the
+  #     test_brood_compat, test_rc_brood), the test_readiness_check library and harness legs, and the
+  #     hooks.json json-manifests parse leg, that the
   #     KNOWN_SUITES probe (#1) does not reach must route to its suite. #1 probes each entrypoint
   #     script, so it would stay green if the schema-chain, shared-lib, harness, push-branch child
   #     or parse-gate selector were dropped. Probe each <path>|<suite> pair directly so removing
@@ -1640,6 +1659,8 @@ self_test() {
     "plugin/skills/open-plan-pr/SKILL.md|$SUITE_TEST_OPEN_PLAN_PR" \
     "plugin/skills/_shared/allowlist.sh|$SUITE_TEST_SYNAPSE_GATE" \
     "plugin/skills/_shared/containment.sh|$SUITE_TEST_SYNAPSE_GATE" \
+    "plugin/skills/_shared/readiness-check.sh|$SUITE_TEST_READINESS_CHECK" \
+    "tools/test_readiness_check.sh|$SUITE_TEST_READINESS_CHECK" \
     "plugin/hooks/hooks.json|$SUITE_JSON_MANIFESTS" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_BROOD" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_RC_BROOD" \
