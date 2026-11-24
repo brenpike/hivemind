@@ -35,19 +35,7 @@
       "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
     },
     {
-      "file": "plugin/skills/init-run-ledger/SKILL.md",
-      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
-    },
-    {
-      "file": "plugin/skills/mark-intent-fallback/SKILL.md",
-      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
-    },
-    {
       "file": "plugin/skills/molt/SKILL.md",
-      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
-    },
-    {
-      "file": "plugin/skills/next-wave/SKILL.md",
       "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
     },
     {
@@ -56,10 +44,6 @@
     },
     {
       "file": "plugin/skills/push-branch/SKILL.md",
-      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
-    },
-    {
-      "file": "plugin/skills/record-state-result/SKILL.md",
       "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
     },
     {

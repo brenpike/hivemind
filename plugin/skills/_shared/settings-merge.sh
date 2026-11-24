@@ -339,6 +339,13 @@ unset __settings_merge_shared_dir
 # never-remove invariant above, and it could delete a rule a user had already repaired to point at
 # their real `$HOME` cache path.
 #
+# ONE-TIME DROP: the three former Edit entries for `.hivemind/runs/.init-inputs-*.json`,
+# `.hivemind/runs/.record-inputs-*.json` and `.hivemind/runs/.markfb-inputs-*.json` were
+# deleted from this template because no skill writes those paths any more. An
+# ALREADY-SEEDED consumer keeps the three entries until a human deletes them by hand. Nothing is
+# auto-removed: the merge is union append-if-absent and NEVER removes, so dropping them only stops
+# new seeds and re-seeds from adding them.
+#
 # INVARIANT (NO-PROVIDER-GRANT): no local-review provider grant — codex today, or copilot or
 # any future provider — may be added to this template. Two reasons:
 #   1. This template merges into a COMMITTED, team-shared `.claude/settings.json`, so a
@@ -346,7 +353,7 @@ unset __settings_merge_shared_dir
 #   2. Per-contributor grants belong in the GITIGNORED `.claude/settings.local.json`.
 # The full rationale for this invariant lives in ADR-0010.
 #
-# INVARIANT (NO-PATH-ANCHOR-IN-PERMISSION-RULES): the eight navigator-transport rules below that
+# INVARIANT (NO-PATH-ANCHOR-IN-PERMISSION-RULES): the five navigator-transport rules below that
 # target `.hivemind/` paths stay RELATIVE BY DECISION. They must NOT be anchored the way the
 # SubagentStart hook command is (see HOOK COMMAND ANCHORING in the header) — the two surfaces are
 # not analogous:
@@ -387,9 +394,6 @@ Bash(git tag --list*)
 Bash(git stash list)
 Bash(git stash show *)
 Edit(.hivemind/review-loop/*)
-Edit(.hivemind/runs/.init-inputs-*.json)
-Edit(.hivemind/runs/.record-inputs-*.json)
-Edit(.hivemind/runs/.markfb-inputs-*.json)
 Edit(.hivemind/spawn-inputs.*.json)
 Edit(.hivemind/seed-inputs-*.json)
 Edit(.hivemind/molt-inputs-*.json)
@@ -679,9 +683,9 @@ hivemind_settings_merge() {
     #       `canon_obj`/`canon_arr` have exactly ONE functional consumer — THIS file
     #       (`claude-mem-path.sh` names them in prose comments only, with no call). The
     #       unguarded-element idiom exists NOWHERE ELSE under `plugin/`. The nearest relative,
-    #       `plugin/skills/next-wave/scripts/next-wave.sh`, FILTERS non-conforming elements
-    #       (`select(type == "string")`) where this file must PRESERVE them — a DIFFERENT kernel,
-    #       so P9 says do not fold them. A shared primitive would ship with one consumer.
+    #       `computeWave` in `plugin/workflow-src/lib/waves.js`, IGNORES non-string done ids
+    #       where this file must PRESERVE non-conforming elements — a DIFFERENT kernel, so P9
+    #       says do not fold them. A shared primitive would ship with one consumer.
     #       `canon_elem` is nonetheless named into the `canon_*` family deliberately: it is the
     #       element-position member of the SAME law, and renaming it out of that family would weaken
     #       the one-law claim the header makes. See ADR-0028 (element-access amendment).

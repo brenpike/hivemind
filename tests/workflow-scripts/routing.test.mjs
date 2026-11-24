@@ -132,14 +132,6 @@ function bumpTypeLines() {
   ];
 }
 
-function nextWaveSpec() {
-  return {
-    all_done: { pattern: BOOLEAN, required: true },
-    wave: { pattern: /\[\]|\[[A-Za-z0-9._-]+(, [A-Za-z0-9._-]+)*\]/, required: true },
-    remaining: { pattern: COUNT, required: true }
-  };
-}
-
 function assertLineProblem(result, problem, line) {
   assert.deepEqual(result, { ok: false, problem: problem, line: line });
 }
@@ -237,17 +229,6 @@ describe('header-derived samples parse', () => {
         dropped_reverts: '2'
       }
     });
-  });
-  test('next-wave with a wave list', () => {
-    const text = joinLines(['all_done: false', 'wave: [STEP-001, STEP-003]', 'remaining: 4']);
-    assert.deepEqual(parse(text, nextWaveSpec()), {
-      ok: true,
-      values: { all_done: 'false', wave: '[STEP-001, STEP-003]', remaining: '4' }
-    });
-  });
-  test('next-wave all done with an empty wave', () => {
-    const text = joinLines(['all_done: true', 'wave: []', 'remaining: 0']);
-    assert.equal(parse(text, nextWaveSpec()).values.wave, '[]');
   });
 });
 

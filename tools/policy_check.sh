@@ -1403,18 +1403,9 @@ mark_time 'CHECK8'
 # For each (script, guarded-token) pair we locate:
 #   * the GUARD line (the containment helper invocation for that token), and
 #   * the FIRST DANGEROUS READ line (the first jq/cat that actually opens the
-#     file, or — for $ledger — the first existence/validity probe on the
-#     post-derivation path).
+#     file).
 # We FIRE when a token is read but (a) has NO guard at all, or (b) its first
 # dangerous read occurs at a line number BEFORE the guard.
-#
-# The $INPUTS_FILE containment guard may be satisfied EITHER by an inline
-# hivemind_assert_inputs_contained call OR by delegation to the
-# hivemind_read_inputs_file shared helper, which performs that assertion
-# internally (per the ADR-0020 engine-IO extraction, issue #245). Both forms
-# are recognized as the guard line. This recognizes a real guard and does NOT
-# weaken the check: a script that reads $INPUTS_FILE with NEITHER an inline
-# assertion NOR the helper call still fires a missing-guard finding.
 #
 # Deliberate exclusions to avoid false positives:
 #   * the GUARD line itself names the token as an argument — never counted as a read.
@@ -1422,30 +1413,6 @@ mark_time 'CHECK8'
 #     presence probes that legitimately precede the inputs guard; only the first
 #     `jq` open of $INPUTS_FILE is the read the guard must gate (the jq validity
 #     probe is the canonical read-oracle, per the engine reference script).
-#   * for $ledger the path is DERIVED after the runs-dir guard, so its first
-#     `[ -f "$ledger" ]` existence probe IS a real read of the derived path and
-#     the guard must precede it.
-#
-# Two distinct guards are enforced for the ledger, as SEPARATE token rows:
-#   * $ledger      — the ANCESTOR/runs-dir ordering guard (hivemind_assert_contained)
-#                    must precede the first ledger read. Its guard pattern is anchored
-#                    to the EXECUTABLE invocation (^[[:space:]]*[^#]*hivemind_assert_contained
-#                    [^#]*\.hivemind/runs/$run_id) so the prose comments that merely NAME
-#                    hivemind_assert_contained are not miscounted as the guard line —
-#                    otherwise the first match would be an explanatory comment ABOVE the
-#                    real call, and a $ledger read moved above the real guard could pass.
-#                    The read pattern is likewise line-start anchored (^[[:space:]]*) so a
-#                    `[ -f "$ledger" ]` appearing inside a comment is not miscounted as the
-#                    first read.
-#   * $ledger-leaf — the LEAF symlink guard (hivemind_assert_ledger_contained) must
-#                    ALSO precede the first ledger read. This makes the leaf guard
-#                    TERMINAL: a containment-sourcing engine that reads "$ledger"
-#                    without first calling hivemind_assert_ledger_contained fires a
-#                    missing-guard or ordering finding, so a reverted leaf guard or a
-#                    new unguarded ledger reader cannot regress silently. The
-#                    $ledger-leaf row anchors its read/guard patterns at line start
-#                    (^[[:space:]]*) so prose in comments naming the symbols is not
-#                    miscounted as a guard or a read.
 
 echo ''
 echo '=== CHECK 9: Containment guard precedes guarded read in engine scripts ==='
@@ -1485,31 +1452,21 @@ for engine_script in "${check9_engine_scripts[@]}"; do
 
     # Token table: TOKEN | GUARD_PATTERN | READ_PATTERN | READ_EXCLUDE
     # READ_EXCLUDE removes existence/arg-presence/symlink probes that legitimately
-    # precede the guard so they are not mistaken for the gated open. For
-    # $INPUTS_FILE the GUARD_PATTERN and READ_EXCLUDE both accept the
-    # hivemind_read_inputs_file helper call as the guard (it runs
-    # hivemind_assert_inputs_contained internally; ADR-0020 / #245), so the
-    # bootstrap helper-call line is neither a missing guard nor a counted read.
+    # precede the guard so they are not mistaken for the gated open.
     # EVERY GUARD_PATTERN is anchored to an EXECUTABLE line (^[[:space:]]*[^#]*)
-    # so a COMMENT that merely NAMES the guard helper (e.g. a `# hivemind_read_inputs_file
+    # so a COMMENT that merely NAMES the guard helper (e.g. a `# hivemind_assert_inputs_contained
     # "$INPUTS_FILE"` doc line above the first real read) is NOT miscounted as the
     # guard — otherwise an engine reading $INPUTS_FILE with no real guard
     # could pass on the strength of a comment mention.
-    declare -a token_labels=('$INPUTS_FILE' '$ledger' '$ledger-leaf')
+    declare -a token_labels=('$INPUTS_FILE')
     declare -a token_guards=(
-        '^[[:space:]]*[^#]*(hivemind_assert_inputs_contained|hivemind_read_inputs_file)[^#]*"\$INPUTS_FILE"'
-        '^[[:space:]]*[^#]*hivemind_assert_contained[^#]*\.hivemind/runs/\$run_id'
-        '^[[:space:]]*hivemind_assert_ledger_contained'
+        '^[[:space:]]*[^#]*hivemind_assert_inputs_contained[^#]*"\$INPUTS_FILE"'
     )
     declare -a token_reads=(
         '(jq |cat )[^#]*"\$INPUTS_FILE"'
-        '^[[:space:]]*(jq |cat |\[ -f )[^#]*"\$ledger"'
-        '^[[:space:]]*(jq |cat |\[ -f )[^#]*"\$ledger"'
     )
     declare -a token_read_excludes=(
-        'hivemind_assert_inputs_contained|hivemind_read_inputs_file|\[ -[fnL] '
-        'hivemind_assert(_contained|_ledger_contained)'
-        'hivemind_assert(_contained|_ledger_contained)'
+        'hivemind_assert_inputs_contained|\[ -[fnL] '
     )
 
     ti=0
@@ -2417,7 +2374,7 @@ mark_time 'CHECK14'
 # decoration, so P19 is only real once a CI guard asserts it -- this is that
 # guard.
 #
-# SCOPE. plugin/**/*.md plus plugin/workflows/*.json: the runtime-loaded
+# SCOPE. plugin/**/*.md only: the runtime-loaded
 # instruction payload an agent reads as its own context. Committed shell under
 # plugin/ is deliberately OUT of scope -- its comments are developer-facing and
 # are never loaded into an agent's context, so a tracker ID there stales a
@@ -2514,11 +2471,9 @@ mark_time 'CHECK14'
 #     layer each return non-zero on failure instead of empty output, and that
 #     discovery selects by name only and descends a symlinked directory.
 #
-# Discovery FAILS CLOSED PER ARM: each of the two discovery arms (`plugin/**/*.md`
-# and `plugin/workflows/*.json`) carries its OWN zero-file assertion. An aggregate
-# count cannot carry this guarantee -- a missing, renamed, or unreadable workflows
-# tree yields zero JSON files while the markdown arm keeps the aggregate nonzero,
-# so half the stated scope would vanish with the check still green. A find that
+# Discovery FAILS CLOSED: the one discovery arm (`plugin/**/*.md`) carries its
+# OWN zero-file assertion, so a missing, renamed, or unreadable payload tree
+# that yields zero Markdown files is a finding, never a green check. A find that
 # fails, or a path stream that ends without its trailing status record, is its
 # own finding. Because discovery passes no type test, every name-matching path is
 # handed to the read gate: a symlink to a regular file is read through it, and a
@@ -2526,7 +2481,7 @@ mark_time 'CHECK14'
 # symlink to one), or unreadable is a finding, as is a classifier that exits
 # non-zero on a file -- never a clean file.
 #
-# Both arms discover through the shared checked-discovery engine
+# The arm discovers through the shared checked-discovery engine
 # (discover_checked_paths under CHECK15_DISCOVERY_GATE, see the Checked
 # discovery section), which follows symlinks with -L script-wide: a symlinked
 # directory under plugin/ is descended and every name-matching path beneath it
@@ -2759,11 +2714,10 @@ scan_file_for_tracker_refs() {
 # INVARIANT: discovery selects by NAME only, never by type: every name-matching
 # path reaches the read gate, where a path that is missing or not a regular file becomes a
 # finding instead of being dropped silently by find. The traversal canary pins
-# these arrays literally.
+# this array literally.
 CHECK15_MD_FIND_ARGS=(-name '*.md')
-CHECK15_JSON_FIND_ARGS=(-maxdepth 1 -name '*.json')
 
-# INVARIANT: both arms discover under the `raw` gate. check15_read_records is
+# INVARIANT: the arm discovers under the `raw` gate. check15_read_records is
 # CHECK 15's type gate; a `files` gate ahead of it would reject a directory or
 # dangling link before the read gate, leaving the traversal canary's read-gate
 # probes guarding a path production never reaches. The traversal canary pins
@@ -2777,29 +2731,14 @@ for prose_file in "${check15_md_files[@]}"; do
     scan_file_for_tracker_refs "$prose_file"
 done
 
-declare -a check15_json_files=()
-discover_checked_paths 'CHECK15' check15_json_files "$CHECK15_DISCOVERY_GATE" 'plugin/workflows/*.json' "$PLUGIN_ROOT/workflows" -- "${CHECK15_JSON_FIND_ARGS[@]}" || check15_found=true
-check15_json_count="${#check15_json_files[@]}"
-for prose_file in "${check15_json_files[@]}"; do
-    scan_file_for_tracker_refs "$prose_file"
-done
+check15_file_count="$check15_md_count"
 
-check15_file_count=$((check15_md_count + check15_json_count))
-
-# Per-arm fail-closed. Each arm's tree is non-empty by construction, so a zero
-# count means that arm was moved, renamed, or is unreadable -- and a per-arm
-# assertion is the only shape that catches it: an aggregate count stays nonzero
-# while one arm silently contributes nothing.
+# Fail-closed. The arm's tree is non-empty by construction, so a zero count
+# means the payload tree was moved, renamed, or is unreadable.
 if [[ "$check15_md_count" -eq 0 ]]; then
     check15_found=true
     add_finding 'CHECK15' "$PLUGIN_ROOT" 0 \
-        "Tracker-reference discovery found ZERO plugin/**/*.md runtime prose files, which disarms half this check; restore the payload tree or retire the check deliberately"
-fi
-
-if [[ "$check15_json_count" -eq 0 ]]; then
-    check15_found=true
-    add_finding 'CHECK15' "$PLUGIN_ROOT/workflows" 0 \
-        "Tracker-reference discovery found ZERO plugin/workflows/*.json runtime definitions, which disarms half this check; restore the workflow-definition tree or retire the check deliberately"
+        "Tracker-reference discovery found ZERO plugin/**/*.md runtime prose files, which disarms this check; restore the payload tree or retire the check deliberately"
 fi
 
 # ── CHECK 15 DETECTION CANARY ──────────────────────────────────────────────
@@ -3026,7 +2965,6 @@ check15_expect_find_args() {
 }
 
 check15_expect_find_args 'CHECK15_MD_FIND_ARGS' '-name *.md' "${CHECK15_MD_FIND_ARGS[@]}"
-check15_expect_find_args 'CHECK15_JSON_FIND_ARGS' '-maxdepth 1 -name *.json' "${CHECK15_JSON_FIND_ARGS[@]}"
 if [[ "$CHECK15_DISCOVERY_GATE" != 'raw' ]]; then
     check15_flag_traversal_canary "CHECK15_DISCOVERY_GATE is '${CHECK15_DISCOVERY_GATE}' but must be exactly 'raw' -- check15_read_records is the type gate, so a discovery gate ahead of it rejects a directory or dangling link before the read gate ever sees it"
 fi
@@ -3931,7 +3869,7 @@ check16_expect_doc_clean() {
 }
 
 if [[ -n "$CHECK16_CACHE_READ_RULE" ]]; then
-    check16_canary_glob='.hivemind/runs/.record-inputs-*.json'
+    check16_canary_glob='.hivemind/seed-inputs-*.json'
 
     check16_expect_hit 'Read'
     check16_expect_hit 'Write   # x'
@@ -3978,7 +3916,7 @@ if [[ -n "$CHECK16_CACHE_READ_RULE" ]]; then
     check16_expect_recognized 'mcp__plugin_claude-mem_mcp-search__search'
     check16_expect_recognized "$CHECK16_CACHE_READ_RULE"
 
-    check16_expect_safe_glob '.hivemind/runs/.record-inputs-*.json'
+    check16_expect_safe_glob '.hivemind/sub/.x-inputs-*.json'
     check16_expect_safe_glob '.hivemind/spawn-inputs.*.json'
     check16_expect_unsafe_glob '.hivemind/**'
     check16_expect_unsafe_glob '.hivemind/*'

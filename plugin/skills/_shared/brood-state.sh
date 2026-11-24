@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 #
 # brood-state.sh — the ONLY code that reads coordinator brood state: the brood listing, a brood
-# manifest, a child run ledger, a child's facts evidence and the pre-launch facts guard.
+# manifest, a child's facts evidence and the pre-launch facts guard.
 #
 # THIS FILE IS SOURCED, NOT EXECUTED. No shebang: each caller sources it by absolute path derived
 # from its OWN script_dir (`. "$plugin_root/skills/_shared/brood-state.sh"`). It defines functions
@@ -16,16 +16,15 @@
 # `set -u` and error routing. Allowlisted under CHECK13 as a P18 documented exception.
 #
 # CALLER CONTRACT: source containment.sh BEFORE this file (every reader resolves its root with
-# hivemind_canon_root). Source ledger-project.sh before calling hivemind_brood_read_child_ledger
-# (it projects the two ledger scalars with hivemind_project_state_current_content /
-# hivemind_project_run_status_content).
+# hivemind_canon_root).
 #
-# TRUST BOUNDARY: ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Trust-Boundary Discipline,
-# item 3) and the ADR-0037 slice 4 amendment. Brood children run as the same OS user as the
-# coordinator, so they are not a security boundary against it; these checks catch ACCIDENTS (a
-# stray symlink, a non-regular file, a NUL byte, several JSON documents), not a hostile child.
+# TRUST BOUNDARY: ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Trust-Boundary Discipline),
+# the brood child → coordinator boundary, and the ADR-0037 slice 4 amendment. Brood children run
+# as the same OS user as the coordinator, so they are not a security boundary against it; these
+# checks catch ACCIDENTS (a stray symlink, a non-regular file, a NUL byte, several JSON
+# documents), not a hostile child.
 # Every function takes IDENTIFIERS (a checkout or worktree root the caller derived from git, a
-# brood id, a run id) and derives every location from them; no function accepts a file path.
+# brood id) and derives every location from them; no function accepts a file path.
 # Each directory component under the canonical root is tested in turn: a symlinked or
 # non-directory component is refused, never followed.
 #
@@ -68,16 +67,6 @@
 #     never followed). Non-matching names and real directories without a manifest.json entry
 #     are skipped.
 #
-#   hivemind_brood_read_child_ledger <worktree_root> <run_id>
-#     <run_id> must be one safe path component (non-empty, no '/', not . or ..), else both lines
-#     are MALFORMED. Tests .hivemind, runs and <run_id> under the canonical worktree and reads
-#     state.json. Prints exactly two lines, state.current then run.status:
-#       MISSING / MISSING     the chain or the leaf is absent
-#       MALFORMED / MALFORMED the chain or the leaf is refused, or the leaf is unreadable
-#       otherwise each line is hivemind_project_state_current_content /
-#       hivemind_project_run_status_content over the one snapshot (a validated value, MISSING
-#       or MALFORMED). Always returns 0. Never prints raw ledger bytes.
-#
 #   hivemind_detect_facts_evidence <worktree_root>
 #     Prints `yes` when a REGULAR, NON-SYMLINK file whose name has the exact gather-facts output
 #     shape facts-<8 digits>T<6 digits>Z-<12 lowercase hex>.json sits directly in the worktree's
@@ -95,14 +84,13 @@
 # (hivemind_brood_facts_absent) refuses a strain (marked failed, worktree removed, never launched)
 # when its fresh worktree already holds `.hivemind/facts` in any form, so a facts file committed
 # in a hostile base ref (force-added past the .hivemind/ gitignore) and materialized by
-# `git worktree add` never reaches a launched strain. The run-ledger source carries the same
-# guarantee: its leaf is keyed by the spawn-generated brood GUID run id. A match proves the file
-# was written after launch, NOT that gather-facts wrote it: any process that runs after launch can
-# write a facts-shaped file (or, knowing the run id from task.md, a run-ledger state.current).
+# `git worktree add` never reaches a launched strain. A match proves the file was written after
+# launch, NOT that gather-facts wrote it: any process that runs after launch can write a
+# facts-shaped file.
 # Recorded residual, ADR-0037 amendment 2026-10-24 (slice 4), "A process that runs after launch
 # can write a facts-shaped file".
 #
-# DEPENDENCIES: containment.sh, ledger-project.sh (child ledger only), jq, tr, sort.
+# DEPENDENCIES: containment.sh, jq, tr, sort.
 
 # hivemind_brood_id_matches <name>
 # Contract: see CONTRACT in the header.
@@ -272,42 +260,6 @@ hivemind_brood_list_ids() {
     *) return 2 ;;
   esac
   hivemind__brood_list_entries "$broods_dir"
-}
-
-# hivemind_brood_read_child_ledger <worktree_root> <run_id>
-# Contract: see CONTRACT in the header.
-hivemind_brood_read_child_ledger() {
-  local worktree_root="$1"
-  local run_id="$2"
-  case "$run_id" in
-    ''|.|..|*/*)
-      printf 'MALFORMED\nMALFORMED\n'
-      return 0
-      ;;
-  esac
-  local canon_wt
-  if ! canon_wt="$(hivemind_canon_root "$worktree_root")"; then
-    printf 'MALFORMED\nMALFORMED\n'
-    return 0
-  fi
-  local run_dir ledger_json read_status
-  run_dir="$(hivemind__brood_walk_dir "$canon_wt" .hivemind runs "$run_id" 2>/dev/null)"
-  read_status=$?
-  if [ "$read_status" -eq 0 ]; then
-    ledger_json="$(hivemind_brood_read_json "$run_dir" state.json 2>/dev/null)"
-    read_status=$?
-  fi
-  case "$read_status" in
-    0) ;;
-    4) printf 'MISSING\nMISSING\n' ;;
-    *) printf 'MALFORMED\nMALFORMED\n' ;;
-  esac
-  if [ "$read_status" -ne 0 ]; then
-    return 0
-  fi
-  hivemind_project_state_current_content "$ledger_json"
-  hivemind_project_run_status_content "$ledger_json"
-  return 0
 }
 
 # hivemind__brood_facts_match <facts_dir>

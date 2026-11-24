@@ -90,8 +90,8 @@ _Alias_: trivial fast path (TFP)
 _Avoid_: quick path, shortcut
 
 **Instinct**:
-A permanent, named delivery path for a non-Reflex `standard-delivery` request, beside the script engine. The overlord drives it by judgment — no workflow script, no **Run Ledger**, no state-machine gating. Pairs with **Reflex**: Reflex is the trivial fast path, Instinct the full delivery done by intent. It names what every run must have (a plan, a **Working Branch**, delegated edits, **Molt** commits and the delivery gates) and leaves order to judgment; not a step sequence. It is also the fallback for a refused or failed `standard-delivery` engine run. A started run the **Guide** launched is the exception: when it fails or ends blocked it returns to the **Guide** (ADR-0046). The path choice and the fallback rules live in `plugin/agents/overlord.md` (`## Engine`, `## Instinct`) and ADR-0039.
-_Avoid_: light path (the placeholder name), intent-driven fallback (the degraded mode of a ledgered run), manual mode
+A permanent, named path the overlord drives by judgment, with no workflow script. Pairs with **Reflex**: Reflex is the trivial fast path, Instinct the full run done by intent. It delivers a `standard-delivery` request, runs a read-only analysis, remediates review feedback on an existing pull request, and dispatches a **Brood**. It names what every run must have (a plan from fresh facts, a **Working Branch** when the run changes files, delegated edits, **Molt** commits and the delivery gates) and leaves order to judgment; not a step sequence. At an interactive autonomy level, it is the one fallback for every refused or blocked workflow launch and for a started `standard-delivery` run that fails or ends blocked. A started run the **Guide** launched is the exception: when it fails or ends blocked it returns to the **Guide** (ADR-0046). The rules live in `plugin/agents/overlord.md` (`## Engine`, `## Instinct`, `## Brood Execution`), ADR-0039 and ADR-0048.
+_Avoid_: light path (the placeholder name), manual mode
 
 **Session Facts**:
 Cached resolved values (trunk name, task-type, claude-mem status, active-step) that persist within a task to avoid redundant lookups.
@@ -208,7 +208,7 @@ The opt-in merge of a watched PR by the fixed script `merge-approved.sh`, run on
 _Avoid_: merge-advised, agent merge, merge decision
 
 **Remediation Doctrine**:
-The governance doc (`plugin/governance/remediation-doctrine.md`) holding the shared, definitional policy meaning of root-cause review remediation — **First-Finding Triage**, Root-Cluster, Same-Framing Test, Closed-by-Construction Preference, Surface-Growth Escalation (a fix that adds more surface than it removes goes to the user as one architectural call), Bounded-Impact Gating, Defer-with-Scope (only for a finding that is not a found root cause; it routes the finding by destination — a tracked issue when it is work someone should do, a Recorded Residual when it is a decision rather than work), Recorded Residual (admissible only outside the recorded threat model, or for a class no fix on this engine can close, by user decision; never on origin), Recorded Decisions and **Repeat Findings**, Stop-and-Merge, and Severity as Sensitivity Modifier — loaded by both reviewers, the overlord, and the cerebrate so all four share one vocabulary. The one home for these rules on both engines: the standard-delivery script's review handling follows it too, and no consumer copies it (ADR-0038). Policy only; detection mechanics live in **detect-remediation-signals**.
+The governance doc (`plugin/governance/remediation-doctrine.md`) holding the shared, definitional policy meaning of root-cause review remediation — **First-Finding Triage**, Root-Cluster, Same-Framing Test, Closed-by-Construction Preference, Surface-Growth Escalation (a fix that adds more surface than it removes goes to the user as one architectural call), Bounded-Impact Gating, Defer-with-Scope (only for a finding that is not a found root cause; it routes the finding by destination — a tracked issue when it is work someone should do, a Recorded Residual when it is a decision rather than work), Recorded Residual (admissible only outside the recorded threat model, or for a class no fix on this engine can close, by user decision; never on origin), Recorded Decisions and **Repeat Findings**, Stop-and-Merge, and Severity as Sensitivity Modifier — loaded by both reviewers, the overlord, and the cerebrate so all four share one vocabulary. The one home for these rules on every path: the standard-delivery script's review handling follows it too, and no consumer copies it (ADR-0038). Policy only; detection mechanics live in **detect-remediation-signals**.
 _Avoid_: remediation policy, doctrine doc, remediation rules
 
 **First-Finding Triage**:
@@ -224,7 +224,7 @@ A set of N-or-more review findings sharing a root cause, surface, or fix-framing
 _Avoid_: finding group, batch, duplicate set
 
 **`root-cluster-suspected`**:
-The reviewer exit_reason that carries a detected **Root-Cluster** (shared surface, member thread/finding refs, hypothesized root cause, same-framing rationale). Routes the overlord to a cerebrate remediation zoom-out (`review_remediation_plan` / `review_remediation_plan_postpr`) for one structural fix instead of N narrow patches.
+The reviewer exit_reason that carries a detected **Root-Cluster** (shared surface, member thread/finding refs, hypothesized root cause, same-framing rationale). Routes the overlord to a cerebrate remediation zoom-out for one structural fix instead of N narrow patches.
 _Avoid_: cluster-found, zoom-out signal, whack-a-mole exit
 
 **Merge-Advised**:
@@ -247,12 +247,8 @@ The test that promotes a Tier-B decision back to a surface — trips when the re
 _Avoid_: escalation gate, risk gate
 
 **Decision Journal**:
-The per-decision record (situation, options, trade-offs, recommendation strength, gate outcome, disposition, decision, rationale, reversibility) the overlord appends to the run ledger's `event.outputs.decisions[]` for every autonomous (and surfaced) decision.
+The decisions a run that opens a pull request, or pushes to one through `hivemind:open-plan-pr`, took for the user, one line each, listed on that pull request and in the run's final message or report. A run with no pull request keeps none; where it lists its decisions is set by ADR-0048 decision 6.
 _Avoid_: audit log, decision log
-
-**Decision Report**:
-The OPT-IN post-merge narrative the overlord surfaces after a PR merges — only when the decision report is enabled via `HIVEMIND_ENABLE_DECISION_REPORT` — recounting each autonomous decision in the consumer project's ubiquitous language; produced by `hivemind:decision-report`.
-_Avoid_: summary, changelog
 
 **Disposition**:
 The outcome of a Tier-B decision — `did-now` (auto-executed), `deferred` (tracked follow-up), `recorded` (accepted residual — the reasoning is recorded in the repository next to the code; no tracker entry), or `surfaced` (returned to the Overmind).
@@ -420,35 +416,11 @@ The user-only conductor skill, run in the main session, that takes the maintaine
 _Alias_: conductor
 _Avoid_: wizard, pipeline runner, workflow (which takes no input mid-run)
 
-### Workflow State Machine
-
-**Workflow Definition**:
-A declarative JSON file under `plugin/workflows/<id>.json` enumerating a workflow's legal states and named transitions. Read-only at runtime, parsed by `jq`. Names WHO acts (agent/skill/overlord decision) and WHAT outcomes are legal next — never WHY an outcome is chosen (the WHO/WHAT-not-WHY invariant, ADR-0018). Authored as JSON (not YAML) because the deterministic engine parses it; `description` fields replace comments.
-_Avoid_: workflow YAML, STT, state table, workflow spec
-
-**Run Ledger**:
-The per-instance JSON file at `.hivemind/runs/<run-id>/state.json` recording one overlord instance's workflow progress — current state, event log, facts, blockers. The source of truth for progress (conversation memory is not). Written via temp-write + atomic rename; untrusted fields serialized with `jq --arg`. Owned and mutated only by the instance whose worktree contains it.
-_Avoid_: state file, run state, progress log
+### Routing
 
 **Workflow Router**:
-The `hivemind:route-workflow` skill — the sole classifier that selects a workflow for a request by judgment (never a keyword lookup table). Outcomes: `selected`, `ambiguous` (2+ known → confirm gate), `exploratory` (no known match → catch-all), `blocked` (unsafe/illegible only). Keeps the overlord flat as the workflow catalog grows: a new workflow = a new definition + one routing rule.
+The `hivemind:route-workflow` skill — the sole classifier that selects a workflow for a request by judgment (never a keyword lookup table). Outcomes: `selected`, `ambiguous` (2+ known → confirm gate) and `blocked` (unsafe/illegible only). A request no workflow fits goes to `analysis-only` when it asks for no change, to `standard-delivery` when it asks for one, and is `ambiguous` otherwise. A selected workflow launches its workflow script when it has one and the launch goes ahead; otherwise it runs on **Instinct**.
 _Avoid_: classifier, dispatcher, intent matcher
-
-**Exploratory Intent Session**:
-The catch-all workflow (`exploratory-intent-session`) the router selects when no concrete workflow matches. Handles novel requests in a bounded, ledgered, observable way and emits an advisory recommendation on whether the pattern should be codified into a new workflow — never auto-authoring one. The data-driven nursery for future workflows; the router must prefer concrete workflows over it.
-_Avoid_: default workflow, fallback workflow, misc
-
-**Transition Engine**:
-The committed `record-state-result.sh` script (with `init-run-ledger.sh`) that deterministically reads the ledger + definition, validates `result ∈ allowed`, mutates, and atomically writes. The skill is a thin navigator; the script owns the determinism (the `spawn-brood.sh` precedent).
-_Avoid_: advance-workflow, state updater
-
-**Run Ownership**:
-The policy (RUN-OWNERSHIP-01) that a run ledger is owned and mutated only by the overlord instance whose worktree contains it; cross-instance reads (hatchery → child ledger) are read-only. Enforced by worktree isolation, not convention; the brood manifest is the sole shared artifact and only the hatchery writes it.
-_Avoid_: ledger lock, write policy
-
-**Intent-Driven Fallback**:
-The universal degradation posture: whenever the deterministic substrate is unavailable or invalidated — workflow-definition version skew across a plugin upgrade, a torn/missing ledger, an unresolvable state — the overlord finishes by judgment (transition gating suspended, run marked `intent_fallback`) rather than hard-failing. Determinism only ever adds safety/observability; it never strands a run. Worst case equals pure-intent behavior.
-_Avoid_: degraded mode, manual mode, safe mode
 
 ## Relationships
 
@@ -479,7 +451,6 @@ _Avoid_: degraded mode, manual mode, safe mode
 - An **Unsafe Git State** blocks all modifying agent operations until resolved
 
 - An **Overlord** records a **Decision Journal** entry for every Tier-B decision; the **Promotion Gate** decides whether the decision is auto-taken or surfaced to the **Overmind**
-- A **Decision Report** is produced once per merged PR that contains ≥1 auto **Disposition** (`did-now`, `deferred`, or `recorded`) when the decision report is enabled via `HIVEMIND_ENABLE_DECISION_REPORT`, rendered in the consumer's ubiquitous language
 - **Remediation** Tier-B choices (planner-escalation, root-cluster routing) are auto-taken + journaled unless the **Promotion Gate** trips
 
 - A **Brood** contains one or more **Strains**, each running in a separate git worktree
@@ -503,13 +474,11 @@ _Avoid_: degraded mode, manual mode, safe mode
 - Triage proposes `readiness:ready` only for an issue that passes the **Readiness Check**; the **Lair** re-runs the check at claim time and claims only a **Ready Issue**
 - The **Guide** (conductor) orchestrates `hivemind:plan-interrogation`, `hivemind:plan-to-prd`, the **Design Review** and `hivemind:prd-to-issues` by intent, and leaves `readiness:ready` to the maintainer through triage
 
-- A **Workflow Router** selects exactly one **Workflow Definition** for a request, or routes to the **Exploratory Intent Session** when no concrete workflow matches; outside **Instinct**, the **Overlord** then executes that definition's states, advancing only via the **Transition Engine** and recording progress in the **Run Ledger**
-- A **Reflex** (trivial fast path) bypasses the **Workflow Router** and the **Run Ledger** entirely — the **Overlord** drives the short delivery tail by intent, just as it skips the **Cerebrate**
-- **Instinct** follows the **Workflow Router** (it is taken only for `standard-delivery`) but bypasses the **Run Ledger** and the **Transition Engine** — unlike a **Reflex**, it keeps the **Cerebrate** plan, the **Working Branch**, and every delivery gate
-- **Instinct** is the fallback for a refused or failed `standard-delivery` script-engine run, except a started run the **Guide** launched; its rules live in ADR-0039 and ADR-0046
-- **Intent-Driven Fallback** is the floor beneath every **Workflow Definition**: when the deterministic substrate is invalidated, execution degrades to judgment rather than failing
-- **Run Ownership** (RUN-OWNERSHIP-01) is enforced by worktree isolation; a **Hatchery** reads child **Run Ledgers** read-only and never mutates them (consistent with ADR-0007)
-- The declarative **Workflow Definition** + **Run Ledger** are JSON (parsed by `jq`); all inter-agent/human-read contracts stay YAML — format follows consumer (ADR-0018)
+- A **Workflow Router** selects exactly one workflow for a request; the **Overlord** launches its workflow script, or runs it on **Instinct** when it has none or its launch is refused or blocked
+- A **Reflex** (trivial fast path) bypasses the **Workflow Router** entirely — the **Overlord** drives the short delivery tail by intent, just as it skips the **Cerebrate**
+- **Instinct** follows the **Workflow Router** — unlike a **Reflex**, it keeps the **Cerebrate** plan from fresh facts, the **Working Branch** and every delivery gate
+- **Instinct** is the one fallback for a refused or blocked launch of any workflow, and for a failed `standard-delivery` run, except a started run the **Guide** launched; its rules live in ADR-0039, ADR-0046 and ADR-0048
+- A **Hatchery** reads only a child's facts file name and type as started-evidence, never its other files, and never mutates them (consistent with ADR-0007)
 
 ## Example dialogue
 
@@ -538,4 +507,5 @@ _Avoid_: degraded mode, manual mode, safe mode
 - "scope" — resolved: always means file scope (the explicit file list in a spawn), never task scope or project scope.
 - "validation" vs "verification" — resolved and promoted to glossary terms: **Validation** means running declared project commands; **Verification** means the overlord's post-phase acceptance checks (scope compliance, report schema conformance, git state safety).
 - "light path" — placeholder name, resolved to **Instinct**.
+- "run ledger" — retired (ADR-0048). Files under `.hivemind/runs/` from older versions are neither read nor deleted. No path keeps a run ledger: a run that opens a branch and a pull request is recorded by them, and a run that opens none, such as a read-only analysis, keeps no record.
 - "prototype" — resolved: **UI Prototype** is the approved look of an **Initiative**'s user-facing surface, an initiative artifact; the Prototype exception of `hivemind:plan-to-prd` is a labelled code sketch inside the PRD of a throwaway prototype or spike. Name either one in full, never a bare "prototype".

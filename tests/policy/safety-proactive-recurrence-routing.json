@@ -10,10 +10,6 @@
       "pattern": "remediation-doctrine.md` (Proactive Zoom-Out Marker)"
     },
     {
-      "file": "plugin/references/run-ledger-schema.md",
-      "pattern": "remediation-doctrine.md` (Proactive Zoom-Out Marker)"
-    },
-    {
       "file": "plugin/governance/decision-autonomy.md",
       "pattern": "Cross-Iteration Same-Surface Recurrence, Proactive Zoom-Out Marker)"
     }

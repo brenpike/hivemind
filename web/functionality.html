@@ -114,7 +114,7 @@
           </article>
           <article class="panel card">
             <h3 class="xg">jq</h3>
-            <p>Required by the run-ledger engines (<code>hivemind:init-run-ledger</code>, <code>hivemind:record-state-result</code>), by the facts and git scripts (<code>hivemind:gather-facts</code>, <code>hivemind:molt</code>, <code>hivemind:open-plan-pr</code>), and by <code>hivemind:seed-hive</code>.</p>
+            <p>Required by the facts and git scripts (<code>hivemind:gather-facts</code>, <code>hivemind:molt</code>, <code>hivemind:open-plan-pr</code>), the brood scripts and <code>hivemind:seed-hive</code>.</p>
             <span class="tag tag--ember">JSON</span>
           </article>
         </div>
@@ -270,24 +270,8 @@
                 <td>The sole workflow classifier: selects which workflow handles a non-Reflex request by judgment (never a keyword table), emitting selected, ambiguous, or blocked.</td>
               </tr>
               <tr>
-                <td><code>hivemind:init-run-ledger</code></td>
-                <td>State machine only. Initialize the run ledger for the current overlord instance: creates <code>.hivemind/runs/&lt;run-id&gt;/</code> and writes the initial <code>state.json</code> via the committed engine script.</td>
-              </tr>
-              <tr>
-                <td><code>hivemind:record-state-result</code></td>
-                <td>State machine only. Record the outcome of the current workflow state into the run ledger and advance <code>state.current</code> to the legal next state, validated against the workflow definition.</td>
-              </tr>
-              <tr>
-                <td><code>hivemind:next-wave</code></td>
-                <td>State machine only (the <code>standard-delivery</code> script computes its waves in code, in <code>plugin/workflow-src/lib/waves.js</code>, with parity tests against this engine). Reads the run ledger and computes the ready wave: the maximal, file-disjoint set of dependency-satisfied plan steps to dispatch in parallel this iteration.</td>
-              </tr>
-              <tr>
-                <td><code>hivemind:mark-intent-fallback</code></td>
-                <td>Sanctioned engine write path for the version-skew intent-fallback resume door and the start-fresh stale-run closeout: sets <code>run.mode:intent_fallback</code>, appends a fallback event, and optionally closes a stale run via <code>run.status</code>.</td>
-              </tr>
-              <tr>
                 <td><code>hivemind:create-working-branch</code></td>
-                <td>Create or confirm a compliant working branch before implementation, through a committed script that refuses a dirty tree, an in-progress merge, rebase, cherry-pick, revert or bisect, and a working branch that is trunk, before any change. Used by both engines.</td>
+                <td>Create or confirm a compliant working branch before implementation, through a committed script that refuses a dirty tree, an in-progress merge, rebase, cherry-pick, revert or bisect, and a working branch that is trunk, before any change. Used by the workflow scripts and on Instinct.</td>
               </tr>
               <tr>
                 <td><code>hivemind:gather-facts</code></td>
@@ -295,11 +279,11 @@
               </tr>
               <tr>
                 <td><code>hivemind:molt</code></td>
-                <td>Commit a completed phase, milestone, version bump, or review-remediation item through the committed <code>molt.sh</code> script, which commits exactly the listed files, refuses any other dirty path before it changes anything, and reports <code>committed: false</code> when there is nothing to commit. Used by both engines; in a workflow script it closes each wave and each gate step.</td>
+                <td>Commit a completed phase, milestone, version bump, or review-remediation item through the committed <code>molt.sh</code> script, which commits exactly the listed files, refuses any other dirty path before it changes anything, and reports <code>committed: false</code> when there is nothing to commit. Used by the workflow scripts and on Instinct; in a workflow script it closes each wave and each gate step.</td>
               </tr>
               <tr>
                 <td><code>hivemind:bump-type</code></td>
-                <td>Read-only engine for the overlord's <code>version_bump_decision</code> workflow state, and for the version check in the validation step of the standard-delivery workflow script: derives the dominant Bump Type Determination row and bump verdict from the working-branch commits since the base. The Bump Trigger and No-bump judgments stay with the caller.</td>
+                <td>Read-only engine for the overlord's version bump decision on Instinct, and for the version check in the validation step of the standard-delivery workflow script: derives the dominant Bump Type Determination row and bump verdict from the working-branch commits since the base. The Bump Trigger and No-bump judgments stay with the caller.</td>
               </tr>
               <tr>
                 <td><code>hivemind:push-branch</code></td>
@@ -311,7 +295,7 @@
               </tr>
               <tr>
                 <td><code>hivemind:open-plan-pr</code></td>
-                <td>Open a pull request after completion, validation, and versioning gates pass, through a committed script that pushes through <code>push-branch.sh</code>, then reuses an open PR on the same head, base and commit (posting an optional comment there) or creates the PR, optionally as a draft, and verifies it. It takes the PR body from its own file (<code>--body-file</code>). Used by both engines.</td>
+                <td>Open a pull request after completion, validation, and versioning gates pass, through a committed script that pushes through <code>push-branch.sh</code>, then reuses an open PR on the same head, base and commit (posting an optional comment there) or creates the PR, optionally as a draft, and verifies it. It takes the PR body from its own file (<code>--body-file</code>). Used by the workflow scripts and on Instinct.</td>
               </tr>
               <tr>
                 <td><code>hivemind:adaptation-cycle</code></td>
@@ -489,7 +473,7 @@
           <div class="card-grid card-grid--2">
             <article class="panel card" role="region" aria-labelledby="lifecycle-waves-heading">
               <h3 class="xg" id="lifecycle-waves-heading">Waves</h3>
-              <p>Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap, so parallel workers never write the same file. A worker deletes only files and empty folders in its scope or created by its own task, each by name. Workers in a wave do not commit; one checkpoint commit (one molt) closes each wave, made by a runner in a script run and by the overlord on the state machine. On the state machine, <code>hivemind:next-wave</code> computes the wave from the run ledger; the <code>standard-delivery</code> script computes its waves in <code>plugin/workflow-src/lib/waves.js</code>.</p>
+              <p>Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap, so parallel workers never write the same file. A worker deletes only files and empty folders in its scope or created by its own task, each by name. Workers in a wave do not commit; one checkpoint commit (one molt) closes each wave, made by a runner in a script run and by the overlord on Instinct. The script computes its waves in <code>plugin/workflow-src/lib/waves.js</code>; on Instinct the overlord forms each wave by the same rule.</p>
             </article>
             <article class="panel card" role="region" aria-labelledby="lifecycle-watch-heading">
               <h3 class="xg" id="lifecycle-watch-heading">Default PR watch</h3>
