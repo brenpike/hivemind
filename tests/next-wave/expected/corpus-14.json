@@ -1,0 +1,14 @@
+{
+  "case": "case 14: non-string file on wide",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-001",
+      "STEP-003",
+      "STEP-005",
+      "STEP-006"
+    ],
+    "remaining": 6
+  }
+}

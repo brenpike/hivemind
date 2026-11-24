@@ -1,0 +1,12 @@
+{
+  "case": "same file twice",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "A",
+      "B"
+    ],
+    "remaining": 2
+  }
+}

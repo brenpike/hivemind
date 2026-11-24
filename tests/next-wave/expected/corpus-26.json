@@ -1,0 +1,7 @@
+{
+  "case": "case 26: dot component on duplicate id",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps[5].id: duplicate step id"
+  }
+}

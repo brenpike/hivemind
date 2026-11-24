@@ -1,0 +1,11 @@
+{
+  "case": "replan same-epoch credit",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-002"
+    ],
+    "remaining": 1
+  }
+}

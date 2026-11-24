@@ -1,0 +1,7 @@
+{
+  "case": "case 25: empty string file on duplicate id",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps[5].id: duplicate step id"
+  }
+}

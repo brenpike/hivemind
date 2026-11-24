@@ -1,0 +1,7 @@
+{
+  "case": "case 23: empty string file on unknown dependency",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps[0].depends_on[0]: unknown step id"
+  }
+}

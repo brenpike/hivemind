@@ -1,0 +1,12 @@
+{
+  "case": "diamond wave2 fan-out",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-002",
+      "STEP-003"
+    ],
+    "remaining": 3
+  }
+}

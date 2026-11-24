@@ -1,0 +1,7 @@
+{
+  "case": "empty",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps: empty, nothing to schedule"
+  }
+}

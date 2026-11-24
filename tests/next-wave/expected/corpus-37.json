@@ -1,0 +1,12 @@
+{
+  "case": "case 37: empty string file on wide",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-001",
+      "STEP-002"
+    ],
+    "remaining": 3
+  }
+}

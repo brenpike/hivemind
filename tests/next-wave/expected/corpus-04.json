@@ -1,0 +1,11 @@
+{
+  "case": "case 4: leading slash on wide",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-001"
+    ],
+    "remaining": 1
+  }
+}

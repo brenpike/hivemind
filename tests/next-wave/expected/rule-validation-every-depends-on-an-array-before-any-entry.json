@@ -1,0 +1,7 @@
+{
+  "case": "every depends_on an array before any entry",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps[1].depends_on: not an array"
+  }
+}

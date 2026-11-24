@@ -1,0 +1,7 @@
+{
+  "case": "every step an object before any id",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps[1]: not an object"
+  }
+}

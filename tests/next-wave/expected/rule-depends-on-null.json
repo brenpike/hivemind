@@ -1,0 +1,12 @@
+{
+  "case": "depends_on null",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "A",
+      "B"
+    ],
+    "remaining": 2
+  }
+}

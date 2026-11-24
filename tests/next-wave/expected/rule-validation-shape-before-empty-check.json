@@ -1,0 +1,7 @@
+{
+  "case": "shape before empty check",
+  "result": {
+    "ok": false,
+    "problem": "plan.steps[0]: not an object"
+  }
+}

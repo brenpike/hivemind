@@ -1,0 +1,7 @@
+{
+  "case": "case 22: empty string file on self dependency",
+  "result": {
+    "ok": false,
+    "problem": "dependency cycle detected among plan steps"
+  }
+}

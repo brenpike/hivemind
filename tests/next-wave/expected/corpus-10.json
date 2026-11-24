@@ -1,0 +1,12 @@
+{
+  "case": "case 10: empty files on two chains",
+  "result": {
+    "ok": true,
+    "all_done": false,
+    "wave": [
+      "STEP-001",
+      "STEP-002"
+    ],
+    "remaining": 3
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "case": "case 20: question glob on cycle",
+  "result": {
+    "ok": false,
+    "problem": "dependency cycle detected among plan steps"
+  }
+}
