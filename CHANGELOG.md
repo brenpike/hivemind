@@ -17,14 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- The planner's Design Binding rule (`plugin/agents/cerebrate.md`): when an issue the plan closes has a `## Design` section, its solution-design headings, ADRs and prototype bind the plan; a departure is raised as a question with an architectural gate, never a plan step, and the plan follows the design until a reply settles it.
+- The planner's Design Binding rule (`plugin/agents/cerebrate.md`): when an issue the plan closes has a `## Design` section, its solution-design headings, ADRs and prototype bind the plan; a departure is raised as a question, its gate architectural when the departure is the recommended option, never a plan step, and the plan follows the design until a reply settles it.
 - The brood rule: each issue the request names to deliver is one strain with that issue, by number, as its task; the planner never splits, merges or reshapes one and adds only the overlap analysis.
 
 ### Changed
 
 - README: the Plan step and Brood Mode list describe both rules.
 - `tests/workflow-scripts/cerebrate-plan.test.mjs` pins both rules and the `## Design` coupling to `plugin/skills/_shared/readiness-check.sh`.
-- `plugin/agents/cerebrate.md` prose tightened to fit its budget; the budget in `tests/policy/prose-byte-budget.json` lowered from 16938 to 16929.
+- `plugin/agents/cerebrate.md` prose tightened to fit its budget; the budget in `tests/policy/prose-byte-budget.json` lowered from 16938 to 16895.
+- `tests/workflow-scripts/standard-delivery.test.mjs` SD-09: a recommended design departure inside the request, at medium or large effort, is asked at every autonomy level through the real planner-question check, never taken and never sent back to the planner.
+- `docs/adr/0045-lair-software-factory.md` amendment 2026-11-24: a departure from an issue's design is never inside the issue's ask, so decision 8 never waives its gate and the unattended level parks it.
 
 No prose budget raised.
 
