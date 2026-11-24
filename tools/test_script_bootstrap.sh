@@ -132,6 +132,7 @@ ENTRY_ROWS=(
     "plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh|SCRIPT_DIR|poll_fail|cannot-self-locate"
     "plugin/skills/github-review-loop/scripts/react-marker.sh|SCRIPT_DIR|react_marker_fail|cannot-self-locate"
     "plugin/skills/github-review-loop/scripts/reply-resolve.sh|SCRIPT_DIR|replyresolve_fail|cannot-self-locate"
+    "plugin/skills/design-review/scripts/design-review.sh|script_dir|design_review_fail|cannot-self-locate"
 )
 
 POLL_SCRIPT_PATH='plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh'
@@ -159,6 +160,7 @@ STAGE2_ROWS=(
     "plugin/skills/seed-hive/scripts/seed-hive.sh|plugin_root|../../..|$PLUGIN_ROOT_REASON"
     "plugin/skills/spawn-brood/scripts/spawn-brood.sh|plugin_root|../../..|$PLUGIN_ROOT_REASON"
     "plugin/skills/github-review-loop/scripts/ledger-reconstruct.sh|plugin_root|../../..|cannot-resolve-plugin-root"
+    "plugin/skills/design-review/scripts/design-review.sh|shared_dir|../../_shared|cannot-resolve-shared-dir"
 )
 
 # build_std_source_row <path> <path-expr dir> <lib> -> prints a SOURCE_ROWS row carrying the
@@ -217,6 +219,8 @@ SOURCE_ROWS=(
     'plugin/skills/github-review-loop/scripts/prefilter.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
     'plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
     'plugin/skills/github-review-loop/scripts/merge-approved.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
+    'plugin/skills/design-review/scripts/design-review.sh|$shared_dir/readiness-check.sh|missing-readiness-check|unparseable-readiness-check|readiness-check.sh'
+    'plugin/skills/design-review/scripts/design-review.sh|$shared_dir/record-verify.sh|missing-record-verify|unparseable-record-verify|record-verify.sh'
 )
 
 # ── Table helpers ───────────────────────────────────────────────────────────
@@ -257,6 +261,7 @@ emitter_contract() {
         react_marker_fail) EC_RC=1; EC_CHANNEL=err; EC_PREFIX='REACTMARKER_ERROR=' ;;
         replyresolve_fail) EC_RC=1; EC_CHANNEL=out; EC_PREFIX='REPLYRESOLVE_ERROR=' ;;
         merge_approved_fail) EC_RC=1; EC_CHANNEL=out; EC_PREFIX='MERGE_ERROR=' ;;
+        design_review_fail) EC_RC=2; EC_CHANNEL=err; EC_PREFIX='design-review-error: ' ;;
         *) return 1 ;;
     esac
 }

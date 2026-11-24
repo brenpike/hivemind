@@ -1,0 +1,18 @@
+{
+  "rule": "Validation record rule",
+  "description": "P3 coupling. The source pin spans both claim-carrying clauses of the Validation Procedure's record rule: the reporting obligation (each `record-verify-failed:` line of failure output is reported word for word, which the validate step's record stop reads) and the prohibition (no fix edits a review record, with the record path pattern that names which files). Dropping either sentence, loosening word for word, or narrowing the path turns the suite red. The workflow consumer pins the validate schema's failures description in plugin/workflow-src/lib/gates.js, which asks the drone for each such line word for word. The github-reviewer consumer pins its pointer that validates per the Validation Procedure section. Residuals: the pin proves the word sequences exist, not that agents obey them; the source pin is whole-file, so it stays green if the sentences move out of the Validation Procedure section; a rewrite-around that keeps the pinned bytes is invisible.",
+  "source": {
+    "file": "plugin/governance/definitions.md",
+    "pattern": "Report each `record-verify-failed:` line of failure output word for word. No fix edits a review record (`docs/initiatives/<slug>/review-record.md`)."
+  },
+  "consumers": [
+    {
+      "file": "plugin/workflow-src/lib/gates.js",
+      "pattern": "Each failing command with its failure output, each record-verify-failed: line word for word."
+    },
+    {
+      "file": "plugin/agents/github-reviewer.md",
+      "pattern": "Validate per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure); a failure returns `blocked`."
+    }
+  ]
+}

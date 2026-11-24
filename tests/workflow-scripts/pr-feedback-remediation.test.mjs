@@ -1387,6 +1387,64 @@ const ROW_TESTS = {
         assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
       }
     });
+  },
+  'PFR-31': () => {
+    const RECORD = 'docs/initiatives/cache-layer/review-record.md';
+    const VARIANT = 'Docs/Initiatives/Cache-Layer/Review-Record.MD';
+    const refusedLead = (record) => 'The commit step refused review record ' + main.encodeUntrustedText(record) + ', so the remediation stopped.';
+    function recordPlanResult(record) {
+      const plan = makePlan();
+      return planResult({ ...plan, steps: [{ ...plan.steps[0], files: ['src/a.js', record] }] });
+    }
+    test('a wave whose files hold a review record, a case variant included, is refused before any runner call with a terminal stop naming it', async () => {
+      for (const record of [RECORD, VARIANT]) {
+        const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': recordPlanResult(record) }));
+        assert.deepEqual([run.result.needs_user, run.result.outcome, run.result.resume_args], [false, 'blocked', undefined], record);
+        assert.ok(run.result.message.startsWith(blockedMessage(refusedLead(record)).message + '\n\n'), run.result.message);
+        assert.equal(labelsOf(run).at(-1), 'work-2-STEP-001', record);
+        assert.ok(!labelsOf(run).includes('commit-2-1'), record);
+      }
+    });
+    test('a fix round reporting a review record, a case variant included, is refused before any runner call with a terminal stop naming it', async () => {
+      for (const record of [RECORD, VARIANT]) {
+        const results = escalationResults('planner-escalation', { 'validate-2-1': { outcome: 'failed', failures: 'npm test failed.' }, 'fix-2-1': { outcome: 'complete', files: ['src/a.js', record] } });
+        const run = await runWorkflow(LAUNCH, results);
+        assert.deepEqual([run.result.needs_user, run.result.outcome, run.result.resume_args], [false, 'blocked', undefined], record);
+        assert.ok(run.result.message.startsWith(blockedMessage(refusedLead(record)).message + '\n\n'), run.result.message);
+        assert.equal(labelsOf(run).at(-1), 'fix-2-1', record);
+        assert.ok(!labelsOf(run).includes('fix-commit-2-1'), record);
+      }
+    });
+    test('a wave whose files hold a path outside the record shape commits it', async () => {
+      const outside = 'docs/initiatives/cache-layer/notes/review-record.md';
+      const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': recordPlanResult(outside) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.equal(readDataBlock(callOf(run, 'commit-2-1').prompt, 'files_file').content, 'src/a.js\n' + outside);
+    });
+  },
+  'PFR-32': () => {
+    const RECORD = 'docs/initiatives/cache-layer/review-record.md';
+    const recordLead = (record) => 'Record verify failed: ' + main.encodeUntrustedText(record) + ', so the remediation stopped before the pull request.';
+    test('a failed validation with a record-verify-failed: line, trimmed, stops blocked naming the record, with no validation_remediation decision and no fix round', async () => {
+      const failures = 'npm test failed.\n\trecord-verify-failed: ' + RECORD + ' ';
+      const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'validate-2-1': { outcome: 'failed', failures: failures } }));
+      assert.deepEqual([run.result.needs_user, run.result.outcome, run.result.resume_args], [false, 'blocked', undefined]);
+      assert.ok(run.result.message.startsWith(blockedMessage(recordLead(RECORD), REPORT_NEXT).message + '\n\n'), run.result.message);
+      assert.equal(labelsOf(run).at(-1), 'validate-2-1');
+      assert.ok(!labelsOf(run).some((label) => label.startsWith('fix-2')), JSON.stringify(labelsOf(run)));
+    });
+    test('a record-verify-failed: line whose path is outside the record shape is not read, so the failure goes to a fix round', async () => {
+      for (const path of ['docs/initiatives/Cache-Layer/review-record.md', 'docs/initiatives/cache_layer/review-record.md', 'docs/initiatives/a/b/review-record.md', 'docs/review-record.md']) {
+        const failed = { outcome: 'failed', failures: 'npm test failed.\nrecord-verify-failed: ' + path };
+        const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'validate-2-1': failed, 'fix-2-1': { outcome: 'complete', files: ['src/a.js'] }, 'fix-commit-2-1': moltRelay('3'.repeat(40), 'true'), 'validate-2-2': VALIDATE_PASSED }));
+        assert.equal(run.result.outcome, 'complete', path + ': ' + run.result.message);
+        assert.deepEqual(labelsOf(run).slice(-4), ['fix-2-1', 'fix-commit-2-1', 'validate-2-2', 'pr-2'], path);
+      }
+    });
+    test('the failures description of the validate schema asks for each record-verify-failed: line word for word', async () => {
+      const run = await runWorkflow(LAUNCH, escalationResults());
+      assert.ok(callOf(run, 'validate-2-1').opts.schema.properties.failures.description.startsWith('Each failing command with its failure output, each record-verify-failed: line word for word.'));
+    });
   }
 };
 
