@@ -21,15 +21,19 @@ Exit 2 stops the skill: report its stderr error token.
 
 ## Required Inputs
 
-The caller passes these; the skill runs no git of its own.
+The caller passes these; the skill reads git only through the engine.
 
 - `slug`: the initiative slug.
 - `reviewed`: the reviewed commit, the docs pull request's head commit recorded before the pass.
 - `merge_base`: the merge-base of `reviewed` with trunk.
-- `adrs`: the ADR paths the docs pull request adds or edits, or none.
-- `previous` and `diff`: for a confirming round, the previous round's reviewed commit and the change from it to `reviewed`.
+- `previous`: for a confirming round, the previous round's reviewed commit.
 - `touches`: whether the design touches a trust boundary, credentials or the merge path, as the record's Rounds section states.
 - `review_fix`: yes when a stamped document of a passing record changed after the review exited.
+
+The engine gives two more:
+
+- `adrs`: each `A` or `M` path under `docs/adr/` that `diff --names --from <merge_base> --to <reviewed>` prints, or none.
+- `diff`: for a confirming round, what `diff --from <previous> --to <reviewed>` prints.
 
 ## Procedure
 
