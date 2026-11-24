@@ -433,6 +433,19 @@ function makeGatedBrief(problem) {
 }
 
 /**
+ * A planner question shaped as cerebrate's Design Binding prescribes: the
+ * recommended option A departs from the issue's design, option B follows
+ * it, and the gate is architectural.
+ */
+function makeDepartureBrief(effort, strength, beyondRequest) {
+  const options = [
+    { id: 'A', summary: 'Depart from the design.', steel_man: 'Simpler.', straw_man: 'Breaks the design.', effort: effort, value: 'high', reversible: true, beyond_request: beyondRequest },
+    { id: 'B', summary: 'Follow the design.', steel_man: 'Matches the design.', straw_man: 'More work.', effort: effort, value: 'medium', reversible: true, beyond_request: false }
+  ];
+  return { ...makeGatedBrief('DEPARTURE_PROBLEM'), options: options, recommendation: { option_id: 'A', strength: strength, why: 'The departure is simpler.' } };
+}
+
+/**
  * A gated planner question whose every bounded field holds its most code
  * points: the largest question a plan result can carry.
  */
@@ -2011,6 +2024,30 @@ const ROW_TESTS = {
         assert.ok(!run.result.message.includes('DEFECT_PROBLEM'), run.result.message);
       });
     }
+    test('a design-departure planner question, the departure recommended within the request at medium or large effort, strong or weak, is asked at every level, never taken and never sent back to the planner', async () => {
+      const row = autonomyTable.rows.find((candidate) => candidate.kind === 'planner_question');
+      for (const effort of ['medium', 'large']) {
+        for (const strength of ['strong', 'weak']) {
+          const departure = makeDepartureBrief(effort, strength, false);
+          for (const level of autonomyTable.levels) {
+            const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+            run.level = level;
+            const resolution = main.resolvePlanAsks(planResult(makePlan(), [departure]), parsedFacts(), run, EMPTY_SCOPE);
+            const takenKinds = resolution.taken.filter((entry) => entry.kind === 'planner_question');
+            const askedReasons = resolution.asks.filter((ask) => ask.kind === 'planner_question').map((ask) => ask.reason);
+            const expected = row[level] === 'auto' ? 'gate_architectural' : 'table_surface';
+            assert.deepEqual(structuredClone([takenKinds, askedReasons]), [[], [expected]], [effort, strength, level].join(' '));
+            assert.equal(lib.hasDefectQuestion([departure], 'planner_question', level, autonomyTable, briefSchema), false, [effort, strength, level].join(' '));
+          }
+          const paused = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan(), [departure]) });
+          assert.equal(paused.result.needs_user, true, [effort, strength].join(' '));
+          assert.ok(paused.result.message.includes('Q1. DEPARTURE_PROBLEM'), paused.result.message);
+          assert.ok(!labelsOf(paused).includes('plan-1-fix-1'), labelsOf(paused).join(' '));
+        }
+      }
+      const flagged = makeDepartureBrief('medium', 'strong', true);
+      assert.ok(autonomyTable.levels.every((level) => lib.hasDefectQuestion([flagged], 'planner_question', level, autonomyTable, briefSchema)));
+    });
     test('every code-built brief offers only options within the request and fits BRIEF_SCHEMA with worst-case inputs', () => {
       const briefs = [
         main.buildPlanAcceptanceBrief(makePlan()),

@@ -36,7 +36,7 @@ const DESIGN_BINDING_TERMS = [
   'departure',
   'raise it as a question, never a plan step',
   'architectural',
-  'the issue\'s ask',
+  'its gate architectural when it is the recommended option',
   'Until a reply settles',
   'the plan follows the design'
 ];
@@ -215,6 +215,12 @@ describe('cerebrate binds the plan to the design of the issue it closes', () => 
       assert.ok(readSection(cerebrateText, '## Design Binding').includes(term), term);
     });
   }
+  test('Design Binding sets only the gate and never names the ask or beyond_request', () => {
+    const section = readSection(cerebrateText, '## Design Binding');
+    for (const phrase of ['the issue\'s ask', 'beyond_request']) {
+      assert.ok(!section.includes(phrase), `Design Binding names ${phrase}: the rule sets only the gate, because decide() refuses a recommended beyond-request option unless it is strong and of trivial or small effort`);
+    }
+  });
 });
 
 describe('the Design section the planner binds to is the one readiness-check.sh parses', () => {

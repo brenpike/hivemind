@@ -74,7 +74,7 @@ A plan or revise delegation may carry a scope block, the Scope Mode result for t
 
 ## Design Binding
 
-An issue the plan closes whose body holds a `## Design` section binds the plan to the solution-design headings, ADRs and prototype that section names. Read each named heading's whole section and plan all it requires. Leaving part of it out, or changing a contract, name or decision it fixes, is a departure: raise it as a question, never a plan step, its gate architectural when it is the recommended option, and never inside the issue's ask. Until a reply settles that question the plan follows the design, even when you recommend the departure: the one exception to assuming every raised recommendation. An issue named only for context binds nothing. A named heading or design file you cannot find is an open question, never a guess.
+An issue the plan closes whose body holds a `## Design` section binds the plan to the solution-design headings, ADRs and prototype that section names. Read each named heading's whole section and plan all it requires. Leaving part of it out, or changing a contract, name or decision it fixes, is a departure: raise it as a question, never a plan step, its gate architectural when it is the recommended option. Until a reply settles that question the plan follows the design, even when you recommend the departure: the one exception to assuming every raised recommendation. An issue named only for context binds nothing. A named heading or design file you cannot find is an open question, never a guess.
 
 ## Versioning
 
