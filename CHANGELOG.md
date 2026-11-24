@@ -13,6 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [14.2.0] - 2026-11-24
+
+### Added
+
+- The planner's Design Binding rule (`plugin/agents/cerebrate.md`): when an issue the plan closes has a `## Design` section, its solution-design headings, ADRs and prototype bind the plan; a departure is raised as a question with an architectural gate, never a plan step, and the plan follows the design until a reply settles it.
+- The brood rule: each issue the request names to deliver is one strain with that issue, by number, as its task; the planner never splits, merges or reshapes one and adds only the overlap analysis.
+
+### Changed
+
+- README: the Plan step and Brood Mode list describe both rules.
+- `tests/workflow-scripts/cerebrate-plan.test.mjs` pins both rules and the `## Design` coupling to `plugin/skills/_shared/readiness-check.sh`.
+- `plugin/agents/cerebrate.md` prose tightened to fit its budget; the budget in `tests/policy/prose-byte-budget.json` lowered from 16938 to 16929.
+
+No prose budget raised.
+
+Issue: #636.
+
 ## [14.1.0] - 2026-11-23
 
 ### Added
