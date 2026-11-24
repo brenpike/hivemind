@@ -953,7 +953,9 @@ test_snapshot_large_design() {
 # gh-cases.json holds gh mode cases. Each names its issue numbers, the canned response per number
 # and either `lines`, the cases.json cases whose expected lines it gives, or `token`, its failure
 # token. A response is `raw` body text, a `json` body, or an `issue` response wrapping a cases.json
-# snapshot with `del` paths removed, `set` paths set, `extra` top-level keys and `copies` bodies;
+# snapshot, given `pageInfo: {hasNextPage: false}` on each connection that has none as gh's reply
+# to the constant query always holds one, with `del` paths removed, `set` paths set, `extra`
+# top-level keys and `copies` bodies;
 # `rc` is gh's exit status, 0 by default. `commit` names the cases.json case whose documents the
 # evaluated commit holds; absent, the base documents.
 
@@ -970,9 +972,12 @@ jq -e 'type == "array" and length > 0
 # shellcheck disable=SC2016
 GH_RESPONSE_JQ='
 def case_node($name): first($cases[0][] | select(.name == $name) | .snapshot);
+def paged: if has("pageInfo") then . else .pageInfo = {hasNextPage: false} end;
 def node_of:
   . as $response
   | case_node($response.issue)
+  | .labels |= paged | .blockedBy |= paged | .subIssues |= paged
+  | if .parent == null then . else .parent.labels |= paged end
   | reduce ($response.del // [])[] as $path (.; delpaths([$path]))
   | reduce ($response.set // [])[] as $change (.; setpath($change.path; $change.value));
 def body_of:
@@ -1110,6 +1115,28 @@ test_gh_cases() {
   SNAP_COMMIT="$BASE_COMMIT"
 }
 
+# test_gh_page_info: gh mode holds each of the four connections to a pageInfo object with a
+# boolean hasNextPage; a reply missing either, or with another type, is snapshot-malformed.
+test_gh_page_info() {
+  local connection change case_file index=0
+  for connection in labels blockedBy subIssues parent.labels; do
+    for change in del:pageInfo null:pageInfo empty:pageInfo del:hasNextPage null:hasNextPage \
+      string:hasNextPage; do
+      case_file="$(write_input "gh-page-info-$index" "$(jq -nc --arg c "$connection" --arg ch "$change" '
+        ($c | split(".")) as $p
+        | ($ch | split(":")) as [$kind, $field]
+        | (if $field == "pageInfo" then $p + ["pageInfo"] else $p + ["pageInfo", "hasNextPage"] end) as $path
+        | {numbers: [201], token: "snapshot-malformed",
+           responses: {"201": ({issue: "slice-pass"}
+             + if $kind == "del" then {del: [$path]}
+               else {set: [{path: $path, value: ({"null": null, "empty": {}, "string": "false"}[$kind])}]} end)}}')")"
+      index=$((index + 1))
+      serve_gh_case "$case_file"
+      run_gh_token_case "page-info:$connection:$change" snapshot-malformed 201
+    done
+  done
+}
+
 test_gh_absent() {
   local no_gh_dir="$TMPDIR_TEST/no-gh-bin" case_file tool
   mkdir -p "$no_gh_dir" || setup_fail "cannot create the no-gh PATH dir"
@@ -1207,6 +1234,7 @@ test_snapshot_no_gh
 test_snapshot_code_bases
 test_gh_query_constant
 test_gh_cases
+test_gh_page_info
 test_gh_absent
 test_gh_arguments
 

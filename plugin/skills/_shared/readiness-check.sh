@@ -81,7 +81,8 @@
 #       usage with no gh call. gh missing from PATH, a non-zero gh exit, a body that is not exactly
 #       one JSON object, a non-empty `errors` or a non-object issue node give gh-failed. The node
 #       then takes snapshot mode's validation: snapshot-malformed, also for a node whose number
-#       is not <number>, then truncated.
+#       is not <number> or whose labels, blockedBy, subIssues or parent labels lack a pageInfo
+#       object with a boolean hasNextPage, then truncated.
 #   hivemind_readiness_check_gh <commit> <owner/repo> <trunk-name> <number>...
 #       gh mode: checks every argument before any git or gh call (commit-malformed, usage; each
 #       <number> matches `^[1-9][0-9]*$`), resolves the commit once (commit-unresolvable),
@@ -384,6 +385,15 @@ hivemind_record_front_matter() {
 
 # _hivemind_rc_issue_jq_defs: prints the constant jq definitions that validate an issue snapshot
 # and evaluate its issue layer; they need _hivemind_rc_jq_defs before them.
+#
+# Pagination completeness: rc_page_ok accepts an absent or null pageInfo or hasNextPage, so
+# snapshot mode reads such a connection as complete. Completeness of a recorded snapshot is its
+# caller's contract: the Lair records snapshots paged to the end. gh mode builds its own reply,
+# whose query always asks for pageInfo, so it holds every connection to rc_page_strict and gives
+# snapshot-malformed when one fails. Decided by the run (review call taken per
+# decision-autonomy.md Review Calls) on the local review finding that asked to fail closed on
+# missing pagination fields in both modes; a later finding asking the same for snapshot mode is
+# a repeat of this record.
 _hivemind_rc_issue_jq_defs() {
   printf '%s\n' '
 def rc_number_ok: type == "number" and . == floor and . > 0;
@@ -391,6 +401,11 @@ def rc_page_ok:
   .pageInfo == null
   or ((.pageInfo | type) == "object"
       and (.pageInfo.hasNextPage == null or (.pageInfo.hasNextPage | type) == "boolean"));
+def rc_page_strict:
+  (.pageInfo | type) == "object" and (.pageInfo.hasNextPage | type) == "boolean";
+def rc_snapshot_pages_strict:
+  (.labels | rc_page_strict) and (.blockedBy | rc_page_strict) and (.subIssues | rc_page_strict)
+  and (.parent == null or (.parent.labels | rc_page_strict));
 def rc_labels_ok:
   type == "object" and (.nodes | type) == "array"
   and all(.nodes[]; type == "object" and (.name | type) == "string") and rc_page_ok;
@@ -760,6 +775,12 @@ rc_document_plan'
     fi
     codes+="$output"$'\n'
   fi
+  # Document counts: ADR entries here and review record stamps in _hivemind_rc_record_codes have
+  # no count limit; each costs a few git calls. Accepted risk: an issue body holds at most 65536
+  # characters, a maintainer approves it, and a review record is a committed file. Decided by the
+  # run (review call taken per decision-autonomy.md Review Calls) on the local review finding that
+  # asked for count limits or batched git reads; a later finding asking the same is a repeat of
+  # this record.
   for path in "${adrs[@]}"; do
     output="$(_hivemind_rc_doc_eval "$commit" "$path" "" 'rc_doc_eval(rc_adr_status)')" || return 2
     case "$output" in
@@ -905,7 +926,8 @@ hivemind_readiness_fetch_snapshot() {
   elif ($all[0].errors | . != null and . != []) then "gh-failed"
   else ($all[0] | try .data.repository.issue catch null) as $sn
   | if ($sn | type) != "object" then "gh-failed"
-    elif ($sn | rc_snapshot_ok | not) or ($sn.number | tostring) != $number then "snapshot-malformed"
+    elif ($sn | rc_snapshot_ok | not) or ($sn | rc_snapshot_pages_strict | not)
+      or ($sn.number | tostring) != $number then "snapshot-malformed"
     elif ($sn | rc_snapshot_truncated) then "truncated"
     else $sn end
   end'
