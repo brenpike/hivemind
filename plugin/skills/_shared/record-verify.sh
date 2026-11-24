@@ -54,8 +54,8 @@
 #       and each record the pull request adds or edits, and the record of every
 #       `docs/initiatives/<s>/` folder it changes, must meet the pass rule; a changed folder
 #       with no record fails, named by its record path, and none of those records is skipped as
-#       delivered. A stamp-equality record also fails when a stamp path's blob at <base-tip>
-#       differs from its blob at <merge-base>.
+#       delivered. Every record merge mode checks that is not skipped also fails when a stamp
+#       path's blob at <base-tip> differs from its blob at <merge-base>.
 #
 # CHECKS: the Findings table is the one table under the record's one `## Findings` section,
 # with the exact header `| ID | Round | Angle | Severity | Disposition | Note |`, a delimiter
@@ -400,12 +400,15 @@ _hivemind_rv_pass_stamps_ok() {
   _hivemind_rv_stamps_match "$head" "$summary"
 }
 
-# _hivemind_rv_full_ok <head> <record> <pass-rule> <required-adr>...: every check of a record the
-# pull request adds or edits, or of a changed folder's record in merge mode; <pass-rule> yes also
-# requires the pass rule. 0 when it passes, 1 when it fails, 2 on a failure.
+# _hivemind_rv_full_ok <head> <record> <pass-rule> <merge-base> <base-tip> <required-adr>...: every
+# check of a record the pull request adds or edits, or of a changed folder's record in merge mode;
+# <pass-rule> yes also requires the pass rule. A non-empty <merge-base> (merge mode) also requires
+# stable stamp paths from <merge-base> to <base-tip>. 0 when it passes, 1 when it fails, 2 on a
+# failure.
 _hivemind_rv_full_ok() {
-  local head="$1" record="$2" pass_rule="$3" summary="" slug="" ui="" check_rc=0
-  shift 3
+  local head="$1" record="$2" pass_rule="$3" merge_base="$4" base_tip="$5" summary="" slug="" ui=""
+  local check_rc=0
+  shift 5
   if [ "$(_hivemind_rv_kind "$record")" != review-record ]; then
     return 1
   fi
@@ -435,6 +438,9 @@ _hivemind_rv_full_ok() {
     if [ "$check_rc" -ne 0 ]; then
       return "$check_rc"
     fi
+  fi
+  if [ -n "$merge_base" ]; then
+    _hivemind_rv_stamps_stable "$merge_base" "$base_tip" "$summary" || return "$?"
   fi
   _hivemind_rv_recorded_ok "$head" "$summary"
 }
@@ -502,10 +508,11 @@ _hivemind_rv_check_one() {
 _hivemind_rv_run() {
   local head="$1" from="$2" listing="" path="" kind="" rest="" record="" failures="" output=""
   local edited_rule=no check_rc=0
-  local -a changed=() kept=() adrs=() discovered=() merge_args=()
+  local -a changed=() kept=() adrs=() discovered=() merge_args=() full_args=("" "")
   local -A full=()
   if [ "$#" -eq 3 ]; then
     merge_args=("$2" "$3")
+    full_args=("$2" "$3")
     edited_rule=yes
   fi
   if ! listing="$(_hivemind_rv_changed_paths "$from" "$head" --diff-filter=d)"; then
@@ -543,9 +550,10 @@ _hivemind_rv_run() {
     check_rc=0
     if [ "${full[$record]}" = edited ]; then
       output="$(_hivemind_rv_check_one _hivemind_rv_full_ok "$head" "$record" "$edited_rule" \
-        "${adrs[@]}")" || check_rc=$?
+        "${full_args[@]}" "${adrs[@]}")" || check_rc=$?
     else
-      output="$(_hivemind_rv_check_one _hivemind_rv_full_ok "$head" "$record" yes)" || check_rc=$?
+      output="$(_hivemind_rv_check_one _hivemind_rv_full_ok "$head" "$record" yes \
+        "${full_args[@]}")" || check_rc=$?
     fi
     if [ "$check_rc" -ne 0 ]; then
       _hivemind_rv_error git-failed
