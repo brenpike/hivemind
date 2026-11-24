@@ -1041,6 +1041,47 @@
     "error": "evidence-malformed"
   },
   {
+    "name": "evidence-slice-detached",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "readiness_patch": {
+            "parent": null
+          }
+        }
+      ]
+    },
+    "error": "evidence-malformed",
+    "no_git": true
+  },
+  {
+    "name": "evidence-slice-moved",
+    "evidence": {
+      "slices": [
+        {
+          "number": 21,
+          "readiness_patch": {
+            "parent": {
+              "number": 7,
+              "state": "OPEN",
+              "body": "<!-- hivemind-initiative: other -->",
+              "labels": {
+                "nodes": [
+                  {
+                    "name": "type:epic"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "error": "evidence-malformed",
+    "no_git": true
+  },
+  {
     "name": "trunk-unfetched",
     "evidence": {},
     "error": "commit-unresolvable",

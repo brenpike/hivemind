@@ -127,7 +127,9 @@
 #        ready_events holds every `readiness:ready` labeled event, renamed_at every title rename.
 #   Fewer slices than `sub_issue_total`, any snapshot `pageInfo.hasNextPage` true, or the epic's
 #   labels `hasNextPage` true, is truncated. Slices with a null epic, more slices than
-#   `sub_issue_total`, or an epic that is not the one seed, are evidence-malformed.
+#   `sub_issue_total`, a slice whose snapshot parent is null or not the epic (a sub-issue
+#   detached or moved between reads), or an epic that is not the one seed, are
+#   evidence-malformed.
 #
 # RESOLUTION: the seed is the one open issue whose body's first line, one ending CR removed, is
 # `<!-- hivemind-initiative: <slug> -->` and whose author has write permission. A marker-shaped
@@ -243,7 +245,10 @@ def sd_evidence_ok:
   and has("epic") and (.epic | sd_epic_ok)
   and (.slices | sd_list(sd_slice_ok)) and (.slices | sd_unique(.readiness.number))
   and (if .epic == null then (.slices | length) == 0
-       else (.slices | length) <= .epic.sub_issue_total end);
+       else (.slices | length) <= .epic.sub_issue_total
+            and (.epic.number as $epic
+                 | all(.slices[]; (.readiness.parent | type) == "object"
+                                  and .readiness.parent.number == $epic)) end);
 def sd_truncated:
   (.epic != null and ((.slices | length) < .epic.sub_issue_total or .epic.labels.pageInfo.hasNextPage))
   or any(.slices[];
