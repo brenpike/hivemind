@@ -10,7 +10,7 @@ shell: bash
 # Bump Type
 
 Derive the version-bump verdict for the commits on the working branch since it diverged from
-the base. This skill backs the overlord's version bump decision. The deterministic engine is
+the base. This skill backs the version bump decision. The deterministic engine is
 the committed, READ-ONLY script
 `${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh`; this body is a thin navigator
 that runs the script once and interprets its routing. The engine mutates NOTHING — it reads
