@@ -904,7 +904,8 @@ hivemind_readiness_check_snapshot() {
 
 # hivemind_readiness_fetch_snapshot <owner/repo> <number>: reads one issue snapshot through one gh
 # GraphQL call and prints its issue node (see PUBLIC API). gh's output and exit status reach jq
-# on stdin as one framed stream: the body, a newline, then the status.
+# on stdin as one framed stream: the body, a newline, then the status. jq stops at a non-JSON body,
+# so the writer's stderr is discarded: a broken-pipe write error never reaches the caller.
 hivemind_readiness_fetch_snapshot() {
   if [ "$#" -ne 2 ]; then
     _hivemind_rc_error usage
@@ -936,7 +937,7 @@ hivemind_readiness_fetch_snapshot() {
       gh api graphql -f query="$query" -f owner="${owner_repo%%/*}" -f name="${owner_repo#*/}" \
         -F number="$number" </dev/null 2>/dev/null || gh_rc=$?
       printf '\n%s' "$gh_rc"
-    } | jq -nc --arg number "$number" "$program" 2>/dev/null
+    } 2>/dev/null | jq -nc --arg number "$number" "$program" 2>/dev/null
   )"; then
     _hivemind_rc_error gh-failed
     return 2
