@@ -49,6 +49,12 @@
 #       holds exactly one entry at exactly <path>, of type blob and mode 100644 or 100755.
 #       Returns 1 when missing (a malformed path is missing, with no git call). Returns 2 on
 #       commit-malformed (no git call), commit-unresolvable or git-failed.
+#       Shape-only by decision: it checks path syntax, never the allowlist. A caller passing an
+#       issue-derived path MUST pass it through hivemind_readiness_path_kind first, as snapshot
+#       mode does. The allowlist stays out of this entry point because verify (#619) must read
+#       recorded Note paths that lie outside it. Decided by the run (review call taken per
+#       decision-autonomy.md Review Calls) on the local review finding that asked for the
+#       allowlist here; a later finding asking the same is a repeat of this record.
 #   hivemind_doc_read <commit> <path>
 #       Streams the document's bytes, read only by the blob id the existence test printed.
 #       Returns 1 when missing, 2 on failure; a caller discards stdout on any non-zero return.
