@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [14.4.0] - 2026-11-24
+
+### Added
+
+- The stage derivation library `plugin/skills/_shared/stage-derivation.sh` with three entry points: `hivemind_stage_evidence_gh` (reads an initiative's evidence through gh, every paged read failing closed as truncated), `hivemind_stage_derive` (an initiative's stage, status and next action from recorded evidence plus git, every document read through the Document existence test, including the UI prototype stage between the PRD and the solution design) and `hivemind_stage_handoff` (passes only when every slice passes, naming each slice claimable now or blocked). It reuses the readiness check library and record verify. It has no caller yet; the guide adopts it in #622.
+- The offline suite `tools/test_stage_derivation.sh` with recorded fixtures in `tests/stage-derivation/`, registered in `tools/validate.sh`.
+
+No prose budget raised.
+
+Issue: #621.
+
 ## [14.3.0] - 2026-11-24
 
 ### Added
