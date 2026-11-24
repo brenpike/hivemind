@@ -299,7 +299,7 @@
               </tr>
               <tr>
                 <td><code>hivemind:adaptation-cycle</code></td>
-                <td>Run a local pre-PR review of the branch diff with the tool <code>HIVEMIND_LOCAL_REVIEWER</code> picks (the <code>codex-plugin</code> preset by default) through <code>run-review.sh</code>, and return normalized findings. Skips when no reviewer can run; blocks on output it cannot read or a changed working tree. Review-only: it never fixes. Invoked by the <code>local-reviewer</code> agent only.</td>
+                <td>Run a local pre-PR review of the branch diff with the tool <code>HIVEMIND_LOCAL_REVIEWER</code> picks (the <code>codex-plugin</code> preset by default) through <code>run-review.sh</code>, and return normalized findings. Skips when no reviewer can run; blocks on output it cannot read or a changed working tree. Review-only: it never fixes. Invoked by the <code>local-reviewer</code> agent and by <code>hivemind:design-review</code>.</td>
               </tr>
               <tr>
                 <td><code>hivemind:github-review-loop</code></td>
@@ -324,6 +324,10 @@
               <tr>
                 <td><code>hivemind:plan-to-prd</code></td>
                 <td>Turn an interrogated plan into a committed WHAT-only PRD.</td>
+              </tr>
+              <tr>
+                <td><code>hivemind:design-review</code></td>
+                <td>Run one round of the design review of an initiative's PRD, solution design, ADRs and UI prototype from the main session: one fresh read-only cerebrate pass on the model <code>HIVEMIND_DESIGN_REVIEW_MODEL</code> names, plus one <code>hivemind:adaptation-cycle</code> pass when the design touches a trust boundary, credentials or the merge path. Returns the round's findings and the review record update; writes no file.</td>
               </tr>
               <tr>
                 <td><code>hivemind:prd-to-issues</code></td>
