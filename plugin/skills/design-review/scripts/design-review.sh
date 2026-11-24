@@ -38,9 +38,10 @@
 #            four open counts>`, then exactly one of, first match wins:
 #              stop=passed         the record meets the pass rule: verdict pass, every open count
 #                                  0, clean_round true, rounds 2 to 3
-#              stop=open-findings  an open count is above 0
-#              stop=cap-reached    rounds 3 or more and not passing: the split-the-initiative
-#                                  signal for the maintainer
+#              stop=cap-reached    rounds 3 or more and not passing, open findings or not: no
+#                                  fourth round runs, the split-the-initiative signal for the
+#                                  maintainer
+#              stop=open-findings  rounds below 3 and an open count is above 0
 #              next=<n>            the next round to run: 1 when the record is missing, else
 #                                  rounds + 1
 #            A malformed record prints no line after `record=malformed`. Exit 0.
@@ -124,8 +125,8 @@ def dr_round:
     | "record=present", "verdict=" + $fm.verdict, "rounds=" + ($fm.rounds | tostring),
       "open=" + ($open | tostring),
       (if $passing then "stop=passed"
-       elif $open > 0 then "stop=open-findings"
        elif $fm.rounds >= 3 then "stop=cap-reached"
+       elif $open > 0 then "stop=open-findings"
        else "next=" + ($fm.rounds + 1 | tostring) end)
     end;
 '

@@ -10709,6 +10709,14 @@ const ROW_TESTS = {
       assertStepStopEnd(run, recordLead([RECORD]) + '\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
       assert.ok(!run.result.message.includes(main.buildVersionQuestionBrief({ version_check: 'undetermined' }).problem), run.result.message);
     });
+    test('the record stop comes before a blocked or malformed version relay', async () => {
+      for (const version of [{ outcome: 'blocked', stderr: 'blocker: base ref does not resolve to a commit\n' }, { outcome: 'ran', stdout: 'version_check: match\n' }]) {
+        const failed = { outcome: 'failed', failures: FAILURE_TEXT + '\nrecord-verify-failed: ' + RECORD, version: version };
+        const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': failed }));
+        assertStepStopEnd(run, recordLead([RECORD]) + '\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
+        assert.ok(!run.result.message.includes('The version check of the validation step'), run.result.message);
+      }
+    });
     test('a record-verify-failed: line whose path is outside the record shape is not read, so the failure goes to a fix round', async () => {
       const outside = [
         'docs/initiatives/Cache/review-record.md',
@@ -10769,6 +10777,19 @@ const ROW_TESTS = {
       for (const [stepName, files] of [['wave', [VARIANT]], ['fix', ['docs/initiatives/a/b/review-record.md']], ['fix', ['docs/review-record.md']], ['fix', ['docs/initiatives/a/review-record.md.bak']]]) {
         const stepped = await runStepWithStubAgent((run) => main.runCommitStep({ ...run, factsStem: FACTS_STEM }, makePlan(), { files: files, label: 'commit-1-1', stepName: stepName, subject: 'Step S1 is done.' }, []));
         assert.deepEqual(stepped.labels, ['commit-1-1'], stepName + ' ' + files[0]);
+      }
+    });
+    test('a fix round reporting a record path spelled with ./, //, /./ or a leading slash reaches the commit script, which refuses it, so the run stops with no record committed', async () => {
+      const scratch = makeScratchRepo();
+      const spellings = ['./' + RECORD, 'docs//initiatives/cache-layer/review-record.md', 'docs/initiatives/cache-layer/./review-record.md', '/' + RECORD];
+      const filesBlocker = 'files must be an array of exact paths relative to the top of the work tree';
+      for (const [index, spelling] of spellings.entries()) {
+        assert.equal(moltRefusesPath(scratch, spelling, index), true, spelling);
+        const run = await runWorkflow(LAUNCH, fixFlowResults({ 'fix-1-1': { outcome: 'complete', files: ['src/cache.js', spelling] }, 'fix-commit-1-1': { outcome: 'blocked', stderr: 'blocker: ' + filesBlocker + '\n' } }));
+        assert.deepEqual([run.result.needs_user, run.result.outcome, run.result.resume_args], [false, 'blocked', undefined], spelling);
+        assert.ok(run.result.message.startsWith('The commit step was blocked, so the delivery stopped: its blocker line says "' + filesBlocker + '".'), run.result.message);
+        assert.equal(readDataBlock(callOf(run, 'fix-commit-1-1').prompt, 'files_file').content, 'src/cache.js\n' + spelling, spelling);
+        assert.equal(labelsOf(run).at(-1), 'fix-commit-1-1', spelling);
       }
     });
   }

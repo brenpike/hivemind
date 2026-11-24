@@ -668,7 +668,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '1154c4ea4d2a69f2';
+const BUILD_ID = '8c2098c384211d5e';
 
 function supportedSchemaKeywords(){
 return[
@@ -4227,7 +4227,7 @@ phase('Validate');
 const schema=selectValidateSchema(plan);
 const prompt=addResumeNote(buildValidatePrompt(plan,facts.trunk_commit),run);
 const result=await agent(prompt,droneOptions(gateLabel('validate',run,gates.runs.validate),'Validate',schema));
-const validation=readValidateOutcome(result,schema);
+const validation=checkRecordVerify(readValidateOutcome(result,schema));
 return validation.problem===undefined?applyVersionCheck(validation,run):validation;
 }
 async function askVersionQuestion(run,plan,gates,validation){
@@ -4253,7 +4253,7 @@ const records=(validation.failures??'').split('\n').map((line)=>/^record-verify-
 return records.length===0?validation:{problem:'Record verify failed: '+records.map(encodeUntrustedText).join(', ')+describePullRequestStop(),terminal:true,nextAction:'report'};
 }
 async function runValidateGate(run,plan,facts,gates){
-const validation=hasKeptFailure(run,gates)?gates.failures[run.head]:checkRecordVerify(await runValidateStep(run,plan,facts,gates));
+const validation=hasKeptFailure(run,gates)?gates.failures[run.head]:await runValidateStep(run,plan,facts,gates);
 if(validation.problem!==undefined){
 return stopDelivery([validation],run);
 }

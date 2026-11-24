@@ -219,6 +219,8 @@ SOURCE_ROWS=(
     'plugin/skills/github-review-loop/scripts/prefilter.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
     'plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
     'plugin/skills/github-review-loop/scripts/merge-approved.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
+    'plugin/skills/github-review-loop/scripts/merge-approved.sh|$SCRIPT_DIR/../../_shared/readiness-check.sh|missing-readiness-check|unparseable-readiness-check|readiness-check.sh'
+    'plugin/skills/github-review-loop/scripts/merge-approved.sh|$SCRIPT_DIR/../../_shared/record-verify.sh|missing-record-verify|unparseable-record-verify|record-verify.sh'
     'plugin/skills/design-review/scripts/design-review.sh|$shared_dir/readiness-check.sh|missing-readiness-check|unparseable-readiness-check|readiness-check.sh'
     'plugin/skills/design-review/scripts/design-review.sh|$shared_dir/record-verify.sh|missing-record-verify|unparseable-record-verify|record-verify.sh'
 )

@@ -1421,6 +1421,17 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.equal(readDataBlock(callOf(run, 'commit-2-1').prompt, 'files_file').content, 'src/a.js\n' + outside);
     });
+    test('a fix round reporting a record path spelled with ./, //, /./ or a leading slash reaches the commit script, whose files rule refusal stops the run with no record committed', async () => {
+      const filesBlocker = 'files must be an array of exact paths relative to the top of the work tree';
+      for (const spelling of ['./' + RECORD, 'docs//initiatives/cache-layer/review-record.md', 'docs/initiatives/cache-layer/./review-record.md', '/' + RECORD]) {
+        const results = escalationResults('planner-escalation', { 'validate-2-1': { outcome: 'failed', failures: 'npm test failed.' }, 'fix-2-1': { outcome: 'complete', files: ['src/a.js', spelling] }, 'fix-commit-2-1': { outcome: 'blocked', stderr: 'blocker: ' + filesBlocker + '\n' } });
+        const run = await runWorkflow(LAUNCH, results);
+        assert.deepEqual([run.result.needs_user, run.result.outcome, run.result.resume_args], [false, 'blocked', undefined], spelling);
+        assert.ok(run.result.message.startsWith('The commit step was blocked, so the remediation stopped: its blocker line says "' + filesBlocker + '".'), run.result.message);
+        assert.equal(readDataBlock(callOf(run, 'fix-commit-2-1').prompt, 'files_file').content, 'src/a.js\n' + spelling, spelling);
+        assert.equal(labelsOf(run).at(-1), 'fix-commit-2-1', spelling);
+      }
+    });
   },
   'PFR-32': () => {
     const RECORD = 'docs/initiatives/cache-layer/review-record.md';
@@ -1432,6 +1443,16 @@ const ROW_TESTS = {
       assert.ok(run.result.message.startsWith(blockedMessage(recordLead(RECORD), REPORT_NEXT).message + '\n\n'), run.result.message);
       assert.equal(labelsOf(run).at(-1), 'validate-2-1');
       assert.ok(!labelsOf(run).some((label) => label.startsWith('fix-2')), JSON.stringify(labelsOf(run)));
+    });
+    test('the record stop comes before a blocked or malformed version relay', async () => {
+      for (const version of [{ outcome: 'blocked', stderr: 'blocker: base ref does not resolve to a commit\n' }, { outcome: 'ran', stdout: 'version_check: match\n' }]) {
+        const failed = { outcome: 'failed', failures: 'npm test failed.\nrecord-verify-failed: ' + RECORD, version: version };
+        const run = await runWorkflow(LAUNCH, escalationResults('planner-escalation', { 'plan-2': versionedPlanResult(), 'validate-2-1': failed }));
+        assert.deepEqual([run.result.needs_user, run.result.outcome, run.result.resume_args], [false, 'blocked', undefined]);
+        assert.ok(run.result.message.startsWith(blockedMessage(recordLead(RECORD), REPORT_NEXT).message + '\n\n'), run.result.message);
+        assert.ok(!run.result.message.includes('The version check of the validation step'), run.result.message);
+        assert.equal(labelsOf(run).at(-1), 'validate-2-1');
+      }
     });
     test('a record-verify-failed: line whose path is outside the record shape is not read, so the failure goes to a fix round', async () => {
       for (const path of ['docs/initiatives/Cache-Layer/review-record.md', 'docs/initiatives/cache_layer/review-record.md', 'docs/initiatives/a/b/review-record.md', 'docs/review-record.md']) {

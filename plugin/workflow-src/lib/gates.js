@@ -86,8 +86,9 @@
  *           stops the run blocked through stopDelivery before its failures
  *           are kept and before any fix round or decide() call: one
  *           terminal cause, next action report, naming each such record
- *           encoded (checkRecordVerify, issue 619). A line with any other
- *           path is ignored.
+ *           encoded (checkRecordVerify, issue 619), checked before the
+ *           version relay, so a record stop wins over a version relay
+ *           problem. A line with any other path is ignored.
  *   Fix     a failed validation resolves through decide(). Each taken round is
  *           a drone that fixes the failures and reports its files, which the
  *           commit runner commits; at maxFixRounds() the run asks. A failed
@@ -452,7 +453,7 @@ async function runValidateStep(run, plan, facts, gates) {
   const schema = selectValidateSchema(plan);
   const prompt = addResumeNote(buildValidatePrompt(plan, facts.trunk_commit), run);
   const result = await agent(prompt, droneOptions(gateLabel('validate', run, gates.runs.validate), 'Validate', schema));
-  const validation = readValidateOutcome(result, schema);
+  const validation = checkRecordVerify(readValidateOutcome(result, schema));
   return validation.problem === undefined ? applyVersionCheck(validation, run) : validation;
 }
 
@@ -486,7 +487,7 @@ function checkRecordVerify(validation) {
 }
 
 async function runValidateGate(run, plan, facts, gates) {
-  const validation = hasKeptFailure(run, gates) ? gates.failures[run.head] : checkRecordVerify(await runValidateStep(run, plan, facts, gates));
+  const validation = hasKeptFailure(run, gates) ? gates.failures[run.head] : await runValidateStep(run, plan, facts, gates);
   if (validation.problem !== undefined) {
     return stopDelivery([validation], run);
   }

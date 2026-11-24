@@ -191,7 +191,13 @@ async function runCommitStep(run, plan, commit, stepCauses) {
   const isReplan = commit.stepName === 'wave';
   phase('Commit');
   const listWords = (label) => listCommitWords(run, label, commit.files);
-  const record = commit.stepName === 'wave' && RECORD_WRITES ? undefined : commit.files.find((file) => /^docs\/initiatives\/[^/]+\/review-record\.md$/i.test(file));
+  /*
+   * INVARIANT: the record match reads only the exact path form. molt.sh
+   * refuses a listed path with a leading slash or an empty, . or ..
+   * component, so a record path spelled with ./, //, /./ or a leading slash
+   * never commits a record: the run stops on that commit script refusal.
+   */
+  const record =commit.stepName === 'wave' && RECORD_WRITES ? undefined : commit.files.find((file) => /^docs\/initiatives\/[^/]+\/review-record\.md$/i.test(file));
   const recordStop = record === undefined ? undefined : { problem: 'The commit step refused review record ' + encodeUntrustedText(record) + ', so ' + RUN_NAME + ' stopped.', terminal: true };
   const commandStop = describeCommandStop('commit', listWords(commit.label), listWords(commit.label + '-retry'));
   const buildPrompt = (label) => addResumeNote(buildCommitPrompt(listWords(label), commit.files, plan, texts.purpose, subject, run.pluginRoot), run);
