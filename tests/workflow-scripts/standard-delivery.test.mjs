@@ -10688,6 +10688,110 @@ const ROW_TESTS = {
       assertTailPause(run, [surfacedAsk(repeatedBrief())], 'review-commit-2-1', REPEAT_PINNED);
       assert.deepEqual(labelsOf(run), SECOND_PASS_LABELS);
     });
+  },
+  'SD-88': () => {
+    const RECORD = 'docs/initiatives/cache-layer/review-record.md';
+    const SECOND_RECORD = 'docs/initiatives/v2-cache/review-record.md';
+    const recordLead = (records) => 'Record verify failed: ' + records.map((record) => main.encodeUntrustedText(record)).join(', ') + ', so the delivery stopped before the pull request.';
+    test('a failed validation with record-verify-failed: lines, trimmed, stops blocked naming each record, with no validation_remediation decision and no fix round', async () => {
+      const failures = FAILURE_TEXT + '\n  record-verify-failed: ' + RECORD + '  \nrecord-verify-failed: ' + SECOND_RECORD;
+      for (const target of [workflow, buildWithSurfaceKinds(['validation_remediation'])]) {
+        const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'failed', failures: failures } }), target);
+        assertStepStopEnd(run, recordLead([RECORD, SECOND_RECORD]) + '\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
+        assert.ok(!labelsOf(run).some((label) => label.startsWith('fix-')), JSON.stringify(labelsOf(run)));
+        assert.ok(!run.result.message.includes(main.buildValidationRemediationBrief(OTHER, 1).problem), run.result.message);
+        assert.ok(!run.result.message.includes('Decided for you'), run.result.message);
+      }
+    });
+    test('the record stop comes before the version question of an undetermined version check', async () => {
+      const failed = validateWithVersion(ASK_UNDETERMINED, { outcome: 'failed', failures: 'record-verify-failed: ' + RECORD });
+      const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': failed }));
+      assertStepStopEnd(run, recordLead([RECORD]) + '\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
+      assert.ok(!run.result.message.includes(main.buildVersionQuestionBrief({ version_check: 'undetermined' }).problem), run.result.message);
+    });
+    test('the record stop comes before a blocked or malformed version relay', async () => {
+      for (const version of [{ outcome: 'blocked', stderr: 'blocker: base ref does not resolve to a commit\n' }, { outcome: 'ran', stdout: 'version_check: match\n' }]) {
+        const failed = { outcome: 'failed', failures: FAILURE_TEXT + '\nrecord-verify-failed: ' + RECORD, version: version };
+        const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': failed }));
+        assertStepStopEnd(run, recordLead([RECORD]) + '\n\n' + main.nextStepLine('report'), 'validate-1-1', 'report');
+        assert.ok(!run.result.message.includes('The version check of the validation step'), run.result.message);
+      }
+    });
+    test('a record-verify-failed: line whose path is outside the record shape is not read, so the failure goes to a fix round', async () => {
+      const outside = [
+        'docs/initiatives/Cache/review-record.md',
+        'docs/initiatives/a--b/review-record.md',
+        'docs/initiatives/-a/review-record.md',
+        'docs/initiatives/a/b/review-record.md',
+        'docs/initiatives//review-record.md',
+        'docs/initiatives/a/review-record.MD',
+        'src/review-record.md',
+        './docs/initiatives/a/review-record.md',
+        RECORD + ' extra'
+      ];
+      const lines = outside.map((path) => 'record-verify-failed: ' + path).concat(['see record-verify-failed: ' + RECORD, 'record-verify-failed:' + RECORD, 'Record-Verify-Failed: ' + RECORD]);
+      for (const line of lines) {
+        assert.equal(main.checkRecordVerify({ status: 'failed', failures: line }).problem, undefined, line);
+        const failures = FAILURE_TEXT + '\n' + line;
+        const run = await runWorkflow(LAUNCH, fixFlowResults({ 'validate-1-1': { outcome: 'failed', failures: failures } }));
+        assert.equal(run.result.outcome, 'complete', line + ': ' + run.result.message);
+        assert.deepEqual(labelsOf(run), FIX_FLOW_LABELS, line);
+        assert.equal(readDataBlock(callOf(run, 'fix-1-1').prompt, 'failures'), failures, line);
+      }
+    });
+    test('the failures description of every validate schema asks for each record-verify-failed: line word for word', async () => {
+      for (const [hasCommands, hasVersion] of [[true, false], [false, false], [true, true], [false, true]]) {
+        assert.ok(main.buildValidateSchema(hasCommands, hasVersion).properties.failures.description.startsWith('Each failing command with its failure output, each record-verify-failed: line word for word.'), hasCommands + ' ' + hasVersion);
+      }
+      const run = await runWorkflow(LAUNCH, happyResults());
+      assert.ok(callOf(run, 'validate-1-1').opts.schema.properties.failures.description.startsWith('Each failing command with its failure output, each record-verify-failed: line word for word.'));
+    });
+  },
+  'SD-89': () => {
+    const RECORD = 'docs/initiatives/cache-layer/review-record.md';
+    const VARIANT = 'Docs/Initiatives/Cache-Layer/Review-Record.MD';
+    const refusedLead = (record) => 'The commit step refused review record ' + main.encodeUntrustedText(record) + ', so the delivery stopped.';
+    test('a wave whose files hold a review record commits it', async () => {
+      const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js', RECORD])] });
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(readRunnerInputs(callOf(run, 'commit-1-1').prompt).files, ['src/cache.js', RECORD]);
+    });
+    test('a fix round reporting a review record, a case variant included, is refused before any runner call with a terminal stop naming it', async () => {
+      for (const record of [RECORD, VARIANT]) {
+        const run = await runWorkflow(LAUNCH, fixFlowResults({ 'fix-1-1': { outcome: 'complete', files: ['src/cache.js', record] } }));
+        assert.equal(run.result.outcome, 'blocked', run.result.message);
+        assert.equal(run.result.needs_user, false, run.result.message);
+        assert.equal(run.result.resume_args, undefined);
+        assert.deepEqual(run.result.message.split('\n\n').slice(0, 2), [refusedLead(record), NEXT_STEP_LINE], record);
+        assert.equal(labelsOf(run).at(-1), 'fix-1-1', record);
+        assert.ok(!labelsOf(run).includes('fix-commit-1-1'), record);
+      }
+    });
+    test('runCommitStep refuses a record for every step but wave, after the step causes, and lets a wave and a path outside the record shape through', async () => {
+      for (const stepName of ['fix', 'head']) {
+        const stepped = await runStepWithStubAgent((run) => main.runCommitStep({ ...run, factsStem: FACTS_STEM }, makePlan(), { files: [VARIANT], label: 'commit-1-1', stepName: stepName }, [{ problem: 'STEP_CAUSE_ZQ.' }]));
+        assert.deepEqual(stepped.labels, [], stepName);
+        assert.deepEqual(stepped.result.result.message.split('\n\n').slice(0, 3), ['STEP_CAUSE_ZQ.', NEXT_STEP_LINE, refusedLead(VARIANT)], stepName);
+      }
+      for (const [stepName, files] of [['wave', [VARIANT]], ['fix', ['docs/initiatives/a/b/review-record.md']], ['fix', ['docs/review-record.md']], ['fix', ['docs/initiatives/a/review-record.md.bak']]]) {
+        const stepped = await runStepWithStubAgent((run) => main.runCommitStep({ ...run, factsStem: FACTS_STEM }, makePlan(), { files: files, label: 'commit-1-1', stepName: stepName, subject: 'Step S1 is done.' }, []));
+        assert.deepEqual(stepped.labels, ['commit-1-1'], stepName + ' ' + files[0]);
+      }
+    });
+    test('a fix round reporting a record path spelled with ./, //, /./ or a leading slash reaches the commit script, which refuses it, so the run stops with no record committed', async () => {
+      const scratch = makeScratchRepo();
+      const spellings = ['./' + RECORD, 'docs//initiatives/cache-layer/review-record.md', 'docs/initiatives/cache-layer/./review-record.md', '/' + RECORD];
+      const filesBlocker = 'files must be an array of exact paths relative to the top of the work tree';
+      for (const [index, spelling] of spellings.entries()) {
+        assert.equal(moltRefusesPath(scratch, spelling, index), true, spelling);
+        const run = await runWorkflow(LAUNCH, fixFlowResults({ 'fix-1-1': { outcome: 'complete', files: ['src/cache.js', spelling] }, 'fix-commit-1-1': { outcome: 'blocked', stderr: 'blocker: ' + filesBlocker + '\n' } }));
+        assert.deepEqual([run.result.needs_user, run.result.outcome, run.result.resume_args], [false, 'blocked', undefined], spelling);
+        assert.ok(run.result.message.startsWith('The commit step was blocked, so the delivery stopped: its blocker line says "' + filesBlocker + '".'), run.result.message);
+        assert.equal(readDataBlock(callOf(run, 'fix-commit-1-1').prompt, 'files_file').content, 'src/cache.js\n' + spelling, spelling);
+        assert.equal(labelsOf(run).at(-1), 'fix-commit-1-1', spelling);
+      }
+    });
   }
 };
 

@@ -117,7 +117,7 @@ function buildScopeSchema() {
   const pathItem = buildScopeItem({
     path: pathField,
     exists: { type: 'boolean', description: 'true when the path exists now.' },
-    drift: { type: 'string', minLength: 0, maxLength: 400, description: externalLabel() + ' How the path differs from what the section says, empty when it does not.' }
+    drift: { type: 'string', minLength: 0, maxLength: 400, description: externalLabel() + ' How the path differs from what the section says, else empty.' }
   });
   const limitItem = buildScopeItem({ path: pathField, origin: { type: 'string', enum: ['request', 'answer'] } });
   return {

@@ -13,6 +13,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [14.3.0] - 2026-11-24
+
+### Added
+
+- The `hivemind:design-review` skill (`plugin/skills/design-review/`): fresh read-only cerebrate rounds over a design, plus the local review tool pass for trust, credential and merge-path designs. `HIVEMIND_DESIGN_REVIEW_MODEL` sets the model of the cerebrate rounds.
+- The engine `plugin/skills/design-review/scripts/design-review.sh` with the subcommands `verify`, `stamps`, `round`, `head`, `model` and `diff`.
+- `plugin/skills/_shared/record-verify.sh`: PR mode and merge mode, exit 0, 1 or 2.
+- `tools/test_design_review.sh`, with `tools/verify_records.sh` registered in `tools/validate.sh`.
+
+### Changed
+
+- The validate step stops blocked on a `record-verify-failed:` line (SD-88, PFR-32), and `runCommitStep` refuses a review-record path outside a standard-delivery wave (SD-89, PFR-31). Both narrow ADR-0037 decision 16.
+- The Validation Procedure record rule in `plugin/governance/definitions.md`.
+- The `merge-approved.sh` record gate for docs-path PRs and its three new output lines `MERGE=skipped:record-blocked`, `MERGE=skipped:record-unread` and `MERGE=wait:base-moved` (ADR-0044 amendment 2026-11-24, decisions 21 to 25).
+- `hivemind_readiness_jq_defs` in `plugin/skills/_shared/readiness-check.sh` is public.
+- `hivemind:adaptation-cycle` names the design review as its second caller.
+- Behaviour-preserving prose cuts in the workflow sources keep build prose room.
+
+No prose budget raised.
+
+Issue: #619.
+
 ## [14.2.0] - 2026-11-24
 
 ### Added

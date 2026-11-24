@@ -10,11 +10,12 @@
  *   plan   the accepted plan, from runPlanningPass (lib/plan.js).
  *   relay  each runner result: {outcome, stdout, stderr} under
  *          RELAY_SCHEMA, its stdout read with lib/routing.js.
- *   The constants of the workflow's main.js this file reads: RUN_NAME and
- *   RELAY_SCHEMA. Every workflow whose code calls a function of this file
- *   declares them. It reads no workflow function: the relay helpers are
- *   lib/runner.js, the routing spec lib/specs.js, the stop and head
- *   functions lib/record.js and the prompt blocks lib/facts.js.
+ *   The constants of the workflow's main.js this file reads: RUN_NAME,
+ *   RELAY_SCHEMA and RECORD_WRITES. Every workflow whose code calls a
+ *   function of this file declares them. It reads no workflow function:
+ *   the relay helpers are lib/runner.js, the routing spec lib/specs.js,
+ *   the stop and head functions lib/record.js and the prompt blocks
+ *   lib/facts.js.
  *
  * Outputs
  *   runCommitStep(run, plan, commit, stepCauses)  commit is {files,
@@ -64,6 +65,10 @@
  *   Every step that can change files ends with the commit runner, whatever
  *   the workers returned (ADR-0037 invariant 1, decision 12). Workers never
  *   commit.
+ *   Before any runner call, runCommitStep refuses a file list holding a
+ *   review record path, docs/initiatives/<slug>/review-record.md compared
+ *   case-insensitively, unless stepName is wave and RECORD_WRITES is true:
+ *   one terminal cause naming the path, after the step causes (issue 619).
  *   A file-changing step reads its own result before its commit and passes
  *   its causes to runCommitStep, which stops through stopDelivery, isReplan
  *   true for a wave: a failed commit adds its cause after them, so a commit
@@ -96,7 +101,7 @@ function commitStepTexts(stepName) {
     case 'wave':
       return { purpose: 'the wave of plan steps that just ran', noun: 'the wave' };
     case 'fix':
-      return { purpose: 'the validation fix round that just ran', noun: 'the fix round', subject: 'fix the failed validation' };
+      return { purpose: 'the fix round', noun: 'the fix round', subject: 'fix the failed validation' };
     case 'head':
       return { purpose: 'nothing: with no files it reports the working branch head after a reply to a stop', noun: 'the head check', subject: 'read the branch head' };
     default:
@@ -184,12 +189,19 @@ async function runCommitStep(run, plan, commit, stepCauses) {
   const texts = commit.texts ?? commitStepTexts(commit.stepName);
   const subject = commit.subject ?? texts.subject;
   const isReplan = commit.stepName === 'wave';
-  const phaseTitle = 'Commit';
-  phase(phaseTitle);
+  phase('Commit');
   const listWords = (label) => listCommitWords(run, label, commit.files);
+  /*
+   * INVARIANT: the record match reads only the exact path form. molt.sh
+   * refuses a listed path with a leading slash or an empty, . or ..
+   * component, so a record path spelled with ./, //, /./ or a leading slash
+   * never commits a record: the run stops on that commit script refusal.
+   */
+  const record =commit.stepName === 'wave' && RECORD_WRITES ? undefined : commit.files.find((file) => /^docs\/initiatives\/[^/]+\/review-record\.md$/i.test(file));
+  const recordStop = record === undefined ? undefined : { problem: 'The commit step refused review record ' + encodeUntrustedText(record) + ', so ' + RUN_NAME + ' stopped.', terminal: true };
   const commandStop = describeCommandStop('commit', listWords(commit.label), listWords(commit.label + '-retry'));
   const buildPrompt = (label) => addResumeNote(buildCommitPrompt(listWords(label), commit.files, plan, texts.purpose, subject, run.pluginRoot), run);
-  const checked = commandStop ?? checkCommitRelay(await runRunnerRelay(buildPrompt, commit.label, phaseTitle), plan, texts.noun);
+  const checked = recordStop ?? commandStop ?? checkCommitRelay(await runRunnerRelay(buildPrompt, commit.label, 'Commit'), plan, texts.noun);
   if (checked.problem !== undefined) {
     return stopDelivery(stepCauses.concat([checked]), run, [], isReplan);
   }

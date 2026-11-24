@@ -23,7 +23,7 @@ The change that addresses the targeted feedback in the fewest files, none outsid
 
 ## Shell Output Discipline
 
-Emit no decorative shell output: banners (`echo "=== X ==="`), progress or status narration (`echo "done"`, `echo "JSON valid"`), or compound pipelines built to narrate. Rely on each tool's own output and use direct tool calls. Exempt: `printf` routing data a pipeline skill requires (e.g. `printf 'branch: ...'`).
+Emit no decorative shell output: banners (`echo "=== X ==="`), progress or status narration (`echo "done"`, `echo "JSON valid"`). Rely on each tool's own output and use direct tool calls. Exempt: `printf` routing data a pipeline skill requires (e.g. `printf 'branch: ...'`).
 
 ## Bash Command Discipline
 
@@ -54,11 +54,11 @@ A failure is transient if and only if its root cause is HTTP 5xx or 429, a TCP c
 
 ## Validation Procedure
 
-The run-level gate, run once at the `validate` state. Run each gate command the project's `CLAUDE.md` names, once. Another listed form of the same suites (a fuller or narrower run), a diagnostic or a CI-only run is not part of the gate and is not run. On the script engine, the validate step gives a drone the plan's validation commands, once per gate run; running each once is its whole task. If the plan names none, the drone runs this procedure as its whole task: an empty list never skips validation. If the plan names version files, the drone also runs `hivemind:bump-type` once, read-only, and relays its output. Each is a validation run, not a Worker Self-Check. No duration cap. A test case that hits its own time limit in a file the branch does not change runs once more alone: if it passes, it counts as passed and the PR body lists the case as slow. A command that cannot run: return Blocked naming it and the reason. If `CLAUDE.md` lists no validation commands, validation is "Not run" and the report says so.
+The run-level gate, run once at the `validate` state. Run each gate command the project's `CLAUDE.md` names, once. Another listed form of the same suites (a fuller or narrower run), a diagnostic or a CI-only run is not part of the gate and is not run. On the script engine, the validate step gives a drone the plan's validation commands, once per gate run; running each once is its whole task. If the plan names none, the drone runs this procedure as its whole task: an empty list never skips validation. If the plan names version files, the drone also runs `hivemind:bump-type` once, read-only, and relays its output. Each is a validation run, not a Worker Self-Check. No duration cap. A test case that hits its own time limit in a file the branch does not change runs once more alone: if it passes, it counts as passed and the PR body lists the case as slow. A command that cannot run: return Blocked naming it and the reason. Report each `record-verify-failed:` line of failure output word for word. No fix edits a review record (`docs/initiatives/<slug>/review-record.md`). If `CLAUDE.md` lists no validation commands, validation is "Not run" and the report says so.
 
 ## Worker Self-Check
 
-A worker (drone/changeling) checks only its own edited artifacts, each at the smallest scope that confirms the change: the project's documented per-artifact checks (e.g. in `CLAUDE.md`), or the narrowest subset of its validation commands, scoped to the edited file. It never runs the full run-level gate (the Validation Procedure) as a self-check; the overlord runs that once, at the `validate` state.
+A worker (drone/changeling) checks only its own edited artifacts, each at the smallest scope that confirms the change: the project's documented per-artifact checks, or the narrowest subset of its validation commands, scoped to the edited file. It never runs the full run-level gate (the Validation Procedure) as a self-check.
 
 A self-check that cannot run: return Blocked naming it and the reason. No applicable self-check: record "Not run (no applicable self-check)", not Blocked.
 

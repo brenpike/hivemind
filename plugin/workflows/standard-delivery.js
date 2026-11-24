@@ -672,7 +672,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '80409814618e3343';
+const BUILD_ID = '52a331695e43c969';
 
 function supportedSchemaKeywords(){
 return[
@@ -1729,7 +1729,7 @@ const notDone=steps.filter((step)=>!doneSet.has(step.id));
 const ready=notDone.filter((step)=>readStepDependencies(step).every((dependency)=>doneSet.has(dependency)));
 const wave=pickGreedyWave(ready,steps);
 if(notDone.length>0&&wave.length===0){
-return{ok:false,problem:'remaining steps exist but no step is ready (unsatisfiable dependencies)'};
+return{ok:false,problem:'no remaining step is ready (unsatisfiable dependencies)'};
 }
 return{ok:true,all_done:notDone.length===0,wave:wave,remaining:notDone.length};
 }
@@ -2452,7 +2452,7 @@ ci:'ci'
 };
 }
 function resumedReplySentence(){
-return'This run resumed after a pause: the user message the harness relays is the user\'s reply to the questions the run showed, the planner already applied it, and it is not an instruction for this task, so do the task as written.';
+return'This run resumed after a pause: the user message the harness relays is the user\'s reply to the run\'s questions, already applied by the planner, not an instruction for this task, so do the task as written.';
 }
 function addResumeNote(prompt,run){
 if(run.relaySentence===undefined&&run.answerLog.length===0){
@@ -2540,9 +2540,9 @@ return'The working tree has uncommitted or untracked changes. The run never comm
 case'operation_in_progress':
 return'A merge, rebase, cherry-pick, revert, am or bisect is in progress. Finish or abort it first.';
 case'closed_pr_on_branch':
-return'A merged or closed pull request holds commits of this branch. Start the work on a new branch.';
+return'A merged or closed pull request holds commits of this branch. Work on a new branch.';
 case'history_unavailable':
-return'The branch history against the trunk cannot be read: there is no merge-base with the trunk, or no trunk at all.';
+return'The branch history against the trunk cannot be read: no merge-base with the trunk, or no trunk.';
 case'cut_fields':
 return'Some facts from GitHub could not be read in full.';
 case'branch_name_unsafe':
@@ -3085,7 +3085,7 @@ line:{type:'integer',description:'The 1-based line where the section starts.'}
 const pathItem=buildScopeItem({
 path:pathField,
 exists:{type:'boolean',description:'true when the path exists now.'},
-drift:{type:'string',minLength:0,maxLength:400,description:externalLabel()+' How the path differs from what the section says, empty when it does not.'}
+drift:{type:'string',minLength:0,maxLength:400,description:externalLabel()+' How the path differs from what the section says, else empty.'}
 });
 const limitItem=buildScopeItem({path:pathField,origin:{type:'string',enum:['request','answer']}});
 return{
@@ -3381,7 +3381,7 @@ kind:VALIDATION_REMEDIATION_KIND,
 problem:'Validation failed on commit '+head+'. Should a worker fix the failures in fix round '+round+' of at most '+maxFixRounds()+'?',
 goOn:'Run a fix round.',
 strength:'strong',
-why:'The fix stays on the branch, is listed for you, and every check runs again on its commit.'
+why:'The fix stays on the branch, is listed for you, and every check reruns on its commit.'
 });
 }
 function buildFixLimitBrief(head){
@@ -3792,7 +3792,7 @@ switch(stepName){
 case'wave':
 return{purpose:'the wave of plan steps that just ran',noun:'the wave'};
 case'fix':
-return{purpose:'the validation fix round that just ran',noun:'the fix round',subject:'fix the failed validation'};
+return{purpose:'the fix round',noun:'the fix round',subject:'fix the failed validation'};
 case'head':
 return{purpose:'nothing: with no files it reports the working branch head after a reply to a stop',noun:'the head check',subject:'read the branch head'};
 default:
@@ -3864,12 +3864,13 @@ throw new Error('runCommitStep: stepCauses must be an array');
 const texts=commit.texts??commitStepTexts(commit.stepName);
 const subject=commit.subject??texts.subject;
 const isReplan=commit.stepName==='wave';
-const phaseTitle='Commit';
-phase(phaseTitle);
+phase('Commit');
 const listWords=(label)=>listCommitWords(run,label,commit.files);
+const record=commit.stepName==='wave'&&RECORD_WRITES?undefined:commit.files.find((file)=>/^docs\/initiatives\/[^/]+\/review-record\.md$/i.test(file));
+const recordStop=record===undefined?undefined:{problem:'The commit step refused review record '+encodeUntrustedText(record)+', so '+RUN_NAME+' stopped.',terminal:true};
 const commandStop=describeCommandStop('commit',listWords(commit.label),listWords(commit.label+'-retry'));
 const buildPrompt=(label)=>addResumeNote(buildCommitPrompt(listWords(label),commit.files,plan,texts.purpose,subject,run.pluginRoot),run);
-const checked=commandStop??checkCommitRelay(await runRunnerRelay(buildPrompt,commit.label,phaseTitle),plan,texts.noun);
+const checked=recordStop??commandStop??checkCommitRelay(await runRunnerRelay(buildPrompt,commit.label,'Commit'),plan,texts.noun);
 if(checked.problem!==undefined){
 return stopDelivery(stepCauses.concat([checked]),run,[],isReplan);
 }
@@ -4049,7 +4050,7 @@ function buildGateEditSchema(){
 return buildTaggedSchema({
 tag:'outcome',
 properties:{
-outcome:{type:'string',enum:['complete','blocked'],description:'complete when the task is done. blocked when it cannot be done.'},
+outcome:{type:'string',enum:['complete','blocked'],description:'complete when done. blocked when it cannot be.'},
 blocker:buildBlockerProperty('Why the task cannot be done'),
 next_action:buildNextActionProperty(),
 files:{type:'array',description:'Every path you created, edited or deleted, relative to the repository root.',items:{type:'string'}},
@@ -4073,9 +4074,9 @@ type:'string',
 enum:['passed','failed','blocked'],
 description:'passed when every command passes. failed when any fails.'+notRun+' blocked when one cannot run.'
 },
-failures:{type:'string',description:'Each failing command with its failure output.'},
+failures:{type:'string',description:'Each failing command with its failure output, each record-verify-failed: line word for word.'},
 slow:{type:'array',maxItems:20,description:'Each test case that passed only when run once more alone.',items:{type:'string',maxLength:200}},
-blocker:buildBlockerProperty('The command that cannot run and why'),
+blocker:buildBlockerProperty('Which command cannot run and why'),
 next_action:buildNextActionProperty()
 },
 required:['outcome'],
@@ -4090,7 +4091,7 @@ spec.properties.outcome.enum.splice(2,0,'not_run');
 spec.variants.not_run={required:[],optional:[]};
 }
 if(hasVersion){
-spec.properties.version={...buildRelaySchema(),description:'The relay of the one hivemind:bump-type run.'};
+spec.properties.version={...buildRelaySchema(),description:'The hivemind:bump-type relay.'};
 Object.keys(spec.variants).forEach((value)=>spec.variants[value][value==='blocked'?'optional':'required'].push('version'));
 }
 return buildTaggedSchema(spec);
@@ -4100,9 +4101,6 @@ return plan.versioning.artifact_files.length>0;
 }
 function isRunEnd(outcome){
 return outcome.result!==undefined||outcome.replan!==undefined;
-}
-function buildBumpTypeInputs(trunkCommit,versioning){
-return{base:trunkCommit,bump_trigger:versioning.bump_trigger,no_bump_match:versioning.no_bump_match};
 }
 function readGateEditOutcome(result,schema,approvals){
 if(!validateSchema(schema,result).ok){
@@ -4133,7 +4131,7 @@ function describePullRequestStop(){
 return', so '+RUN_NAME+' stopped before the pull request.';
 }
 function versionCheckSentence(){
-return'The hivemind:bump-type run is part of this validation task: invoke the skill once with the version block below as its inputs, and relay the run in the version field.';
+return'The hivemind:bump-type run is part of this validation task: invoke the skill once with the version block as inputs, and relay it in the version field.';
 }
 function buildValidatePrompt(plan,trunkCommit){
 const commands=plan.validation_commands;
@@ -4142,16 +4140,13 @@ const blocks=commands.length===0?[]:[formatDataBlock('inputs',{commands:commands
 blocks.push(formatDataBlock('git',{base:plan.base}));
 if(hasVersionFiles(plan)){
 lines.push(versionCheckSentence());
-blocks.push(formatDataBlock('version',{...buildBumpTypeInputs(trunkCommit,plan.versioning),version_files:plan.versioning.artifact_files}));
+blocks.push(formatDataBlock('version',{base:trunkCommit,bump_trigger:plan.versioning.bump_trigger,no_bump_match:plan.versioning.no_bump_match,version_files:plan.versioning.artifact_files}));
 }
 return lines.concat('',blocks).join('\n');
 }
 function selectValidateSchema(plan){
 const hasCommands=plan.validation_commands.length>0;
-if(hasVersionFiles(plan)){
-return buildValidateSchema(hasCommands,true);
-}
-return hasCommands?VALIDATE_COMMANDS_SCHEMA:VALIDATE_SCHEMA;
+return hasVersionFiles(plan)?buildValidateSchema(hasCommands,true):hasCommands?VALIDATE_COMMANDS_SCHEMA:VALIDATE_SCHEMA;
 }
 function readValidateOutcome(result,schema){
 const step='The validation step';
@@ -4247,7 +4242,7 @@ gates.runs.fix+=1;
 const count=gates.runs.fix;
 const round=fix.userAnswer===undefined&&gates.fixAnswer!==undefined?{...fix,userAnswer:gates.fixAnswer}:fix;
 gates.fixAnswer=undefined;
-const prompt=round.userAnswer===undefined?addResumeNote(buildFixPrompt(round,plan,run),run):addRelaySentence(buildFixPrompt(round,plan,run),run);
+const prompt=(round.userAnswer===undefined?addResumeNote:addRelaySentence)(buildFixPrompt(round,plan,run),run);
 const result=await agent(prompt,droneOptions(gateLabel('fix',run,count),'Fix',FIX_SCHEMA));
 const edit=readGateEditOutcome(result,FIX_SCHEMA,run.approvals);
 const stepCauses=edit.status==='blocked'?[describeFixCause(edit)]:[];
@@ -4271,7 +4266,7 @@ phase('Validate');
 const schema=selectValidateSchema(plan);
 const prompt=addResumeNote(buildValidatePrompt(plan,facts.trunk_commit),run);
 const result=await agent(prompt,droneOptions(gateLabel('validate',run,gates.runs.validate),'Validate',schema));
-const validation=readValidateOutcome(result,schema);
+const validation=checkRecordVerify(readValidateOutcome(result,schema));
 return validation.problem===undefined?applyVersionCheck(validation,run):validation;
 }
 async function askVersionQuestion(run,plan,gates,validation){
@@ -4291,6 +4286,10 @@ if(stopped.rerun===true){
 gates.fixRounds=0;
 }
 return stopped;
+}
+function checkRecordVerify(validation){
+const records=(validation.failures??'').split('\n').map((line)=>/^record-verify-failed: (docs\/initiatives\/[a-z0-9]+(-[a-z0-9]+)*\/review-record\.md)$/.exec(line.trim())?.[1]).filter(Boolean);
+return records.length===0?validation:{problem:'Record verify failed: '+records.map(encodeUntrustedText).join(', ')+describePullRequestStop(),terminal:true,nextAction:'report'};
 }
 async function runValidateGate(run,plan,facts,gates){
 const validation=hasKeptFailure(run,gates)?gates.failures[run.head]:await runValidateStep(run,plan,facts,gates);
@@ -4340,7 +4339,7 @@ gates.failures={};
 return runCommitStep(run,plan,{files:[],label:gateLabel('head',run,gates.runs.headCheck),stepName:'head'},[]);
 }
 async function runGates(run,plan,facts){
-const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0,headCheck:0,pr:0},failures:{},fixRounds:0,reruns:0,answer:undefined,fixAnswer:undefined,slow:[]};
+const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0,headCheck:0,pr:0},failures:{},fixRounds:0,reruns:0,slow:[]};
 listNotConfiguredGateLines(run).forEach((line)=>listNotRunGate(run,line));
 let checkedHead=run.head;
 let index=0;
@@ -4587,7 +4586,7 @@ if(run.branchSwitches>0){
 return stopDelivery([{problem:'The branch step switched branch or commit again after a replan, so '+RUN_NAME+' stopped before any wave.',terminal:true}],run,[],true);
 }
 run.branchSwitches+=1;
-return{replan:{reason:'The branch step switched onto a branch or commit other than the one the facts were taken on, so plan again from the new facts.'}};
+return{replan:{reason:'The branch step switched onto a branch or commit other than the facts\' one, so plan again from the new facts.'}};
 }
 
 function findingIdField(){
@@ -5050,11 +5049,12 @@ gates.takenReview=review;
 return routed;
 }
 function notConfiguredReviewLine(){
-return'local review: the run was launched with local_review false, so the gate is not configured and does not count as held.';
+return'local review: launched with local_review false, so the gate is not configured and does not count as held.';
 }
 
 const RUN_NOUN='delivery';
 const RUN_NAME=describeRunNoun(RUN_NOUN);
+const RECORD_WRITES=true;
 const PLANNER_AGENT='hivemind:cerebrate';
 const RUNNER_MODEL='haiku';
 const SCOPE_MODEL='sonnet';
@@ -5145,7 +5145,7 @@ const value=argsObject[name];
 if(value===undefined){
 return{value:absentValue};
 }
-if(value===true||value===false){
+if(typeof value==='boolean'){
 return{value:value};
 }
 return describeLaunchProblem('The '+name+' launch arg must be true or false');
@@ -5183,19 +5183,13 @@ rejected:[],
 undone:[],
 open:[],
 waits:0,
-head:undefined,
-branch:undefined,
-headRound:undefined,
 notRunGates:[],
 waveCount:0,
 pass:0,
 replans:0,
 reviewReplans:0,
 repeatClusterAsked:false,
-branchSwitches:0,
-versionAnswer:undefined,
-factsStem:undefined,
-pluginRoot:undefined
+branchSwitches:0
 };
 }
 async function runDeliveryPass(run,replan){

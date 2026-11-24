@@ -14,6 +14,11 @@
 #                                  one merge call, with the head, rollup and review states of the
 #                                  most recent read served before it
 #   OTHER argv=<...>               any other gh call (always a failure here)
+# A PATH-shim fake `git` runs the real git and appends `GIT argv=<...>` per call. On `fetch` it adds
+# a `url.<fixture server>.insteadOf=<the remote's URL>` setting, so the named remote's configured
+# URL is fetched from a local bare fixture repository; FIXTURE_GIT_FAIL=<subcommand> makes that
+# subcommand exit 1. The record cases run in a case directory that is a git repository whose
+# remote names the PR's repository; every other case's directory is not, and must make no git call.
 # Each case asserts the script's one stdout line, its exit status, an empty stderr, and the number
 # of reads and merge calls; its stdout line is also kept in the case's stdout file. Fixture bodies
 # are derived inline from one clean base body with one jq edit each, so a case differs from the
@@ -30,7 +35,8 @@
 #   - --admin appears only as the second merge call of a case, after a refused plain merge, with
 #     HIVEMIND_AUTO_MERGE_ADMIN set to a non-empty value, on the same head as the plain merge;
 #   - a merged or merged-admin line requires the case's last call to be a READ showing
-#     state=MERGED, after its last merge call.
+#     state=MERGED, after its last merge call;
+#   - a case outside the record cases makes no git call.
 #
 # Scratch space comes from tools/lib/scratch.sh (make_scratch_dir), removed on EXIT.
 #
@@ -39,7 +45,8 @@
 
 set -u
 
-unset HIVEMIND_AUTO_MERGE HIVEMIND_AUTO_MERGE_ADMIN HIVEMIND_PR_REVIEWERS
+unset HIVEMIND_AUTO_MERGE HIVEMIND_AUTO_MERGE_ADMIN HIVEMIND_PR_REVIEWERS GH_HOST
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=lib/scratch.sh
@@ -49,10 +56,13 @@ MERGE_APPROVED="$REPO_ROOT/plugin/skills/github-review-loop/scripts/merge-approv
 
 [ -f "$MERGE_APPROVED" ] || { echo "FAIL: script under test missing: $MERGE_APPROVED" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "FAIL: required dependency 'jq' is not installed" >&2; exit 2; }
+REAL_GIT="$(command -v git)" || { echo "FAIL: required dependency 'git' is not installed" >&2; exit 2; }
 
 make_scratch_dir TMPDIR_TEST
 cleanup() { rm -rf "$TMPDIR_TEST"; }
 trap cleanup EXIT
+mkdir -p "$TMPDIR_TEST/home"
+export HOME="$TMPDIR_TEST/home" GIT_CONFIG_NOSYSTEM=1
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -105,15 +115,46 @@ exit 97
 EOF
 chmod +x "$SHIM_DIR/gh"
 
+GIT_SERVER="$TMPDIR_TEST/server.git"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'real_git=%q\n' "$REAL_GIT"
+  printf 'git_server=%q\n' "$GIT_SERVER"
+  cat <<'EOF'
+printf 'GIT argv=%s\n' "$*" >>"${FIXTURE_CASE_DIR:?}/calls.log"
+subcommand="" skip_next=0 remote_next=0 remote_name=""
+for git_arg in "$@"; do
+  if [ "$skip_next" = 1 ]; then skip_next=0; continue; fi
+  if [ "$remote_next" = 1 ]; then remote_name="$git_arg"; break; fi
+  case "$git_arg" in
+    -c|-C) skip_next=1 ;;
+    --) remote_next=1 ;;
+    -*) ;;
+    *) [ -n "$subcommand" ] || subcommand="$git_arg" ;;
+  esac
+done
+[ -z "${FIXTURE_GIT_FAIL:-}" ] || [ "$subcommand" != "$FIXTURE_GIT_FAIL" ] || exit 1
+if [ "$subcommand" = "fetch" ] && [ -n "$remote_name" ]; then
+  remote_url="$("$real_git" remote get-url "$remote_name" 2>/dev/null)" || exit 1
+  exec "$real_git" -c "url.$git_server.insteadOf=$remote_url" "$@"
+fi
+exec "$real_git" "$@"
+EOF
+} >"$SHIM_DIR/git"
+chmod +x "$SHIM_DIR/git"
+
 HEAD_A="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 HEAD_B="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+BASE_A="1111111111111111111111111111111111111111"
 BOT_LOGIN="review-helper[bot]"
 SELF="operator"
 
-# The merge-ready PR: open, not a draft, head HEAD_A, CLEAN, rollup SUCCESS, one COMMENTED latest
-# review from a Bot, an empty THUMBS_UP group, and one resolved thread whose last comment is the Bot's.
-BASE_BODY="$(jq -n -c --arg head "$HEAD_A" --arg bot "$BOT_LOGIN" '{data: {repository: {pullRequest: {
+# The merge-ready PR: open, not a draft, head HEAD_A, CLEAN, base main at BASE_A, rollup SUCCESS,
+# one COMMENTED latest review from a Bot, an empty THUMBS_UP group, one resolved thread whose last
+# comment is the Bot's, and one changed file outside the docs paths, so the record gate is off.
+BASE_BODY="$(jq -n -c --arg head "$HEAD_A" --arg base "$BASE_A" --arg bot "$BOT_LOGIN" '{data: {repository: {pullRequest: {
   state: "OPEN", isDraft: false, headRefOid: $head, mergeStateStatus: "CLEAN",
+  baseRefName: "main", baseRefOid: $base,
   commits: {nodes: [{commit: {oid: $head, statusCheckRollup: {state: "SUCCESS"}}}]},
   comments: {nodes: [{id: "IC_1"}]},
   reviews: {nodes: [{id: "PRR_1"}]},
@@ -124,7 +165,8 @@ BASE_BODY="$(jq -n -c --arg head "$HEAD_A" --arg bot "$BOT_LOGIN" '{data: {repos
   ],
   reviewThreads: {pageInfo: {hasNextPage: false}, nodes: [
     {isResolved: true, comments: {nodes: [{author: {login: $bot, __typename: "Bot"}}]}}
-  ]}
+  ]},
+  files: {pageInfo: {hasNextPage: false}, nodes: [{path: "README.md", changeType: "MODIFIED"}]}
 }}}}')"
 PR='.data.repository.pullRequest'
 # The confirm-read edit: the base body with the PR merged.
@@ -432,6 +474,14 @@ read_error_case "read:reaction-groups-null" "$PR.reactionGroups = null"         
 read_error_case "read:review-state-missing" "del($PR.latestReviews.nodes[0].state)"                      malformed-read
 read_error_case "read:review-state-null"   "$PR.latestReviews.nodes[0].state = null"                     malformed-read
 read_error_case "read:review-state-number" "$PR.latestReviews.nodes[0].state = 1"                        malformed-read
+read_error_case "read:base-oid-not-hex"    "$PR.baseRefOid = \"main\""                                  malformed-read
+read_error_case "read:base-oid-null"       "$PR.baseRefOid = null"                                       malformed-read
+read_error_case "read:base-name-empty"     "$PR.baseRefName = \"\""                                      malformed-read
+read_error_case "read:base-name-number"    "$PR.baseRefName = 1"                                         malformed-read
+read_error_case "read:files-lost"          "del($PR.files)"                                              malformed-read
+read_error_case "read:files-page-flag-null" "$PR.files.pageInfo = null"                                  malformed-read
+read_error_case "read:file-path-null"      "$PR.files.nodes[0].path = null"                              malformed-read
+read_error_case "read:file-change-type-number" "$PR.files.nodes[0].changeType = 1"                       malformed-read
 
 gate_case "read:other-group-next-page-ignored" "$PR.reactionGroups[1].reactors.pageInfo.hasNextPage = true" "MERGE=merged" 1
 
@@ -546,6 +596,295 @@ for admin_case in refused:blocked-admin refused:behind-admin refused:blocked-adm
   fi
 done
 
+# ── Record gate: a PR whose files touch docs ─────────────────────────────────
+# The fixture server is a bare repository built with the real git from an author repository. Its
+# branches: main (a README), trunk-demo (main plus a demo initiative whose record passes) and
+# trunk-drift (trunk-demo with the demo PRD edited and not re-stamped). Its PR heads:
+#   11  main + the demo initiative, record passes
+#   12  main + the demo initiative, record verdict fail
+#   13  main + the demo initiative, record verdict pass with an open finding
+#   14  main + the demo PRD and solution design, no record
+#   15  trunk-demo + the demo solution design marked delivered
+#   16  trunk-demo + a second initiative whose record passes
+# PR 18 has no head ref on the server.
+AUTHOR_DIR="$TMPDIR_TEST/author"
+
+# author_git <arg>...: the real git in the author repository, with a fixed identity.
+author_git() {
+  "$REAL_GIT" -C "$AUTHOR_DIR" -c user.name=fixture -c user.email=fixture@example.invalid "$@"
+}
+
+# author_file <path> <text>: writes <text> to <path> in the author work tree.
+author_file() {
+  mkdir -p "$AUTHOR_DIR/$(dirname "$1")" && printf '%s' "$2" >"$AUTHOR_DIR/$1"
+}
+
+# author_commit <var> <message>: commits the whole author work tree and sets <var> to its id.
+author_commit() {
+  author_git add -A >/dev/null 2>&1 && author_git commit -q -m "$2" >/dev/null 2>&1 \
+    && printf -v "$1" '%s' "$(author_git rev-parse HEAD)" && [[ "${!1}" =~ ^[0-9a-f]{40}$ ]]
+}
+
+# author_initiative <slug>: writes the slug's PRD (UI no) and draft solution design.
+author_initiative() {
+  author_file "docs/prds/$1.md" "# $1 PRD"$'\n\n'"**UI:** no"$'\n' \
+    && author_file "docs/initiatives/$1/solution-design.md" "# $1 design"$'\n\n'"**Status:** draft"$'\n'
+}
+
+# author_record <slug> <verdict> <medium-open> <rounds> <clean-round> <disposition>: writes the
+# slug's review record, stamping its PRD and solution design at their current blobs, with one
+# medium Findings row of the given disposition.
+author_record() {
+  local prd_blob design_blob
+  prd_blob="$(author_git hash-object "docs/prds/$1.md")" || return 1
+  design_blob="$(author_git hash-object "docs/initiatives/$1/solution-design.md")" || return 1
+  author_file "docs/initiatives/$1/review-record.md" "---
+stamps:
+  - path: docs/prds/$1.md
+    blob: $prd_blob
+  - path: docs/initiatives/$1/solution-design.md
+    blob: $design_blob
+verdict: $2
+open:
+  critical: 0
+  high: 0
+  medium: $3
+  low: 0
+rounds: $4
+clean_round: $5
+---
+# Review record: $1
+
+## Findings
+
+| ID | Round | Angle | Severity | Disposition | Note |
+| --- | --- | --- | --- | --- | --- |
+| F1 | 1 | A | medium | $6 | Tightened the wording. |
+"
+}
+
+# author_from <commit>: points the author work tree at <commit>, detached.
+author_from() {
+  author_git checkout -q --detach "$1" >/dev/null 2>&1
+}
+
+# build_fixture_server: builds the author history and pushes it to the bare fixture server.
+build_fixture_server() {
+  "$REAL_GIT" init -q "$AUTHOR_DIR" && "$REAL_GIT" init -q --bare "$GIT_SERVER" || return 1
+  author_file README.md "fixture"$'\n' && author_commit MAIN_OID main || return 1
+  author_initiative demo && author_record demo pass 0 2 true fixed && author_commit PASS_OID pass || return 1
+  author_from "$MAIN_OID" && author_initiative demo && author_record demo fail 0 1 false fixed \
+    && author_commit FAIL_OID fail || return 1
+  author_from "$MAIN_OID" && author_initiative demo && author_record demo pass 1 2 true open \
+    && author_commit OPEN_OID open || return 1
+  author_from "$MAIN_OID" && author_initiative demo && author_commit NORECORD_OID norecord || return 1
+  author_from "$PASS_OID" \
+    && author_file docs/initiatives/demo/solution-design.md "# demo design"$'\n\n'"**Status:** delivered"$'\n' \
+    && author_commit DELIVERED_OID delivered || return 1
+  author_from "$PASS_OID" \
+    && author_file docs/prds/demo.md "# demo PRD"$'\n\n'"**UI:** no"$'\n\n'"Edited on trunk."$'\n' \
+    && author_commit DRIFT_OID drift || return 1
+  author_from "$PASS_OID" && author_initiative second && author_record second pass 0 2 true fixed \
+    && author_commit SECOND_OID second || return 1
+  author_git push -q "$GIT_SERVER" "$MAIN_OID:refs/heads/main" "$PASS_OID:refs/heads/trunk-demo" \
+    "$DRIFT_OID:refs/heads/trunk-drift" "$PASS_OID:refs/pull/11/head" "$FAIL_OID:refs/pull/12/head" \
+    "$OPEN_OID:refs/pull/13/head" "$NORECORD_OID:refs/pull/14/head" \
+    "$DELIVERED_OID:refs/pull/15/head" "$SECOND_OID:refs/pull/16/head" >/dev/null 2>&1
+}
+build_fixture_server || { echo "FAIL: fixture server failed to build" >&2; exit 2; }
+
+ORIGIN_REMOTE="origin https://github.com/o/r.git"
+DOCS_FILES='[{path: "docs/initiatives/demo/review-record.md", changeType: "ADDED"}]'
+README_FILES='[{path: "README.md", changeType: "MODIFIED"}]'
+
+# record_edit <head> <base-name> <base-oid> <files-json>: prints a jq edit of the base body for a PR
+# on that head and base whose changed files are <files-json>.
+record_edit() {
+  printf '%s' "$PR.headRefOid = \"$1\" | $PR.commits.nodes[0].commit.oid = \"$1\" | $PR.baseRefName = \"$2\" | $PR.baseRefOid = \"$3\" | $PR.files.nodes = $4"
+}
+PASS_EDIT="$(record_edit "$PASS_OID" main "$MAIN_OID" "$DOCS_FILES")"
+
+# new_record_case <name> [<remote-name> <remote-url>]...: sets RECORD_CASE_DIR to a fresh case
+# directory that is a git repository with the given remotes.
+new_record_case() {
+  RECORD_CASE_DIR="$(new_case "$1")"
+  shift
+  "$REAL_GIT" init -q "$RECORD_CASE_DIR" || { echo "FAIL: case repository failed to build" >&2; exit 2; }
+  while [ "$#" -ge 2 ]; do
+    "$REAL_GIT" -C "$RECORD_CASE_DIR" remote add "$1" "$2" \
+      || { echo "FAIL: case remote failed to build" >&2; exit 2; }
+    shift 2
+  done
+}
+
+# record_case <name> <remotes> <pr> <jq-edit> <line> <reads> <merges> [env...]: a case in a
+# repository with <remotes> (space-separated name and URL pairs); reads 1 and 2 are the edited base
+# body and read 3 the same with state MERGED; HIVEMIND_AUTO_MERGE=squash plus any extra env.
+record_case() {
+  local case_name="$1" remotes="$2" pr_number="$3" fixture_edit="$4" want_line="$5" want_reads="$6" want_merges="$7"
+  shift 7
+  # shellcheck disable=SC2086
+  new_record_case "$case_name" $remotes
+  write_read "$RECORD_CASE_DIR" 1 "$fixture_edit"
+  write_read "$RECORD_CASE_DIR" 2 "$fixture_edit"
+  write_read "$RECORD_CASE_DIR" 3 "$fixture_edit | $MERGED_EDIT"
+  run_case "$RECORD_CASE_DIR" HIVEMIND_AUTO_MERGE=squash "$@" bash "$MERGE_APPROVED" o r "$pr_number" automated "$SELF"
+  expect_case "$case_name" "$RECORD_CASE_DIR" "$want_line" 0 "$want_reads" "$want_merges"
+}
+
+# expect_git <name> <case_dir> <fetches>: assert the case made a git call and exactly <fetches>
+# fetch calls.
+expect_git() {
+  local got_git got_fetches
+  got_git="$(count_calls "$2" GIT)"
+  got_fetches="$(grep -c '^GIT argv=.* fetch ' "$2/calls.log")"
+  if [ "$got_git" -gt 0 ] && [ "$got_fetches" -eq "$3" ]; then
+    pass "$1" "record gate ran: $got_git git calls, $got_fetches fetch"
+  else
+    failed "$1" "git calls $got_git, fetches $got_fetches (want >0 git calls, $3 fetch)"
+  fi
+}
+
+# The gate is off without a docs path: no git call and no extra read, even in a tied repository.
+new_record_case "record:off-no-docs-path" $ORIGIN_REMOTE
+write_read "$RECORD_CASE_DIR" 1 "$(record_edit "$PASS_OID" main "$MAIN_OID" "$README_FILES")"
+write_read "$RECORD_CASE_DIR" 2 "$(record_edit "$PASS_OID" main "$MAIN_OID" "$README_FILES") | $MERGED_EDIT"
+run_case "$RECORD_CASE_DIR" HIVEMIND_AUTO_MERGE=squash bash "$MERGE_APPROVED" o r 11 automated "$SELF"
+expect_case "record:off-no-docs-path" "$RECORD_CASE_DIR" "MERGE=merged" 0 2 1
+if [ "$(count_calls "$RECORD_CASE_DIR" GIT)" -eq 0 ]; then
+  pass "record:off-no-git-call" "a PR without a docs path makes no git call"
+else
+  failed "record:off-no-git-call" "calls: $(tr '\n' '|' <"$RECORD_CASE_DIR/calls.log")"
+fi
+gate_case "docs-touch:off-other-docs-path" \
+  "$PR.files.nodes = [{path: \"docs/references/notes.md\", changeType: \"ADDED\"}, {path: \"docsx/prds/a.md\", changeType: \"MODIFIED\"}]" \
+  "MERGE=merged" 1
+gate_case "docs-touch:off-no-files" "$PR.files.nodes = []" "MERGE=merged" 1
+
+# A passing record merges; the fetch names the tied remote, the PR head ref and the base branch,
+# and writes no local branch or remote-tracking ref.
+record_case "record:pass-merges" "$ORIGIN_REMOTE" 11 "$PASS_EDIT" "MERGE=merged" 3 1
+expect_git "record:pass-merges-ran-gate" "$RECORD_CASE_DIR" 1
+want_fetch="GIT argv=--no-replace-objects fetch --quiet --no-tags --no-recurse-submodules --no-prune --refmap= -- origin refs/pull/11/head refs/heads/main"
+if grep -qxF "$want_fetch" "$RECORD_CASE_DIR/calls.log"; then
+  pass "record:fetch-argv" "${want_fetch#GIT argv=}"
+else
+  failed "record:fetch-argv" "calls: $(tr '\n' '|' <"$RECORD_CASE_DIR/calls.log")"
+fi
+written_refs="$("$REAL_GIT" -C "$RECORD_CASE_DIR" for-each-ref)"
+if [ -z "$written_refs" ] && "$REAL_GIT" -C "$RECORD_CASE_DIR" cat-file -e "$PASS_OID^{commit}"; then
+  pass "record:fetch-writes-no-ref" "head fetched into the object store, no ref written"
+else
+  failed "record:fetch-writes-no-ref" "refs: $(tr '\n' '|' <<<"$written_refs")"
+fi
+
+# Each docs trigger runs the gate: a docs path, a RENAMED file and a files page overflow.
+record_case "record:trigger-prds-path" "$ORIGIN_REMOTE" 12 \
+  "$(record_edit "$FAIL_OID" main "$MAIN_OID" '[{path: "docs/prds/demo.md", changeType: "ADDED"}]')" \
+  "MERGE=skipped:record-blocked" 1 0
+record_case "record:trigger-adr-path" "$ORIGIN_REMOTE" 12 \
+  "$(record_edit "$FAIL_OID" main "$MAIN_OID" '[{path: "docs/adr/0099-demo.md", changeType: "MODIFIED"}]')" \
+  "MERGE=skipped:record-blocked" 1 0
+record_case "record:trigger-renamed" "$ORIGIN_REMOTE" 12 \
+  "$(record_edit "$FAIL_OID" main "$MAIN_OID" '[{path: "src/tool.sh", changeType: "RENAMED"}]')" \
+  "MERGE=skipped:record-blocked" 1 0
+expect_git "record:trigger-renamed-ran-gate" "$RECORD_CASE_DIR" 1
+record_case "record:trigger-files-overflow" "$ORIGIN_REMOTE" 12 \
+  "$(record_edit "$FAIL_OID" main "$MAIN_OID" "$README_FILES") | $PR.files.pageInfo.hasNextPage = true" \
+  "MERGE=skipped:record-blocked" 1 0
+expect_git "record:trigger-files-overflow-ran-gate" "$RECORD_CASE_DIR" 1
+
+# The remote tied to <OWNER>/<REPO> on the gh host, in each URL form.
+record_case "record:remote-scp-mixed-case" "origin git@GitHub.com:O/R.git" 11 "$PASS_EDIT" "MERGE=merged" 3 1
+record_case "record:remote-ssh-trailing-slash" "origin ssh://git@github.com/o/r/" 11 "$PASS_EDIT" "MERGE=merged" 3 1
+record_case "record:remote-gh-host" "origin https://ghe.example.com/o/r" 11 "$PASS_EDIT" "MERGE=merged" 3 1 \
+  GH_HOST=ghe.example.com
+record_case "record:remote-second-tied" "fork https://github.com/other/r.git upstream https://github.com/o/r" 11 \
+  "$PASS_EDIT" "MERGE=merged" 3 1
+if grep -q '^GIT argv=.* fetch .* -- upstream refs/pull/11/head refs/heads/main$' "$RECORD_CASE_DIR/calls.log"; then
+  pass "record:remote-second-tied-fetch" "fetch names the tied remote, not the first one"
+else
+  failed "record:remote-second-tied-fetch" "calls: $(tr '\n' '|' <"$RECORD_CASE_DIR/calls.log")"
+fi
+
+# The record cannot be read: record-unread, no merge call.
+record_case "record:unread-no-tied-remote" "origin https://github.com/other/r.git" 11 "$PASS_EDIT" \
+  "MERGE=skipped:record-unread" 1 0
+expect_git "record:unread-no-tied-remote-no-fetch" "$RECORD_CASE_DIR" 0
+record_case "record:unread-no-remote" "" 11 "$PASS_EDIT" "MERGE=skipped:record-unread" 1 0
+record_case "record:unread-other-host" "origin https://ghe.example.com/o/r" 11 "$PASS_EDIT" \
+  "MERGE=skipped:record-unread" 1 0
+record_case "record:unread-bad-base-name" "$ORIGIN_REMOTE" 11 \
+  "$(record_edit "$PASS_OID" "bad..name" "$MAIN_OID" "$DOCS_FILES")" "MERGE=skipped:record-unread" 1 0
+expect_git "record:unread-bad-base-name-no-fetch" "$RECORD_CASE_DIR" 0
+record_case "record:unread-fetch-fails" "$ORIGIN_REMOTE" 18 "$PASS_EDIT" "MERGE=skipped:record-unread" 1 0
+expect_git "record:unread-fetch-fails-ran-fetch" "$RECORD_CASE_DIR" 1
+record_case "record:unread-missing-head-object" "$ORIGIN_REMOTE" 11 \
+  "$(record_edit "cccccccccccccccccccccccccccccccccccccccc" main "$MAIN_OID" "$DOCS_FILES")" \
+  "MERGE=skipped:record-unread" 1 0
+record_case "record:unread-missing-base-object" "$ORIGIN_REMOTE" 11 \
+  "$(record_edit "$PASS_OID" main "$BASE_A" "$DOCS_FILES")" "MERGE=skipped:record-unread" 1 0
+record_case "record:unread-verify-error" "$ORIGIN_REMOTE" 11 "$PASS_EDIT" "MERGE=skipped:record-unread" 1 0 \
+  FIXTURE_GIT_FAIL=ls-tree
+
+# The record fails merge-mode verify: record-blocked, no merge call, with the admin setting too.
+record_case "record:blocked-failing-record" "$ORIGIN_REMOTE" 12 \
+  "$(record_edit "$FAIL_OID" main "$MAIN_OID" "$DOCS_FILES")" "MERGE=skipped:record-blocked" 1 0
+record_case "record:blocked-failing-record-admin" "$ORIGIN_REMOTE" 12 \
+  "$(record_edit "$FAIL_OID" main "$MAIN_OID" "$DOCS_FILES")" "MERGE=skipped:record-blocked" 1 0 \
+  HIVEMIND_AUTO_MERGE_ADMIN=1
+record_case "record:blocked-open-finding" "$ORIGIN_REMOTE" 13 \
+  "$(record_edit "$OPEN_OID" main "$MAIN_OID" "$DOCS_FILES")" "MERGE=skipped:record-blocked" 1 0
+record_case "record:blocked-folder-without-record" "$ORIGIN_REMOTE" 14 \
+  "$(record_edit "$NORECORD_OID" main "$MAIN_OID" "$DOCS_FILES")" "MERGE=skipped:record-blocked" 1 0
+record_case "record:blocked-delivered-flip" "$ORIGIN_REMOTE" 15 \
+  "$(record_edit "$DELIVERED_OID" trunk-demo "$PASS_OID" "$DOCS_FILES")" "MERGE=skipped:record-blocked" 1 0
+record_case "record:blocked-base-drift" "$ORIGIN_REMOTE" 16 \
+  "$(record_edit "$SECOND_OID" trunk-drift "$DRIFT_OID" "$DOCS_FILES")" "MERGE=skipped:record-blocked" 1 0
+record_case "record:second-without-drift-merges" "$ORIGIN_REMOTE" 16 \
+  "$(record_edit "$SECOND_OID" trunk-demo "$PASS_OID" "$DOCS_FILES")" "MERGE=merged" 3 1
+
+# The fresh read right before the merge call.
+# fresh_case <name> <read-2 jq-edit> <line>: the record gate holds and read 2, the fresh read, is
+# the passing edit plus <read-2 jq-edit>; two reads, no merge call.
+fresh_case() {
+  new_record_case "$1" $ORIGIN_REMOTE
+  write_read "$RECORD_CASE_DIR" 1 "$PASS_EDIT"
+  write_read "$RECORD_CASE_DIR" 2 "$PASS_EDIT | $2"
+  run_case "$RECORD_CASE_DIR" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 11 automated "$SELF"
+  expect_case "$1" "$RECORD_CASE_DIR" "$3" 0 2 0
+}
+fresh_case "record:fresh-base-moved" "$PR.baseRefOid = \"$BASE_A\"" "MERGE=wait:base-moved"
+fresh_case "record:fresh-head-moved" "$PR.headRefOid = \$head_b | $PR.commits.nodes[0].commit.oid = \$head_b" \
+  "MERGE=wait:head-moved"
+fresh_case "record:fresh-checks-failed" "$PR.commits.nodes[0].commit.statusCheckRollup.state = \"FAILURE\"" \
+  "MERGE=wait:checks-failed"
+fresh_case "record:fresh-changes-requested" "$PR.latestReviews.nodes[0].state = \"CHANGES_REQUESTED\"" \
+  "MERGE=skipped:no-approval"
+
+# The --admin path: the re-read after a refused plain merge is the fresh read before --admin.
+new_record_case "record:admin-merged" $ORIGIN_REMOTE
+write_read "$RECORD_CASE_DIR" 1 "$PASS_EDIT"
+write_read "$RECORD_CASE_DIR" 2 "$PASS_EDIT"
+write_read "$RECORD_CASE_DIR" 3 "$PASS_EDIT | $PR.mergeStateStatus = \"BLOCKED\""
+write_read "$RECORD_CASE_DIR" 4 "$PASS_EDIT | $MERGED_EDIT"
+printf '1' >"$RECORD_CASE_DIR/merge-1.status"
+run_case "$RECORD_CASE_DIR" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 11 automated "$SELF"
+expect_case "record:admin-merged" "$RECORD_CASE_DIR" "MERGE=merged-admin" 0 4 2
+if grep -qxF "MERGE 2 after_head=$PASS_OID after_rollup=SUCCESS after_reviews=COMMENTED argv=pr merge 11 --repo o/r --squash --match-head-commit $PASS_OID --admin" "$RECORD_CASE_DIR/calls.log"; then
+  pass "record:admin-merged-argv" "admin rerun keeps --match-head-commit $PASS_OID"
+else
+  failed "record:admin-merged-argv" "calls: $(tr '\n' '|' <"$RECORD_CASE_DIR/calls.log")"
+fi
+
+new_record_case "record:admin-base-moved" $ORIGIN_REMOTE
+write_read "$RECORD_CASE_DIR" 1 "$PASS_EDIT"
+write_read "$RECORD_CASE_DIR" 2 "$PASS_EDIT"
+write_read "$RECORD_CASE_DIR" 3 "$PASS_EDIT | $PR.mergeStateStatus = \"BLOCKED\" | $PR.baseRefOid = \"$BASE_A\""
+printf '1' >"$RECORD_CASE_DIR/merge-1.status"
+run_case "$RECORD_CASE_DIR" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 11 automated "$SELF"
+expect_case "record:admin-base-moved" "$RECORD_CASE_DIR" "MERGE=wait:base-moved" 0 3 1
+
 # ── Properties over every case ───────────────────────────────────────────────
 # check_merge_review_states <case> <call_line> <after_reviews>: fail the merge call when the read
 # before it held a review state outside APPROVED, COMMENTED or DISMISSED.
@@ -574,6 +913,8 @@ check_merged_confirm_read() {
 
 merge_call_count=0
 merged_case_count=0
+record_case_count=0
+non_record_case_count=0
 for calls_log in "$CASES_DIR"/*/calls.log; do
   case_name="$(basename "$(dirname "$calls_log")")"
   case_dir="$(dirname "$calls_log")"
@@ -591,6 +932,15 @@ for calls_log in "$CASES_DIR"/*/calls.log; do
   case_env_admin="no"
   case "$case_name" in
     refused:blocked-admin|refused:behind-admin|refused-admin-refused|refused:blocked-admin-confirm-open) case_env_admin="yes" ;;
+    record:admin-merged|record:admin-base-moved) case_env_admin="yes" ;;
+  esac
+  case "$case_name" in
+    record:*) record_case_count=$((record_case_count + 1)) ;;
+    *)
+      if grep -q '^GIT ' "$calls_log"; then
+        failed "property:no-git-call-without-docs" "$case_name: $(grep -c '^GIT ' "$calls_log") git calls"
+      fi
+      non_record_case_count=$((non_record_case_count + 1)) ;;
   esac
   while IFS= read -r call_line; do
     case "$call_line" in MERGE\ *) ;; *) continue ;; esac
@@ -626,6 +976,11 @@ if [ "$merge_call_count" -gt 0 ]; then
   pass "property:scan-non-vacuous" "$merge_call_count merge calls scanned for --auto, --delete-branch, --match-head-commit, SUCCESS-only, allowed review states and --admin placement"
 else
   failed "property:scan-non-vacuous" "no merge call recorded in any case"
+fi
+if [ "$non_record_case_count" -gt 0 ] && [ "$record_case_count" -gt 0 ]; then
+  pass "property:git-scan-non-vacuous" "$non_record_case_count cases outside the record cases scanned for no git call; $record_case_count record cases"
+else
+  failed "property:git-scan-non-vacuous" "non-record cases $non_record_case_count, record cases $record_case_count"
 fi
 if [ "$merged_case_count" -gt 0 ]; then
   pass "property:merged-scan-non-vacuous" "$merged_case_count merged or merged-admin cases scanned for a last READ showing state=MERGED after the last merge call"

@@ -92,5 +92,5 @@ function requestBranchReplan(run) {
     return stopDelivery([{ problem: 'The branch step switched branch or commit again after a replan, so ' + RUN_NAME + ' stopped before any wave.', terminal: true }], run, [], true);
   }
   run.branchSwitches += 1;
-  return { replan: { reason: 'The branch step switched onto a branch or commit other than the one the facts were taken on, so plan again from the new facts.' } };
+  return { replan: { reason: 'The branch step switched onto a branch or commit other than the facts\' one, so plan again from the new facts.' } };
 }

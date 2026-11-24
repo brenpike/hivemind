@@ -1,0 +1,54 @@
+{
+  "rule": "Design review round rules",
+  "description": "P3 coupling. plugin/skills/design-review/SKILL.md owns the design review's round rules. The source pin spans the cap clause's condition and obligation: a review that did not converge in 3 rounds is told to the maintainer unprompted, and the initiative is split before its docs merge. Further pins in the same file each carry one load-bearing rule: the open-zero gate (stop=open-findings refuses the pass until the round's findings land), the confirming-round scope (only the diff and the fixes to the previous round's findings), the tool-pass condition (one hivemind:adaptation-cycle pass only when the design touches a trust boundary, credentials or the merge path) and its skip (no tool configured or a tool that cannot run skips the pass and the record says so), the model fallback (an unreachable model yields no round and the pass re-runs on cerebrate's own model), the disposition rule (critical and high findings are only fixed or rejected) and the diminishing-returns check's three options. Deleting or inverting any pinned clause turns the suite red. The record-format consumer pins its Disposition set with the critical and high rule, and its pass rule (verdict pass, every open count 0, clean_round true, rounds 2 to 3). The adaptation-cycle consumer pins its design-review caller line: base is the previous round's reviewed commit, round 1 the merge-base with trunk, with a fixed focus. Residuals: a pin proves only that these word sequences exist in the named files, not that the skill obeys them; every pin is whole-file, so a rule that moves out of its step or section stays green; a rewrite-around that keeps the pinned bytes, or a new caller that omits the rules, is invisible.",
+  "source": {
+    "file": "plugin/skills/design-review/SKILL.md",
+    "pattern": "`stop=cap-reached`: tell the maintainer, unprompted, that the review did not converge in 3 rounds and the initiative is split before its docs merge. Run no round."
+  },
+  "consumers": [
+    {
+      "file": "plugin/skills/design-review/SKILL.md",
+      "pattern": "`stop=open-findings`: refuse the pass until the round's findings land"
+    },
+    {
+      "file": "plugin/skills/design-review/SKILL.md",
+      "pattern": "A confirming round covers only `diff` and the fixes to the previous round's findings."
+    },
+    {
+      "file": "plugin/skills/design-review/SKILL.md",
+      "pattern": "`touches`: whether the design touches a trust boundary, credentials or the merge path"
+    },
+    {
+      "file": "plugin/skills/design-review/SKILL.md",
+      "pattern": "When `touches` is yes, run one `hivemind:adaptation-cycle` pass"
+    },
+    {
+      "file": "plugin/skills/design-review/SKILL.md",
+      "pattern": "With no tool configured, or a tool that cannot run, its `skipped:` output skips the pass and the record says so."
+    },
+    {
+      "file": "plugin/skills/design-review/SKILL.md",
+      "pattern": "A model the call cannot reach yields no round, and the pass re-runs on cerebrate's own model."
+    },
+    {
+      "file": "plugin/skills/design-review/SKILL.md",
+      "pattern": "Critical and high findings are only `fixed` or `rejected`."
+    },
+    {
+      "file": "plugin/skills/design-review/SKILL.md",
+      "pattern": "with three options: narrow the claim and hand the rest to the slice that builds it as a tracked follow-up; accept the rest as recorded residuals; or keep going."
+    },
+    {
+      "file": "plugin/skills/design-review/references/record-format.md",
+      "pattern": "Disposition: exactly one of `fixed`, `rejected`, `deferred`, `recorded` or `open`. A critical or high finding is only `fixed` or `rejected`."
+    },
+    {
+      "file": "plugin/skills/design-review/references/record-format.md",
+      "pattern": "Pass rule: the record passes when `verdict` is `pass`, every open count is 0, `clean_round` is `true` and `rounds` is 2 to 3."
+    },
+    {
+      "file": "plugin/skills/adaptation-cycle/SKILL.md",
+      "pattern": "the `hivemind:design-review` skill, whose round passes as `base` the previous round's reviewed commit (round 1: the merge-base with trunk) and a fixed `focus`"
+    }
+  ]
+}

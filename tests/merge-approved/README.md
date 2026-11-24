@@ -8,8 +8,9 @@ contract; this file describes how the suite tests it.
 The suite holds no fixture files. Every GraphQL body is built inline from one
 clean base body, a merge-ready PR, with one `jq` edit, so each case differs from
 that PR in one place. The base PR is open, not a draft, on head `aaaa…`, with
-`mergeStateStatus` `CLEAN`, a `SUCCESS` rollup, one `COMMENTED` latest review
-from a Bot, an empty THUMBS_UP group and one resolved thread. Every
+`mergeStateStatus` `CLEAN`, base `main` at `1111…`, a `SUCCESS` rollup, one
+`COMMENTED` latest review from a Bot, an empty THUMBS_UP group, one resolved
+thread and one changed file, `README.md`, so the record gate is off. Every
 latestReviews node a case writes carries a `state`.
 
 ## Fake gh
@@ -28,6 +29,13 @@ has its own folder:
   `MERGE <n> after_head=<h> after_rollup=<r> after_reviews=<states> argv=<argv>`
   (with the head, rollup and review states of the last read before it), or
   `OTHER argv=<argv>` for any other call.
+
+A fake `git` first on `PATH` runs the real git and appends
+`GIT argv=<argv>` to `calls.log` per call. On `fetch` it adds a
+`url.<server>.insteadOf=<the remote's URL>` setting, so the remote's configured
+URL is fetched from a local bare fixture server. `FIXTURE_GIT_FAIL=<subcommand>`
+makes that git subcommand exit 1. `HOME` points into the scratch space and
+`GIT_CONFIG_NOSYSTEM` is set, so no user or system git config reaches a case.
 
 The fake writes a line to stderr on each call, and the merge call also prints to
 stdout. A case asserts the script's one stdout line, its exit code, an empty
@@ -82,7 +90,9 @@ A merge call that exits 0 is followed by the confirm read. A case that expects
   A gh exit code that is not 0 prints `graphql-read-failed`. The envelope and
   shape tokens come out as `graphql-<token>` and `shape-<token>`. A wrong type,
   a review `state` that is missing or not a string, an unknown PR state, a
-  non-hex head, a head that does not match the last commit, or no commit prints
+  non-hex head or base oid, a base name that is empty or not a string, a lost
+  `files` connection or page flag, a file path or changeType that is not a
+  string, a head that does not match the last commit, or no commit prints
   `malformed-read`. Each of these makes no merge call.
 - **Refused merge.** The plain merge exits 1 and a second read decides:
   - a moved head prints `wait:head-moved`;
@@ -100,6 +110,47 @@ A merge call that exits 0 is followed by the confirm read. A case that expects
   - an `--admin` refusal, or any other state, prints `skipped:refused`;
   - a failed or incomplete re-read prints `MERGE_ERROR`.
 
+- **Record gate off.** A PR whose files hold no `docs/prds/`, `docs/initiatives/`
+  or `docs/adr/` path, no `RENAMED` file and no next page makes no git call and
+  no extra read, even in a repository tied to the PR: 2 reads and 1 merge call,
+  as before. A `docs/references/` path, a `docsx/prds/` path or no files at all
+  leave it off.
+- **Record gate on.** The record cases run in a case folder that is a git
+  repository, against a bare fixture server built with the real git. Its
+  branches are `main`, `trunk-demo` (a demo initiative whose record passes) and
+  `trunk-drift` (`trunk-demo` with the demo PRD edited and not re-stamped). Its
+  PR heads are 11 (record passes), 12 (verdict fail), 13 (verdict pass with an
+  open finding), 14 (PRD and solution design, no record), 15 (`trunk-demo` with
+  the solution design marked delivered) and 16 (`trunk-demo` plus a second
+  initiative whose record passes). PR 18 has no head ref.
+  - A passing record merges: 3 reads (the first, the fresh read and the confirm
+    read) and 1 merge call. The fetch is exactly
+    `fetch --quiet --no-tags --no-recurse-submodules --no-prune --refmap= --
+    origin refs/pull/11/head refs/heads/main`, and the case repository holds no
+    ref afterwards while the head commit is in its object store.
+  - A `docs/prds/` path, a `docs/adr/` path, a `RENAMED` file and a files page
+    overflow each run the gate (on PR 12, so each prints `record-blocked`); an
+    overflow is never `read-incomplete`.
+  - The tied remote is found in scp form with mixed case, in ssh form with a
+    trailing slash, on `GH_HOST`, and as the second remote after a fork; the
+    fetch names that remote.
+  - `skipped:record-unread`, with no merge call: no tied remote (no fetch), no
+    remote, a host other than the gh host, a base name that fails the
+    identifier gate (no fetch), a fetch failure, a head or base oid missing
+    after the fetch, and a verify error (`ls-tree` made to fail).
+  - `skipped:record-blocked`, with no merge call: a failing record, the same
+    with the admin setting set, an open finding, a changed initiative folder
+    with no record, a delivered flip of a stamped solution design, and base
+    drift of another record's stamp. PR 16 on `trunk-demo`, with no drift,
+    merges.
+  - The fresh read: a moved base prints `wait:base-moved`, a moved head
+    `wait:head-moved`, and a failed gate its line (`checks-failed`,
+    `no-approval`), each with 2 reads and no merge call.
+  - The `--admin` path: after a refused plain merge, a `BLOCKED` re-read on the
+    same base reruns with `--admin` and the same `--match-head-commit`
+    (`merged-admin`, 4 reads, 2 merge calls); a `BLOCKED` re-read on a moved
+    base prints `wait:base-moved` with no `--admin` call.
+
 ## Properties over every case
 
 After the cases run, the suite scans every `calls.log`:
@@ -113,7 +164,9 @@ After the cases run, the suite scans every `calls.log`:
 - `--admin` appears only as the second merge call of a case that set the admin
   setting, after a refused plain merge on the same head with a `SUCCESS` rollup;
 - a `merged` or `merged-admin` line requires the case's last call to be a read
-  showing `state=MERGED`, after its last merge call.
+  showing `state=MERGED`, after its last merge call;
+- a case outside the record cases makes no git call.
 
-The scan fails if it finds no merge call at all, or no `merged` or
-`merged-admin` case, so it can never pass empty.
+The scan fails if it finds no merge call at all, no `merged` or
+`merged-admin` case, or no case on either side of the git check, so it can
+never pass empty.

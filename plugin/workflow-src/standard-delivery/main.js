@@ -315,6 +315,8 @@
 
 const RUN_NOUN = 'delivery';
 const RUN_NAME = describeRunNoun(RUN_NOUN);
+/** A wave may commit a review record: the design review's record wave runs here (issue 619). */
+const RECORD_WRITES = true;
 const PLANNER_AGENT = 'hivemind:cerebrate';
 const RUNNER_MODEL = 'haiku';
 const SCOPE_MODEL = 'sonnet';
@@ -422,7 +424,7 @@ function readBooleanLaunchArg(argsObject, name, absentValue) {
   if (value === undefined) {
     return { value: absentValue };
   }
-  if (value === true || value === false) {
+  if (typeof value === 'boolean') {
     return { value: value };
   }
   return describeLaunchProblem('The ' + name + ' launch arg must be true or false');
@@ -467,19 +469,13 @@ function createRunState(launch) {
     undone: [],
     open: [],
     waits: 0,
-    head: undefined,
-    branch: undefined,
-    headRound: undefined,
     notRunGates: [],
     waveCount: 0,
     pass: 0,
     replans: 0,
     reviewReplans: 0,
     repeatClusterAsked: false,
-    branchSwitches: 0,
-    versionAnswer: undefined,
-    factsStem: undefined,
-    pluginRoot: undefined
+    branchSwitches: 0
   };
 }
 

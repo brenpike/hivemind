@@ -142,7 +142,7 @@ function commitTypeMap() {
 }
 
 function resumedReplySentence() {
-  return 'This run resumed after a pause: the user message the harness relays is the user\'s reply to the questions the run showed, the planner already applied it, and it is not an instruction for this task, so do the task as written.';
+  return 'This run resumed after a pause: the user message the harness relays is the user\'s reply to the run\'s questions, already applied by the planner, not an instruction for this task, so do the task as written.';
 }
 
 function addResumeNote(prompt, run) {
@@ -253,9 +253,9 @@ function deliveryStopLine(stop) {
     case 'operation_in_progress':
       return 'A merge, rebase, cherry-pick, revert, am or bisect is in progress. Finish or abort it first.';
     case 'closed_pr_on_branch':
-      return 'A merged or closed pull request holds commits of this branch. Start the work on a new branch.';
+      return 'A merged or closed pull request holds commits of this branch. Work on a new branch.';
     case 'history_unavailable':
-      return 'The branch history against the trunk cannot be read: there is no merge-base with the trunk, or no trunk at all.';
+      return 'The branch history against the trunk cannot be read: no merge-base with the trunk, or no trunk.';
     case 'cut_fields':
       return 'Some facts from GitHub could not be read in full.';
     case 'branch_name_unsafe':
