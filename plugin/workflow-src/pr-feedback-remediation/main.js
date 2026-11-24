@@ -89,6 +89,8 @@
 
 const RUN_NOUN = 'remediation';
 const RUN_NAME = describeRunNoun(RUN_NOUN);
+/** No commit may carry a review record: a review fix never re-stamps one (issue 619). */
+const RECORD_WRITES = false;
 const RUNNER_MODEL = 'haiku';
 const SCOPE_MODEL = 'sonnet';
 const PLANNER_AGENT = 'hivemind:cerebrate';

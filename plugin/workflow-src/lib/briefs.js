@@ -432,7 +432,7 @@ function buildValidationRemediationBrief(head, round) {
     problem: 'Validation failed on commit ' + head + '. Should a worker fix the failures in fix round ' + round + ' of at most ' + maxFixRounds() + '?',
     goOn: 'Run a fix round.',
     strength: 'strong',
-    why: 'The fix stays on the branch, is listed for you, and every check runs again on its commit.'
+    why: 'The fix stays on the branch, is listed for you, and every check reruns on its commit.'
   });
 }
 

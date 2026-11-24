@@ -596,5 +596,5 @@ async function runReviewGate(run, plan, gates) {
 }
 
 function notConfiguredReviewLine() {
-  return 'local review: the run was launched with local_review false, so the gate is not configured and does not count as held.';
+  return 'local review: launched with local_review false, so the gate is not configured and does not count as held.';
 }

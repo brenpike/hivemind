@@ -66,6 +66,9 @@
 #       {"stamps":[{"path","blob"}...],"verdict","open":{"critical","high","medium","low"},
 #       "rounds","clean_round"} and returns 0; any other shape returns 1 with no output. The
 #       zero-stamp form is the line `stamps: []`; a bare `stamps:` needs at least one stamp.
+#   hivemind_readiness_jq_defs
+#       Prints the constant jq definitions of PARSING, then those of the document layer, so a
+#       caller's own jq program parses documents by the same rules. Takes no argument.
 #   hivemind_readiness_check_snapshot <commit> <owner/repo> <trunk-name>  (snapshot on stdin)
 #       Snapshot mode: stdin is exactly one JSON array of issue snapshot objects (GitHub GraphQL
 #       Issue nodes); prints one line per element, in order,
@@ -638,6 +641,17 @@ def rc_record_codes:
       (.stamps[] | "stamp\t" + .path + "\t" + .blob)
     end;
 '
+}
+
+# hivemind_readiness_jq_defs: prints the shared jq definitions, then the document layer's (see
+# PUBLIC API).
+hivemind_readiness_jq_defs() {
+  if [ "$#" -ne 0 ]; then
+    _hivemind_rc_error usage
+    return 2
+  fi
+  _hivemind_rc_jq_defs
+  _hivemind_rc_doc_jq_defs
 }
 
 # _hivemind_rc_doc_eval <commit> <path> <prefix> <filter>: streams the line <prefix>, the bytes of

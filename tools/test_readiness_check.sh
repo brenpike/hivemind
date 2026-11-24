@@ -1215,7 +1215,31 @@ test_gh_arguments() {
   expect_git_flags "gh:unknown-commit"
 }
 
+test_jq_defs() {
+  local want_file="$TMPDIR_TEST/jq-defs.want" parsed=""
+  bash -c '. "$1"; _hivemind_rc_jq_defs; _hivemind_rc_doc_jq_defs' jq-defs "$LIB" >"$want_file" \
+    || setup_fail "cannot print the private jq definitions"
+  lib_call "jq-defs" "$REPO" "$NO_INPUT" hivemind_readiness_jq_defs
+  if [ "$CALL_RC" = 0 ] && [ -s "$CALL_OUT" ] && cmp -s "$CALL_OUT" "$want_file" && [ ! -s "$CALL_ERR" ]; then
+    pass "jq-defs:accessor" "shared then document-layer definitions, in order"
+  else
+    failed "jq-defs:accessor" "rc $CALL_RC, stdout differs from the private definitions or stderr not empty"
+  fi
+  expect_no_git "jq-defs"
+  parsed="$(printf 'a\r\n# T\n\n**UI:** yes\n' | jq -Rsr "$(cat "$CALL_OUT")"'
+{texts: rc_lines} | rc_prd_ui' 2>&1)" || parsed="jq failed: $parsed"
+  if [ "$parsed" = yes ]; then
+    pass "jq-defs:compiles" "a caller program built on the definitions runs"
+  else
+    failed "jq-defs:compiles" "$parsed"
+  fi
+  lib_call "jq-defs:usage" "$REPO" "$NO_INPUT" hivemind_readiness_jq_defs extra
+  expect_call "jq-defs:usage" 2 "" $'readiness-check-error: usage\n'
+  expect_no_git "jq-defs:usage"
+}
+
 test_library_form
+test_jq_defs
 test_codes
 test_commit_forms
 test_doc_entry

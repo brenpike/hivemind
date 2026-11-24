@@ -56,7 +56,7 @@ function computeWave(steps, doneIds) {
   const ready = notDone.filter((step) => readStepDependencies(step).every((dependency) => doneSet.has(dependency)));
   const wave = pickGreedyWave(ready, steps);
   if (notDone.length > 0 && wave.length === 0) {
-    return { ok: false, problem: 'remaining steps exist but no step is ready (unsatisfiable dependencies)' };
+    return { ok: false, problem: 'no remaining step is ready (unsatisfiable dependencies)' };
   }
   return { ok: true, all_done: notDone.length === 0, wave: wave, remaining: notDone.length };
 }
