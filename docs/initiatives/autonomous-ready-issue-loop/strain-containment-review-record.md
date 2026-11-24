@@ -6,7 +6,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 3
+rounds: 4
 clean_round: false
 ---
 
@@ -24,7 +24,7 @@ How this record is kept:
 - The `hivemind:design-review` engine has no part-design mode. Its `round` and `stamps` read only the slug's `review-record.md`, and record verify reads only files named `review-record.md`.
 - So this record follows record-format's front matter and body rules by hand.
 - The round number, the pass rule and the 3-round cap come from this front matter.
-- The maintainer raised the cap to 4 for this review after round 3 (2026-11-24), for one confirming pass over the round-3 fixes. If round 4 is not clean, the review closes with verdict `fail` and no stamp; no fifth round runs. A pass at round 4 falls outside record-format's pass rule (rounds 2 to 3); this record is outside record verify (D1), and the exception is the maintainer's decision recorded here.
+- The maintainer raised the cap to 4 for this review after round 3 (2026-11-24), for one confirming pass over the round-3 fixes. If round 4 is not clean, the review closes with verdict `fail` and no stamp; no fifth round runs. A pass at round 4 falls outside record-format's pass rule (rounds 2 to 3); this record is outside record verify (D1), and the exception is the maintainer's decision recorded here. Round 4 was not clean. The review closed after it with verdict `fail` and no stamp, as the maintainer's answer set. Its findings were fixed in the part design in one last wave that no review round checked; the docs pull request's review is the next look at them.
 - The pass stamp is `git rev-parse <reviewed>:<path>`.
 - The epic record is not edited.
 - Inherited findings join the Findings table at round 1 with IDs such as `integration R1-1`.
@@ -58,6 +58,14 @@ Confirming round. Reviewed commit `7e36583da92f4a1eeb3949da5164767d7110488b`; pr
 - Pass 1: reviewer cerebrate, on cerebrate's own model (`model=default`), a fresh read-only pass with "Memory context: none". It covered the diff from the previous commit and the round-2 fixes, and checked decisions D1-D9. It found every round-2 row closed (`unfixed: none`). It raised 4 findings.
 - Pass 2: reviewer the local review tool, preset `codex-plugin`, on the tool's own default model, base the previous round's commit, iteration 3, with the skill's fixed design-review focus. It raised 1 finding.
 - Diminishing-returns advisory: all three signals. Recurrence: S3-1 to S3-4 come from the round-2 file-view fix. Trend: high findings 5, 2, 0 while the design grew 74.5 KB, 100 KB, 102.9 KB. Bounded edge cases: S3-2 to S3-4 are bounded by existing safeguards; S3-1 is bounded at start by the probe's `control` case. Options given: narrow and hand off; accept residuals; keep going. The maintainer's answer (2026-11-24): fix all four design findings now (each has a strong, contained fix, so none is deferred), reject S3-T1, and raise the cap to 4 for one confirming pass.
+
+### Round 4
+
+Confirming round. Reviewed commit `0105014fd000bc808451431e8d0bf0478c0b769b`; previous `7e36583da92f4a1eeb3949da5164767d7110488b`.
+
+- Pass 1: reviewer cerebrate, on cerebrate's own model (`model=default`), a fresh read-only pass with "Memory context: none". It covered the diff from the previous commit and the round-3 fixes. It judged the S3-T1 rejection reason sound and the `/init` carve-out sound, and found every round-3 row closed (`unfixed: none`). It raised 5 findings, all low.
+- Pass 2: reviewer the local review tool, preset `codex-plugin`, on the tool's own default model, base the previous round's commit, iteration 4, with the skill's fixed design-review focus. It raised 2 findings.
+- The review closed: no fifth round. Every round-4 finding was fixed in the part design after the round, or rejected, without a further review round.
 
 ## Findings
 
@@ -97,7 +105,14 @@ Confirming round. Reviewed commit `7e36583da92f4a1eeb3949da5164767d7110488b`; pr
 | S3-2 | 3 | confirm | low | fixed | The residual for a special file or mount made after launch is bounded as a kernel or sandbox bug: the 2026-11-21 amendment's forged marker and ADR-0045's prompt-injected strain residual. |
 | S3-3 | 3 | confirm | low | fixed | The head check lstats the loose ref as it does `HEAD`, a failed check keeps the worktree; the shared-store residual names the stall as a denial of service. |
 | S3-4 | 3 | confirm | low | fixed | Probe case `special-files` fails on FIFOs only and reports sockets and device nodes. |
-| S3-T1 | 3 | review | medium | rejected | Reason: ADR-0046's head binding exists so the merged design is the reviewed design. Here the pass stamp is the design's blob, checked against the final pull request head before merge, so the merged bytes are the reviewed bytes; every reviewed commit is in the pull request's history (D3). The later `solution-design.md` amendment (D4) is outside this part review and is flagged for the epic re-review. |
+| S3-T1 | 3 | review | medium | rejected | Reason: ADR-0046's head binding exists so the merged design is the reviewed design. Here the pass stamp is the design's blob, checked against the final pull request head before merge, so the merged bytes are the reviewed bytes; every reviewed commit is in the pull request's history (D3). The later `solution-design.md` amendment (D4) is outside this part review and is flagged for the epic re-review. The review closed with verdict `fail` and no stamp (round 4), so no pass relies on this reason; the docs pull request's head is reviewed by the pull request's own review. |
+| S4-1 | 4 | confirm | low | fixed | Probe case `wsl-interop` runs a Windows program copied into the session's scratch folder by path, and passes only on a failure after exec. |
+| S4-2 | 4 | confirm | low | fixed | Every Lair git call in its checkout, Lair-mode `spawn-brood.sh` worktree calls included, runs under the child timeout; admin-folder `HEAD` and `gitdir` FIFOs named in the shared-store residual; Failure modes row. |
+| S4-3 | 4 | confirm | low | fixed | The wide-bind rule compares against the resolved forms of `$HOME`, the state root and the Claude Code folder; symlinked-home fixture; the probe's `control` case targets the resolved state root. |
+| S4-4 | 4 | confirm | low | fixed | The record names no stamp check because the review closed with no stamp; the S3-T1 note now says so. |
+| S4-5 | 4 | confirm | low | fixed | The round-3 trust choices are listed for veto as D11 to D13. |
+| S4-T1 | 4 | review | high | fixed | The head check runs no git against the shared ref store: it reads `HEAD`, the loose ref and `packed-refs` each by one no-follow, non-blocking open, fstat and bounded read of that descriptor, gates the commit id, and tests ancestry only in the Lair's own bare repository; Lair mode refuses a non-`files` ref backend; race and packed-refs pins. |
+| S4-T2 | 4 | review | medium | rejected | Reason: the review closed with verdict `fail` and no stamp, so no pass outside record-format's pass rule exists. The cap raise is the maintainer's decision, recorded here, with precedent in [claim-integrity-review-record.md](claim-integrity-review-record.md), whose cap the user raised to 6. |
 
 ## Decisions taken, listed for veto
 
@@ -111,6 +126,10 @@ Confirming round. Reviewed commit `7e36583da92f4a1eeb3949da5164767d7110488b`; pr
 - **D8.** S2-T1 and S2-T2 fix: the Linux view is a fresh root with named read-only binds, replacing the read-only bind of the whole host root and its per-submount binds. Strength: strong. Touches: trust.
 - **D9.** S2-1 fix: the macOS profile denies preference writes and the probe checks it. Strength: strong. Touches: trust.
 - **D10.** S3-T1 rejected on the blob-stamp ground. Strength: strong. Touches: scope (ADR-0046 process).
+- **D11.** S3-1 fix: a `PATH` link to WSL's `/init` (`/usr/bin/wslpath`, `/sbin/mount.drvfs`) is not followed, so `/` is never bound. Strength: strong. Touches: trust.
+- **D12.** S3-1 fix: WSL2 Windows drive-mount `PATH` entries are dropped from the view, not refused. Strength: strong. Touches: trust.
+- **D13.** S3-4 fix: probe case `special-files` fails on FIFOs only and reports sockets and device nodes. Strength: strong. Touches: trust.
+- **D14.** Round-4 findings fixed in the part design after the last round, without a further review round; S4-T2 rejected. Strength: strong. Touches: scope (ADR-0046 process).
 
 ## Decisions asked
 
@@ -120,6 +139,7 @@ The first two are inputs, answered before this review.
 - The user's choice of 2026-11-22 to split containment into its own part design with its own review, recorded in the epic's [review record](review-record.md).
 - Round 2 diminishing-returns advisory (2026-11-24): options narrow / accept residuals / keep going. Answer: keep going (3).
 - Round 3 cap and advisory (2026-11-24): fix all round-3 design findings, reject S3-T1, raise the cap to 4 for one confirming pass. Answer: A.
+- Round 4 outcome (2026-11-24): per answer A, the review closes with verdict `fail` and no stamp; no fifth round.
 
 ## Residuals
 
