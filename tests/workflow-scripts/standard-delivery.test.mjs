@@ -42,7 +42,6 @@ const definitionsText = readText(join(repoRoot, 'plugin/governance/definitions.m
 const reviewerText = readText(join(repoRoot, 'plugin/agents/local-reviewer.md'));
 const cerebrateText = readText(join(repoRoot, 'plugin/agents/cerebrate.md'));
 const workflowRulesText = readText(join(repoRoot, 'plugin/governance/workflow.md'));
-const deliveryMachine = readJson('plugin/workflows/standard-delivery.json');
 const autonomyTable = readJson('plugin/references/decision-autonomy-table.json');
 
 const REQUEST = 'Add the cache layer. REQUEST_MARKER_ZQ';
@@ -1338,39 +1337,6 @@ function gateHoldingExitsOfRoutes() {
  */
 function localReviewExitsRoutedTo(route) {
   return Object.entries(main.localReviewRoutes()).filter(([, candidate]) => candidate === route).map(([exitReason]) => exitReason).sort();
-}
-
-/**
- * Every transition of `machine` that targets `target`, as 'state.outcome', sorted.
- */
-function listTransitionsInto(machine, target) {
-  const edges = Object.entries(machine.states).flatMap(([name, state]) => Object.entries(state.transitions || {}).filter(([, next]) => next === target).map(([outcome]) => name + '.' + outcome));
-  return edges.sort();
-}
-
-/**
- * Whether a breadth-first walk over the transitions of `machine` from `start`
- * reaches `target` without expanding the state named `unexpanded`.
- */
-function reachesStateWithout(machine, start, target, unexpanded) {
-  const seen = new Set([start]);
-  const queue = [start];
-  while (queue.length > 0) {
-    const name = queue.shift();
-    if (name === target) {
-      return true;
-    }
-    if (name === unexpanded) {
-      continue;
-    }
-    for (const next of Object.values(machine.states[name].transitions || {})) {
-      if (!seen.has(next)) {
-        seen.add(next);
-        queue.push(next);
-      }
-    }
-  }
-  return false;
 }
 
 /**
@@ -4250,7 +4216,7 @@ const ROW_TESTS = {
     test('step_stop surfaces at every level at standard-delivery.stop, so decide() asks each stop brief table_surface, a strong one included', () => {
       const row = autonomyTable.rows.find((candidate) => candidate.kind === 'step_stop');
       assert.deepEqual([row.high, row.balanced, row.low], ['surface', 'surface', 'surface']);
-      assert.deepEqual(row.resolved_at, ['standard-delivery.stop']);
+      assert.deepEqual(row.resolved_at, ['standard-delivery.stop', 'pr-feedback-remediation.stop']);
       for (const isReplan of [false, true]) {
         const brief = main.buildStepStopBrief(isReplan);
         assert.equal(brief.kind, 'step_stop');
@@ -4851,68 +4817,9 @@ const ROW_TESTS = {
         assert.ok(!workflowTakenConditionExits().includes(exitReason), exitReason);
       }
     });
-    test('the local_review transitions route the same exits: hold to gate_check, diminishing to diminishing_returns_decision, and every stop and draft exit, the asked ones included, to a terminal state that never reaches open_pr', () => {
-      const transitions = deliveryMachine.states.local_review.transitions;
-      assert.deepEqual(Object.keys(transitions).sort(), Object.keys(main.localReviewRoutes()).sort());
-      for (const exitReason of localReviewExitsRoutedTo('hold')) {
-        assert.equal(transitions[exitReason], 'gate_check', exitReason);
-      }
-      const decision = deliveryMachine.states.diminishing_returns_decision;
-      assert.equal(decision.type, 'decision');
-      assert.equal(decision.owner, 'overlord');
-      for (const exitReason of localReviewExitsRoutedTo('diminishing')) {
-        assert.equal(transitions[exitReason], 'diminishing_returns_decision', exitReason);
-      }
-      assert.deepEqual(localReviewExitsRoutedTo('stop'), ['injection-suspect']);
-      assert.deepEqual(localReviewExitsRoutedTo('stop_replan'), []);
-      assert.deepEqual(localReviewExitsRoutedTo('stop_rerun'), ['blocked']);
-      assert.deepEqual(localReviewExitsRoutedTo('draft'), ['break-fix-break', 'max-iterations-reached']);
-      assert.deepEqual(localReviewExitsRoutedTo('skip'), ['skipped']);
-      assert.equal(transitions.skipped, 'gate_check');
-      for (const exitReason of [...localReviewExitsRoutedTo('stop'), ...localReviewExitsRoutedTo('stop_rerun'), ...localReviewExitsRoutedTo('draft')]) {
-        assert.notEqual(transitions[exitReason], 'open_pr', exitReason);
-        assert.equal(deliveryMachine.states[transitions[exitReason]].type, 'terminal', exitReason);
-        assert.equal(reachesStateWithout(deliveryMachine, transitions[exitReason], 'open_pr', 'local_review'), false, exitReason);
-      }
-    });
-    test('the only transitions into gate_check are local_review clean and skipped, diminishing_returns_decision taken and local_review_decision skipped and held', () => {
-      const holdEdges = [...localReviewExitsRoutedTo('hold'), ...localReviewExitsRoutedTo('skip')].map((exitReason) => 'local_review.' + exitReason);
-      const allowed = [...holdEdges, 'diminishing_returns_decision.taken', 'local_review_decision.held', 'local_review_decision.skipped'].sort();
-      assert.deepEqual(listTransitionsInto(deliveryMachine, 'gate_check'), allowed);
-      assert.deepEqual(allowed, ['diminishing_returns_decision.taken', 'local_review.clean', 'local_review.skipped', 'local_review_decision.held', 'local_review_decision.skipped']);
-    });
-    test('gate_check is an overlord decision whose held is the only transition into open_pr, whose rerun goes back to validate and whose blocked ends at blocked', () => {
-      const gate = deliveryMachine.states.gate_check;
-      assert.equal(gate.type, 'decision');
-      assert.equal(gate.owner, 'overlord');
-      assert.deepEqual(gate.transitions, { held: 'open_pr', rerun: 'validate', blocked: 'blocked' });
-      assert.deepEqual(listTransitionsInto(deliveryMachine, 'open_pr'), ['gate_check.held']);
-      assert.equal(deliveryMachine.states[gate.transitions.blocked].type, 'terminal');
-      assert.equal(reachesStateWithout(deliveryMachine, gate.transitions.blocked, 'open_pr', 'gate_check'), false);
-    });
-    test('no path from plan reaches open_pr without gate_check', () => {
-      assert.equal(reachesStateWithout(deliveryMachine, 'plan', 'open_pr', 'gate_check'), false);
-    });
-    test('the definition is version 7 with no pr_confirm state, and its only user gates are brood_confirm and question', () => {
-      assert.equal(deliveryMachine.version, 7);
-      assert.ok(!Object.hasOwn(deliveryMachine.states, 'pr_confirm'));
-      const userGates = Object.keys(deliveryMachine.states).filter((name) => deliveryMachine.states[name].type === 'user_gate').sort();
-      assert.deepEqual(userGates, ['brood_confirm', 'question']);
-    });
-    test('diminishing_returns_decision reaches gate_check only through taken, and its other outcomes end at a terminal state that never reaches open_pr', () => {
-      const transitions = deliveryMachine.states.diminishing_returns_decision.transitions;
-      assert.deepEqual(Object.keys(transitions).filter((outcome) => transitions[outcome] === 'gate_check'), ['taken']);
-      const otherOutcomes = Object.keys(transitions).filter((outcome) => outcome !== 'taken');
-      assert.ok(otherOutcomes.includes('not_taken'));
-      for (const outcome of otherOutcomes) {
-        assert.equal(deliveryMachine.states[transitions[outcome]].type, 'terminal', outcome);
-        assert.equal(reachesStateWithout(deliveryMachine, transitions[outcome], 'open_pr', 'local_review'), false, outcome);
-      }
-    });
-    test('the diminishing_returns_exit row resolves at the diminishing_returns_decision state, not at the local_review edge', () => {
+    test('the diminishing_returns_exit row resolves at standard-delivery.local_review, not at a local_review edge', () => {
       const row = autonomyTable.rows.find((candidate) => candidate.kind === 'diminishing_returns_exit');
-      assert.ok(row.resolved_at.includes('diminishing_returns_decision'));
-      assert.ok(Object.hasOwn(deliveryMachine.states, 'diminishing_returns_decision'));
+      assert.deepEqual(row.resolved_at, ['standard-delivery.local_review']);
       assert.ok(!row.resolved_at.includes('local_review.diminishing-returns'));
     });
     test('reviewExitFields equals the conditional fields of the Output Contract', () => {

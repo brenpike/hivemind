@@ -730,8 +730,8 @@ assert_spawn_brood_task_md_data_only() {
 # binary. On a host missing tmux or claude the script would blocker on the dep check and
 # never reach the guard, so a naive run would PASS for the wrong reason (exit non-zero from
 # the dep check, not the guard). To assert the GUARD specifically, gate on tmux+claude+jq all
-# being present and SKIP cleanly when any is absent (mirrors test_engine.sh's dependency
-# preflight). When present, the guard is the only non-zero gate the valid inputs reach.
+# being present and SKIP cleanly when any is absent. When present, the guard is the only
+# non-zero gate the valid inputs reach.
 assert_spawn_brood_symlink_escape_blocked() {
     local name="ESCAPE:spawn-brood-symlink-escape-blocked"
     # Gate: spawn-brood's dep checks (tmux/claude/jq) precede the containment guard and exit

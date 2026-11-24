@@ -27,6 +27,7 @@ import {
   countProseCharacters,
   discoverWorkflowIds,
   findCopiedSentences,
+  findForeignOutputs,
   findNonRegularOutputs,
   findOrphanWorkflowIds,
   isDraftWorkflow,
@@ -464,11 +465,19 @@ describe('build_workflows --check', () => {
     assert.ok(!run.stderr.includes('stale'), run.stderr);
     assert.ok(!run.stderr.includes('.json'), run.stderr);
   });
-  test('a .json engine file with no source directory is not an orphan', () => {
+  test('a .json file under plugin/workflows/ fails --check, naming it', () => {
     const scratchRoot = makeScratchCopy();
     writeFileSync(join(scratchRoot, 'plugin/workflows/orphan-check.json'), '{}');
+    const run = runCliIn(scratchRoot, ['--check']);
+    assert.equal(run.code, 1);
+    assert.ok(run.stderr.includes('plugin/workflows/orphan-check.json is not a generated workflow script'), run.stderr);
+    assert.ok(run.stderr.includes('plugin/workflows/ holds only <id>.js scripts built from plugin/workflow-src/<id>/'), run.stderr);
+    assert.deepEqual(findForeignOutputs(scratchRoot), ['plugin/workflows/orphan-check.json']);
     assert.deepEqual(findOrphanWorkflowIds(scratchRoot), []);
-    assert.equal(runCliIn(scratchRoot, ['--check']).code, 0);
+  });
+  test('the committed plugin/workflows/ holds only generated .js scripts', () => {
+    assert.deepEqual(findForeignOutputs(repoRoot), []);
+    assert.deepEqual(findNonRegularOutputs(repoRoot), []);
   });
   test('rejects an unknown argument', () => {
     assert.equal(runCliIn(repoRoot, ['--chek']).code, 2);
@@ -502,14 +511,16 @@ describe('build_workflows regular files only', () => {
     assert.ok(run.stderr.includes('plugin/workflows/x.js is a directory'), run.stderr);
     assert.ok(run.stderr.includes('must be a regular file'), run.stderr);
   });
-  test('--check names a symlinked .json, whatever its name', () => {
+  test('--check names a symlinked .json, whatever its name, as a symlink and not as foreign', () => {
     const scratchRoot = makeScratchCopy();
-    symlinkSync(join(scratchRoot, 'plugin/workflows/analysis-only.json'), join(scratchRoot, 'plugin/workflows/link-check.json'));
-    symlinkSync(join(scratchRoot, 'plugin/workflows/analysis-only.json'), join(scratchRoot, 'plugin/workflows/no-extension'));
+    symlinkSync(join(scratchRoot, 'plugin/workflows/analysis-only.js'), join(scratchRoot, 'plugin/workflows/link-check.json'));
+    symlinkSync(join(scratchRoot, 'plugin/workflows/analysis-only.js'), join(scratchRoot, 'plugin/workflows/no-extension'));
     const run = runCliIn(scratchRoot, ['--check']);
     assert.equal(run.code, 1);
     assert.ok(run.stderr.includes('plugin/workflows/link-check.json is a symlink'), run.stderr);
     assert.ok(run.stderr.includes('plugin/workflows/no-extension is a symlink'), run.stderr);
+    assert.ok(!run.stderr.includes('not a generated workflow script'), run.stderr);
+    assert.deepEqual(findForeignOutputs(scratchRoot), []);
   });
   test('--check names an entry that is neither a file, a directory nor a symlink', (t) => {
     const scratchRoot = makeScratchCopy();
@@ -1499,11 +1510,9 @@ for (const id of liveIds) {
     test('has no CR', () => {
       assert.ok(!readFileSync(join(repoRoot, builtPathFor(id)), 'utf8').replace(/\r\n/g, '\n').includes('\r'));
     });
-    test('meta.name equals the file stem and the JSON workflow id', async () => {
+    test('meta.name equals the file stem', async () => {
       const run = await loadWorkflow(join(repoRoot, builtPathFor(id))).run({ args: undefined, results: {} });
-      const definition = JSON.parse(readFileSync(join(repoRoot, 'plugin/workflows/' + id + '.json'), 'utf8'));
       assert.equal(run.meta.name, id);
-      assert.equal(definition.id, id);
     });
   });
 }

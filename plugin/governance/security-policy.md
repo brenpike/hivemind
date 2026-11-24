@@ -114,7 +114,7 @@ This policy binds every agent and skill that consumes external content, whether 
 
 ### Inert Inputs-File Navigator Pattern
 
-A navigator skill writes its inputs file only with the Write tool, to a fixed-literal `.hivemind/` path in the skill body (a fixed prefix plus a skill-body `<token>`), never derived from untrusted input. Only the content carries untrusted fields; the engine reads it only with `jq` into shell variables used as `"$var"`, so no field enters shell source or jq program source. "Inert" names that transport property only, not what a field means once read; each engine's own contract governs that (ADR-0017, ADR-0018, ADR-0019).
+A navigator skill writes its inputs file only with the Write tool, to a fixed-literal `.hivemind/` path in the skill body (a fixed prefix plus a skill-body `<token>`), never derived from untrusted input. Only the content carries untrusted fields; the engine reads it only with `jq` into shell variables used as `"$var"`, so no field enters shell source or jq program source. "Inert" names that transport property only, not what a field means once read; each engine's own contract governs that (ADR-0017, ADR-0019).
 
 **Tool grant.** Write comes from the calling agent's `tools:`. A skill's `allowed-tools` pre-approves a permission but never provisions a tool.
 

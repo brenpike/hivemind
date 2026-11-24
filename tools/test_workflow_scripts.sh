@@ -13,10 +13,9 @@
 # Requires Node 18 or later (node:test and `node --test <files>`). Fails closed with a
 # message naming node when node is absent or older.
 #
-# Also requires bash, git and jq on PATH: the waves parity test (waves.test.mjs) runs
-# plugin/skills/next-wave/scripts/next-wave.sh under bash as its oracle, inside a scratch
-# checkout it creates with git, and that engine reads the ledger with jq. Fails closed with a
-# message naming the first missing tool.
+# Also requires bash, git and jq on PATH: the facts, identifier, standard-delivery and
+# pr-feedback-remediation tests spawn bash and git, and the gather-facts.sh and molt.sh
+# scripts they run use jq. Fails closed with a message naming the first missing tool.
 #
 # Output: on success, only the drift-check result and the node:test summary counts are
 # printed. On failure, the full output of the failing step is printed. Exits non-zero on
@@ -42,7 +41,7 @@ command -v node >/dev/null 2>&1 || {
 
 for required_tool in bash git jq; do
   command -v "$required_tool" >/dev/null 2>&1 || {
-    echo "FAIL: $required_tool is required (the waves parity test runs next-wave.sh) but was not found on PATH" >&2
+    echo "FAIL: $required_tool is required (the node tests spawn bash and git, and gather-facts.sh and molt.sh use jq) but was not found on PATH" >&2
     exit 2
   }
 done
