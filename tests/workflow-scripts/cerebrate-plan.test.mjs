@@ -8,6 +8,7 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const cerebrateText = readFileSync(repoRoot + 'plugin/agents/cerebrate.md', 'utf8').replace(/\r/g, '');
 const planSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/plan-schema.json', 'utf8'));
 const briefSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-brief-schema.json', 'utf8'));
+const readinessCheckText = readFileSync(repoRoot + 'plugin/skills/_shared/readiness-check.sh', 'utf8').replace(/\r/g, '');
 
 const PLAN_SCHEMA_PATH = '${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json';
 const BRIEF_SCHEMA_PATH = '${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json';
@@ -29,6 +30,23 @@ const SCOPE_MODE_LOCATOR_RULE ='For each repository-document section the request
 const SCOPE_MODE_LIMITS_RULE = 'Each scope limit the request or an answer states in words, with its origin; a path they only name confines nothing. A later answer beats the request and any earlier answer. Return none when nothing confines the work.';
 const ANSWERS_SETTLE_RULE = 'an answers block holds the user\'s earlier answers, each entry one round\'s questions, the user\'s reply, and settled, the Q labels the reply settled. Only the questions and decisions its settled labels name are settled for good: never raise or reverse them. Every other question in that entry stayed open. Labels are per round: Q1 in one entry is not Q1 in another.';
 const STEP_SIZE_RULE = 'Size each step as one concern one drone can carry. Split a step that mixes concerns, or edits more than about four files beyond its own tests and generated output, along its file or concern seams, with `depends_on` only where the order is real.';
+const DESIGN_BINDING_TERMS = [
+  '`## Design`',
+  'each named heading\'s whole section',
+  'departure',
+  'raise it as a question, never a plan step',
+  'architectural',
+  'the issue\'s ask',
+  'Until a reply settles',
+  'the plan follows the design'
+];
+const BROOD_STRAIN_TERMS = [
+  'one strain',
+  'names that issue by number as its task',
+  'never split, merge',
+  'overlap analysis'
+];
+const READINESS_DESIGN_SECTION_PATTERN = /rc_section\((\d+); "(Design)"\)/;
 const RESEARCH_NOT_A_STEP_RULE = 'Every plan step changes files: research, probes and measurements are never plan steps but your own work, and what your tools cannot answer goes to `Open questions:`.';
 
 function readSection(text, heading) {
@@ -189,4 +207,29 @@ describe('cerebrate sizes steps and keeps research out of them', () => {
   test('Branch Facts no longer makes git research a plan step', () => {
     assert.ok(!readSection(cerebrateText, '## Branch Facts').includes('make it a plan step'));
   });
+});
+
+describe('cerebrate binds the plan to the design of the issue it closes', () => {
+  for (const term of DESIGN_BINDING_TERMS) {
+    test(`Design Binding carries: ${term}`, () => {
+      assert.ok(readSection(cerebrateText, '## Design Binding').includes(term), term);
+    });
+  }
+});
+
+describe('the Design section the planner binds to is the one readiness-check.sh parses', () => {
+  test('readiness-check.sh parses a Design section, and Design Binding names it at the same heading level', () => {
+    const match = readinessCheckText.match(READINESS_DESIGN_SECTION_PATTERN);
+    assert.ok(match, 'readiness-check.sh no longer parses a section titled Design');
+    const designHeading = '`' + '#'.repeat(Number(match[1])) + ' ' + match[2] + '`';
+    assert.ok(readSection(cerebrateText, '## Design Binding').includes(designHeading), designHeading);
+  });
+});
+
+describe('cerebrate makes each brood issue one strain', () => {
+  for (const term of BROOD_STRAIN_TERMS) {
+    test(`the Full output carries: ${term}`, () => {
+      assert.ok(readSection(cerebrateText, '### Full').includes(term), term);
+    });
+  }
 });
