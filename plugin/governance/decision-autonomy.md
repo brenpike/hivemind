@@ -4,7 +4,7 @@ A term defined here binds every rule that uses it.
 
 ## Decision Tiers
 
-Each decision is Tier A, always surfaced to the user, or Tier B, auto-decided and journaled only while the promotion gate is clean.
+Each decision is Tier A, always surfaced, or Tier B, auto-decided and journaled only while the promotion gate is clean.
 
 ### Tier A — Always Surface
 
@@ -23,8 +23,6 @@ On the script engine, `decide()` asks only for `hard_stop`, `table_surface`, `ga
 
 ### Tier B — Auto-Decide and Journal
 
-Each resolves to exactly one disposition of **Disposition Vocabulary**:
-
 - planner-escalation routing
 - the Creep-Stagnation / diminishing-returns advisory early-exit decision
 - a validation failure: remediate autonomously; surface only if unresolved
@@ -35,16 +33,12 @@ Each resolves to exactly one disposition of **Disposition Vocabulary**:
 
 ## The Autonomy 2x2
 
-Tier-B axes: recommendation strength (strong | weak/none) and the promotion gate (clean | trips).
-
 | | gate clean | gate trips |
 |---|---|---|
-| **strong recommendation** | do it now (auto), journal `did-now` | surface to the user |
-| **weak / no recommendation** | auto defer-with-scope or record-with-scope: full scope to a tracked follow-up (`deferred`) or the repository's durable design record (`recorded`) | surface to the user |
+| **strong recommendation** | do it now (auto), journal `did-now` | surface |
+| **weak / no recommendation** | auto defer or record with full scope (`deferred` or `recorded`) | surface |
 
-- The gate judges the recommended action, not the option set: a heavy or architectural alternative never promotes a contained recommended action with a clean gate.
-- Defer-or-record is the fallback without a strong recommendation, never a substitute: strong with a clean gate is done now, never downgraded to a follow-up or an accepted residual.
-- Any recommendation with a tripped gate surfaces, whatever its strength.
+- Strong with a clean gate is done now, never deferred or recorded.
 
 ## Promotion Gate
 
@@ -54,7 +48,7 @@ The gate trips, forcing a surface, when the recommended action is any of:
 2. **Architectural blast radius**: changes a public contract, alters governance-doc semantics, or crosses a cross-module boundary.
 3. **Safety-relevant**: touches any Destructive Fix category 1-10 per `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` (Destructive Fix Gate).
 
-Otherwise it is clean, and the 2x2 applies. A review call reads clauses 1 and 2 only (**Review Calls**).
+Otherwise it is clean. A review call reads clauses 1 and 2 only (**Review Calls**).
 
 **Remediation-plan rule.** Routing a reviewer's or escalation's read-only signal to cerebrate for a remediation plan is clean-gate, auto-taken (**Tier B**), except the forced zoom-out per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry). Accepting the returned plan is asked of the user only when its `remediation_gate` (`${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json`) marks any of:
 
@@ -76,18 +70,20 @@ A taken call returns to the reviewer as its answer, recorded at its source per `
 
 Asked of the user: an irreversible call; an architectural call; a call whose recommendation has strength none; every call at an autonomy level whose table cell for its row is `surface`. **Tier A** hard stops still apply, and the overlord asks only what `${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `### Stop Conditions` surfaces.
 
+**Design-decision rule.** In the design stages, a decision with a strong recommendation is taken and listed for veto, in the review record and on the docs pull request, whatever it touches: PRD scope or acceptance criteria, an accepted-ADR amendment, or a trust-boundary, credential or merge-path change. Of design decisions only two kinds are asked: a weak or absent recommendation, asked, never deferred (brenpike/hivemind#638 may change that only by its own ADR), and an action irreversible now, outside the unmerged pull request. The asks other rules set are unchanged. The gate reads **Promotion Gate** clause 1 only, applied to the action taken now. The design stages run no `decide()`; take or ask is judgment, checked by review.
+
 ## Disposition Vocabulary
 
 Each Tier-B decision resolves to exactly one of:
 
 - **`did-now`**: strong recommendation, clean gate; the overlord did the work.
 - **`deferred`**: no strong recommendation, clean gate; the finding's full scope went to a tracked follow-up, not acted on now. Only a tracked follow-up makes a disposition `deferred`; a residual in the repository's durable design record is `recorded`, never `deferred` (`${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Defer-with-Scope)).
-- **`recorded`**: adjudicated, deliberately not actioned, reasoning written in the repository next to its code (the durable design record, or a code comment where a full record is disproportionate): root cause, bounded impact, and the ground with its citation. No tracker entry. Admissible only on a ground named in `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Residual); a behavior's origin is never one. Not a silent drop: its scope requirement equals `deferred`'s; only the destination differs.
+- **`recorded`**: adjudicated, deliberately not actioned, reasoning written in the repository next to its code (the durable design record, or a code comment where a full record is disproportionate): root cause, bounded impact, and the ground with its citation. No tracker entry. Admissible only on a ground named in `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Residual); a behavior's origin is never one. Its scope requirement equals `deferred`'s; only the destination differs.
 - **`surfaced`**: the gate tripped, or the decision was genuine ambiguity-with-risk; it went to the user. A Tier-A decision is always `surfaced`.
 
 ## Decision Journal
 
-A run's decision journal is the list of the decisions it took for the user, one line each: the problem, the option chosen and its summary. A run that opens a pull request, or pushes to one through `hivemind:open-plan-pr`, lists them on that pull request, under "Decided for you" in the body of one it opens and in a comment on one it reuses, and the same lines in its final message or final report. A run that opens no pull request and pushes to none through `hivemind:open-plan-pr`, such as a read-only analysis or a brood dispatch, lists its decisions in its final message or final report and keeps no decision journal. Accepting a plan or a remediation plan, and rerunning a gate after a later commit, are not listed, except a plan acceptance that changes a file outside the request's limits. A workflow script writes the list in code; on Instinct the overlord writes it. No local copy exists.
+A run's decision journal is the list of the decisions it took for the user, one line each: the problem, the option chosen and its summary. A run that opens a pull request, or pushes to one through `hivemind:open-plan-pr`, lists them on that pull request, under "Decided for you" in the body of one it opens and in a comment on one it reuses, and the same lines in its final message or final report. Any other run, such as a read-only analysis or a brood dispatch, lists its decisions in its final message or final report and keeps no decision journal. Accepting a plan or a remediation plan, and rerunning a gate after a later commit, are not listed, except a plan acceptance that changes a file outside the request's limits. A workflow script writes the list in code; on Instinct the overlord writes it. No local copy exists.
 
 ## Recurrence Interplay
 
