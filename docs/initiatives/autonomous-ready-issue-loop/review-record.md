@@ -12,7 +12,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 1
+rounds: 2
 clean_round: false
 ---
 
@@ -52,6 +52,16 @@ Review rule:
 - **Result:** not clean. Every finding is disposed below, so none is open: R1-1 and R1-2 are deferred with full scope to #608, R1-3 is fixed, and R1-T1 is rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls). The fix is in the solution design's Amendments entry "2026-11-25, fourth Lair re-review round 1".
 - **Diminishing-returns check:** recurrence: R1-3 is on the readiness-check call contract that third re-review R1-3 fixed. Trend: this is round 1, so none. The standing rule applies: the strong recommended fixes are taken (Decisions asked, Standing rule clarification).
 
+### Round 2
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `d7d37ca463633496d9972b32b56c7718f883d8e1`, previous commit `93e1ef17dcae3834085b099da5ea9aa071348cb0`.
+- **Scope:** a confirming round over the change since the previous round's reviewed commit and round 1's fixes, the solution design's Amendments entry "2026-11-25, fourth Lair re-review round 1".
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It covered the diff and round 1's fixes and found no earlier finding unfixed (`unfixed: none`). It raised 1 finding, R2-1, low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the previous commit `93e1ef17dcae3834085b099da5ea9aa071348cb0`. It raised 1 finding, R2-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R2-1 is fixed (solution design, entry "2026-11-25, fourth Lair re-review round 2"), and R2-T1 is rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls).
+- **Diminishing-returns check:** recurrence: R2-1 is on R1-3's fix; the fix closes it by construction, citing Seams between the part designs with no item list. The standing rule applies: the strong recommended fixes are taken (Decisions asked, Standing rule clarification).
+
 ## Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
@@ -60,6 +70,8 @@ Review rule:
 | R1-2 | 1 | B | low | deferred | `-L default` on every Lair-mode tmux call would put the probe's scratch server and the scanner's calls on the user's default server. Deferred with full scope to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7165886305)): no call relies on `$TMUX`; strain and probe sessions name `-L default`; scratch-server and scanner calls name `-S <path>` or `-L hivemind-probe-<N>`. Bounded impact: no Lair tmux call exists until #608 builds it. |
 | R1-3 | 1 | A | low | fixed | Contracts and seams' "Readiness-check call at claim" and "Queue report" bullets pointed only to claim integrity's overridden sections. Fixed: each names its override (solution design, entry "2026-11-25, fourth Lair re-review round 1"). |
 | R1-T1 | 1 | review | high | rejected | Local review finding `087297a8bb7d363e968104bb29a998ff301bc3fb13278f19eac71f00f82991d1`, "The amended design has not been reviewed". Rejected: it asks for the review this round runs. It repeats first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls): the record states its own state, and the pass rule, not the tool, decides passing. |
+| R2-1 | 2 | confirm | low | fixed | The "Queue report" and "The queue report contents" bullets listed only some of the Seams items that change the report. Fixed by construction: both cite Seams between the part designs with no item list. |
+| R2-T1 | 2 | review | high | rejected | Local review finding `2dae3cffde368a9f0f67d118a005175d1fbe393b06a073b586452d4cd2d99210`, "The amended design is still explicitly unreviewed". Rejected: a process finding asking for the confirming round this review runs. It repeats first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls): the record states its own state, and the pass rule, not the tool, decides passing. |
 
 ## Decisions taken, listed for veto
 
@@ -334,6 +346,13 @@ Fourth re-review round 1's calls, each taken on a strong recommendation and list
 | R1-1 and R1-2 deferred with full scope to #608, the slice that builds the tick and the probe ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7165886305)) | strong | scope: it moves two #608 details to #608's issue; no ADR is edited, no trust, credential or merge-path change |
 | R1-3 fixed now: each of the two contract bullets names its override, in the solution design's Amendments entry "2026-11-25, fourth Lair re-review round 1" | strong | none: it corrects a pointer; no ADR is edited, no trust, credential or merge-path change |
 | R1-T1 rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls) | strong | none: round 1 is the round that reviews the amended design; no ADR is edited, no trust, credential or merge-path change |
+
+Fourth re-review round 2's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The IDs are this fourth re-review's (Findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| R2-1 fixed now: the "Queue report" and "The queue report contents" bullets cite Seams between the part designs with no item list, in the solution design's Amendments entry "2026-11-25, fourth Lair re-review round 2" | strong | none: it corrects a pointer; no ADR is edited, no trust, credential or merge-path change |
+| R2-T1 rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls) | strong | none: round 2 is the confirming round; no ADR is edited, no trust, credential or merge-path change |
 
 ## Decisions asked
 

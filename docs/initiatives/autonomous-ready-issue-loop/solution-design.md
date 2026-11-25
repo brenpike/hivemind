@@ -120,7 +120,7 @@ Fields and seams only. Each slice builds the code.
 - **Settled decisions.** Strain launch, Contracts and seams, "Settled decisions".
 - **Auto-tier script result.** The merge lane, Components "Auto-tier script".
 - **Readiness-check call at claim.** Claim integrity, Contracts and seams, "Readiness-check call at claim", as Seam order's cross-epic bullet on the readiness-check call changes it.
-- **Queue report.** Claim integrity, Contracts and seams, "Queue report", as Seams between the part designs, items 5 and 16, change it.
+- **Queue report.** Claim integrity, Contracts and seams, "Queue report", as Seams between the part designs change it.
 
 ### Seams between the part designs
 
@@ -284,7 +284,7 @@ A decision that is not ADR-worthy names the [P20](../../engineering-principles.m
 - **The `unattended` level and park action.** ADR-0045 decision 6, amending ADR-0036 decision 8. For a verified Lair strain, decision 6 also narrows ADR-0039 decisions 3 and 4, the Instinct fallback, and decision 8 narrows ADR-0026 decision 3, the promotion gate. #607 records the first narrowing in an ADR amendment, as it records ADR-0037's ([strain launch](strain-launch-design.md), Decisions). Its ADR-0026 amendment states that no architectural gate is waived until the dated Amendments entry that designs the signal lands. Until #607 designs a signal, recorded by a dated Amendments entry here, decision 8 waives no architectural gate in `unattended`: every brief with `gate.architectural` true parks (ADR-0045 amendment of 2026-11-24 to decision 8).
 - **Merges only through `merge-approved.sh` and its gates.** The [merge lane](merge-lane-design.md)'s Decisions govern it, under ADR-0044 decisions 17 to 20.
 - **The exit fallback.** Not ADR-worthy: fails P20's hard-to-reverse condition. It covers an unverified item in the ADR-0045 residuals. Its rule is [strain launch](strain-launch-design.md)'s Failure modes row on `/exit`. The stall fallback is [claim integrity](claim-integrity-design.md)'s idle signal, in its Decisions, with strain launch's activity rule (Seams between the part designs, item 13).
-- **The queue report contents.** Claim integrity's Decisions govern them, except that readiness-check and strain launch reason codes print as Seams between the part designs, item 16, states, in place of claim integrity's reason-code pattern.
+- **The queue report contents.** Claim integrity's Decisions govern them, except as Seams between the part designs change them.
 - **The outcome in an outcome marker, and the circuit breaker scoped to the Lair session.** Claim integrity's Decisions govern both, under Seams between the part designs, items 1 and 4.
 - **A red CI result.** The merge lane's Decisions govern the CI-red rule, under Seams between the part designs, item 2.
 - **An issue edited after claim is not merged and goes to `lair:review`.** The merge lane's Decisions govern it.
@@ -533,5 +533,11 @@ This entry, as any Amendments entry, stales the review record.
 - Fourth re-review R1-3: Contracts and seams, the bullets "Readiness-check call at claim" and "Queue report", now name their overrides: the first cites Seam order's cross-epic bullet on the readiness-check call, the second cites Seams between the part designs, items 5 and 16.
 
 Findings R1-1 and R1-2 are deferred with full scope to #608 ([#608 comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7165886305)) and change no text here.
+
+This entry, as any Amendments entry, stales the review record.
+
+**2026-11-25, fourth Lair re-review round 2.** This entry applies the fix of the fourth Lair re-review's round 2, run in PR #672, finding R2-1 in the [review record](review-record.md), its strong recommended fix, taken and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22. The entries above stay as written; where this entry corrects them, this entry governs. These sections change:
+
+- Fourth re-review R2-1: Contracts and seams, "Queue report", and Decisions, "The queue report contents", cite Seams between the part designs as a whole, with no item list, so every item that changes the report is covered; this replaces the item list of the entry "2026-11-25, fourth Lair re-review round 1".
 
 This entry, as any Amendments entry, stales the review record.
