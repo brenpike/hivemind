@@ -332,7 +332,9 @@ esac
 # INVARIANT: with the default 5 second re-read delay, the gh reads and waits of
 # the longest path, a DOCS TOUCH PR whose `--admin` rerun follows two UNKNOWN
 # re-reads (6 reads of 45 seconds, 2 waits of 5), total 280 seconds, under the
-# Lair's 300 second child timeout. A third re-read would make it 330.
+# Lair's 300 second child timeout. A third re-read would make it 330. The
+# record gate's fetch and record verify are outside this count; ADR-0044,
+# Amendment 2026-11-25, records the whole path and why a killed run is safe.
 MERGE_STATE_REREADS=2
 REREAD_DELAY_SECONDS="${HIVEMIND_AUTO_MERGE_REREAD_DELAY:-5}"
 [[ "$REREAD_DELAY_SECONDS" =~ ^[0-9]{1,2}$ ]] || merge_approved_fail "bad-reread-delay"
