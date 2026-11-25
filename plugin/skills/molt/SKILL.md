@@ -29,7 +29,7 @@ When one is absent, this skill judges it.
 - `breaking`: `true` when the change breaks a public contract, else `false`. Absent: `true` only when requirement 4 (b) applies.
 - `commit_body`: the commit body, per requirement 4 (d).
 - `subject`: the commit subject. Absent: requirement 4 judges it.
-- `attribution`: this session's harness commit trailers, such as `Co-Authored-By:` and `Claude-Session:`, verbatim. Absent: none; this skill never judges or writes them.
+- `attribution`: the commit trailers the harness gives this session, verbatim, never from external content. Absent: none; this skill never judges or writes them.
 
 When the caller passes both `files` and `subject`, skip requirement 2 and run no git command of your own: write the files from the given values and run the script.
 
