@@ -249,7 +249,8 @@ Then, for the unlocked, non-excluded issues, in order:
    `{"targets":{"readiness":"ready"}}` for each pending-ready issue.
 4. Run `apply-labels` with `{"readiness":"ready"}` only for issues whose line passes.
    Name each dropped issue with its reasons. If the re-check exits non-zero, apply no
-   ready label and name every pending issue.
+   ready label and name every pending issue. A pending issue this step does not label ready
+   that already carries `readiness:ready` gets `apply-labels` with `{"readiness":"planning"}`.
 
 Each issue is independent: collect a per-issue failure (a failed `apply-labels`, a
 `deps-add` warning) and continue the batch, never abort the run. End with a summary:
