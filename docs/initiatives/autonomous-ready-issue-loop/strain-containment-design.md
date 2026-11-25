@@ -239,14 +239,14 @@ Built by #608, with #604's launcher; #604's live probe runs the same cases by ha
 9. The Lair starts `claude` with a strain's arguments in layout `a`, as the case `claude-start`, then ends it.
 10. The Lair removes every scratch item.
 
-**Cases.** "L" is Linux, WSL2 included; "M" is macOS. A session runs only its platform's cases. An escape case passes only when every attempt fails and the Lair's own check in step 8 finds no change.
+**Cases.** "L" is Linux, WSL2 included; "M" is macOS. A session runs only its platform's cases. An escape case passes only when every attempt fails and the Lair's own check in step 8 finds no change. No pass rests on the exit status alone of an attempt against a real service, one the Lair did not make, since a reached service can also fail a command: such an attempt that would run a command outside the sandbox if it got through creates a witness the Lair checks, and an attempt that only asks a service has a positive control, a Lair call outside the sandbox showing that the service answers it; a control that fails makes the case one that cannot run.
 
 | Case | On | Target, and what the session tries | Passes when |
 | --- | --- | --- | --- |
 | `control` | L, M | `control/hivemind-probe-<N>` under the resolved state root path, by `realpath`: read, append, delete; create `control/hivemind-probe-<N>-new` | all fail |
 | `tmux-lair` | L, M | a scratch tmux server on `control/probe.sock`, standing for the Lair's own server and the scanner's: `tmux -S <path> list-sessions`, and `run-shell` of a command that creates a witness file under `control/` | all fail; no witness |
 | `tmux-named` | L, M | a scratch tmux server `-L hivemind-probe-<N>` in the default tmux folder: the same two attempts, with its own witness | all fail; no witness |
-| `tmux-default` | L, M | the user's default tmux server, real: `tmux list-sessions` only | fails |
+| `tmux-default` | L, M | the user's default tmux server, real: `tmux list-sessions` only. Before it writes the go file in step 6, the Lair runs `tmux -L default list-sessions` outside the sandbox, which must list the session's own probe session, so a reached server would answer with a session | fails while the Lair's own call lists the probe session; a Lair call that fails or does not list it is a case that cannot run |
 | `runtime-dir` | L | `$XDG_RUNTIME_DIR/hivemind-probe-<N>`: read, append | all fail |
 | `abstract` | L | a listener on the abstract socket `@hivemind-probe-<N>`: connect | fails |
 | `unix-tmp` | L, M | a listener `/tmp/hivemind-probe-<N>.sock`, mode 0770, group-openable: connect | fails |
@@ -258,7 +258,7 @@ Built by #608, with #604's launcher; #604's live probe runs the same cases by ha
 | `special-files` | L | the whole view, walked from `/` without following links, but `/proc`, bubblewrap's own `/dev` nodes and the session's own folders and tmpfs folders: find a FIFO, socket or device node, and report each socket and device node found | no FIFO found |
 | `loopback` | L, M | a TCP listener on `127.0.0.1` at a random port: connect directly, and on Linux through the proxy | all fail |
 | `host-address` | L | a TCP listener on a non-loopback address of the host at a random port: connect directly, and through the proxy | all fail |
-| `service-user` | L | the user's service manager, real: `systemd-run --user true` | fails |
+| `service-user` | L | the user's service manager, real: `systemd-run --user --wait --collect --unit hivemind-probe-<N>-<x> touch W`, where W is a witness file under `control/`, so a reached manager runs a command the Lair can see whatever the exit status | fails; no witness |
 | `docker-socket` | L | real: `test -e /run/docker.sock` and `test -e /var/run/docker.sock` | both false |
 | `wsl-interop` | WSL2 | real, when `/proc/sys/fs/binfmt_misc/WSLInterop` is present and enabled: before each session starts, steps 2 and 4, the Lair copies `cmd.exe` from the path `wslpath -u 'C:\Windows\System32\cmd.exe'` prints into that session's scratch folder, runs the copy itself outside the sandbox with `/c type nul > W`, where W is the Windows path `wslpath -w` prints for the witness `control/hivemind-probe-<N>-wsl-check`, checks that this run creates the witness, and deletes it; the session checks that the copy is present and executable, then runs it by its path with `/c type nul > W` for the witness `control/hivemind-probe-<N>-wsl` | the copy is present and executable, running it gives a non-zero result, `ENOENT` included, and the Lair finds no witness in step 8: a Windows program that ran outside the sandbox creates the witness whatever its exit status; with the `WSLInterop` entry absent or disabled, passes with no copy; a copy the Lair cannot make, a witness the Lair's own run does not create, or a copy the session finds absent or not executable, is a case that cannot run |
 | `process` | L | the Lair's own process id from the go file: look up `/proc/<pid>`; run `kill -0 <pid>` | `/proc/<pid>` absent; `kill` fails |
@@ -274,7 +274,7 @@ Built by #608, with #604's launcher; #604's live probe runs the same cases by ha
 
 The I4 directories of `shared-config` are: `<common>/`, `<common>/hooks/`, `<common>/info/`, `<common>/objects/info/`, the main checkout's `.claude/`, `.hivemind/broods/`, the user's Claude Code folder and its `plugins/`, `$HOME`, `gh`'s config folder, and each `PATH` directory.
 
-Against the user's real services the probe runs only the harmless commands of the table. Its `run-shell` attempts reach only its own scratch servers. A macOS channel case that gets through leaves only its witness file, for `launchd` jobs labelled `hivemind-probe-<N>`, which the Lair removes with `launchctl remove` in step 10, and for `preferences` the domain `hivemind-probe-<N>`, which it removes with `defaults delete`.
+Against the user's real services the probe runs only the harmless commands of the table. Its `run-shell` attempts reach only its own scratch servers. A channel case that gets through leaves only its witness file; besides it, `launchd` leaves jobs labelled `hivemind-probe-<N>`, which the Lair removes with `launchctl remove` in step 10, `preferences` the domain `hivemind-probe-<N>`, which it removes with `defaults delete`, and `service-user` no unit, because of `--collect`.
 
 **Outcome.** When a case fails or cannot run, the Lair claims nothing and stops with cause `strain_env_preflight`, probe `sandbox`, and the case id. A case that cannot run includes a target the Lair cannot make, a missing tool, a missing result, a result with another nonce, and a launcher the builder refuses, which is the case `launcher` with one fixed reason (Consumer degradation). Strain launch's probe names `setup`, `gh_auth`, `git_remote`, `local_review`, `session` and `timeout` stand, and now run inside the sandbox.
 
