@@ -12,7 +12,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 0
+rounds: 1
 clean_round: false
 ---
 
@@ -42,12 +42,24 @@ Review rule:
 
 ## Rounds
 
-No round of this fourth re-review has run yet.
+### Round 1
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `93e1ef17dcae3834085b099da5ea9aa071348cb0`, merge-base `eb40ed9804b7ad92498ed42a8478b8edd3311e82`.
+- **Scope:** the Review rule's round-1 scope.
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It raised 3 findings, R1-1 to R1-3: 0 critical, 0 high, 1 medium and 2 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the merge-base. It raised 1 finding, R1-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R1-1 and R1-2 are deferred with full scope to #608, R1-3 is fixed, and R1-T1 is rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls). The fix is in the solution design's Amendments entry "2026-11-25, fourth Lair re-review round 1".
+- **Diminishing-returns check:** recurrence: R1-3 is on the readiness-check call contract that third re-review R1-3 fixed. Trend: this is round 1, so none. The standing rule applies: the strong recommended fixes are taken (Decisions asked, Standing rule clarification).
 
 ## Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
 | --- | --- | --- | --- | --- | --- |
+| R1-1 | 1 | B | medium | deferred | The Lair's read of a strain's result file `.hivemind/lair/result.json` has no non-following, bounded read rule: a FIFO with no writer stalls every tick, and a link to `/dev/zero` gives an unbounded read. Deferred with full scope to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7165886305)): every Lair read of a strain-layout file goes through strain containment's clean-up helper with a size cap, else `invalid-result`, with `tools/test_lair_tick.sh` cases. Bounded impact: the tick does not exist until #608 builds it with this rule. |
+| R1-2 | 1 | B | low | deferred | `-L default` on every Lair-mode tmux call would put the probe's scratch server and the scanner's calls on the user's default server. Deferred with full scope to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7165886305)): no call relies on `$TMUX`; strain and probe sessions name `-L default`; scratch-server and scanner calls name `-S <path>` or `-L hivemind-probe-<N>`. Bounded impact: no Lair tmux call exists until #608 builds it. |
+| R1-3 | 1 | A | low | fixed | Contracts and seams' "Readiness-check call at claim" and "Queue report" bullets pointed only to claim integrity's overridden sections. Fixed: each names its override (solution design, entry "2026-11-25, fourth Lair re-review round 1"). |
+| R1-T1 | 1 | review | high | rejected | Local review finding `087297a8bb7d363e968104bb29a998ff301bc3fb13278f19eac71f00f82991d1`, "The amended design has not been reviewed". Rejected: it asks for the review this round runs. It repeats first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls): the record states its own state, and the pass rule, not the tool, decides passing. |
 
 ## Decisions taken, listed for veto
 
@@ -314,6 +326,14 @@ Third re-review round 3's calls, each taken on a strong recommendation and liste
 | Third re-review R2-3's fix withdrawn in the solution design's Amendments entry "2026-11-25, third Lair re-review round 3" and third re-review R2-3 deferred with full scope to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7165458580)); third re-review R3-T1 and R3-2 fixed by that removal | strong | scope: it moves a #608 detail to #608's issue; no ADR is edited, no trust, credential or merge-path change |
 | Third re-review R3-1's fix: third re-review R2-1 to R2-3 take Angle `confirm`, round 2's line is the `Diminishing-returns advisory:` line, and round 1's Result records third re-review R1-T1's veto and rejection | strong | none: it corrects this record's bookkeeping |
 | The diminishing-returns advisory after third re-review round 3, at the round cap: restart the re-review at round 1 under the standing rule (Decisions asked, Standing rule clarification), with the third re-review's rounds and findings kept under History: 2026-11-25 (second restart) | strong | none: the round cap and the pass rule are unchanged; no ADR is edited, no trust, credential or merge-path change |
+
+Fourth re-review round 1's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The IDs are this fourth re-review's (Findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| R1-1 and R1-2 deferred with full scope to #608, the slice that builds the tick and the probe ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7165886305)) | strong | scope: it moves two #608 details to #608's issue; no ADR is edited, no trust, credential or merge-path change |
+| R1-3 fixed now: each of the two contract bullets names its override, in the solution design's Amendments entry "2026-11-25, fourth Lair re-review round 1" | strong | none: it corrects a pointer; no ADR is edited, no trust, credential or merge-path change |
+| R1-T1 rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls) | strong | none: round 1 is the round that reviews the amended design; no ADR is edited, no trust, credential or merge-path change |
 
 ## Decisions asked
 

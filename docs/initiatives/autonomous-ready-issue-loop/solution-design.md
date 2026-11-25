@@ -119,8 +119,8 @@ Fields and seams only. Each slice builds the code.
 - **Answer form.** `/lair answer <key> <option or text>`. `<key>` names an open park on that issue. A `decision` answer names one option. A `fact` answer is free text.
 - **Settled decisions.** Strain launch, Contracts and seams, "Settled decisions".
 - **Auto-tier script result.** The merge lane, Components "Auto-tier script".
-- **Readiness-check call at claim.** Claim integrity, Contracts and seams, "Readiness-check call at claim".
-- **Queue report.** Claim integrity, Contracts and seams, "Queue report".
+- **Readiness-check call at claim.** Claim integrity, Contracts and seams, "Readiness-check call at claim", as Seam order's cross-epic bullet on the readiness-check call changes it.
+- **Queue report.** Claim integrity, Contracts and seams, "Queue report", as Seams between the part designs, items 5 and 16, change it.
 
 ### Seams between the part designs
 
@@ -525,5 +525,13 @@ This entry, as any Amendments entry, stales the review record.
 **2026-11-25, third Lair re-review round 3.** This entry applies the third Lair re-review's round 3, run in PR #672, findings R3-T1 and R3-2 in the [review record](review-record.md), each its strong recommended fix, taken and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22. The entries above stay as written; where this entry corrects them, this entry governs. These sections change:
 
 - Third re-review R3-T1 and R3-2: the entry "2026-11-25, third Lair re-review round 2"'s R2-3 bullet is withdrawn, and Seam order's cross-epic bullet on the readiness-check call returns to its text before that entry. Normalizing the repository's owner and name moves to #608, with its scope on the issue ([#608 comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7165458580)): one normalization inside the [merge lane](merge-lane-design.md)'s Contracts and seams, "Merge environment", "The host binding", so the readiness check, the merge script and the poll script get the same owner and name, with its test; it lands as a dated entry under Amendments here. Withdrawing the clause removes the text R3-T1 and R3-2 attack.
+
+This entry, as any Amendments entry, stales the review record.
+
+**2026-11-25, fourth Lair re-review round 1.** This entry applies the fix of the fourth Lair re-review's round 1, run in PR #672, finding R1-3 in the [review record](review-record.md), its strong recommended fix, taken and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22. The entries above stay as written; where this entry corrects them, this entry governs. These sections change:
+
+- Fourth re-review R1-3: Contracts and seams, the bullets "Readiness-check call at claim" and "Queue report", now name their overrides: the first cites Seam order's cross-epic bullet on the readiness-check call, the second cites Seams between the part designs, items 5 and 16.
+
+Findings R1-1 and R1-2 are deferred with full scope to #608 ([#608 comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7165886305)) and change no text here.
 
 This entry, as any Amendments entry, stales the review record.
