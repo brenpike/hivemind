@@ -297,6 +297,19 @@
 #                - an idempotency key: GitHub offers none for comments.
 #   Linkage:     local review finding 2a8f6742.
 #
+# RECORDED DECISION (attribution separator): the open-plan-pr SKILL.md writes the body, one
+# blank line and any `attribution` to the body file, in words, with no byte-level assembly
+# rule, and this script sends the body file unchanged and does not check the separator. A body
+# that ends in several newlines, or a body file that holds only the attribution, can leave more
+# than one blank line before the attribution or a blank line before it at the top. GitHub
+# renders the PR description as Markdown, where a run of blank lines and leading blank lines
+# both render as one paragraph break or none, so the PR reads the same whichever newlines the
+# body holds; a given body is never changed (the SKILL.md rule). A byte-exact assembly rule in
+# both skills would add prose and tests for no change a reader sees. Decided by the run, not
+# the user, as a review call per ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Review
+# Calls), on local review finding 3c0cc4f4 (the molt twin is 61671fd4). A later finding asking
+# for an exact separator rule repeats this decision.
+#
 # NOT CHECKED: repo hooks, local refs, git config, gh config and auth, and the operator are
 # trusted under ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier
 # Discipline). gh picks the repository for every call from the git remotes and its own config;
