@@ -436,7 +436,11 @@ run_suites() {
 #     tools/test_stage_derivation.sh
 #                                      -> test_stage_derivation (the libraries keep their other routes
 #                                         by union)
-#   tools/**                           -> FULL suite (validator bootstrap)
+#   plugin/skills/triage-backlog/scripts/*.sh, plugin/skills/_shared/readiness-check.sh,
+#     tests/triage-backlog/**
+#                                      -> test_triage_ops (triage-ops.sh loads the library; the
+#                                         library keeps its other routes by union)
+#   tools/**                        -> FULL suite (validator bootstrap)
 #   .github/**                         -> FULL suite (CI bootstrap — the gate harness itself)
 #   outside plugin|.claude-plugin|tools|tests|.github and not fixture-pinned above
 #     (docs/** other than docs/adr/**, docs/initiatives/**, docs/prds/** and
@@ -1013,8 +1017,11 @@ map_path() {
   # plugin/* file (policy_check prose-lints it via the wholesale rule below), but policy_check NEVER
   # EXECUTES bash — so without this rule a triage-ops edit would only be prose-linted, never
   # behaviorally exercised. Route both the script glob and its fixture dir to the behavioral suite.
+  # Also the readiness-check library plugin/skills/_shared/readiness-check.sh: triage-ops.sh loads
+  # it, so a library edit must re-run the triage suite (the library keeps its other routes by union).
   # (tools/test_triage_ops.sh itself is covered by the tools/** full-suite leg.)
   if [[ "$p" == plugin/skills/triage-backlog/scripts/*.sh \
+     || "$p" == plugin/skills/_shared/readiness-check.sh \
      || "$p" == tests/triage-backlog/* ]]; then
     add_selected "$SUITE_TEST_TRIAGE_OPS" "$p (triage-ops script/fixture)"
     matched=1
@@ -1596,7 +1603,8 @@ self_test() {
   #     test_rc_brood), the test_readiness_check library and harness legs, the test_design_review
   #     skill, library and harness legs, the test_merge_approved record gate library legs, the
   #     verify_records record, stamped doc, library and suite legs (and the docs/adr/**
-  #     policy_check leg it unions with), the test_stage_derivation library and harness legs, and the hooks.json json-manifests parse leg, that the
+  #     policy_check leg it unions with), the test_stage_derivation library and harness legs, the
+  #     test_triage_ops readiness-check library leg, and the hooks.json json-manifests parse leg, that the
   #     KNOWN_SUITES probe (#1) does not reach must route to its suite. #1 probes each entrypoint
   #     script, so it would stay green if the schema-chain, shared-lib, harness, push-branch child
   #     or parse-gate selector were dropped. Probe each <path>|<suite> pair directly so removing
@@ -1643,6 +1651,7 @@ self_test() {
     "plugin/skills/_shared/readiness-check.sh|$SUITE_TEST_STAGE_DERIVATION" \
     "plugin/skills/_shared/record-verify.sh|$SUITE_TEST_STAGE_DERIVATION" \
     "tools/test_stage_derivation.sh|$SUITE_TEST_STAGE_DERIVATION" \
+    "plugin/skills/_shared/readiness-check.sh|$SUITE_TEST_TRIAGE_OPS" \
     "plugin/hooks/hooks.json|$SUITE_JSON_MANIFESTS" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_BROOD" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_RC_BROOD"; do

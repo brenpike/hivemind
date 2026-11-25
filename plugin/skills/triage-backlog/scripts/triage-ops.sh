@@ -15,7 +15,9 @@
 #   - apply a rating as labels with PER-FAMILY MUTUAL EXCLUSION (clean reconcile),
 #   - read + add NATIVE GitHub issue dependencies (blocked-by) via GraphQL,
 #   - surface a GitHub-rejected dependency cycle as a STRUCTURED warning record
-#     instead of crashing.
+#     instead of crashing,
+#   - run the shared readiness check (skills/_shared/readiness-check.sh, sourced at
+#     startup) over an overlay of the labels and blocked-by edges a pending apply would write.
 # The split mirrors fetch-normalize.sh: a thin live `gh`/network shell wrapping a
 # pure, offline-exercisable transform core.
 #
@@ -97,6 +99,45 @@
 #              supplying ANY of them is REJECTED fail-closed via the shared guard
 #              (see §5) BEFORE any gh call.
 #
+#   deps-add --issue-id <NODE_ID> --blocked-by-number <n> [--blocked-by-number-response <path|->]
+#     --blocked-by-number names the blocker by issue number (^[1-9][0-9]*$) in place of
+#     --blocked-by-id; passing both fails with exit 2. A closed blocker resolves like an open one.
+#     online:  resolves the blocker's node id with one `gh api graphql` issue(number:) read
+#              (owner/repo from gh's {owner}/{repo} placeholders), routed through
+#              validate_response_shape BEFORE the lock gate and the mutation; a null issue,
+#              `.errors` envelope, malformed body or number mismatch FAILS CLOSED (exit 1).
+#     offline: --blocked-by-number-response injects that RAW read and drives the same
+#              resolution; the resolved id then feeds the offline flow above.
+#     --blocked-by-number-response is a TEST SEAM honored ONLY when TRIAGE_OPS_OFFLINE is set;
+#              a live invocation supplying it is REJECTED fail-closed (see §5) BEFORE any gh call.
+#
+#   readiness <commit> --overlay <json> [--snapshot-file <path|->] [--repo-response-file <path|->]
+#     Runs the shared readiness check (skills/_shared/readiness-check.sh) on every issue the
+#     overlay names, as if the overlay's labels and blocked-by edges were present.
+#     <commit> must be a full lowercase hex commit id (40 or 64 characters, the library's
+#              hivemind_readiness_commit_ok); anything else (a branch name, HEAD, a local ref,
+#              short or uppercase hex) exits 2 with empty stdout BEFORE any gh or git call.
+#     <json> is an object keyed by issue number (^[1-9][0-9]*$); each value is
+#              {"targets": {family: value}, "blocked_by": [positive integers]}, both keys
+#              optional and no other key allowed. Every target is checked against the palette
+#              exactly as apply-labels checks --targets: an unknown family or value, or the
+#              `triage` family, exits 2 BEFORE any gh call. No inputs file is involved.
+#     online:  owner/repo and the default branch name come from one `gh repo view` read
+#              routed through validate_response_shape; each issue is fetched with
+#              hivemind_readiness_fetch_snapshot; the overlay is applied (label names become
+#              current minus compute_mutex_delta's remove set plus its add set; each blocked_by
+#              number not already present becomes a blockedBy node); every issue is evaluated in
+#              ONE hivemind_readiness_check_snapshot call.
+#     offline: --snapshot-file (an object of issue snapshot nodes keyed by issue number) and
+#              --repo-response-file (the RAW gh repo view response) replace the two gh reads;
+#              an absent node reaches the library as null and fails snapshot-malformed.
+#     Any non-zero gh or library return leaves stdout EMPTY and exits 1, keeping the library's
+#     `readiness-check-error: <token>` stderr line. A locked issue is checked like any other;
+#     this subcommand never mutates.
+#     --snapshot-file and --repo-response-file are TEST SEAMS honored ONLY when
+#              TRIAGE_OPS_OFFLINE is set; a live invocation supplying either is REJECTED
+#              fail-closed (see §5) BEFORE any gh call.
+#
 # 3. OUTPUT SCHEMA — JSON on stdout (compact)
 # -------------------------------------------
 #   ensure-labels (offline) / palette:
@@ -119,6 +160,11 @@
 #     warning: { "status": "warning", "kind": "cycle-rejected"|"error"|"transport-error",
 #                "message": <str> }
 #
+#   readiness: the library's output contract lines, printed verbatim, one per overlay issue in
+#   ascending issue order (exit 0 only when every issue was evaluated):
+#     { "issue": <int>, "commit": <commit>, "track": "standalone"|"slice",
+#       "result": "pass"|"fail", "reasons": [<code>, ...] }
+#
 # 4. INVARIANTS
 # -------------
 #   - SINGLE SHARED RESPONSE-SHAPE KERNEL: EVERY live gh/GraphQL read that informs
@@ -134,9 +180,15 @@
 #     the kernel's array requirement), deps-add's lock-label node(id:) read (before
 #     the addBlockedBy mutation — never mutate on unverifiable lock state),
 #     list-issues' gh issue list output (before the cap check and before emitting
-#     the backlog), and apply-labels' label read (before the lock gate and before
-#     the delta). No subcommand bypasses this kernel — no live read pre-projects
-#     before the kernel.
+#     the backlog), apply-labels' label read (before the lock gate and before
+#     the delta), deps-add's --blocked-by-number node-id read (before the lock gate
+#     and the mutation), and readiness' gh repo view read. readiness' issue reads go
+#     through the shared library's hivemind_readiness_fetch_snapshot, which carries
+#     its own fail-closed shape gate. No subcommand bypasses this kernel — no live read
+#     pre-projects before the kernel.
+#   - READINESS COMMIT GATE: readiness refuses any <commit> that is not a full
+#     lowercase hex object id before any gh or git call, so no ref is ever resolved.
+#     A failed read or library return never prints a partial result: stdout is empty.
 #   - DEPS-ADD LOCK-READ IS PAGINATION-COMPLETE (fail-closed). The node(id:) labels
 #     read requests labels(first: 100) with pageInfo { hasNextPage }; the shared
 #     kernel's root_pred requires (.labels.pageInfo.hasNextPage // false) == false,
@@ -193,12 +245,15 @@
 # injected via flags: --current-labels-file (apply-labels), --response-file
 # (deps-read, deps-add, list-issues), --issue-labels-file (deps-add — injects the
 # label set the live path would resolve by node id, so the lock gate is offline-
-# drivable). EVERY fixture/injection flag is honored ONLY when TRIAGE_OPS_OFFLINE
+# drivable), --issue-labels-response (deps-add — the RAW lock-label read),
+# --blocked-by-number-response (deps-add — the RAW blocker node-id read), and
+# --snapshot-file / --repo-response-file (readiness — the issue snapshot nodes and the
+# RAW gh repo view read). EVERY fixture/injection flag is honored ONLY when TRIAGE_OPS_OFFLINE
 # is set; a live invocation supplying ANY of them is REJECTED fail-closed (exit 2)
 # BEFORE any gh call — they are test seams, not live caller payloads, and would
 # otherwise spoof state (e.g. omit triage:locked to bypass the human-only lock on
 # the deps-add path) or silently no-op a real mutation. This offline-only invariant
-# is enforced UNIFORMLY for all four subcommands by the single shared guard
+# is enforced UNIFORMLY for every subcommand by the single shared guard
 # reject_fixture_flags_in_live_mode (one mechanism, no per-subcommand divergence).
 # Use `-` for stdin on any *-file
 # flag. The pure transforms are factored as functions reading from injected input
@@ -208,6 +263,12 @@
 # --payload-file injection.
 
 set -euo pipefail
+
+triage_ops_fail() { printf 'triage-ops: %s\n' "$1" >&2; exit 1; }
+script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || triage_ops_fail "cannot self-locate the script directory; refusing to proceed"
+shared_dir="$(CDPATH= cd -- "$script_dir/../../_shared" 2>/dev/null && pwd -P 2>/dev/null)" || triage_ops_fail "cannot resolve skills/_shared from the script directory; refusing to proceed"
+[ -f "$shared_dir/readiness-check.sh" ] || triage_ops_fail "required shared library missing: skills/_shared/readiness-check.sh; refusing to proceed"
+. "$shared_dir/readiness-check.sh" || triage_ops_fail "failed to source skills/_shared/readiness-check.sh (unparseable); refusing to proceed"
 
 PROG="triage-ops"
 
@@ -572,6 +633,66 @@ normalize_deps_read() {
          blocked_by: [ ($i.blockedBy.nodes)[] | { number, id, title } ] }'
 }
 
+# resolve_blocker_node_id <response-json> <number>: project a raw issue(number:) GraphQL
+# response into the blocker's node id, through the shared kernel. Fails closed (nonzero) on a
+# transport error, a `.errors` envelope, a null issue, a missing id or number, or an issue
+# whose number is not <number>. Exit codes: 0 = id printed; 1 = fail-closed.
+resolve_blocker_node_id() {
+  local resp="$1" number="$2" blocker
+  blocker="$(validate_response_shape "$resp" \
+    '.data.repository.issue' \
+    '(.number | type == "number") and (.id | type == "string" and length > 0)' \
+    '[.id]' \
+    'type == "string" and length > 0' \
+    '.data.repository.issue | { number, id }')" || return 1
+  printf '%s' "$blocker" | jq -e -r --arg number "$number" \
+    'select((.number | tostring) == $number) | .id'
+}
+
+# validate_readiness_overlay <overlay-json>: pure shape gate for the readiness --overlay. True
+# (exit 0) only for a non-empty object keyed by issue numbers (^[1-9][0-9]*$) whose every value
+# is an object holding no key but `targets` (an object) and `blocked_by` (an array of positive
+# integers). Both keys are optional. The targets' palette check is compute_mutex_delta's.
+validate_readiness_overlay() {
+  printf '%s' "$1" | jq -e '
+    type == "object" and length > 0
+    and all(to_entries[];
+      (.key | test("\\A[1-9][0-9]*\\z"))
+      and (.value | type == "object")
+      and ((.value | keys) - ["targets", "blocked_by"] | length == 0)
+      and ((.value | has("targets") | not) or (.value.targets | type == "object"))
+      and ((.value | has("blocked_by") | not)
+           or (.value.blocked_by | type == "array"
+               and all(.[]; type == "number" and . == floor and . > 0))))' >/dev/null 2>&1
+}
+
+# apply_readiness_overlay <issue-number> <node-json> <targets-json> <blocked-by-json>: pure
+# overlay of one issue snapshot node. The label names become current minus compute_mutex_delta's
+# remove set plus its add set, and each blocked-by number not already present becomes a
+# blockedBy node {number}. Prints the overlaid node.
+# INVARIANT: a node whose labels or blockedBy nodes are not well-formed passes through unchanged,
+# so the readiness library's own snapshot validation fails it closed (snapshot-malformed) rather
+# than this transform masking the malformed read.
+apply_readiness_overlay() {
+  local issue="$1" node="$2" targets_json="$3" blocked_json="$4" current_json delta
+  current_json="$(printf '%s' "$node" \
+    | jq -c 'try [ .labels.nodes[] | .name | strings ] catch []')" || return 1
+  delta="$(compute_mutex_delta "$issue" "$targets_json" "$current_json")" || return 1
+  printf '%s' "$node" | jq -c --argjson delta "$delta" --argjson blocked "$blocked_json" '
+    if type == "object"
+       and (.labels | type) == "object" and (.labels.nodes | type) == "array"
+       and all(.labels.nodes[]; type == "object" and (.name | type) == "string")
+       and (.blockedBy | type) == "object" and (.blockedBy.nodes | type) == "array"
+       and all(.blockedBy.nodes[]; type == "object")
+    then
+      .labels.nodes |= ( [ .[] | select(.name as $name | ($delta.remove | index($name)) | not) ]
+                         + [ $delta.add[] | { name: . } ] )
+      | [ .blockedBy.nodes[].number ] as $have
+      | .blockedBy.nodes += [ $blocked[] | select(. as $n | ($have | index($n)) | not)
+                              | { number: . } ]
+    else . end'
+}
+
 # --- Baked GraphQL operations (live path only) -------------------------------
 # Native GitHub issue dependencies (blocked-by), GA 2025-08-21. Spec citation:
 # https://github.blog/changelog/2025-08-21-dependencies-on-issues/ — mutation
@@ -604,6 +725,18 @@ query($id: ID!) {
         pageInfo { hasNextPage }
         nodes { name }
       }
+    }
+  }
+}'
+
+# Resolve a blocker's GraphQL NODE ID from its issue number, for deps-add --blocked-by-number.
+# owner and repo come from gh's {owner} and {repo} placeholders; $number is passed via -F.
+DEPS_BLOCKER_ID_QUERY='
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    issue(number: $number) {
+      id
+      number
     }
   }
 }'
@@ -828,12 +961,17 @@ cmd_deps_read() {
 
 cmd_deps_add() {
   local issue_id="" blocked_by_id="" response_file="" issue_labels_file="" issue_labels_response=""
+  local blocked_by_number="" blocked_by_number_response=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --issue-id) [ "$#" -ge 2 ] || die "missing value for --issue-id" 2
                issue_id="$2"; shift 2 ;;
       --blocked-by-id) [ "$#" -ge 2 ] || die "missing value for --blocked-by-id" 2
                blocked_by_id="$2"; shift 2 ;;
+      --blocked-by-number) [ "$#" -ge 2 ] || die "missing value for --blocked-by-number" 2
+               blocked_by_number="$2"; shift 2 ;;
+      --blocked-by-number-response) [ "$#" -ge 2 ] || die "missing value for --blocked-by-number-response" 2
+               blocked_by_number_response="$2"; shift 2 ;;
       --response-file) [ "$#" -ge 2 ] || die "missing value for --response-file" 2
                response_file="$2"; shift 2 ;;
       --issue-labels-file) [ "$#" -ge 2 ] || die "missing value for --issue-labels-file" 2
@@ -849,6 +987,12 @@ cmd_deps_add() {
       *) die "deps-add: unexpected argument '$1'" 2 ;;
     esac
   done
+  if [ -n "$blocked_by_number" ]; then
+    [ -z "$blocked_by_id" ] \
+      || die "deps-add: pass --blocked-by-id OR --blocked-by-number, not both" 2
+    [[ "$blocked_by_number" =~ ^[1-9][0-9]*$ ]] \
+      || die "deps-add: --blocked-by-number must be a positive issue number" 2
+  fi
 
   if is_offline; then
     if [ -n "$response_file" ]; then
@@ -857,8 +1001,20 @@ cmd_deps_add() {
       surface_dep_response "$(read_injected "$response_file")"
       return "$?"
     fi
-    [ -n "$issue_id" ] && [ -n "$blocked_by_id" ] \
-      || die "offline deps-add requires --issue-id and --blocked-by-id (or --response-file)" 2
+    [ -n "$issue_id" ] && { [ -n "$blocked_by_id" ] || [ -n "$blocked_by_number" ]; } \
+      || die "offline deps-add requires --issue-id and --blocked-by-id or --blocked-by-number (or --response-file)" 2
+    # Offline blocker-number seam: drive the live number->id resolution (shared kernel gate)
+    # over an injected RAW issue(number:) response, before any lock gate or payload.
+    if [ -n "$blocked_by_number" ]; then
+      [ -n "$blocked_by_number_response" ] \
+        || die "offline deps-add --blocked-by-number requires --blocked-by-number-response" 2
+      local raw_blocker_resp
+      raw_blocker_resp="$(read_injected "$blocked_by_number_response")"
+      blocked_by_id="$(resolve_blocker_node_id "$raw_blocker_resp" "$blocked_by_number")" \
+        || die "deps-add: cannot resolve the node id of blocker issue #$blocked_by_number (unreadable/malformed/null read)" 1
+    elif [ -n "$blocked_by_number_response" ]; then
+      die "deps-add: --blocked-by-number-response is valid only with --blocked-by-number" 2
+    fi
     # Offline RAW-response lock seam: drive the SECURITY-CRITICAL live lock-read
     # path — the SHARED kernel guard + the lock gate — over an injected RAW
     # node(id:) labels response (mirrors the live deps-add lock read exactly). A
@@ -896,10 +1052,21 @@ cmd_deps_add() {
 
   reject_fixture_flags_in_live_mode "deps-add" \
     "--response-file=$response_file" "--issue-labels-file=$issue_labels_file" \
-    "--issue-labels-response=$issue_labels_response"
-  [ -n "$issue_id" ] && [ -n "$blocked_by_id" ] \
-    || die "deps-add requires --issue-id and --blocked-by-id" 2
+    "--issue-labels-response=$issue_labels_response" \
+    "--blocked-by-number-response=$blocked_by_number_response"
+  [ -n "$issue_id" ] && { [ -n "$blocked_by_id" ] || [ -n "$blocked_by_number" ]; } \
+    || die "deps-add requires --issue-id and --blocked-by-id or --blocked-by-number" 2
   require_gh "deps-add"
+  # Resolve --blocked-by-number to the blocker's node id BEFORE the lock gate and the
+  # mutation, through the shared kernel: a null issue, an `.errors` envelope or a malformed
+  # body FAILS CLOSED, so addBlockedBy never runs against an unverified blocker.
+  if [ -n "$blocked_by_number" ]; then
+    local blocker_resp
+    blocker_resp="$(gh api graphql -f query="$DEPS_BLOCKER_ID_QUERY" \
+                      -F owner='{owner}' -F repo='{repo}' -F number="$blocked_by_number" 2>/dev/null)" || true
+    blocked_by_id="$(resolve_blocker_node_id "$blocker_resp" "$blocked_by_number")" \
+      || die "deps-add: cannot resolve the node id of blocker issue #$blocked_by_number (unreadable/malformed/null read)" 1
+  fi
   # Honor the human-only lock on the issue being MUTATED (--issue-id) BEFORE the
   # addBlockedBy write, via the SAME shared gate apply-labels uses. Resolve
   # ground-truth labels by node id ($id passed via -f, never interpolated). Only
@@ -930,6 +1097,92 @@ cmd_deps_add() {
   surface_dep_response "$resp"
 }
 
+cmd_readiness() {
+  local commit="" overlay_json="" snapshot_file="" repo_response_file=""
+  [ "$#" -ge 1 ] || die "readiness requires a commit id" 2
+  commit="$1"; shift
+  # The commit gate runs before any gh or git call: a branch name, HEAD, a local ref, short or
+  # uppercase hex never reaches the library's git reads.
+  hivemind_readiness_commit_ok "$commit" \
+    || die "readiness: <commit> must be a full lowercase hex commit id (40 or 64 characters)" 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --overlay) [ "$#" -ge 2 ] || die "missing value for --overlay" 2
+                 overlay_json="$2"; shift 2 ;;
+      --snapshot-file) [ "$#" -ge 2 ] || die "missing value for --snapshot-file" 2
+                 snapshot_file="$2"; shift 2 ;;
+      --repo-response-file) [ "$#" -ge 2 ] || die "missing value for --repo-response-file" 2
+                 repo_response_file="$2"; shift 2 ;;
+      *) die "readiness: unexpected argument '$1'" 2 ;;
+    esac
+  done
+  [ -n "$overlay_json" ] || die "readiness requires --overlay" 2
+  validate_readiness_overlay "$overlay_json" \
+    || die "readiness: --overlay must be a non-empty object keyed by issue number, each value {\"targets\": {family: value}, \"blocked_by\": [positive integers]} with no other keys" 2
+
+  local key keys_text entry targets_json blocked_json
+  local -a issue_keys=()
+  keys_text="$(printf '%s' "$overlay_json" | jq -r 'keys_unsorted | sort_by(tonumber) | .[]')" \
+    || die "readiness: cannot order the --overlay issue numbers" 1
+  mapfile -t issue_keys <<<"$keys_text"
+  # Every target is checked against the palette exactly as apply-labels checks --targets, for
+  # every issue, before any gh call.
+  for key in "${issue_keys[@]}"; do
+    targets_json="$(printf '%s' "$overlay_json" | jq -c --arg k "$key" '.[$k].targets // {}')"
+    compute_mutex_delta "$key" "$targets_json" '[]' >/dev/null \
+      || die "readiness: --overlay targets for issue #$key name a label outside the managed palette" 2
+  done
+
+  local repo_resp snapshot_json=""
+  if is_offline; then
+    [ -n "$snapshot_file" ] && [ -n "$repo_response_file" ] \
+      || die "offline readiness requires --snapshot-file and --repo-response-file" 2
+    snapshot_json="$(read_injected "$snapshot_file")"
+    repo_resp="$(read_injected "$repo_response_file")"
+  else
+    reject_fixture_flags_in_live_mode "readiness" \
+      "--snapshot-file=$snapshot_file" "--repo-response-file=$repo_response_file"
+    require_gh "readiness"
+    repo_resp="$(gh repo view --json nameWithOwner,defaultBranchRef)" \
+      || die "readiness: failed to resolve owner/repo and the default branch" 1
+  fi
+  # The repo read routes RAW through the shared kernel; the object is wrapped in a synthetic
+  # 1-element array to satisfy the kernel's array requirement (as deps-read does).
+  local repo_target owner_repo trunk
+  repo_target="$(validate_response_shape "$repo_resp" \
+    '.' \
+    '(.nameWithOwner | type == "string" and length > 0)
+     and (.defaultBranchRef.name | type == "string" and length > 0)' \
+    '[.nameWithOwner]' \
+    'type == "string" and length > 0' \
+    '{ owner_repo: .nameWithOwner, trunk: .defaultBranchRef.name }')" \
+    || die "readiness: failed to resolve owner/repo and the default branch (unreadable/malformed repo response)" 1
+  owner_repo="$(printf '%s' "$repo_target" | jq -r '.owner_repo')"
+  trunk="$(printf '%s' "$repo_target" | jq -r '.trunk')"
+
+  local node nodes="" output
+  for key in "${issue_keys[@]}"; do
+    entry="$(printf '%s' "$overlay_json" | jq -c --arg k "$key" '.[$k]')"
+    targets_json="$(printf '%s' "$entry" | jq -c '.targets // {}')"
+    blocked_json="$(printf '%s' "$entry" | jq -c '.blocked_by // [] | unique')"
+    if is_offline; then
+      node="$(printf '%s' "$snapshot_json" \
+        | jq -c --arg k "$key" 'if type == "object" then .[$k] else null end')" \
+        || die "readiness: --snapshot-file is not JSON" 1
+    else
+      node="$(hivemind_readiness_fetch_snapshot "$owner_repo" "$key")" \
+        || die "readiness: snapshot read failed for issue #$key; no issue was evaluated" 1
+    fi
+    node="$(apply_readiness_overlay "$key" "$node" "$targets_json" "$blocked_json")" \
+      || die "readiness: cannot apply the overlay to issue #$key" 1
+    nodes+="${nodes:+,}$node"
+  done
+  output="$(printf '[%s]\n' "$nodes" \
+    | hivemind_readiness_check_snapshot "$commit" "$owner_repo" "$trunk")" \
+    || die "readiness: readiness check failed; no issue was evaluated" 1
+  [ -z "$output" ] || printf '%s\n' "$output"
+}
+
 # --- Dispatch ----------------------------------------------------------------
 
 usage() {
@@ -941,8 +1194,14 @@ subcommands:
   list-issues   [--limit N] [--response-file <path|->]
   apply-labels  <issue> --targets <json>|--targets-file <path> [--current-labels-file <path|->]
   deps-read     <issue> [--response-file <path|->]
-  deps-add      --issue-id <ID> --blocked-by-id <ID> [--response-file <path|->] [--issue-labels-file <path|->]
+  deps-add      --issue-id <ID> --blocked-by-id <ID>|--blocked-by-number <n> [--response-file <path|->]
+                [--issue-labels-file <path|->] [--issue-labels-response <path|->]
+                [--blocked-by-number-response <path|->]
+  readiness     <commit> --overlay <json> [--snapshot-file <path|->] [--repo-response-file <path|->]
 Set TRIAGE_OPS_OFFLINE to drive the pure transforms over injected input (no gh).
+Test flags (offline only; rejected on a live run): --current-labels-file, --response-file,
+--issue-labels-file, --issue-labels-response, --blocked-by-number-response, --snapshot-file,
+--repo-response-file.
 EOF
 }
 
@@ -954,6 +1213,7 @@ case "$subcmd" in
   apply-labels)  cmd_apply_labels "$@" ;;
   deps-read)     cmd_deps_read "$@" ;;
   deps-add)      cmd_deps_add "$@" ;;
+  readiness)     cmd_readiness "$@" ;;
   -h|--help)     usage; exit 0 ;;
   *)             die "unknown subcommand '$subcmd' (try --help)" 2 ;;
 esac
