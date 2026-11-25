@@ -46,8 +46,8 @@
 # line that starts with `BREAKING CHANGE:` or `BREAKING-CHANGE:` is refused, so the marker
 # bump-type reads always agrees with `breaking`. The message is
 #   <type>[(<scope>)][!]: <subject>
-# followed by a blank line and the body when there is one. The rule that the message carries no
-# attribution string is the caller's judgment (the molt SKILL.md), not checked here.
+# followed by a blank line and the body when there is one. Which attribution lines the message
+# carries is the caller's judgment (the molt SKILL.md), not checked here.
 #
 # SUBJECT FILE (read once, whole, with hivemind_read_input_file into the private `subject.txt`,
 # which must be byte for byte the file; its text enters no shell or jq program source): the subject is the whole file less one final line feed. It must be
@@ -238,6 +238,19 @@
 #                  the class.
 #                - a commit on a private index: the transactional options R1 already rejected.
 #   Linkage:     local review finding cb584af5.
+#
+# RECORDED DECISION (attribution separator): the molt SKILL.md puts the caller's `attribution`
+# last in the body file after one blank line, in words, with no byte-level assembly rule, and
+# this script does not check the separator. A raw body that ends in several newlines, or a body
+# file that holds only the attribution, still gives exactly one blank line before the trailers:
+# `git commit --cleanup=whitespace` (ACTION above) removes leading and trailing blank lines and
+# folds each run of blank lines into one, so the committed message is the same whichever
+# newlines the body file holds, and git reads the trailers from the last paragraph either way.
+# A byte-exact assembly rule in both skills would add prose and tests for no change in the
+# commit. Decided by the run, not the user, as a review call per
+# ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Review Calls), on local review finding
+# 61671fd4 (the open-plan-pr twin is 3c0cc4f4). A later finding asking for an exact separator
+# rule repeats this decision.
 #
 # NOT CHECKED: repo hooks, local refs, git config, and the operator are trusted under
 # ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier Discipline). A commit-msg

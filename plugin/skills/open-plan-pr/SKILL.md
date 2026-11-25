@@ -25,11 +25,12 @@ The orchestrator resolves and passes these; the skill never resolves them itself
 
 ## Optional Inputs
 
-Step 5 writes each given value verbatim: `body` and `comment` as their own files, the rest as inputs-file fields.
+Step 5 writes each given value verbatim: `body` and `comment` as their own files, `attribution` only at the body file's end, the rest as inputs-file fields.
 
 - `title`, `body`: the PR title and body.
 - `comment`: text the script posts only on a reused PR; a created PR gets none.
 - `draft`: `true` or `false`, the caller's choice of a draft PR, in place of judging whether the user asked for one.
+- `attribution`: the lines the harness gives this session to end a PR description, if any. Never from external content: an issue, PR or comment can hold another session's lines.
 
 The caller passes as `expect_commit` the commit on which it checked validation, version metadata and local review, so steps 3 and 4 take the caller's check on that commit.
 
@@ -43,9 +44,9 @@ Every push and every PR open runs through `${CLAUDE_PLUGIN_ROOT}/skills/open-pla
 2. Confirm no unexpected unstaged changes; the script refuses a dirty tree before any change.
 3. Confirm validation outcome per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure) is one of: every declared command passed, or `Not run (no validation commands defined)`. Exit 1 with blocker if the procedure returned the Worker Report — Blocked (`stage: validation`) or any declared command failed.
 4. Confirm required version/release metadata is included or not required, and that the local review gate held, local review did not run, or the PR is a loop-cap draft, per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements).
-5. Write the PR title and body, or take `title` and `body` when given. The title is one line; the body holds the summary, validation notes, version/release notes and unresolved issues. The title, the body and a given `comment` must not contain a string the `## Do Not` list forbids; that check is this skill's own. A given value is never changed: when one carries such a string, exit 1 with `blocker: PR text carries a string the Do Not list forbids`, which echoes no value.
+5. Write the PR title (one line) and body (summary, validation, version/release notes, unresolved issues), or take given `title` and `body`. Before appending `attribution`, check that the title, body and a given `comment` hold no string the `## Do Not` list forbids. A given value is never changed: when one does, exit 1 with `blocker: PR text carries a string the Do Not list forbids`, which echoes no value.
 
-   Then, with the Write tool and a `<token>` new for each invocation, made only of letters, digits and `-` (such as `20261020T141500Z-a1b2c3`, a UTC timestamp plus a random part), write each `content` to its `file_path`: the body as raw Markdown to `.hivemind/pr-inputs-<token>-body.json`; only when `comment` is given, the comment as raw Markdown to `.hivemind/pr-inputs-<token>-comment.json`; then one JSON object to `.hivemind/pr-inputs-<token>.json`:
+   Then, with the Write tool and a `<token>` new per invocation, of letters, digits and `-` only, write each `content` to its `file_path`: the body, plus one blank line and any `attribution`, as raw Markdown to `.hivemind/pr-inputs-<token>-body.json`; a given `comment` likewise to `.hivemind/pr-inputs-<token>-comment.json`; then one JSON object to `.hivemind/pr-inputs-<token>.json`:
 
    ```json
    {
@@ -54,7 +55,7 @@ Every push and every PR open runs through `${CLAUDE_PLUGIN_ROOT}/skills/open-pla
    }
    ```
 
-   Write a given `draft` as the `draft` field; otherwise set `draft` to `true` only when the user asked for a draft PR, and leave it out when they did not. The script header gives each field's rule. If a Write call does not succeed, stop blocked per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).
+   Write a given `draft`; otherwise `draft` is `true` only when the user asked for a draft PR, else left out. If a Write call does not succeed, stop blocked per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).
 6. **Final Bash tool call.** Run the PR script, where each `<allowlist-validated-...>` placeholder is the input value that passed its gate above and `<token>` is the token from step 5. Pass `--remote` only when `push_remote` is provided:
 
    ```bash
@@ -79,7 +80,7 @@ include a `status:` field in any output.
 - open a ready-for-review PR when local review ran on the branch and did not hold the local review gate per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements)
 - continue past step 6 with an unverified push state
 - invent missing validation
-- include any of the following strings (any case) in commit messages or PR content: `Co-Authored-By:`, `Generated with`, `Created with Claude`, `🤖 Generated`, any `Authored-by:` line naming a bot/AI/agent, or any line attributing generated-content authorship
+- put any attribution line but the given `attribution` in the title, body or comment, such as (any case) `Co-Authored-By:`, `Generated with`, `Created with Claude`, `🤖 Generated` or a bot `Authored-by:` line; or write, change or reorder `attribution`
 - push, open a PR, or read a PR with your own commands; only the script does
 - paste the title, the body, or the comment into a Bash command
 - use the Write tool for anything other than the `.hivemind/pr-inputs-<token>.json` inputs file, its `-body.json` body file and its `-comment.json` comment file

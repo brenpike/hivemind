@@ -62,4 +62,3 @@ ends at the requirement 2 Bash call. Emit a blocker as
 - create a pull request — this skill pushes only; PR creation belongs to `hivemind:open-plan-pr`.
 - push the trunk branch (`base`) under any circumstance.
 - push outside the push script, or continue past step 2 when the script exits 1.
-- include any of the following strings (any case) in commit messages or output: `Co-Authored-By:`, `Generated with`, `Created with Claude`, `🤖 Generated`, any `Authored-by:` line naming a bot/AI/agent, or any line attributing generated-content authorship.
