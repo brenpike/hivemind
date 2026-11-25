@@ -2,7 +2,9 @@
 #
 # Behavioral unit runner for the triage MECHANISM substrate (triage-backlog skill, STEP-002).
 #
-# OFFLINE jq/bash TEST — CI-runnable with ONLY jq + bash present (NO gh / network / auth). It
+# OFFLINE git/jq/bash TEST — CI-runnable with ONLY git + jq + bash present (NO gh / network /
+# auth). git serves only the readiness cases' hermetic scratch repository (scratch HOME, fixed
+# identity and dates, plumbing-built commit). It
 # drives the pure transform core of:
 #   plugin/skills/triage-backlog/scripts/triage-ops.sh
 # via its documented offline seam (TRIAGE_OPS_OFFLINE=1 + the injection flags
@@ -38,6 +40,7 @@ EXPECTED_DIR="$TB_DIR/expected"
 [ -d "$TB_DIR" ] || { echo "FAIL: triage-backlog fixture dir missing: $TB_DIR" >&2; exit 2; }
 [ -d "$EXPECTED_DIR" ] || { echo "FAIL: expected-output dir missing: $EXPECTED_DIR" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite" >&2; exit 2; }
+REAL_GIT="$(command -v git)" || { echo "FAIL: git is required to run this suite" >&2; exit 2; }
 
 make_scratch_dir TMPDIR_TEST
 trap 'rm -rf "$TMPDIR_TEST"' EXIT
@@ -641,6 +644,275 @@ if [ -e "$STUBBIN_DIR/STUB_REACHED_GRAPHQL" ]; then
 else
   pass "deps-read:malformed-extra-slash-guard-before-split" "graphql not reached; guard fired before split"
 fi
+
+# ── readiness: hermetic scratch repository ────────────────────────────────────────
+# readiness reads a slice's documents at <commit> from the git repository of its working
+# directory. The scratch repository holds one plumbing-built commit of readiness-docs.json (a
+# passing slice document set modeled on tests/readiness-check/docs.json); each
+# `{{blob:<path>}}` placeholder renders as the blob id of <path>'s content, so the review record's
+# stamps match. HOME, the git identity and the dates are fixed, so the commit id is reproducible.
+# Every readiness run uses the offline test flags from inside that repository.
+
+# abort_readiness_setup <message>: prints a readiness setup failure and exits 2.
+abort_readiness_setup() { echo "FAIL: readiness setup: $1" >&2; exit 2; }
+
+RD_DIR="$TMPDIR_TEST/readiness"
+RD_REPO="$RD_DIR/repo"
+RD_DOCS="$TB_DIR/readiness-docs.json"
+RD_SNAPSHOTS="$TB_DIR/readiness-snapshots.json"
+RD_REPO_VIEW="$TB_DIR/readiness-repo-view.json"
+for rd_fixture in "$RD_DOCS" "$RD_SNAPSHOTS" "$RD_REPO_VIEW"; do
+  [ -f "$rd_fixture" ] || abort_readiness_setup "fixture missing: $rd_fixture"
+done
+mkdir -p "$RD_DIR/home" || abort_readiness_setup "cannot create the scratch HOME"
+export HOME="$RD_DIR/home"
+export GIT_CONFIG_NOSYSTEM=1
+export GIT_AUTHOR_NAME=triage-ops-test GIT_AUTHOR_EMAIL=triage-ops-test@example.invalid
+export GIT_COMMITTER_NAME=triage-ops-test GIT_COMMITTER_EMAIL=triage-ops-test@example.invalid
+export GIT_AUTHOR_DATE='2026-01-01T00:00:00Z' GIT_COMMITTER_DATE='2026-01-01T00:00:00Z'
+"$REAL_GIT" init -q "$RD_REPO" || abort_readiness_setup "git init"
+
+# run_scratch_git <arg...>: real git in the scratch repository.
+run_scratch_git() { "$REAL_GIT" -C "$RD_REPO" "$@"; }
+
+# store_doc_blob <path> <blobs-json>: writes the blob of readiness-docs.json's <path>, each
+# `{{blob:<p>}}` placeholder rendered from <blobs-json>, and prints its id. An unrendered
+# placeholder fails.
+store_doc_blob() {
+  local doc_file="$RD_DIR/doc"
+  jq -j --arg path "$1" --argjson blobs "$2" '
+    .[$path] | gsub("\\{\\{blob:(?<p>[^}]*)\\}\\}"; $blobs[.p] // error("unrendered placeholder"))' \
+    "$RD_DOCS" >"$doc_file" || return 1
+  run_scratch_git hash-object -w --no-filters "$doc_file"
+}
+
+rd_plain_text="$(jq -r 'to_entries[] | select(.value | contains("{{") | not) | .key' "$RD_DOCS")" \
+  || abort_readiness_setup "cannot list the plain documents"
+rd_stamped_text="$(jq -r 'to_entries[] | select(.value | contains("{{")) | .key' "$RD_DOCS")" \
+  || abort_readiness_setup "cannot list the stamped documents"
+mapfile -t rd_paths <<<"$rd_plain_text"$'\n'"$rd_stamped_text"
+RD_BLOBS='{}'
+rd_index_info=""
+for rd_path in "${rd_paths[@]}"; do
+  [ -n "$rd_path" ] || continue
+  rd_blob="$(store_doc_blob "$rd_path" "$RD_BLOBS")" || abort_readiness_setup "cannot store $rd_path"
+  RD_BLOBS="$(jq -c --arg p "$rd_path" --arg b "$rd_blob" '. + {($p): $b}' <<<"$RD_BLOBS")" \
+    || abort_readiness_setup "cannot record the blob of $rd_path"
+  rd_index_info+="100644 $rd_blob"$'\t'"$rd_path"$'\n'
+done
+printf '%s' "$rd_index_info" | GIT_INDEX_FILE="$RD_DIR/index" run_scratch_git update-index --index-info \
+  || abort_readiness_setup "update-index"
+rd_tree="$(GIT_INDEX_FILE="$RD_DIR/index" run_scratch_git write-tree)" || abort_readiness_setup "write-tree"
+RD_COMMIT="$(run_scratch_git commit-tree "$rd_tree" -m readiness-docs </dev/null)" \
+  || abort_readiness_setup "commit-tree"
+RD_PRD_BLOB="$(jq -r '.["docs/prds/demo.md"] // empty' <<<"$RD_BLOBS")"
+[ -n "$RD_PRD_BLOB" ] || abort_readiness_setup "readiness-docs.json lacks docs/prds/demo.md"
+
+# Each readiness-snapshots.json scenario becomes one --snapshot-file: issue snapshot nodes keyed by
+# issue number.
+rd_scenarios_text="$(jq -r 'keys[]' "$RD_SNAPSHOTS")" || abort_readiness_setup "cannot list the scenarios"
+mapfile -t rd_scenarios <<<"$rd_scenarios_text"
+for rd_scenario in "${rd_scenarios[@]}"; do
+  jq --arg s "$rd_scenario" '.[$s]' "$RD_SNAPSHOTS" >"$RD_DIR/snapshot.$rd_scenario.json" \
+    || abort_readiness_setup "cannot write scenario $rd_scenario"
+done
+
+# The gh stub drops a sentinel and fails, so a live case proves its rejection came before any gh call.
+RD_GH_DIR="$RD_DIR/gh-bin"
+mkdir -p "$RD_GH_DIR" || abort_readiness_setup "cannot create the gh stub dir"
+# shellcheck disable=SC2016
+printf '%s\n' '#!/bin/sh' ': >"$(dirname "$0")/GH_CALLED"' 'exit 1' >"$RD_GH_DIR/gh" \
+  && chmod +x "$RD_GH_DIR/gh" || abort_readiness_setup "cannot write the gh stub"
+
+# run_readiness <scenario> <overlay> [<commit>]: runs readiness offline from the scratch repository
+# over the scenario's snapshot file, at RD_COMMIT unless <commit> is given. Sets RD_OUT, RD_ERR and
+# RD_STATUS.
+run_readiness() {
+  RD_STATUS=0
+  RD_OUT="$(cd "$RD_REPO" && TRIAGE_OPS_OFFLINE=1 bash "$OPS" readiness "${3:-$RD_COMMIT}" \
+    --overlay "$2" --snapshot-file "$RD_DIR/snapshot.$1.json" --repo-response-file "$RD_REPO_VIEW" \
+    2>"$RD_DIR/stderr")" || RD_STATUS=$?
+  RD_ERR="$(cat "$RD_DIR/stderr")"
+}
+
+# expect_readiness_lines <case> <expected-json>: passes when the last run exited 0 and printed one
+# line per expected {issue, track, result, reasons} object, in order, each naming RD_COMMIT.
+expect_readiness_lines() {
+  if [ "$RD_STATUS" -ne 0 ]; then
+    failed "$1" "exit=$RD_STATUS (stderr: $RD_ERR)"
+    return
+  fi
+  if printf '%s\n' "$RD_OUT" | jq -n -e --argjson expected "$2" --arg commit "$RD_COMMIT" '
+      [inputs] as $lines
+      | ($lines | length) == ($expected | length)
+        and all($lines[]; .commit == $commit)
+        and ([$lines[] | {issue, track, result, reasons: (.reasons | sort)}]
+             == [$expected[] | .reasons |= sort])' >/dev/null 2>&1; then
+    pass "$1" "$(printf '%s\n' "$RD_OUT" | jq -s -c 'map({issue, result, reasons})')"
+  else
+    failed "$1" "expected: $2
+    actual:   $RD_OUT"
+  fi
+}
+
+# expect_readiness_refused <case> [<stderr-text>]: passes when the last run exited non-zero with
+# empty stdout and, when <stderr-text> is given, its stderr holds it.
+expect_readiness_refused() {
+  if [ "$RD_STATUS" -eq 0 ] || [ -n "$RD_OUT" ]; then
+    failed "$1" "expected non-zero exit and empty stdout, got exit=$RD_STATUS (stdout: $RD_OUT)"
+  elif [ -n "${2:-}" ] && [[ "$RD_ERR" != *"$2"* ]]; then
+    failed "$1" "stderr lacks '$2' (stderr: $RD_ERR)"
+  else
+    pass "$1" "exit=$RD_STATUS, empty stdout"
+  fi
+}
+
+# expect_live_rejected <case> <ops-arg...>: runs triage-ops live (TRIAGE_OPS_OFFLINE unset) from the
+# scratch repository with the gh stub first on PATH; passes on exit 2, empty stdout and no gh call.
+expect_live_rejected() {
+  local case_name="$1" out status=0
+  shift
+  rm -f "$RD_GH_DIR/GH_CALLED"
+  out="$(cd "$RD_REPO" && env -u TRIAGE_OPS_OFFLINE PATH="$RD_GH_DIR:$PATH" bash "$OPS" "$@" 2>/dev/null)" \
+    || status=$?
+  if [ "$status" -eq 2 ] && [ -z "$out" ] && [ ! -e "$RD_GH_DIR/GH_CALLED" ]; then
+    pass "$case_name" "exit=2, empty stdout, no gh call"
+  else
+    failed "$case_name" "expected exit 2, empty stdout and no gh call; got exit=$status (stdout: $out; gh called: $([ -e "$RD_GH_DIR/GH_CALLED" ] && echo yes || echo no))"
+  fi
+}
+
+# expect_offline_refused <case> <want-status|nonzero> <ops-arg...>: runs triage-ops offline and
+# passes when it exited with <want-status> (any non-zero for `nonzero`) and printed nothing.
+expect_offline_refused() {
+  local case_name="$1" want="$2" out status=0
+  shift 2
+  out="$(TRIAGE_OPS_OFFLINE=1 bash "$OPS" "$@" 2>/dev/null)" || status=$?
+  if [ -n "$out" ] || [ "$status" -eq 0 ] || { [ "$want" != nonzero ] && [ "$status" -ne "$want" ]; }; then
+    failed "$case_name" "expected exit $want and empty stdout, got exit=$status (stdout: $out)"
+  else
+    pass "$case_name" "exit=$status, empty stdout"
+  fi
+}
+
+RD_SEVEN_TARGETS='{"readiness":"ready","type":"enhancement","effort":"m","moscow":"must","priority":"high","risk":"low","difficulty":"low"}'
+RD_ALL_RATINGS_MISSING='"rating_missing:readiness","rating_missing:type","rating_missing:effort","rating_missing:moscow","rating_missing:priority","rating_missing:risk","rating_missing:difficulty"'
+RD_PASS='[{"issue":201,"track":"slice","result":"pass","reasons":[]}]'
+
+# ── readiness: overlay ────────────────────────────────────────────────────────────
+# A never-triaged slice fails on every rating family and its missing Dependencies edge; the
+# seven-family overlay plus blocked_by makes the same live snapshot pass.
+run_readiness untriaged '{"201":{}}'
+expect_readiness_lines "readiness:never-triaged-no-overlay-fails" \
+  "[{\"issue\":201,\"track\":\"slice\",\"result\":\"fail\",\"reasons\":[$RD_ALL_RATINGS_MISSING,\"dependency_edge_missing:150\"]}]"
+run_readiness untriaged "{\"201\":{\"targets\":$RD_SEVEN_TARGETS,\"blocked_by\":[150]}}"
+expect_readiness_lines "readiness:never-triaged-overlay-passes" "$RD_PASS"
+
+# ── readiness: post-apply re-check ────────────────────────────────────────────────
+# Six families and the edge are live; the re-check overlay of exactly readiness:ready passes, and
+# without it only rating_missing:readiness remains.
+run_readiness applied '{"201":{"targets":{"readiness":"ready"}}}'
+expect_readiness_lines "readiness:recheck-ready-overlay-passes" "$RD_PASS"
+run_readiness applied '{"201":{}}'
+expect_readiness_lines "readiness:recheck-no-overlay-fails" \
+  '[{"issue":201,"track":"slice","result":"fail","reasons":["rating_missing:readiness"]}]'
+
+# A family the apply should have written is absent from the live snapshot: the re-check names it.
+run_readiness dropped '{"201":{"targets":{"readiness":"ready"}}}'
+expect_readiness_lines "readiness:recheck-dropped-family-fails" \
+  '[{"issue":201,"track":"slice","result":"fail","reasons":["rating_missing:risk"]}]'
+
+# ── readiness: Dependencies edges before readiness ────────────────────────────────
+run_readiness no-edge '{"201":{}}'
+expect_readiness_lines "readiness:edge-missing-fails" \
+  '[{"issue":201,"track":"slice","result":"fail","reasons":["dependency_edge_missing:150"]}]'
+run_readiness no-edge '{"201":{"blocked_by":[150]}}'
+expect_readiness_lines "readiness:edge-in-overlay-passes" "$RD_PASS"
+# The edge is in the live snapshot and its blocker is still open: the slice passes.
+run_readiness ready '{"201":{}}'
+expect_readiness_lines "readiness:edge-in-snapshot-open-blocker-passes" "$RD_PASS"
+# An edge already present is not added twice by the overlay.
+run_readiness ready '{"201":{"blocked_by":[150]}}'
+expect_readiness_lines "readiness:edge-in-both-passes" "$RD_PASS"
+
+# A locked issue is checked like any other.
+run_readiness locked '{"201":{}}'
+expect_readiness_lines "readiness:locked-issue-checked" "$RD_PASS"
+
+# One call evaluates every overlay issue in ascending issue order; the failing one carries its reasons.
+run_readiness batch '{"202":{},"201":{}}'
+expect_readiness_lines "readiness:batch-fail-with-reasons" \
+  "[{\"issue\":201,\"track\":\"slice\",\"result\":\"pass\",\"reasons\":[]},{\"issue\":202,\"track\":\"slice\",\"result\":\"fail\",\"reasons\":[$RD_ALL_RATINGS_MISSING]}]"
+
+# ── readiness: bad overlays ───────────────────────────────────────────────────────
+# Each is refused before any read: non-zero exit, empty stdout.
+RD_BAD_OVERLAYS=(
+  'unknown-family|{"201":{"targets":{"color":"red"}}}'
+  'unknown-value|{"201":{"targets":{"priority":"urgent"}}}'
+  'triage-family|{"201":{"targets":{"triage":"locked"}}}'
+  'not-object-array|[]'
+  'not-object-string|"201"'
+  'not-json|nope'
+  'empty-object|{}'
+  'value-not-object|{"201":["readiness:ready"]}'
+  'targets-not-object|{"201":{"targets":["readiness:ready"]}}'
+  'blocked-by-zero|{"201":{"blocked_by":[0]}}'
+  'blocked-by-negative|{"201":{"blocked_by":[-150]}}'
+  'blocked-by-fraction|{"201":{"blocked_by":[1.5]}}'
+  'blocked-by-string|{"201":{"blocked_by":["150"]}}'
+  'blocked-by-not-array|{"201":{"blocked_by":150}}'
+  'key-zero|{"0":{}}'
+  'key-leading-zero|{"0201":{}}'
+  'key-text|{"abc":{}}'
+  'extra-key|{"201":{"labels":[]}}'
+)
+for rd_bad in "${RD_BAD_OVERLAYS[@]}"; do
+  run_readiness ready "${rd_bad#*|}"
+  expect_readiness_refused "readiness:bad-overlay:${rd_bad%%|*}"
+done
+
+# ── readiness: bad commits ────────────────────────────────────────────────────────
+# Only a full lowercase hex id is accepted; a ref, a short id or uppercase hex is refused.
+for rd_bad in "main" "HEAD" "short|${RD_COMMIT:0:7}" "uppercase|${RD_COMMIT^^}"; do
+  run_readiness ready '{"201":{}}' "${rd_bad#*|}"
+  expect_readiness_refused "readiness:bad-commit:${rd_bad%%|*}"
+done
+
+# ── readiness: library failures ───────────────────────────────────────────────────
+# A non-zero library return leaves stdout empty: no line counts as a pass.
+run_readiness ready '{"201":{}}' "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+expect_readiness_refused "readiness:commit-unknown" "readiness-check-error: commit-unresolvable"
+run_readiness ready '{"201":{}}' "$RD_PRD_BLOB"
+expect_readiness_refused "readiness:commit-is-blob" "readiness-check-error: commit-unresolvable"
+run_readiness truncated '{"201":{}}'
+expect_readiness_refused "readiness:snapshot-truncated" "readiness-check-error: truncated"
+run_readiness malformed '{"201":{}}'
+expect_readiness_refused "readiness:snapshot-malformed" "readiness-check-error: snapshot-malformed"
+run_readiness ready '{"201":{},"999":{}}'
+expect_readiness_refused "readiness:snapshot-absent-node" "readiness-check-error: snapshot-malformed"
+
+# ── readiness / deps-add: live runs reject the test flags ─────────────────────────
+expect_live_rejected "readiness:live-snapshot-file-rejected" \
+  readiness "$RD_COMMIT" --overlay '{"201":{}}' --snapshot-file "$RD_DIR/snapshot.ready.json"
+expect_live_rejected "readiness:live-repo-response-file-rejected" \
+  readiness "$RD_COMMIT" --overlay '{"201":{}}' --repo-response-file "$RD_REPO_VIEW"
+expect_live_rejected "deps-add:live-blocked-by-number-response-rejected" \
+  deps-add --issue-id I_aaa --blocked-by-number 151 \
+  --blocked-by-number-response "$TB_DIR/deps-blocker-number-response.json"
+
+# ── deps-add --blocked-by-number ──────────────────────────────────────────────────
+# The blocker number resolves offline into the same {issueId, blockingIssueId} payload.
+run_case "deps-add:blocked-by-number-payload" "$EXPECTED_DIR/deps-add-payload.json" -- \
+  deps-add --issue-id I_aaa --blocked-by-number 151 \
+  --blocked-by-number-response "$TB_DIR/deps-blocker-number-response.json"
+# A null resolution fails closed with no payload.
+expect_offline_refused "deps-add:blocked-by-number-null-no-payload" nonzero \
+  deps-add --issue-id I_aaa --blocked-by-number 151 \
+  --blocked-by-number-response "$TB_DIR/deps-blocker-number-null-response.json"
+# Naming the blocker both ways is a usage failure.
+expect_offline_refused "deps-add:blocked-by-id-and-number-usage" 2 \
+  deps-add --issue-id I_aaa --blocked-by-id I_bbb --blocked-by-number 151 \
+  --blocked-by-number-response "$TB_DIR/deps-blocker-number-response.json"
 
 # ── Summary ───────────────────────────────────────────────────────────────────────
 echo
