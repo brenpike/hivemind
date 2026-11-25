@@ -159,10 +159,11 @@
 #              hivemind_readiness_commit_ok (40 or 64 lowercase hex).
 #     online (fetch): `GIT_TERMINAL_PROMPT=0 git --no-replace-objects fetch --quiet --no-tags
 #              --no-recurse-submodules --no-prune --refmap= -- <remote> refs/heads/<trunk>`, which
-#              writes FETCH_HEAD only. The commit id must then name a local commit object, else
-#              FAILS CLOSED (a force-pushed trunk, or a --repo that is not the local clone). If
-#              trunk moved between the read and the fetch, the read's commit is still present as
-#              an ancestor. No branch name or local ref ever reaches the library: every document
+#              writes FETCH_HEAD only. The commit id must then name a local commit object that
+#              is FETCH_HEAD or its ancestor, else FAILS CLOSED (a force-pushed trunk, even when
+#              the old commit is still in the object store, or a --repo that is not the local
+#              clone). If trunk moved forward between the read and the fetch, the read's commit is
+#              an ancestor and passes. No branch name or local ref ever reaches the library: every document
 #              is read at the commit id, so files only in the working tree never count.
 #     documents (read at the commit ONLY through the shared library):
 #       - ui: docs/prds/<slug>.md via hivemind_doc_read under hivemind_readiness_jq_defs with
@@ -178,6 +179,8 @@
 #         * the pass rule (restating the readiness check's, clause for clause): record_not_passed
 #           (verdict not pass, clean_round not true, or rounds below 2), record_rounds_exceeded
 #           (rounds above 3), record_open (any open count above 0).
+#         * each stamped path failing the Document existence test, or whose blob at the commit
+#           differs from its stamp, gives record_stale:<path> (the staleness rule).
 #         * each prototype path missing from the record's stamps gives record_unstamped:<path>.
 #       ui missing or invalid gives no reason and no refusal: the readiness check fails such a
 #       slice at triage.
@@ -1338,11 +1341,15 @@ read_record_front_matter() {
 #   record_not_passed          verdict not pass, clean_round not true, or rounds below 2
 #   record_rounds_exceeded     rounds above 3
 #   record_open                any open count above 0
+#   record_stale:<path>        a stamped path failing the Document existence test or holding
+#                              another blob than its stamp
 #   record_unstamped:<path>    a prototype path missing from the record's stamps
-# The pass rule restates the readiness check's rc_record_codes clause for clause. Every read is at
-# <commit> through the shared library; a git failure fails closed (nonzero, stdout empty).
+# The pass rule restates the readiness check's rc_record_codes clause for clause, and the stale
+# rule its staleness rule. Every read is at <commit> through the shared library; a git failure
+# fails closed (nonzero, stdout empty).
 design_reasons() {
   local commit="$1" slug="$2" path="" entry_rc=0 codes="" output="" record_status="" record_codes=""
+  local stamps="" stamp="" blob="" oid=""
   local prototype_dir="docs/initiatives/$slug/prototype"
   local -a prototypes=("$prototype_dir/index.html" "$prototype_dir/notes.md")
   for path in "${prototypes[@]}"; do
@@ -1368,7 +1375,23 @@ design_reasons() {
               ($index, $notes | select(. as $path | any($stamped[]; . == $path) | not)
                | "record_unstamped:" + .)')" \
         || die "design-gate: review record evaluation failed" 1
-      codes+="$record_codes"$'\n' ;;
+      codes+="$record_codes"$'\n'
+      stamps="$(printf '%s' "${output%$'\n'*}" | jq -r '.stamps[] | .path + "\t" + .blob')" \
+        || die "design-gate: review record evaluation failed" 1
+      while IFS= read -r stamp; do
+        [ -n "$stamp" ] || continue
+        path="${stamp%%$'\t'*}"
+        blob="${stamp#*$'\t'}"
+        entry_rc=0
+        oid="$(hivemind_doc_entry "$commit" "$path" 2>/dev/null)" || entry_rc=$?
+        case "$entry_rc" in
+          0|1) ;;
+          *) die "design-gate: stamped document read failed at the trunk commit" 1 ;;
+        esac
+        if [ "$entry_rc" -ne 0 ] || [ "$oid" != "$blob" ]; then
+          codes+="record_stale:$path"$'\n'
+        fi
+      done <<<"$stamps" ;;
     '1 '*) codes+="record_missing"$'\n' ;;
     '0 1') codes+="record_malformed"$'\n' ;;
     *) die "design-gate: review record read failed at the trunk commit" 1 ;;
@@ -1443,6 +1466,13 @@ cmd_design_gate() {
     || die "design-gate: trunk commit $commit is not in the local object store" 1
   [ "$object_type" = commit ] \
     || die "design-gate: trunk commit $commit is not in the local object store" 1
+  # The trunk read and the fetch are two reads: a commit id already in the object store passes
+  # the check above even when the remote branch was force-pushed away from it in between, so the
+  # fetched tip must equal it or descend from it.
+  if ! is_offline; then
+    git --no-replace-objects merge-base --is-ancestor "$commit" FETCH_HEAD </dev/null >/dev/null 2>&1 \
+      || die "design-gate: trunk commit $commit is not on the fetched trunk of remote '$remote'" 1
+  fi
 
   ui="$(read_prd_ui "$commit" "$slug")" || exit "$?"
   if [ "$ui" = yes ]; then
@@ -1470,7 +1500,7 @@ subcommands:
 --slug (ensure-parent, valid only with --existing-number) adds "seed": true only when the epic body's
 first line is the seed issue marker naming <slug>. design-gate reads the trunk commit (fetched into
 FETCH_HEAD only) and, when docs/prds/<slug>.md says UI yes, refuses on a prototype file failing the
-Document existence test or a review record that is missing, malformed, not passed or unstamped.
+Document existence test or a review record that is missing, malformed, not passed, stale or unstamped.
 Set SUBISSUE_OPS_OFFLINE to drive the pure transforms over injected input (no gh).
 EOF
 }

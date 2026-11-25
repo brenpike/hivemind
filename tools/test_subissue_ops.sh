@@ -655,14 +655,17 @@ assert_design_case "design-gate:no-ui-line-pass" "$DG_REPO" no pass '[]'
 create_repo DG_REPO; stage_passing_design "$DG_REPO"; commit_paths "$DG_REPO"
 assert_design_case "design-gate:ui-yes-pass" "$DG_REPO" yes pass '[]'
 
-# A missing index.html, or notes.md committed as a symlink, fails the Document existence test.
+# A missing index.html, or notes.md committed as a symlink, fails the Document existence test,
+# which also stales that file's stamp.
 create_repo DG_REPO; stage_passing_design "$DG_REPO"; remove_file "$DG_REPO" "$DG_INDEX"
 commit_paths "$DG_REPO"
-assert_design_case "design-gate:index-missing-refuse" "$DG_REPO" yes refuse '["prototype_missing"]'
+assert_design_case "design-gate:index-missing-refuse" "$DG_REPO" yes refuse \
+  '["prototype_missing","record_stale:docs/initiatives/demo-initiative/prototype/index.html"]'
 create_repo DG_REPO; stage_passing_design "$DG_REPO"; remove_file "$DG_REPO" "$DG_NOTES"
 ln -s index.html "$DG_REPO/$DG_NOTES" || setup_fail "symlink notes.md"
 commit_paths "$DG_REPO"
-assert_design_case "design-gate:notes-symlink-refuse" "$DG_REPO" yes refuse '["prototype_missing"]'
+assert_design_case "design-gate:notes-symlink-refuse" "$DG_REPO" yes refuse \
+  '["prototype_missing","record_stale:docs/initiatives/demo-initiative/prototype/notes.md"]'
 
 # No docs/initiatives/<slug>/ at all: both prototype_missing and record_missing.
 create_repo DG_REPO; copy_prd "$DG_REPO" design-gate-prd-ui-yes.md; commit_paths "$DG_REPO"
@@ -686,18 +689,26 @@ write_record "$DG_REPO" pass 2 0 true "$DG_INDEX"; commit_paths "$DG_REPO"
 assert_design_case "design-gate:notes-unstamped-refuse" "$DG_REPO" yes refuse \
   '["record_unstamped:docs/initiatives/demo-initiative/prototype/notes.md"]'
 
+# A prototype file edited after the record stamped it gives record_stale:<path>, for each file.
+for dg_stale_path in "$DG_INDEX" "$DG_NOTES"; do
+  create_repo DG_REPO; stage_passing_design "$DG_REPO"
+  write_file "$DG_REPO" "$dg_stale_path" $'edited after review\n'; commit_paths "$DG_REPO"
+  assert_design_case "design-gate:stale-${dg_stale_path##*/}-refuse" "$DG_REPO" yes refuse \
+    "[\"record_stale:$dg_stale_path\"]"
+done
+
 # Front matter that does not parse gives record_malformed.
 create_repo DG_REPO; stage_passing_design "$DG_REPO"
 write_file "$DG_REPO" "$DG_RECORD" $'---\nverdict: pass\n---\n\n# Review record\n'
 commit_paths "$DG_REPO"
 assert_design_case "design-gate:record-malformed-refuse" "$DG_REPO" yes refuse '["record_malformed"]'
 
-# Prototype files present only in the work tree, never committed, still refuse.
+# Prototype files present only in the work tree, never committed, still refuse, and stale both stamps.
 create_repo DG_REPO; stage_passing_design "$DG_REPO"
 commit_paths "$DG_REPO" "$DG_PRD" "$DG_RECORD"
 if [ -f "$DG_REPO/$DG_INDEX" ] && [ -f "$DG_REPO/$DG_NOTES" ]; then
   assert_design_case "design-gate:work-tree-only-prototype-refuse" "$DG_REPO" yes refuse \
-    '["prototype_missing"]'
+    '["prototype_missing","record_stale:docs/initiatives/demo-initiative/prototype/index.html","record_stale:docs/initiatives/demo-initiative/prototype/notes.md"]'
 else
   failed "design-gate:work-tree-only-prototype-refuse" "setup lost the work-tree prototype files"
 fi
@@ -779,6 +790,21 @@ if [ "$DG_STATUS" -eq 0 ] && [ -n "$DG_OUT" ] && [ "$DG_OUT" = "$DG_LIVE_OUT" ];
   pass "design-gate:live-equals-offline" "live and offline output identical"
 else
   failed "design-gate:live-equals-offline" "live: $DG_LIVE_OUT offline: $DG_OUT (status $DG_STATUS)"
+fi
+
+# A trunk force-pushed to unrelated history after the trunk read: the read's commit is still in
+# the consumer's object store from the earlier fetch, but is no ancestor of the fetched tip, so
+# design-gate fails closed with no output.
+create_repo DG_REWRITE; copy_prd "$DG_REWRITE" design-gate-prd-ui-no.md; commit_paths "$DG_REWRITE"
+git -C "$DG_REWRITE" push -q -f "$DG_ORIGIN" main:refs/heads/main || setup_fail "force-push to origin"
+git -C "$DG_CONSUMER" cat-file -e "$DG_LIVE_COMMIT" 2>/dev/null \
+  || setup_fail "consumer lost the earlier origin commit"
+run_live_ops "$DG_CONSUMER" "$DG_LIVE_TRUNK" -- \
+  design-gate --slug "$DG_SLUG" --repo demo-owner/demo-repo
+if [ "$LIVE_STATUS" -ne 0 ] && [ -z "$LIVE_OUT" ]; then
+  pass "design-gate:live-force-pushed-refuse" "exit=$LIVE_STATUS, no output"
+else
+  failed "design-gate:live-force-pushed-refuse" "status=$LIVE_STATUS output: $LIVE_OUT"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────────
