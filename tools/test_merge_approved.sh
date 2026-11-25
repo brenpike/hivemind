@@ -273,6 +273,15 @@ write_read "$case_dir" 2 "$MERGED_EDIT"
 run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_REREAD_DELAY= bash "$MERGE_APPROVED" o r 5 automated "$SELF"
 expect_case "setting:empty-reread-delay-default" "$case_dir" "MERGE=merged" 0 2 1
 
+# A leading zero is accepted: the value reaches only sleep, never shell arithmetic, so 08 is 8.
+for zero_delay in 00 01 08; do
+  case_dir="$(new_case "setting-zero-delay-$zero_delay")"
+  write_read "$case_dir" 1 '.'
+  write_read "$case_dir" 2 "$MERGED_EDIT"
+  run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_REREAD_DELAY="$zero_delay" bash "$MERGE_APPROVED" o r 5 automated "$SELF"
+  expect_case "setting:leading-zero-reread-delay-$zero_delay" "$case_dir" "MERGE=merged" 0 2 1
+done
+
 # ── Argument checks: MERGE_ERROR, exit 1, no gh call ─────────────────────────
 # arg_case <name> <reason> <arg>...: the arguments are checked before the setting and before gh.
 arg_case() {
@@ -625,6 +634,20 @@ printf '1' >"$case_dir/read-3.status"
 printf '1' >"$case_dir/merge-1.status"
 run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 5 automated "$SELF"
 expect_case "refused:unknown-reread-fails" "$case_dir" "MERGE_ERROR=graphql-read-failed" 1 3 1
+
+# A failed wait between re-reads is MERGE_ERROR=reread-wait-failed: a sleep shim that exits 1 is
+# put first on PATH; no read or merge call follows it.
+SLEEP_FAIL_DIR="$TMPDIR_TEST/sleep-fail"
+mkdir -p "$SLEEP_FAIL_DIR"
+printf '#!/usr/bin/env bash\nexit 1\n' >"$SLEEP_FAIL_DIR/sleep"
+chmod +x "$SLEEP_FAIL_DIR/sleep"
+case_dir="$(new_case refused-unknown-wait-fails)"
+write_read "$case_dir" 1 '.'
+write_read "$case_dir" 2 "$UNKNOWN_EDIT"
+printf '1' >"$case_dir/merge-1.status"
+run_case "$case_dir" PATH="$SLEEP_FAIL_DIR:$SHIM_DIR:$PATH" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_ADMIN=1 \
+  HIVEMIND_AUTO_MERGE_REREAD_DELAY=1 bash "$MERGE_APPROVED" o r 5 automated "$SELF"
+expect_case "refused:unknown-wait-fails" "$case_dir" "MERGE_ERROR=reread-wait-failed" 1 2 1
 
 case_dir="$(new_case refused-admin-refused)"
 write_read "$case_dir" 1 '.'
