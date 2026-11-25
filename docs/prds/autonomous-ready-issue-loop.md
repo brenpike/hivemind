@@ -1,5 +1,7 @@
 # PRD: Lair — Software Factory
 
+**UI:** no
+
 ## Problem Statement
 
 HIVEMIND can take one request to a merged pull request, and since ADR-0044 it can merge on its own. It still cannot work through a backlog unattended. Every delivery stops to ask the user questions, many with a single option or a strong recommendation already chosen, so a human must sit with each run. The PR #602 delivery stopped four times in about four hours, and only one stop was a decision the user really had to make. A maintainer with a triaged backlog of ready issues has to start each one by hand and answer its questions while it runs. Throughput is bounded by the user's attention, not by the work.

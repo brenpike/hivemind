@@ -1,24 +1,24 @@
 ---
 stamps:
   - path: docs/prds/autonomous-ready-issue-loop.md
-    blob: aa2e7c942a5160b954182f58f5770d0e9d8e8e89
+    blob: 1655472eb547492ab1a55ffb5dda422e6443b503
   - path: docs/initiatives/autonomous-ready-issue-loop/solution-design.md
-    blob: 2b8a7b6b58a953f657ba8ecef5c5a142b36cc7f9
+    blob: 3eaeee60401247dc0026a363c5ee0ca01a697cfc
   - path: docs/adr/0045-lair-software-factory.md
-    blob: e1730da467123263e1e173c3404abae3c5b81861
-verdict: fail
+    blob: 5e4f12f37ac3f550ecd69819d4925e70921d7538
+verdict: pass
 open:
   critical: 0
   high: 0
   medium: 0
   low: 0
-rounds: 0
-clean_round: false
+rounds: 3
+clean_round: true
 ---
 
 # Design review record: Lair — Software Factory
 
-The first review, rounds 1 to 3, did not converge. After round 3 the user split the initiative into three part designs: #630 strain launch, #631 merge lane and #632 claim integrity. #633 integrates them into this design. The integration review, rounds 1 to 3 of 2026-11-22, also reached the 3-round cap without converging, on strain containment, and the user split containment into its own part design, #646, Lair design: strain containment (Decisions asked, Round 3 questions). The restarted review, rounds 1 to 3 of 2026-11-22, reached the cap too, recurring on the decision digest, and the user narrowed the digest to a requirement whose design moves to #611 (Decisions asked, Restarted round 3 advisory). The second restarted review, rounds 1 to 3 of 2026-11-22, reached the cap with only 2 low findings in its round 3, both fixed, and under the user's standing rule its strong recommendation to restart was taken (Decisions taken, listed for veto, Second restart round 3's calls). The third restarted review restarted at round 1, a fresh re-review under ADR-0046 decision 6, Re-review after an amendment, with the earlier reviews' rounds and findings kept under History: 2026-11-22. It passed at round 3 on 2026-11-22, a clean round at reviewed commit `66c4858d38cae6b287c2816dadc17b0afc457047`, with no finding open at any severity. PR #668 (issue #636) then added ADR-0045's "Amendment 2026-11-24", which stales the ADR-0045 stamp. This re-review restarts at round 1 under ADR-0046 decision 6, Re-review after an amendment: the front matter is reset (`verdict`, `rounds`, the open counts and `clean_round`), the stamps are kept, and the passed review's rounds and findings are kept under History: 2026-11-24.
+The first review, rounds 1 to 3, did not converge. After round 3 the user split the initiative into three part designs: #630 strain launch, #631 merge lane and #632 claim integrity. #633 integrates them into this design. The integration review, rounds 1 to 3 of 2026-11-22, also reached the 3-round cap without converging, on strain containment, and the user split containment into its own part design, #646, Lair design: strain containment (Decisions asked, Round 3 questions). The restarted review, rounds 1 to 3 of 2026-11-22, reached the cap too, recurring on the decision digest, and the user narrowed the digest to a requirement whose design moves to #611 (Decisions asked, Restarted round 3 advisory). The second restarted review, rounds 1 to 3 of 2026-11-22, reached the cap with only 2 low findings in its round 3, both fixed, and under the user's standing rule its strong recommendation to restart was taken (Decisions taken, listed for veto, Second restart round 3's calls). The third restarted review restarted at round 1, a fresh re-review under ADR-0046 decision 6, Re-review after an amendment, with the earlier reviews' rounds and findings kept under History: 2026-11-22. It passed at round 3 on 2026-11-22, a clean round at reviewed commit `66c4858d38cae6b287c2816dadc17b0afc457047`, with no finding open at any severity. PR #668 (issue #636) then added ADR-0045's "Amendment 2026-11-24", which stales the ADR-0045 stamp. PR #672 (issue #646) then added a dated Amendments entry of 2026-11-24 to the solution design, joining the strain containment part design, and the PRD gained its `**UI:** no` line; both stale their stamps. This re-review restarts at round 1 under ADR-0046 decision 6, Re-review after an amendment: the front matter is reset (`verdict`, `rounds`, the open counts and `clean_round`), the stamps are kept, and the passed review's rounds and findings are kept under History: 2026-11-24. The first re-review reached the 3-round cap at round 3 on 2026-11-25, with no design finding in its round 3, and restarted at round 1 under the user's standing rule (Decisions taken, listed for veto, First re-review round 3's calls), its rounds and findings kept under History: 2026-11-25. The second re-review also reached the 3-round cap at round 3 on 2026-11-25, with 2 low findings in its round 3, withdrew the no-count rule of its R2-1, and restarted at round 1 under the user's standing rule (Decisions taken, listed for veto, Second re-review round 3's calls), its rounds and findings kept under History: 2026-11-25 (restart). The third re-review also reached the 3-round cap at round 3 on 2026-11-25, with 1 high and 2 low findings in its round 3, all disposed, withdrew the private-network egress rule at the maintainer's veto and deferred the `<owner/repo>` normalization to #608, and restarted at round 1 under the user's standing rule (Decisions taken, listed for veto, Third re-review round 3's calls), its rounds and findings kept under History: 2026-11-25 (second restart). The fourth re-review also reached the 3-round cap at round 3 on 2026-11-25, with 1 low finding, on this record, and 1 rejected high in its round 3 and no design-text finding in that round, deferred its R1-1 and R1-2 to #608, and restarted at round 1 on the maintainer's answer 1 (Decisions asked, Fourth re-review round 3 advisory (2026-11-25)), its rounds and findings kept under History: 2026-11-25 (third restart). The fifth re-review passed at round 3 on 2026-11-25, a clean round at reviewed commit `60a25e8f5b58d291c14329b3370781ea390d6426`, with no finding open at any severity.
 
 ## Reviewed documents
 
@@ -26,15 +26,15 @@ The first review, rounds 1 to 3, did not converge. After round 3 the user split 
 - [Solution design: Lair — Software Factory](solution-design.md)
 - [ADR-0045](../../adr/0045-lair-software-factory.md): the Lair software factory
 
-Stamps follow ADR-0046 decision 7, Blob stamps. The first review's stamps were empty; a record written with `verdict` `fail` keeps its stamps, so they stayed empty through the integration review, the restarted review and the second restarted review, and through the third restarted review's rounds 1 and 2. The third restarted review's record set `verdict` `pass`, so it stamped these three documents at `66c4858d38cae6b287c2816dadc17b0afc457047`, the commit its clean round 3 reviewed, ADR-0045 among them because its pull request edited it. While the verdict is `fail`, this record keeps the third restarted review's stamps, the blobs at `66c4858d` (ADR-0046 decision 7, Blob stamps). The record that sets `verdict` `pass` re-stamps the PRD, the solution design and ADR-0045 at the commit its clean round reviewed.
+Stamps follow ADR-0046 decision 7, Blob stamps. The first review's stamps were empty; a record written with `verdict` `fail` keeps its stamps, so they stayed empty through the integration review, the restarted review and the second restarted review, and through the third restarted review's rounds 1 and 2. The third restarted review's record set `verdict` `pass`, so it stamped these three documents at `66c4858d38cae6b287c2816dadc17b0afc457047`, the commit its clean round 3 reviewed, ADR-0045 among them because its pull request edited it. Through the first to fourth re-reviews and the fifth re-review's rounds 1 and 2, this record, with `verdict` `fail`, kept the third restarted review's stamps, the blobs at `66c4858d` (ADR-0046 decision 7, Blob stamps). This record, which sets `verdict` `pass`, stamps the PRD, the solution design and ADR-0045 at `60a25e8f5b58d291c14329b3370781ea390d6426`, the commit its clean round 3 reviewed.
 
-The mechanism of strain containment is designed and reviewed in #646. This review reads the solution design's Seams between the part designs, item 6, as the requirement and its pointer to #646.
+The mechanism of strain containment is designed and reviewed in #646. The solution design's Amendments entry of 2026-11-24, from PR #672, now joins that part design, [strain containment](strain-containment-design.md), and edits Seams between the part designs, item 6, and the #604, #608 and #612 rows. This review reads the containment part design like the other part designs, as the text it supersedes. Its part review closed `verdict` `fail` with no stamp, and the maintainer joined it anyway (answer B, `strain-containment-review-record.md`, Decisions asked, D4). A finding on the join itself repeats that recorded decision.
 
-The three part designs, [strain launch](strain-launch-design.md), the [merge lane](merge-lane-design.md) and [claim integrity](claim-integrity-design.md), are read as the text they supersede in the solution design. They are not stamped: the stamp path rule admits no other file of this folder than the solution design and this record. That is bounded: each part design is frozen, and a change to one lands only with a dated Amendments entry in the solution design, which is stamped, so the change stales this record (solution design, opening paragraphs). An edit made with no such entry is a residual (Residuals).
+The four part designs, [strain launch](strain-launch-design.md), the [merge lane](merge-lane-design.md), [claim integrity](claim-integrity-design.md) and [strain containment](strain-containment-design.md), are read as the text they supersede in the solution design. They are not stamped: the stamp path rule admits no other file of this folder than the solution design and this record. That is bounded: each part design is frozen, and a change to one lands only with a dated Amendments entry in the solution design, which is stamped, so the change stales this record (solution design, opening paragraphs). An edit made with no such entry is a residual (Residuals).
 
 Review rule:
 
-- Rounds count from 1. A record of this design has passed, so round 1 covers the change since `66c4858d38cae6b287c2816dadc17b0afc457047` in the three stamped documents, which is #668's ADR-0045 amendment, "Amendment 2026-11-24", checked against the PRD and the solution design. The part designs are read as the text they supersede.
+- Rounds count from 1. A record of this design has passed, so round 1 covers the change since `66c4858d38cae6b287c2816dadc17b0afc457047` in the three stamped documents, which is now: (a) #668's ADR-0045 amendment, "Amendment 2026-11-24"; (b) the solution design's Amendments entries "2026-11-24, strain containment", which joins the strain containment part design (`strain-containment-design.md`, issue #646) and edits Seams item 6 and the #604, #608 and #612 rows, "2026-11-24, Lair re-review round 1", "2026-11-25, Lair re-review round 2", "2026-11-25, restarted Lair re-review round 1", "2026-11-25, restarted Lair re-review round 2", "2026-11-25, restarted Lair re-review round 3", "2026-11-25, third Lair re-review round 1", "2026-11-25, third Lair re-review round 2", "2026-11-25, third Lair re-review round 3", "2026-11-25, fourth Lair re-review round 1" and "2026-11-25, fourth Lair re-review round 2"; (c) the PRD's `**UI:** no` line. Each is checked against the PRD and the solution design. The part designs, `strain-containment-design.md` included, are read as the text they supersede.
 - Each later round is a confirming round over the change since the previous round's reviewed commit and that round's fixes.
 - Each round is one fresh, read-only `hivemind:cerebrate` pass with `Memory context: none`, covering every angle. The amendment touches ADR-0045 decision 8's architectural gate, so each round adds one pass of the configured local review tool. When none is configured, the record says that pass was skipped.
 - A round never runs two passes of one model.
@@ -42,16 +42,51 @@ Review rule:
 
 ## Rounds
 
-No round of this re-review has run yet.
+### Round 1
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `879f4e3cd9d1cced56ac4cd6231209dddc789951`, merge-base `eb40ed9804b7ad92498ed42a8478b8edd3311e82`.
+- **Scope:** the Review rule's round-1 scope.
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It raised 3 findings, R1-1 to R1-3: 0 critical, 0 high, 2 medium and 1 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the merge-base. It raised 1 finding, R1-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R1-T1 and R1-3 are fixed (solution design, entry "2026-11-25, fifth Lair re-review round 1"), R1-1 is deferred with full scope to #608, and R1-2 is a recorded residual (Residuals).
+- **Diminishing-returns advisory:** recurrence: R1-T1 is on the upstream-proxy path that third re-review R1-T1's withdrawn fix covered. Trend: this is round 1, so none. The maintainer was asked and answered A (Decisions asked, Fifth re-review round 1 question (2026-11-25)).
+
+### Round 2
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `847e26ef9009dd7960deee316696beebb0fabe7c`, previous commit `879f4e3cd9d1cced56ac4cd6231209dddc789951`.
+- **Scope:** a confirming round over the change since the previous round's reviewed commit and round 1's fixes, the solution design's Amendments entry "2026-11-25, fifth Lair re-review round 1".
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It covered the diff and round 1's fixes and found no earlier finding unfixed (`unfixed: none`). It raised 1 finding, R2-1, low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the previous commit `879f4e3cd9d1cced56ac4cd6231209dddc789951`. It raised 2 findings, R2-T1 and R2-T2, both high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R2-1 is fixed (solution design, entry "2026-11-25, fifth Lair re-review round 2"), and R2-T1 and R2-T2 are rejected as repeats of the session-parity decision (Decisions asked, Fifth re-review round 1 question (2026-11-25)).
+- **Diminishing-returns advisory:** fired after round 2. Recurrence: R2-1 is on R1-2's disposition. Trend: severity fell to one low, which corrects wording. The maintainer's standing rule applies: a strong recommendation is taken (Decisions asked, Standing rule clarification). The conductor's recommendation, strong, taken and listed for veto: keep going to round 3 (Decisions taken, listed for veto, Fifth re-review round 2's calls).
+
+### Round 3
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `60a25e8f5b58d291c14329b3370781ea390d6426`, previous commit `847e26ef9009dd7960deee316696beebb0fabe7c`.
+- **Scope:** a confirming round over the change since the previous round's reviewed commit and round 2's fixes, the solution design's Amendments entry "2026-11-25, fifth Lair re-review round 2".
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It raised no new finding and found no earlier finding unfixed (`unfixed: none`).
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the previous commit `847e26ef9009dd7960deee316696beebb0fabe7c`. It raised 1 finding, R3-T1, high.
+- **Result:** clean round. No completed pass raised a new finding and no earlier finding is unfixed. R3-T1 is rejected as a repeat of R2-T2 and of the session-parity decision (Decisions asked, Fifth re-review round 1 question (2026-11-25)), so it is not a new finding (remediation-doctrine, Recorded Decisions and Repeat Findings). No finding is open at any severity, so the review passes under the pass rule of ADR-0046 decision 7.
 
 ## Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
 | --- | --- | --- | --- | --- | --- |
+| R1-T1 | 1 | review | high | fixed | Local review finding `c5df4a787cfc125962bb8ead2b7ed066698b704efc3342f699fa478056f1dd3d`, "Upstream proxy bypasses the local-address containment check": with the user's proxy settings set, the Lair's proxy forwards through that proxy, which resolves and connects itself, so the local-address refusal does not bound what it reaches. Fixed by narrowing the claim at the maintainer's answer A (Decisions asked, Fifth re-review round 1 question (2026-11-25)): no new refusal; Trust boundaries states that a strain reaches what that proxy reaches, within strain containment's residual "network egress with the user's credentials". |
+| R1-1 | 1 | B | medium | deferred | The proxy stops at Lair Stop, so strains in flight lose their only Linux network route until the next Start; their runs end `failed`, `stalled` or `timed-out` and count toward the breaker. Deferred with full scope to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7167068920)). Bounded impact: no proxy exists until #604 and #608 build it. |
+| R1-2 | 1 | B | medium | recorded | A strain can add `refs/replace/` refs or overwrite objects in the shared store, so strain launch's start configuration check, the moved-head check and Lair-mode `spawn-brood.sh`, which read that store without `--no-replace-objects`, could read substituted commits. Recorded as a residual under the maintainer's threat model (Decisions asked, Fifth re-review round 1 question (2026-11-25)), in this record's Residuals ([review-record.md](review-record.md)): it accepts, under that threat model, three Lair reads that [strain containment](strain-containment-design.md)'s residual "the shared object and ref store" does not cover (solution design, entry "2026-11-25, fifth Lair re-review round 2"). |
+| R1-3 | 1 | B | low | fixed | Seams item 5's lead clause had #610 apply the proxy-up gate to remediation dispatch with no "On Linux", so macOS, which runs no proxy, would never dispatch a remediation. Fixed: the clause begins "on Linux" (solution design, entry "2026-11-25, fifth Lair re-review round 1"). |
+| R2-1 | 2 | confirm | low | fixed | R1-2's disposition said the substitution falls within strain containment's residual "the shared object and ref store", but that residual's bullet "the Lair's own git reads use its own repository under `control/`, with replace objects off (merge lane, "Git and tool reads")" is false for the three reads R1-2 names. Fixed, wording only: the bullet holds only for the merge lane's tick reads, and R1-2's three reads are the recorded exception (solution design, entry "2026-11-25, fifth Lair re-review round 2"); R1-2's Note and Residuals reworded. |
+| R2-T1 | 2 | review | high | rejected | Local review finding `65deab31dc662e5971802c41aa17e122c22681fe315f114bc548be64bae5f6a9`, "Upstream-proxy exception leaves contradictory implementation requirements". Rejected: strain containment's Linux egress states both behaviors, the proxy checks the address it resolves and reaches remote hosts through the user's proxy settings when set, and the entry "2026-11-25, fifth Lair re-review round 1" states the consequence. Its ask, a separate upstream contract and proxy-path tests proving refusals, is hardening beyond the session-parity baseline and repeats that decision (Decisions asked, Fifth re-review round 1 question (2026-11-25)). |
+| R2-T2 | 2 | review | high | rejected | Local review finding `93211c41417323f1095317cec77285449573a70cf7c30870e607f8822ab91e20`, "Commit substitution exceeds the residual cited to accept it". Rejected: its over-claim part is R2-1, fixed; its ask, `--no-replace-objects` on every controller read, object-identity checks and adversarial tests, is hardening beyond the session-parity baseline and repeats that decision (Decisions asked, Fifth re-review round 1 question (2026-11-25)). |
+| R3-T1 | 3 | review | high | rejected | Local review finding `28e255a20d9c3bec799d4fdd8e24b49d6b4053efca8b5d765d86fe301bce58a5`, "Commit substitution can corrupt controller decisions, not merely the shared store". Rejected: it repeats R2-T2 and the maintainer's session-parity decision (Decisions asked, Fifth re-review round 1 question (2026-11-25)), so it is not a new finding (remediation-doctrine, Recorded Decisions and Repeat Findings). |
 
 ## Decisions taken, listed for veto
 
-The tables from the part designs' decisions to integration round 3's calls give each decision its always-ask screen: an answer to each of the four always-ask items of ADR-0046 decision 8 as it stood before its amendment of 2026-11-22. "no" means the decision does not do that. Their screen's columns name what each decision touches, and their Recommendation strength column gives its strength: `strong`, or `asked: "Take recs"` where the decision took the reviewer's recommended fix at the user's direction its lead-in names (Decisions asked). Each table meets the amended decision 8's rule that every taken decision gives its recommendation strength and what it touches. The restarted rounds', second restart rounds' and third restart rounds' tables give each decision its recommendation strength and what it touches (scope, ADR amendment, trust, credential, merge path), as the amended decision 8 requires (Decisions asked, Design-decision rule update); "none" means it touches none of them. The IDs in the restarted rounds' tables are the restarted review's, cited elsewhere as "restarted R1-n" (History, Restarted review). The IDs in the second restart rounds' tables are the second restarted review's, cited elsewhere as "second restart R1-n" (History, Second restarted review). The IDs in the third restart rounds' tables are the third restarted review's, cited elsewhere as "third restart R1-n" (History, Third restarted review). This re-review's own IDs are those of Findings above.
+The tables from the part designs' decisions to integration round 3's calls give each decision its always-ask screen: an answer to each of the four always-ask items of ADR-0046 decision 8 as it stood before its amendment of 2026-11-22. "no" means the decision does not do that. Their screen's columns name what each decision touches, and their Recommendation strength column gives its strength: `strong`, or `asked: "Take recs"` where the decision took the reviewer's recommended fix at the user's direction its lead-in names (Decisions asked). Each table meets the amended decision 8's rule that every taken decision gives its recommendation strength and what it touches. The restarted rounds', second restart rounds' and third restart rounds' tables give each decision its recommendation strength and what it touches (scope, ADR amendment, trust, credential, merge path), as the amended decision 8 requires (Decisions asked, Design-decision rule update); "none" means it touches none of them. The IDs in the restarted rounds' tables are the restarted review's, cited elsewhere as "restarted R1-n" (History, Restarted review). The IDs in the second restart rounds' tables are the second restarted review's, cited elsewhere as "second restart R1-n" (History, Second restarted review). The IDs in the third restart rounds' tables are the third restarted review's, cited elsewhere as "third restart R1-n" (History, Third restarted review). The IDs in the first re-review rounds' tables are the first re-review's, cited elsewhere as "first re-review R1-n" (History, First re-review). The IDs in the second re-review rounds' tables are the second re-review's, cited elsewhere as "second re-review R1-n" (History, Second re-review). The IDs in the third re-review rounds' tables are the third re-review's, cited elsewhere as "third re-review R1-n" (History, Third re-review). The IDs in the fourth re-review rounds' tables are the fourth re-review's, cited elsewhere as "fourth re-review R1-n" (History, Fourth re-review). This re-review's own IDs are those of Findings above.
 
 Listed again for veto, from the part designs:
 
@@ -247,6 +282,119 @@ Third restart round 2's calls, each the recommended fix of a finding or, in the 
 | R2-3, Seam order: #608's ADRs cell names ADR-0046 decisions 3 and 4 | strong | none |
 | The diminishing-returns advisory after round 2: keep going to round 3, the last under the cap | strong | none: the round cap and the pass rule are unchanged |
 
+First re-review round 1's calls, each the recommended fix of a finding, a strong recommendation taken and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); first re-review R1-T1 was asked (Decisions asked, Round 1, finding R1-T1 (2026-11-24)). The IDs are the first re-review's (History, First re-review findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| First re-review R1-1 to R1-7, each fixed now as a contained fix in the solution design's Amendments entry "2026-11-24, Lair re-review round 1" | strong | scope: first re-review R1-2 names strain containment in the sections the join left, and first re-review R1-1, R1-4, R1-6 and R1-7 add to the entry; trust: first re-review R1-3 carries ADR-0045's Amendment 2026-11-24 on #607 into the solution design; no ADR is edited, no credential or merge-path change |
+
+First re-review round 2's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); the narrowing was asked as the round's diminishing-returns advisory and answered 1 (Decisions asked, Round 2 diminishing-returns advisory (2026-11-25)). The IDs are the first re-review's (History, First re-review findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| The narrowed requirement's wording: Start refuses a checkout that shares a store with any checkout the user works in | strong | trust, scope: it states the requirement answer B leaves; the mechanism is #608's to design |
+| #608 is the builder and designer of the mechanism, through a dated Amendments entry before build | strong | scope: the mechanism moves from this design to a slice that builds it |
+| First re-review R2-T1 disposed `fixed` by removing the defective text, with its scope moved to #608 | strong | scope: #608's mechanism design must make the bootstrap crash-safe and recoverable |
+| First re-review R2-5's simplification: decision 8 waives no architectural gate in `unattended` until #607 designs a signal | strong | merge path: no gate is waived; #607 may add a waiver with its own signal |
+| First re-review round 1's R1-T1 application calls (the clone path, the record, the HTTPS clone and the codes) were superseded by the narrowing, so they are not listed as calls of that round | strong | trust, credentials: the HTTPS clone and its credential handling move to #608's design with the rest of the mechanism |
+
+First re-review round 3's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The IDs are the first re-review's (History, First re-review findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| First re-review R3-1's fix: the Decisions asked entry "Round 1, finding R1-T1 (2026-11-24)" gains its narrowing of 2026-11-25, and the entry "Round 2 diminishing-returns advisory (2026-11-25)" says first re-review R2-6 is fixed in this record | strong | none: it corrects this record's bookkeeping |
+| First re-review R3-T1 rejected: a round's fixes land after it and the next confirming round checks them, and round 3 was that pass for round 2's fixes | strong | scope: ADR-0046's review process; no ADR is edited, no trust, credential or merge-path change |
+| The diminishing-returns advisory after first re-review round 3, at the round cap: restart the re-review at round 1 under the standing rule, with the first re-review's rounds and findings kept under History: 2026-11-25 | strong | scope: ADR-0046's review process; the round cap and the pass rule are unchanged |
+
+Second re-review round 1's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The IDs are the second re-review's (History, Second re-review findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| Second re-review R1-1 to R1-7, each fixed now as a contained fix in the solution design's Amendments entry "2026-11-25, restarted Lair re-review round 1" | strong | trust: second re-review R1-1 puts the proxy-up read in the tick as a guard on claims and remediation, and second re-review R1-3 gates a strain-written branch name before it reaches the rescue command; scope: second re-review R1-2 assigns the proxy, relay and forwarder to #604 and their start, stop and check to #608, and second re-review R1-4 widens the Snapshot rule to any change adding a field the readiness check reads; none for second re-review R1-5, R1-6 and R1-7; no ADR is edited, no credential or merge-path change |
+| Second re-review R1-T1 rejected as a repeat of the maintainer's answer 1 (Decisions asked, Round 2 diminishing-returns advisory (2026-11-25)), its added cases moved to #608's scope | strong | scope: the checkout-isolation mechanism stays #608's to design, through a dated Amendments entry before build |
+
+Second re-review round 2's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The IDs are the second re-review's (History, Second re-review findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| Second re-review R2-1 to R2-4, each fixed now, second re-review R2-1 to R2-3 as contained fixes in the solution design's Amendments entry "2026-11-25, restarted Lair re-review round 2" and second re-review R2-4 in this record. Second re-review R2-1's override is withdrawn by second re-review R3-1 and R3-2 (Second re-review round 3's calls) | strong | scope: second re-review R2-1 adds a claim integrity override, a proxy found down at the step-5 re-take ends the attempt with no write and no count; none for second re-review R2-2, R2-3 and R2-4; no ADR is edited, no trust, credential or merge-path change |
+| Second re-review R2-T1 rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls) | strong | scope: round 2 is the confirming round, at the commit carrying round 1's fixes |
+| Keep going to round 3 per the diminishing-returns advisory after second re-review round 2 | strong | scope (ADR-0046 process): the round count, within the 3-round cap |
+
+Second re-review round 3's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The IDs are the second re-review's (History, Second re-review findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| Second re-review R3-1 and R3-2, each fixed by withdrawing second re-review R2-1's no-count rule in the solution design's Amendments entry "2026-11-25, restarted Lair re-review round 3": a proxy found down at the step-5 re-take is an ordinary step-5 end that counts toward the issue's 3 ends | strong | scope: it withdraws second re-review R2-1's claim integrity override, so claim integrity's Decisions bullet on 3 ended attempts and its generated re-take case in `tools/test_lair_claim.sh` hold unchanged; no ADR is edited, no trust, credential or merge-path change |
+| Second re-review R3-T1 rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls) | strong | scope: round 3 is the confirming round, at the commit carrying round 2's fixes |
+| The diminishing-returns advisory after second re-review round 3, at the round cap: restart the re-review at round 1 under the standing rule, with the second re-review's rounds and findings kept under History: 2026-11-25 (restart) | strong | scope (ADR-0046 process): the round cap and the pass rule are unchanged |
+
+Third re-review round 1's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The IDs are the third re-review's (History, Third re-review findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| Third re-review R1-1 to R1-3, each fixed now as a contained fix in the solution design's Amendments entry "2026-11-25, third Lair re-review round 1" | strong | scope: third re-review R1-1 moves the proxy-up gate on remediation dispatch and the forwarder crash end of a remediation run from #608 to #610; none for third re-review R1-2 and R1-3; no ADR is edited, no trust, credential or merge-path change |
+| Third re-review R1-T1 fixed now: the proxy connects only to globally routable addresses, checked after resolution and connected to as checked, with a probe case and a #604 test. Vetoed by the maintainer on 2026-11-25 and withdrawn (Decisions asked, Third re-review round 2 advisory (2026-11-25)). | strong | trust: it closes the proxy's egress to private networks; no ADR is edited, no credential or merge-path change |
+
+Third re-review round 2's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The IDs are the third re-review's (History, Third re-review findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| Third re-review R2-3 fixed now: the `<owner/repo>` taken from the repository URL is normalized by stripping a trailing `.git`, in the solution design's Amendments entry "2026-11-25, third Lair re-review round 2". Withdrawn at round 3; deferred to #608. | strong | scope: it touches none; the fix is reversible; no ADR is edited, no trust, credential or merge-path change |
+
+Third re-review round 3's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The IDs are the third re-review's (History, Third re-review findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| Third re-review R2-3's fix withdrawn in the solution design's Amendments entry "2026-11-25, third Lair re-review round 3" and third re-review R2-3 deferred with full scope to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7165458580)); third re-review R3-T1 and R3-2 fixed by that removal | strong | scope: it moves a #608 detail to #608's issue; no ADR is edited, no trust, credential or merge-path change |
+| Third re-review R3-1's fix: third re-review R2-1 to R2-3 take Angle `confirm`, round 2's line is the `Diminishing-returns advisory:` line, and round 1's Result records third re-review R1-T1's veto and rejection | strong | none: it corrects this record's bookkeeping |
+| The diminishing-returns advisory after third re-review round 3, at the round cap: restart the re-review at round 1 under the standing rule (Decisions asked, Standing rule clarification), with the third re-review's rounds and findings kept under History: 2026-11-25 (second restart) | strong | none: the round cap and the pass rule are unchanged; no ADR is edited, no trust, credential or merge-path change |
+
+Fourth re-review round 1's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The IDs are the fourth re-review's (History, Fourth re-review findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| Fourth re-review R1-1 and R1-2 deferred with full scope to #608, the slice that builds the tick and the probe ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7165886305)) | strong | scope: it moves two #608 details to #608's issue; no ADR is edited, no trust, credential or merge-path change |
+| Fourth re-review R1-3 fixed now: each of the two contract bullets names its override, in the solution design's Amendments entry "2026-11-25, fourth Lair re-review round 1" | strong | none: it corrects a pointer; no ADR is edited, no trust, credential or merge-path change |
+| Fourth re-review R1-T1 rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls) | strong | none: round 1 is the round that reviews the amended design; no ADR is edited, no trust, credential or merge-path change |
+
+Fourth re-review round 2's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The IDs are the fourth re-review's (History, Fourth re-review findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| Fourth re-review R2-1 fixed now: the "Queue report" and "The queue report contents" bullets cite Seams between the part designs with no item list, in the solution design's Amendments entry "2026-11-25, fourth Lair re-review round 2" | strong | none: it corrects a pointer; no ADR is edited, no trust, credential or merge-path change |
+| Fourth re-review R2-T1 rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls) | strong | none: round 2 is the confirming round; no ADR is edited, no trust, credential or merge-path change |
+| Keep going to round 3 per the diminishing-returns advisory after fourth re-review round 2 | strong | none: the round count, within the 3-round cap |
+
+Fourth re-review round 3's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The restart was asked and is not a call (Decisions asked, Fourth re-review round 3 advisory (2026-11-25)). The IDs are the fourth re-review's (History, Fourth re-review findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| Fourth re-review R3-1 fixed in this record: fourth re-review round 2's line is the `Diminishing-returns advisory:` line, and Fourth re-review round 2's calls gain the keep-going row | strong | none: it corrects this record's bookkeeping |
+| Fourth re-review R3-T1 rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls) | strong | none: round 3 is the confirming round; no ADR is edited, no trust, credential or merge-path change |
+
+Fifth re-review round 1's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); R1-T1 was asked (Decisions asked, Fifth re-review round 1 question (2026-11-25)):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| R1-1 deferred with full scope to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7167068920)) | strong | scope: it moves a #608 detail to #608's issue |
+| R1-2 recorded as a residual under the maintainer's threat model | strong | trust: it follows the maintainer's answer A and accepts, under that threat model, three Lair reads that strain containment's residual "the shared object and ref store" does not cover (solution design, entry "2026-11-25, fifth Lair re-review round 2") |
+| R1-3 fixed now: item 5's #610 clause begins "on Linux" | strong | none |
+
+Fifth re-review round 2's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked:
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| R2-1 fixed now: wording only, in the solution design's Amendments entry "2026-11-25, fifth Lair re-review round 2" | strong | none: it corrects a claim and adds no check |
+| R2-T1 and R2-T2 rejected as repeats of the session-parity decision (Decisions asked, Fifth re-review round 1 question (2026-11-25)) | strong | trust: it follows the maintainer's answer |
+| Keep going to round 3 per the diminishing-returns advisory after fifth re-review round 2 | strong | none: the round count, within the 3-round cap |
+
+Fifth re-review round 3's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked:
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| R3-T1 rejected as a repeat of the session-parity decision (Decisions asked, Fifth re-review round 1 question (2026-11-25)) | strong | trust: it follows the maintainer's answer |
+
 ## Decisions asked
 
 - **Design-decision rule update.** The user's rule update of 2026-11-22, landed on `main` by PR #649 as the ADR-0046 amendment of 2026-11-22 to decision 8 and merged into this branch at `b9ca37df`. A design-stage decision with a strong recommendation is taken and listed for veto whatever it touches: PRD scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change. Only a decision with a weak or absent recommendation and an action that is irreversible now, outside the unmerged pull request, are asked. This record lists each taken decision with its recommendation strength and what it touches, in every table (Decisions taken, listed for veto). Every restarted round 2 fix had a strong recommendation, so none was asked.
@@ -292,6 +440,30 @@ Third restart round 2's calls, each the recommended fix of a finding or, in the 
   - Claim integrity, ADR-0045 amendment of 2026-11-22, more causes stop the Lair: Tier A, answered yes on 2026-11-22.
 - **Merge lane, item 5, is not applied.** The Tier A merge bullet in `plugin/governance/decision-autonomy.md` (Tier A, Q1, approved 2026-11-21) is built by #605, with its fixture update and structural check.
 
+- **Round 1, finding R1-T1 (2026-11-24).** Asked after the first re-review's round 1, on the local review tool's high finding first re-review R1-T1, "Writable shared Git stores violate the repository's structural concurrency rule" (P16). The maintainer answered B.
+  - The question: how to dispose of first re-review R1-T1. Options: A, reject and keep the residual; B, the Lair runs only from its own clone, siblings keep sharing the store as a residual; C, per-strain clones, a redesign of ADR-0017's model.
+  - Answer: "B". Applied: the solution design's Amendments entry "2026-11-24, Lair re-review round 1" states that the Lair runs only from a clone it makes, so the user's unpushed work never shares a store with strains. Siblings sharing the store stays strain containment's residual "the shared object and ref store", under ADR-0017's worktree model. First re-review R1-T1 is rejected with that reason. Narrowed on 2026-11-25 (Decisions asked, Round 2 diminishing-returns advisory (2026-11-25)): the entry now states the requirement, and the mechanism is #608's.
+
+- **Round 2 diminishing-returns advisory (2026-11-25).** The diminishing-returns advisory (D35), asked after the first re-review's round 2. The maintainer answered 1 on 2026-11-25.
+  - The question: what to do with the round's findings, 7 of 10 of which come from first re-review R1-T1's clone mechanism. Options: (1) narrow the claim and hand the rest to the slice that builds it as a tracked follow-up; (2) accept the rest as recorded residuals; (3) keep going.
+  - Answer: "1". Narrow answer B to a requirement and hand the clone mechanism to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7162158378)). Simplify first re-review R1-3. Applied: first re-review R2-1 to R2-4, R2-7 and R2-8 deferred to #608; first re-review R2-T1, R2-5 and R2-9 fixed in the solution design, and R2-6 in this record; First re-review round 2's calls under Decisions taken, listed for veto.
+
+- **Third re-review round 2 advisory (2026-11-25).** The diminishing-returns advisory (D35), asked after the third re-review's round 2, whose third re-review R2-T1, R2-1 and R2-2 all hit third re-review R1-T1's egress fix. The maintainer answered 3 on 2026-11-25.
+  - The question: what to do with the round's findings. Options: (1) narrow the private-network rule to a one-line rule and hand its details to #604; (2) keep going and specify the rule fully now; (3) back out the private-network rule, leaving strain containment's existing accepted risk.
+  - Reply, verbatim, in two messages: "When did I ask for such a garbage restriction? I do not want that insane, unworkable and brain-dead restriction in place. Put it on a rocket to the sun. Jesus" and then "The private network restriction".
+  - Outcome: answer 3, and a veto of third re-review R1-T1's fix, which had been taken under the standing rule and listed for veto (Decisions taken, listed for veto, Third re-review round 1's calls). Applied: the solution design's Amendments entry "2026-11-25, third Lair re-review round 2" withdraws third re-review R1-T1's fix; third re-review R1-T1 is rejected (History, Third re-review findings); third re-review R2-T1, R2-1 and R2-2 are fixed by that removal.
+
+- **Fourth re-review round 3 advisory (2026-11-25).** The diminishing-returns advisory (D35), asked after the fourth re-review's round 3, which reached the 3-round cap. The maintainer answered 1 on 2026-11-25.
+  - The question, as asked, summarized: the review is at the 3-round cap for the fourth time; each fresh round 1 finds a few small items, while rounds 2 and 3 go clean on the design. Options: (1) restart once more, with fixes kept tiny or handed to the slice that builds them (recommended); (2) split the initiative per the cap rule; (3) stop and merge #672 by hand with the record at `verdict: fail`.
+  - Reply, verbatim: "1".
+  - Outcome: answer 1. The re-review restarts at round 1 as the fifth re-review, with the fourth re-review's rounds and findings kept under History: 2026-11-25 (third restart).
+
+- **Fifth re-review round 1 question (2026-11-25).** Asked after the fifth re-review's round 1, on the local review tool's high finding R1-T1. The maintainer answered A on 2026-11-25.
+  - The question: with the user's proxy settings set, the Lair's proxy hands traffic to that proxy, so a strain reaches what it reaches. Options: A, state that plainly as part of strain containment's accepted egress risk, with nothing new blocked (recommended); B, refuse to start with proxy settings set, the piece vetoed with the private-network rule (Third re-review round 2 advisory (2026-11-25)).
+  - Reply, verbatim: "How is this fucking risky. My god. Is my machine compromised? What the fuck are you wasting my tokens trying to optimize for? Do I work for the US government? Jesus christ".
+  - Follow-up, verbatim: "Is the strain less secure than if I were to be running the same workload in my main sesssion on the same machine? No. So wtf are we doing".
+  - Outcome: answer A. Applied: the solution design's Amendments entry "2026-11-25, fifth Lair re-review round 1"; R1-T1 is fixed, and R1-2 is recorded under Residuals. Standing threat model for this design: the baseline is parity with the maintainer's own session: a strain must be no less safe than the same work run in the maintainer's main session on the same machine, which strain containment already exceeds. A later finding that asks for hardening beyond that baseline repeats this decision and is rejected (critical or high) or recorded (medium or low) citing it.
+
 ## Residuals
 
 - **A part-design edit with no Amendments entry stales no stamp.**
@@ -299,6 +471,11 @@ Third restart round 2's calls, each the recommended fix of a finding or, in the 
   - Ground: the stamp path allowlist (idea-to-ready design, Contracts and seams, "Slice design section format") admits no other file of this folder than the solution design and this record, so no part design can be stamped.
   - Bounded impact: a docs pull request never takes the Lair's auto tier (solution design, Component "Merge lane and auto tier"). The bound is the reviewer of the part-design pull request, when there is one, who sees the edit in its diff; a pull request that edits only a part design leaves this record unchanged. With `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a Bot approval with no human review, the residual the idea-to-ready design records under D24.
   - Recorded: here, and under Reviewed documents.
+- **A strain can substitute commits in the shared store.**
+  - Scope: a strain can add `refs/replace/` refs or overwrite objects in the shared object and ref store, so strain launch's start configuration check, the moved-head check and Lair-mode `spawn-brood.sh`, which read that store without `--no-replace-objects`, can read substituted commits (R1-2).
+  - Ground: the maintainer's threat model (Decisions asked, Fifth re-review round 1 question (2026-11-25)): strains are not treated as attackers beyond what strain containment states.
+  - Bounded impact: the strain is an AI session the maintainer launches on the maintainer's own repository, and [strain containment](strain-containment-design.md)'s residual "the shared object and ref store" already accepts the shared store; its bullet on the Lair's own git reads covers only the merge lane's tick reads, not these three (solution design, entry "2026-11-25, fifth Lair re-review round 2").
+  - Recorded: here.
 
 ## History: 2026-11-22
 
@@ -761,3 +938,230 @@ The third restarted review of this design, rounds 1 to 3 of 2026-11-22, kept as 
 | R2-2 | 2 | confirm | low | fixed | Seams item 4's list of text replaced for invalid results left out the merge lane's Decisions bullet "The breaker counts only `failed`, `crashed`, `stalled` and `timed-out`". Fixed: solution design, Seams between the part designs, item 4, names that bullet; Amendments, the entry of 2026-11-22, third restarted review round 2, mentions it. |
 | R2-3 | 2 | confirm | low | fixed | #608's ADRs cell named ADR-0046 decision 3 but not decision 4, the native blocked-by links its admission reads. Fixed: solution design, Seam order, #608's ADRs cell ends "ADR-0044 decision 17; ADR-0046 decisions 3 and 4". |
 | C2-1 | 2 | review | medium | fixed | Rated high by the tool; the pass's reviewer agent rated it medium, and it is recorded as medium. Seams items 2 and 8 had the `remediation-spent` route always write a review marker, while item 8 adopts the merge lane's Write order, under which a route writes no review marker when the pull request already has one on the claimed issue, under any claim, and a remediation can park on an already-held pull request (merge lane, Lifecycle "Run outcome to labels"; Failure modes "Parked fix-up run"). Fixed: solution design, Seams between the part designs, item 2, the route writes the `remediation-spent` review marker only when the pull request has no review marker under any claim, an existing review marker keeps holding it, as the merge lane's Write order states, and the labels and the run-end marker land either way; item 8, the same; Lifecycle, the run-end bullet; Decisions, the item 2 bullet; Verification strategy, a case of a remediation run that parks on a pull request that already has a review marker under the old claim, then a `complete` re-claim: no second review marker, `lair:review` applied, no merge, with a tick stopped after the labels or after the check for an existing review marker. |
+
+## History: 2026-11-25
+
+### First re-review
+
+The first re-review of this design, rounds 1 to 3 of 2026-11-24 and 2026-11-25, over the change since `66c4858d`, kept as it stood after round 3. Its front matter then held `verdict` `fail`, every open count 0, `rounds` 3 and `clean_round` `false`, and the third restarted review's stamps. Round 3 reached the 3-round cap with no design finding, its one low fixed in this record and its one high rejected, and under the user's standing rule (Decisions asked, Standing rule clarification) the conductor's strong recommendation was taken: the re-review restarts at round 1 (Decisions taken, listed for veto, First re-review round 3's calls). The first re-review's finding IDs are cited as "first re-review R1-n", "first re-review R2-n" and "first re-review R3-n"; this restarted re-review's IDs start again at R1-1.
+
+### First re-review rounds
+
+#### First re-review round 1
+
+- **Date:** 2026-11-24.
+- **Reviewed commit:** `116241952cb82c7ce61cd0dd10dd61c3d2b26437`, merge-base `eb40ed9804b7ad92498ed42a8478b8edd3311e82`.
+- **Scope:** the Review rule's round-1 scope, the change since `66c4858d`: #668's ADR-0045 amendment, "Amendment 2026-11-24"; #672's solution design Amendments entry of 2026-11-24; the PRD's `**UI:**` line. Each is checked against the whole PRD and solution design, with the part designs read as the text they supersede.
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It raised 7 findings, R1-1 to R1-7: 0 critical, 0 high, 4 medium and 3 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the merge-base. It raised 1 finding, R1-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R1-1 to R1-7 are fixed, and R1-T1 is rejected on the maintainer's answer B (Decisions asked, Round 1, finding R1-T1 (2026-11-24)). The fixes are in the solution design's Amendments entry "2026-11-24, Lair re-review round 1".
+- **Diminishing-returns check:** no signal fired. This is round 1, so no earlier round of this re-review exists for recurrence or trend.
+
+#### First re-review round 2
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `542411ad8dc34f55c85539481c99b6093d23fa44`, previous round's reviewed commit `116241952cb82c7ce61cd0dd10dd61c3d2b26437`.
+- **Scope:** a confirming round over the change since `116241952cb82c7ce61cd0dd10dd61c3d2b26437` and round 1's fixes.
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It covered the diff and round 1's fixes, with `unfixed: none`. It raised 9 findings, R2-1 to R2-9: 0 critical, 0 high, 6 medium and 3 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the previous round's reviewed commit. It raised 1 finding, R2-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R2-1 to R2-4, R2-7 and R2-8 are deferred to #608 on the maintainer's answer 1 (Decisions asked, Round 2 diminishing-returns advisory (2026-11-25)); R2-5, R2-6, R2-9 and R2-T1 are fixed.
+- **Diminishing-returns advisory:** fired after round 2. Recurrence: R1-T1's clone mechanism drew 7 of round 2's 10 findings, and R1-3's fix drew 1. Trend: severity did not fall, a high in each round, while each fix added surface. Options given: (1) narrow the claim and hand the rest to the slice that builds it as a tracked follow-up; (2) accept the rest as recorded residuals; (3) keep going. The maintainer's answer (2026-11-25): 1. Narrow answer B to a requirement and hand the clone mechanism to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7162158378)). Simplify R1-3.
+
+#### First re-review round 3
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `069d03cbd1040c01d68528cad99c113975783d45`, previous round's reviewed commit `542411ad8dc34f55c85539481c99b6093d23fa44`.
+- **Scope:** a confirming round over the change since `542411ad8dc34f55c85539481c99b6093d23fa44` and round 2's fixes.
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It covered the diff and round 2's fixes, with `unfixed: none`. It raised 1 finding, R3-1: 0 critical, 0 high, 0 medium and 1 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the previous round's reviewed commit. It raised 1 finding, R3-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R3-1 is fixed in Decisions asked, and R3-T1 is rejected with its reason. The round raised new findings, so the 3-round cap is reached. Under the user's standing rule (Decisions asked, Standing rule clarification), the conductor's strong recommendation is taken and listed for veto: the re-review restarts at round 1 (Decisions taken, listed for veto, First re-review round 3's calls).
+- **Diminishing-returns advisory:** fired at the round cap. Recurrence did not fire on the design: no design text drew a finding. Trend: the design findings fell to zero, and the one low, R3-1, is record bookkeeping from round 2. Bounded edge cases: R3-T1 restates the confirming-round process this round ran. The maintainer's standing rule: a strong recommendation is taken, a restart at the round cap included (Decisions asked, Standing rule clarification); the conductor's strong recommendation: restart at round 1.
+
+### First re-review findings
+
+| ID | Round | Angle | Severity | Disposition | Note |
+| --- | --- | --- | --- | --- | --- |
+| R1-1 | 1 | A | medium | fixed | #667 changed claim integrity's Snapshot (`blockedBy` numbers and states) with no Amendments entry. Fixed: the entry records it, and Seam order "Cross-epic seams with #614" requires a dated entry for any field #615 adds. |
+| R1-2 | 1 | A | medium | fixed | The join updated only the sentences that named #646. Fixed: strain containment is now named, with its governing section, in Components "Strain launch and settings", "Strain result and liveness" and "Controller tick and admission", Seams items 6 and 7, State and ownership, Existing-path coverage, Verification strategy and the Seam order issue edits. |
+| R1-3 | 1 | B | medium | fixed | ADR-0045's Amendment 2026-11-24 on #607 was not carried into the solution design. Fixed: it is carried into Component "Unattended autonomy level", the #607 ADRs cell, the Decisions bullet and a Verification strategy case. |
+| R1-4 | 1 | A | medium | fixed | The 2026-11-24 entry said containment's review was "not run in this pull request", while containment's local-review fixes (L-2 to L-6, D18, L-8) were also checked by no round. Fixed: the new entry states that those fixes were checked by no round, and corrects the 2026-11-24 entry's clause "which is not run in this pull request". |
+| R1-5 | 1 | A | low | fixed | Three statements of the stop "Strain containment cannot be confirmed" named the stop but not the case id. Fixed: "and the case id" added to all three. |
+| R1-6 | 1 | A | low | fixed | Part-design citations of PRD line numbers no longer match the PRD after its `**UI:**` line. Fixed: the new entry says they refer to the PRD before its `**UI:**` line. |
+| R1-7 | 1 | A | low | fixed | The 2026-11-24 entry made body edits it did not list. Fixed: the new entry names them. |
+| R1-T1 | 1 | review | high | rejected | Local review finding `2a58431ec67cd57997e612e667478ec71c07e717d6e7b103eddb5e1768885c16`, "Writable shared Git stores violate the repository's structural concurrency rule" (P16). Rejected on the maintainer's answer B (Decisions asked, Round 1, finding R1-T1 (2026-11-24)): the Lair runs only from a checkout sharing no store with the user's, so the user's unpushed work never shares a store with strains (solution design, Amendments entry "2026-11-24, Lair re-review round 1"). Siblings sharing the store stays strain containment's residual "the shared object and ref store", under ADR-0017's worktree model. Per-strain clones would change ADR-0017's model, `spawn-brood.sh` and `brood-status`. |
+| R2-1 | 2 | confirm | medium | deferred | Start's common-dir check admits a linked worktree of the clone, where the user's work would share the strains' store. Reason: the mechanism moved to the slice that builds it (Decisions asked, Round 2 diminishing-returns advisory (2026-11-25), answer 1). #608 |
+| R2-2 | 2 | confirm | medium | deferred | The clone step writes outside claim integrity's invariant Lock scope, so two clone steps can race. Reason: as R2-1. #608 |
+| R2-3 | 2 | confirm | medium | deferred | Clone-step failures have no recovery path, the record write is not crash-atomic, and no Failure modes rows exist for the codes. Reason: as R2-1. #608 |
+| R2-4 | 2 | confirm | medium | deferred | HTTPS clone credentials, no SSH fallback (P26), and the reftable default ref format. Reason: as R2-1. #608 |
+| R2-5 | 2 | confirm | medium | fixed | R1-3's "design departure" waiver could not be told apart from brief inputs. Fixed: until #607 designs a signal, decision 8 waives no architectural gate in `unattended`; the Verification case is on inputs only. |
+| R2-6 | 2 | confirm | medium | fixed | Round 1's veto list left out the calls made to apply answer B. Fixed: the round-2 veto entry lists the narrowing's calls; the mechanism's calls were removed with it. |
+| R2-7 | 2 | confirm | low | deferred | A fresh clone lacks `.claude/settings.local.json`; `brood-status`, the rescue push and start must run in the clone. Reason: as R2-1. #608 |
+| R2-8 | 2 | confirm | low | deferred | The Start check has no fixed step relative to the `extensions.refStorage` read. Reason: as R2-1. #608 |
+| R2-9 | 2 | confirm | low | fixed | #608's acceptance-criteria edit lacked the checkout requirement. Fixed in Seam order. |
+| R2-T1 | 2 | review | high | fixed | Local review finding `316072b38bd403bb30e930911be07844cf5b2eb0752aeb29e2c21ac0754dbce2`, "Clone bootstrap can strand the repository in an unrecoverable half-created state". Fixed: the bootstrap is removed from the design and answer B stays as a requirement. #608's mechanism design must make bootstrap crash-safe and recoverable (its issue comment lists this scope). |
+| R3-1 | 3 | confirm | low | fixed | Two Decisions asked "Applied:" lines no longer matched after round 2. (1) "Round 1, finding R1-T1 (2026-11-24)" still described the removed clone. (2) "Round 2 diminishing-returns advisory (2026-11-25)" said R2-6 was fixed in the solution design. Fixed: (1) gains "Narrowed on 2026-11-25 (Decisions asked, Round 2 diminishing-returns advisory (2026-11-25)): the entry now states the requirement, and the mechanism is #608's."; (2) now reads "R2-T1, R2-5 and R2-9 fixed in the solution design, and R2-6 in this record". |
+| R3-T1 | 3 | review | high | rejected | Local review finding `32f176f002062ce40e6954bd165fb775ef6a74f939df773228505fb1ec7b9b18`, "Round 2 did not review the changes that dispose its findings". Rejected: under the design-review record format and this record's Review rule, a round's fixes land after it, and the next confirming round checks them. Round 3 is that confirming pass, at `069d03cb`, the commit that carries round 2's fixes. Its cerebrate pass found every round-2 row closed (`unfixed: none`). |
+
+## History: 2026-11-25 (restart)
+
+### Second re-review
+
+The second re-review of this design, rounds 1 to 3 of 2026-11-25, over the change since `66c4858d`, kept as it stood after round 3. Its front matter then held `verdict` `fail`, every open count 0, `rounds` 3 and `clean_round` `false`, and the third restarted review's stamps. Round 3 reached the 3-round cap with 2 low findings, both fixed by withdrawing its R2-1's no-count rule, and its one high rejected as a repeat, and under the user's standing rule (Decisions asked, Standing rule clarification) the conductor's strong recommendation was taken: the re-review restarts at round 1 after withdrawing that rule (Decisions taken, listed for veto, Second re-review round 3's calls). The second re-review's finding IDs are cited as "second re-review R1-n", "second re-review R2-n" and "second re-review R3-n"; this third re-review's IDs start again at R1-1. The second re-review's tables under Decisions taken, listed for veto, are those headed "Second re-review round 1's calls" to "Second re-review round 3's calls".
+
+### Second re-review rounds
+
+#### Second re-review round 1
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `2a8a1e9f453592b3066c2a85d50bbe201d8fc8a1`, merge-base `eb40ed9804b7ad92498ed42a8478b8edd3311e82`.
+- **Scope:** the Review rule's round-1 scope, the change since `66c4858d`: #668's ADR-0045 amendment, "Amendment 2026-11-24"; #672's solution design Amendments entries "2026-11-24, strain containment", "2026-11-24, Lair re-review round 1" and "2026-11-25, Lair re-review round 2"; the PRD's `**UI:**` line. Each is checked against the whole PRD and solution design, with the part designs read as the text they supersede.
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It raised 7 findings, R1-1 to R1-7: 0 critical, 0 high, 4 medium and 3 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the merge-base. It raised 1 finding, R1-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R1-1 to R1-7 are fixed, and R1-T1 is rejected as a repeat of the maintainer's answer 1 (Decisions asked, Round 2 diminishing-returns advisory (2026-11-25)). The fixes are in the solution design's Amendments entry "2026-11-25, restarted Lair re-review round 1".
+- **Diminishing-returns check:** no signal fired on recurrence. The findings are on the containment join's seams, a surface no earlier round of this restarted review fixed; the first re-review's surfaces (the checkout requirement, #607) drew only R1-6 (low) and R1-T1 (a rejected repeat). Trend: this is round 1, so none. The standing rule applies: the strong recommended fixes are taken (Decisions asked, Standing rule clarification).
+
+#### Second re-review round 2
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `5b9986b564bbb4448dbb3272b1053b42c13de041`, previous commit `2a8a1e9f453592b3066c2a85d50bbe201d8fc8a1`.
+- **Scope:** a confirming round over the change since the previous round's reviewed commit and round 1's fixes, the solution design's Amendments entry "2026-11-25, restarted Lair re-review round 1".
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It covered the diff and round 1's fixes and found every round-1 row closed (`unfixed: none`). It raised 4 findings, R2-1 to R2-4: 0 critical, 0 high, 0 medium and 4 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the previous commit. It raised 1 finding, R2-T1, high, a repeat.
+- **Result:** not clean. Every finding is disposed below, so none is open: R2-1 to R2-4 are fixed and R2-T1 is rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls). The fixes are in the solution design's Amendments entry "2026-11-25, restarted Lair re-review round 2", except R2-4, which is fixed in this record.
+- `Diminishing-returns advisory:` Signal 1, recurrence: R1-1's proxy guard drew R2-1 and R2-2, and R1-4's Seam order edits drew R2-3. Signal 2, trend: severity fell from 4 medium and 3 low in round 1 to 4 low in round 2. Signal 3: R2-2's macOS case is already bounded by the round-1 entry's "on Linux". The maintainer's standing rule applies: a strong recommendation is taken (Decisions asked, Standing rule clarification). The conductor's recommendation, strong: keep going to round 3.
+
+#### Second re-review round 3
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `4e9f324246e6ff7dee036fad2aa5c0d94ab5c7cd`, previous commit `5b9986b564bbb4448dbb3272b1053b42c13de041`.
+- **Scope:** a confirming round over the change since the previous round's reviewed commit and round 2's fixes, the solution design's Amendments entry "2026-11-25, restarted Lair re-review round 2" and R2-4's fix in this record.
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It covered the diff and round 2's fixes and found every round-2 row closed (`unfixed: none`). It raised 2 findings, R3-1 and R3-2: 0 critical, 0 high, 0 medium and 2 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the previous commit. It raised 1 finding, R3-T1, high, a repeat.
+- **Result:** not clean. Every finding is disposed below, so none is open: R3-1 and R3-2 are fixed by withdrawing R2-1's no-count rule, in the solution design's Amendments entry "2026-11-25, restarted Lair re-review round 3", and R3-T1 is rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls). The round raised new findings, so the 3-round cap is reached. Under the user's standing rule (Decisions asked, Standing rule clarification), the conductor's strong recommendation is taken and listed for veto: the re-review restarts at round 1 (Decisions taken, listed for veto, Second re-review round 3's calls).
+- `Diminishing-returns advisory:` Signal 1, recurrence: R2-1's no-count rule drew both findings, R3-1 and R3-2. Signal 2, trend: severity stays low, 4 low in round 2 and 2 low in round 3, while each fix adds text. The maintainer's standing rule applies: a strong recommendation is taken, a restart at the round cap included (Decisions asked, Standing rule clarification). The conductor's recommendation, strong, taken and listed for veto: withdraw R2-1's no-count rule, which removes surface, then restart at round 1.
+
+### Second re-review findings
+
+| ID | Round | Angle | Severity | Disposition | Note |
+| --- | --- | --- | --- | --- | --- |
+| R1-1 | 1 | B | medium | fixed | Strain containment's per-tick forwarder and proxy checks had no place in the tick order and no claim or remediation guard. Fixed: Seams item 5 places them; the proxy-up read is a re-taken tick guard and gates remediation; `claims: blocked proxy-down`; #608 tick cases. |
+| R1-2 | 1 | A | medium | fixed | #608 and strain containment's "Linux egress" (#604) both claimed the proxy. Fixed: #604 builds the proxy, relay and forwarder; #608 starts, stops and checks them. |
+| R1-3 | 1 | B | medium | fixed | A strain-written branch name, checked only by `git check-ref-format`, reached the rescue command the user runs. Fixed: read via the head-check helper; identifier gate and 255-byte cap; a fixed rescue text otherwise; #608 case. |
+| R1-4 | 1 | A | medium | fixed | #615 has landed (`readiness-check.sh`, snapshot mode), but Context and code truth said no check exists, and the Snapshot rule bound only #615. Fixed: code truth updated; the rule covers any change adding a GitHub field the check reads. |
+| R1-5 | 1 | A | low | fixed | The "Lair-written settings" contract missed strain containment's overrides. Fixed. |
+| R1-6 | 1 | A | low | fixed | #607's ADR-0026 amendment would record a narrowing not applied. Fixed: it states no gate is waived until the signal's entry lands. |
+| R1-7 | 1 | B | low | fixed | No case pinned the Lair's own tmux calls to `-L default`. Fixed: #608 case. |
+| R1-T1 | 1 | review | high | rejected | Local review finding `25044206254f97df512158b9acb5faf15f0477c15b774052e79974d09708f213`, "The checkout-isolation guard cannot be implemented from the stated requirement". Reason: it repeats the maintainer's answer 1 (Decisions asked, Round 2 diminishing-returns advisory (2026-11-25)), which narrowed the claim to a requirement and deferred the mechanism to #608. #608's design lands as a dated Amendments entry that stales this record before build. The finding's added cases (object alternates, shared object dirs, restart and adoption, tests) were added to #608's scope: https://github.com/brenpike/hivemind/issues/608#issuecomment-7162789441. |
+| R2-1 | 2 | confirm | low | fixed | A proxy found down at claim integrity's step-5 re-take was a step-5 end: `claims: ok`, counted toward the 3-end lockout. Fixed: it ends the attempt with no write and no count; `claims: blocked proxy-down` prints from the next tick's step 4; #608 case aligned; override named. |
+| R2-2 | 2 | confirm | low | fixed | The proxy-up guard, the remediation gate and the #608 case were not scoped to Linux, so macOS would never claim. Fixed: scoped to Linux. |
+| R2-3 | 2 | confirm | low | fixed | Seam order still said ADR-0046 decision 7 and idea-to-ready "Lair admission" await #623's correction, and quoted decision 3's old text, though ADR-0046's amendment of 2026-11-22 had already corrected both. Fixed: stated as corrected; the quote and the #623 comment were updated. |
+| R2-4 | 2 | confirm | low | fixed | Round 1's Scope line under-reported its coverage. Fixed in this record. |
+| R2-T1 | 2 | review | high | rejected | Local review finding `9fef7bb571d9c25a4023fb823da0f6d91101e23c4956d947b559481f02e0a641`, "The fixes have not received the required confirming clean review". Reason: it repeats first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls). Round 2 is that confirming round, at the commit carrying round 1's fixes. |
+| R3-1 | 3 | confirm | low | fixed | R2-1's no-count rule left two claim integrity texts overridden but unnamed: the Decisions bullet on 3 ended attempts, and the generated per-tick-guard re-take case in `tools/test_lair_claim.sh`. Fixed: the no-count rule is withdrawn (solution design, Amendments entry "2026-11-25, restarted Lair re-review round 3"), so both hold unchanged. |
+| R3-2 | 3 | confirm | low | fixed | R2-1's no-count rule removed the 3-scan bound, so a proxy dying in each scan would rescan an issue every tick. Fixed: a proxy-down re-take is an ordinary step-5 end that counts toward the 3 ends (the same entry). |
+| R3-T1 | 3 | review | high | rejected | Local review finding `6859bb817013dc9ce9d2579e1b705476c2fa245258b6743579899be23cba5b67`, "Round-2 fixes remain unreviewed". Reason: it repeats first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls). Round 3 is that confirming round, at the commit carrying round 2's fixes. |
+
+## History: 2026-11-25 (second restart)
+
+### Third re-review
+
+The third re-review of this design, rounds 1 to 3 of 2026-11-25, over the change since `66c4858d`, kept as it stood after round 3. Its front matter then held `verdict` `fail`, every open count 0, `rounds` 3 and `clean_round` `false`, and the third restarted review's stamps. Its round 2 withdrew round 1's private-network egress rule at the maintainer's veto. Round 3 reached the 3-round cap with 1 high and 2 low findings, R3-1 fixed in this record and R3-2 and R3-T1 fixed by withdrawing its R2-3's fix, with R2-3 deferred to #608, and under the user's standing rule (Decisions asked, Standing rule clarification) the conductor's strong recommendation was taken: the re-review restarts at round 1 (Decisions taken, listed for veto, Third re-review round 3's calls). The third re-review's finding IDs are cited as "third re-review R1-n", "third re-review R2-n" and "third re-review R3-n"; this fourth re-review's IDs start again at R1-1. The third re-review's tables under Decisions taken, listed for veto, are those headed "Third re-review round 1's calls" to "Third re-review round 3's calls".
+
+### Third re-review rounds
+
+#### Third re-review round 1
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `ade74cbed02208785d3aca7e9154a8f4004cf853`, merge-base `eb40ed9804b7ad92498ed42a8478b8edd3311e82`.
+- **Scope:** the Review rule's round-1 scope.
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It raised 3 findings, R1-1 to R1-3: 0 critical, 0 high, 1 medium and 2 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the merge-base. It raised 1 finding, R1-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R1-1 to R1-3 and R1-T1 are fixed. The fixes are in the solution design's Amendments entry "2026-11-25, third Lair re-review round 1". The maintainer later vetoed R1-T1's fix, and R1-T1 is rejected (Round 2).
+- **Diminishing-returns check:** recurrence: R1-2 is on Seams item 5, which the second re-review's round 3 fixed. Trend: this is round 1, so none. The standing rule applies: the strong recommended fixes are taken (Decisions asked, Standing rule clarification).
+
+#### Third re-review round 2
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `e6694a0e70dd166a6f1750941992862bb4204e27`, previous commit `ade74cbed02208785d3aca7e9154a8f4004cf853`.
+- **Scope:** a confirming round over the change since the previous round's reviewed commit and round 1's fixes, the solution design's Amendments entry "2026-11-25, third Lair re-review round 1".
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It raised 3 findings, R2-1 to R2-3: 0 critical, 0 high, 1 medium and 2 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the previous commit `ade74cbed02208785d3aca7e9154a8f4004cf853`. It raised 1 finding, R2-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R2-T1, R2-1 and R2-2 are fixed by removal, since the maintainer's veto of R1-T1's fix withdraws the text they attack, and R2-3 is fixed. The fixes are in the solution design's Amendments entry "2026-11-25, third Lair re-review round 2". R2-3's fix was later withdrawn, and R2-3 is deferred to #608 (Round 3).
+- **Diminishing-returns advisory:** fired after round 2. Recurrence: R2-T1, R2-1 and R2-2 all hit round 1's R1-T1 egress fix. Trend: the high did not fall, R1-T1 in round 1 and R2-T1 in round 2. The advisory went to the maintainer with three options; the maintainer answered 3, back out the private-network rule, and vetoed R1-T1's fix (Decisions asked, Third re-review round 2 advisory (2026-11-25)).
+
+#### Third re-review round 3
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `67d56d4d67ab1ba41fd5300516875c70f363e2d8`, previous commit `e6694a0e70dd166a6f1750941992862bb4204e27`.
+- **Scope:** a confirming round over the change since the previous round's reviewed commit and round 2's fixes, the solution design's Amendments entry "2026-11-25, third Lair re-review round 2".
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It covered the diff and round 2's fixes and found no earlier finding unfixed (`unfixed: none`). It raised 2 findings, R3-1 and R3-2: 0 critical, 0 high, 0 medium and 2 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the previous commit `e6694a0e70dd166a6f1750941992862bb4204e27`. It raised 1 finding, R3-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R3-1 is fixed in this record, and R3-2 and R3-T1 are fixed by withdrawing R2-3's fix, in the solution design's Amendments entry "2026-11-25, third Lair re-review round 3"; R2-3 is deferred to #608. The round raised new findings, so the 3-round cap is reached. Under the user's standing rule (Decisions asked, Standing rule clarification), the conductor's strong recommendation is taken and listed for veto: the re-review restarts at round 1 (Decisions taken, listed for veto, Third re-review round 3's calls).
+- **Diminishing-returns advisory:** fired at the round cap. Signal 1, recurrence: R3-T1 and R3-2 are on R2-3's fix. Signal 2, trend: a high in each round, R2-T1 in round 2 and R3-T1 in round 3. The maintainer's standing rule applies: a strong recommendation is taken, a restart at the round cap included (Decisions asked, Standing rule clarification). The conductor's recommendation, strong, taken and listed for veto: withdraw R2-3's fix and defer it to #608, which removes surface, then restart at round 1.
+
+### Third re-review findings
+
+| ID | Round | Angle | Severity | Disposition | Note |
+| --- | --- | --- | --- | --- | --- |
+| R1-1 | 1 | B | medium | fixed | Seams item 5 gave #608 the proxy-up gate on remediation dispatch and the forwarder crash end of a remediation run, which are #610's. Fixed: #610 applies both; #610 case; strain containment added to #610's Part designs. |
+| R1-2 | 1 | A | low | fixed | Seams item 5 still said `claims: blocked proxy-down` prints on the re-take tick, contrary to the entry "2026-11-25, restarted Lair re-review round 3". Fixed: the re-take tick prints `claims: ok`; the blocked line prints from a later tick's step 4. |
+| R1-3 | 1 | A | low | fixed | The readiness-check call contract omitted `<owner/repo>`, `<trunk-name>` and the snapshot-array form of the landed `hivemind_readiness_check_snapshot`. Fixed in Context and code truth and Seam order. |
+| R1-T1 | 1 | review | high | rejected | Local review finding `1e6dc05af9b2afe98f7d8ff8ebbef91b4b424f7e6b9d3e37e1be20eab2697695`, "Egress filtering does not exclude private networks". The fix taken in round 1 was vetoed by the maintainer (Decisions asked, Third re-review round 2 advisory (2026-11-25)): strain containment's residual "network egress with the user's credentials" stands as that part design states it. A later finding asking for a private-network egress rule repeats this decision. |
+| R2-T1 | 2 | review | high | fixed | Local review finding `54c0e6b594347003410e0f3e5087047bab09a11ab14ac78f9ee688966ba41295`, "Private-address deny policy has no deterministic classification contract". Fixed by withdrawing R1-T1's fix: the deny policy it attacks no longer exists (solution design, entry "2026-11-25, third Lair re-review round 2"). |
+| R2-1 | 2 | confirm | medium | fixed | R1-T1's fix had no P26 fallback on Linux for a corporate-proxy-only network or a private GHES or model gateway; the Lair would stop claiming with no stated cause. Fixed by withdrawing R1-T1's fix: the rule it attacks no longer exists. |
+| R2-2 | 2 | confirm | low | fixed | The proxy's answer to a refused address was undefined, and `private-address` was missing from #608's acceptance-criteria edit. Fixed by withdrawing R1-T1's fix: the refusal and its probe code no longer exist. |
+| R2-3 | 2 | confirm | low | deferred | A trailing `.git` on the `<owner/repo>` taken from the repository URL breaks `rc_target_path`, giving `design_link_invalid`. Round 2's fix, stripping a trailing `.git`, was withdrawn at round 3, since R3-2 and R3-T1 hit it (solution design, entry "2026-11-25, third Lair re-review round 3"). Deferred with full scope to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7165458580)): one normalization in the merge lane's "The host binding" with its test. |
+| R3-1 | 3 | confirm | low | fixed | Round 2's entries broke the record format: (1) R2-1, R2-2 and R2-3 had Angle `A` or `B`, though round 2 is a confirming round; (2) Round 2 carried a `**Diminishing-returns check:**` line, not the `Diminishing-returns advisory:` line; (3) Round 1's Result still said R1-T1 was fixed after R1-T1 was rejected at round 2. Fixed in this record: the three Angles are `confirm`, Round 2's line is the advisory line, and Round 1's Result records the veto and the rejection; R1-T1's Round stays 1. |
+| R3-2 | 3 | confirm | low | fixed | The `.git` stripping's reach was stated two ways and did not cover the merge lane's host binding. Fixed by withdrawing R2-3's fix (solution design, entry "2026-11-25, third Lair re-review round 3"). |
+| R3-T1 | 3 | review | high | fixed | Local review finding `df382dba6100afd28803f606a5129c31ac6cdf940ab32ab7b6bcdc6c6d201fd8`, "Repository URL normalization has no verification case". Fixed by withdrawing R2-3's fix: the normalization it attacks no longer exists (solution design, entry "2026-11-25, third Lair re-review round 3"). |
+
+## History: 2026-11-25 (third restart)
+
+### Fourth re-review
+
+The fourth re-review of this design, rounds 1 to 3 of 2026-11-25, over the change since `66c4858d`, kept as it stood after round 3. Its front matter then held `verdict` `fail`, every open count 0, `rounds` 3 and `clean_round` `false`, and the third restarted review's stamps. Its round 1 deferred R1-1 and R1-2 with full scope to #608. Round 3 reached the 3-round cap with 1 low finding, R3-1, fixed in this record, and 1 high, R3-T1, rejected as a repeat, and the diminishing-returns advisory was asked of the maintainer, who answered 1: the re-review restarts at round 1 (Decisions asked, Fourth re-review round 3 advisory (2026-11-25)). The fourth re-review's finding IDs are cited as "fourth re-review R1-n", "fourth re-review R2-n" and "fourth re-review R3-n"; this fifth re-review's IDs start again at R1-1. The fourth re-review's tables under Decisions taken, listed for veto, are those headed "Fourth re-review round 1's calls" to "Fourth re-review round 3's calls".
+
+### Fourth re-review rounds
+
+#### Fourth re-review round 1
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `93e1ef17dcae3834085b099da5ea9aa071348cb0`, merge-base `eb40ed9804b7ad92498ed42a8478b8edd3311e82`.
+- **Scope:** the Review rule's round-1 scope.
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It raised 3 findings, R1-1 to R1-3: 0 critical, 0 high, 1 medium and 2 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the merge-base. It raised 1 finding, R1-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R1-1 and R1-2 are deferred with full scope to #608, R1-3 is fixed, and R1-T1 is rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls). The fix is in the solution design's Amendments entry "2026-11-25, fourth Lair re-review round 1".
+- **Diminishing-returns check:** recurrence: R1-3 is on the readiness-check call contract that third re-review R1-3 fixed. Trend: this is round 1, so none. The standing rule applies: the strong recommended fixes are taken (Decisions asked, Standing rule clarification).
+
+#### Fourth re-review round 2
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `d7d37ca463633496d9972b32b56c7718f883d8e1`, previous commit `93e1ef17dcae3834085b099da5ea9aa071348cb0`.
+- **Scope:** a confirming round over the change since the previous round's reviewed commit and round 1's fixes, the solution design's Amendments entry "2026-11-25, fourth Lair re-review round 1".
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It covered the diff and round 1's fixes and found no earlier finding unfixed (`unfixed: none`). It raised 1 finding, R2-1, low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the previous commit `93e1ef17dcae3834085b099da5ea9aa071348cb0`. It raised 1 finding, R2-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R2-1 is fixed (solution design, entry "2026-11-25, fourth Lair re-review round 2"), and R2-T1 is rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls).
+- **Diminishing-returns advisory:** fired after round 2. Recurrence: R2-1 is on R1-3's fix. Trend and the bounded-edge-case signal did not fire: R2-1's fix removed text, citing Seams between the part designs with no item list. The maintainer's standing rule applies: a strong recommendation is taken (Decisions asked, Standing rule clarification). The conductor's recommendation, strong, taken and listed for veto: keep going to round 3 (Decisions taken, listed for veto, Fourth re-review round 2's calls).
+
+#### Fourth re-review round 3
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `fd87255267da6df2b91f381fa9ddda3c24f451b9`, previous commit `d7d37ca463633496d9972b32b56c7718f883d8e1`.
+- **Scope:** a confirming round over the change since the previous round's reviewed commit and round 2's fixes, the solution design's Amendments entry "2026-11-25, fourth Lair re-review round 2".
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It covered the diff and round 2's fixes and found no earlier finding unfixed (`unfixed: none`). It raised 1 finding, R3-1, low, on this record, and no finding on the design text.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the previous commit `d7d37ca463633496d9972b32b56c7718f883d8e1`. It raised 1 finding, R3-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R3-1 is fixed in this record, and R3-T1 is rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls). The round raised new findings, so the 3-round cap is reached. The maintainer was asked and answered 1: the re-review restarts at round 1 (Decisions asked, Fourth re-review round 3 advisory (2026-11-25)).
+- **Diminishing-returns advisory:** fired at the round cap. Signal 1, recurrence: R3-1 is on round 2's record entries, a repeat of third re-review R3-1 part (2). Signal 2, trend: the design text drew one low finding in round 2, R2-1 on R1-3's fix, and none in round 3. The advisory was asked of the maintainer (Decisions asked, Fourth re-review round 3 advisory (2026-11-25)); the maintainer answered 1, restart.
+
+### Fourth re-review findings
+
+| ID | Round | Angle | Severity | Disposition | Note |
+| --- | --- | --- | --- | --- | --- |
+| R1-1 | 1 | B | medium | deferred | The Lair's read of a strain's result file `.hivemind/lair/result.json` has no non-following, bounded read rule: a FIFO with no writer stalls every tick, and a link to `/dev/zero` gives an unbounded read. Deferred with full scope to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7165886305)): every Lair read of a strain-layout file goes through strain containment's clean-up helper with a size cap, else `invalid-result`, with `tools/test_lair_tick.sh` cases. Bounded impact: the tick does not exist until #608 builds it with this rule. |
+| R1-2 | 1 | B | low | deferred | `-L default` on every Lair-mode tmux call would put the probe's scratch server and the scanner's calls on the user's default server. Deferred with full scope to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7165886305)): no call relies on `$TMUX`; strain and probe sessions name `-L default`; scratch-server and scanner calls name `-S <path>` or `-L hivemind-probe-<N>`. Bounded impact: no Lair tmux call exists until #608 builds it. |
+| R1-3 | 1 | A | low | fixed | Contracts and seams' "Readiness-check call at claim" and "Queue report" bullets pointed only to claim integrity's overridden sections. Fixed: each names its override (solution design, entry "2026-11-25, fourth Lair re-review round 1"). |
+| R1-T1 | 1 | review | high | rejected | Local review finding `087297a8bb7d363e968104bb29a998ff301bc3fb13278f19eac71f00f82991d1`, "The amended design has not been reviewed". Rejected: it asks for the review this round runs. It repeats first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls): the record states its own state, and the pass rule, not the tool, decides passing. |
+| R2-1 | 2 | confirm | low | fixed | The "Queue report" and "The queue report contents" bullets listed only some of the Seams items that change the report. Fixed by construction: both cite Seams between the part designs with no item list. |
+| R2-T1 | 2 | review | high | rejected | Local review finding `2dae3cffde368a9f0f67d118a005175d1fbe393b06a073b586452d4cd2d99210`, "The amended design is still explicitly unreviewed". Rejected: a process finding asking for the confirming round this review runs. It repeats first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls): the record states its own state, and the pass rule, not the tool, decides passing. |
+| R3-1 | 3 | confirm | low | fixed | Round 2's diminishing-returns line used the `Diminishing-returns check:` label though recurrence fired (R2-1 on R1-3's fix), and Fourth re-review round 2's calls had no advisory row. Fixed in this record: Round 2's line is the `Diminishing-returns advisory:` line, and Fourth re-review round 2's calls gain the keep-going row. |
+| R3-T1 | 3 | review | high | rejected | Local review finding `7e9ca4e8bde9aea7db77db2f01d5787dd468cf3eb15e74276e27b2c0e19a4bbc`, "The round-2 fix is explicitly outside the reviewed commit". Rejected: a process finding asking for the confirming round this review runs. It repeats first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls): the record states its own state, and the pass rule, not the tool, decides passing. |
