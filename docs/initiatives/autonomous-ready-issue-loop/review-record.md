@@ -12,7 +12,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 0
+rounds: 1
 clean_round: false
 ---
 
@@ -42,12 +42,28 @@ Review rule:
 
 ## Rounds
 
-No round of this re-review has run yet.
+### Round 1
+
+- **Date:** 2026-11-24.
+- **Reviewed commit:** `116241952cb82c7ce61cd0dd10dd61c3d2b26437`, merge-base `eb40ed9804b7ad92498ed42a8478b8edd3311e82`.
+- **Scope:** the Review rule's round-1 scope, the change since `66c4858d`: #668's ADR-0045 amendment, "Amendment 2026-11-24"; #672's solution design Amendments entry of 2026-11-24; the PRD's `**UI:**` line. Each is checked against the whole PRD and solution design, with the part designs read as the text they supersede.
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It raised 7 findings, R1-1 to R1-7: 0 critical, 0 high, 4 medium and 3 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the merge-base. It raised 1 finding, R1-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R1-1 to R1-7 are fixed, and R1-T1 is rejected on the maintainer's answer B (Decisions asked, Round 1, finding R1-T1 (2026-11-24)). The fixes are in the solution design's Amendments entry "2026-11-24, Lair re-review round 1".
+- **Diminishing-returns check:** no signal fired. This is round 1, so no earlier round of this re-review exists for recurrence or trend.
 
 ## Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
 | --- | --- | --- | --- | --- | --- |
+| R1-1 | 1 | A | medium | fixed | #667 changed claim integrity's Snapshot (`blockedBy` numbers and states) with no Amendments entry. Fixed: the entry records it, and Seam order "Cross-epic seams with #614" requires a dated entry for any field #615 adds. |
+| R1-2 | 1 | A | medium | fixed | The join updated only the sentences that named #646. Fixed: strain containment is now named, with its governing section, in Components "Strain launch and settings", "Strain result and liveness" and "Controller tick and admission", Seams items 6 and 7, State and ownership, Existing-path coverage, Verification strategy and the Seam order issue edits. |
+| R1-3 | 1 | B | medium | fixed | ADR-0045's Amendment 2026-11-24 on #607 was not carried into the solution design. Fixed: it is carried into Component "Unattended autonomy level", the #607 ADRs cell, the Decisions bullet and a Verification strategy case. |
+| R1-4 | 1 | A | medium | fixed | The 2026-11-24 entry said containment's review was "not run in this pull request", while containment's local-review fixes (L-2 to L-6, D18, L-8) were also checked by no round. Fixed: the new entry states that those fixes were checked by no round, and corrects the 2026-11-24 entry's clause "which is not run in this pull request". |
+| R1-5 | 1 | A | low | fixed | Three statements of the stop "Strain containment cannot be confirmed" named the stop but not the case id. Fixed: "and the case id" added to all three. |
+| R1-6 | 1 | A | low | fixed | Part-design citations of PRD line numbers no longer match the PRD after its `**UI:**` line. Fixed: the new entry says they refer to the PRD before its `**UI:**` line. |
+| R1-7 | 1 | A | low | fixed | The 2026-11-24 entry made body edits it did not list. Fixed: the new entry names them. |
+| R1-T1 | 1 | review | high | rejected | Local review finding `2a58431ec67cd57997e612e667478ec71c07e717d6e7b103eddb5e1768885c16`, "Writable shared Git stores violate the repository's structural concurrency rule" (P16). Rejected on the maintainer's answer B (Decisions asked, Round 1, finding R1-T1 (2026-11-24)): the Lair now runs only from a clone it makes, so the user's unpushed work never shares a store with strains (solution design, Amendments entry "2026-11-24, Lair re-review round 1"). Siblings sharing the store stays strain containment's residual "the shared object and ref store", under ADR-0017's worktree model. Per-strain clones would change ADR-0017's model, `spawn-brood.sh` and `brood-status`. |
 
 ## Decisions taken, listed for veto
 
@@ -247,6 +263,12 @@ Third restart round 2's calls, each the recommended fix of a finding or, in the 
 | R2-3, Seam order: #608's ADRs cell names ADR-0046 decisions 3 and 4 | strong | none |
 | The diminishing-returns advisory after round 2: keep going to round 3, the last under the cap | strong | none: the round cap and the pass rule are unchanged |
 
+Re-review round 1's calls, each the recommended fix of a finding, a strong recommendation taken and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); R1-T1 was asked (Decisions asked, Round 1, finding R1-T1 (2026-11-24)). The IDs are this re-review's, those of Findings above:
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| R1-1 to R1-7, each fixed now as a contained fix in the solution design's Amendments entry "2026-11-24, Lair re-review round 1" | strong | scope: R1-2 names strain containment in the sections the join left, and R1-1, R1-4, R1-6 and R1-7 add to the entry; trust: R1-3 carries ADR-0045's Amendment 2026-11-24 on #607 into the solution design; no ADR is edited, no credential or merge-path change |
+
 ## Decisions asked
 
 - **Design-decision rule update.** The user's rule update of 2026-11-22, landed on `main` by PR #649 as the ADR-0046 amendment of 2026-11-22 to decision 8 and merged into this branch at `b9ca37df`. A design-stage decision with a strong recommendation is taken and listed for veto whatever it touches: PRD scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change. Only a decision with a weak or absent recommendation and an action that is irreversible now, outside the unmerged pull request, are asked. This record lists each taken decision with its recommendation strength and what it touches, in every table (Decisions taken, listed for veto). Every restarted round 2 fix had a strong recommendation, so none was asked.
@@ -291,6 +313,10 @@ Third restart round 2's calls, each the recommended fix of a finding or, in the 
   - Claim integrity, ADR-0045 amendment of 2026-11-22, the Lair's strains can read its key where no sandbox hides its processes: Tier A, answer A, 2026-11-22.
   - Claim integrity, ADR-0045 amendment of 2026-11-22, more causes stop the Lair: Tier A, answered yes on 2026-11-22.
 - **Merge lane, item 5, is not applied.** The Tier A merge bullet in `plugin/governance/decision-autonomy.md` (Tier A, Q1, approved 2026-11-21) is built by #605, with its fixture update and structural check.
+
+- **Round 1, finding R1-T1 (2026-11-24).** Asked after this re-review's round 1, on the local review tool's high finding R1-T1, "Writable shared Git stores violate the repository's structural concurrency rule" (P16). The maintainer answered B.
+  - The question: how to dispose of R1-T1. Options: A, reject and keep the residual; B, the Lair runs only from its own clone, siblings keep sharing the store as a residual; C, per-strain clones, a redesign of ADR-0017's model.
+  - Answer: "B". Applied: the solution design's Amendments entry "2026-11-24, Lair re-review round 1" states that the Lair runs only from a clone it makes, so the user's unpushed work never shares a store with strains. Siblings sharing the store stays strain containment's residual "the shared object and ref store", under ADR-0017's worktree model. R1-T1 is rejected with that reason.
 
 ## Residuals
 
