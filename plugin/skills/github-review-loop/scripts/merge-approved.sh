@@ -87,8 +87,10 @@
 #                              as program text. It only adds to the set.
 #   HIVEMIND_AUTO_MERGE_REREAD_DELAY
 #                              optional; whole seconds, 0 to 99, waited before
-#                              each re-read of an UNKNOWN mergeStateStatus (§5).
-#                              Unset or empty is 5. Any other value is
+#                              each re-read of an UNKNOWN mergeStateStatus (§5),
+#                              written with no leading zero (`0`, `5`, `30`).
+#                              Unset or empty is 5. Any other value, `05`
+#                              included, is
 #                              `MERGE_ERROR=bad-reread-delay`, checked after
 #                              HIVEMIND_AUTO_MERGE and before any gh call. The
 #                              test suite sets it to 0.
@@ -337,7 +339,7 @@ esac
 # Amendment 2026-11-25, records the whole path and why a killed run is safe.
 MERGE_STATE_REREADS=2
 REREAD_DELAY_SECONDS="${HIVEMIND_AUTO_MERGE_REREAD_DELAY:-5}"
-[[ "$REREAD_DELAY_SECONDS" =~ ^[0-9]{1,2}$ ]] || merge_approved_fail "bad-reread-delay"
+[[ "$REREAD_DELAY_SECONDS" =~ ^(0|[1-9][0-9]?)$ ]] || merge_approved_fail "bad-reread-delay"
 
 GH_READ_TIMEOUT_SECONDS=45
 GIT_FETCH_TIMEOUT_SECONDS=120

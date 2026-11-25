@@ -124,9 +124,11 @@ A merge call that exits 0 is followed by the confirm read. A case that expects
   - a failed or incomplete re-read, the first or a later one, prints
     `MERGE_ERROR`.
 - **Re-read delay.** `HIVEMIND_AUTO_MERGE_REREAD_DELAY` outside 0 to 99 whole
-  seconds (`abc`, `100`, `-1`, `1 `, `1.5`) prints
-  `MERGE_ERROR=bad-reread-delay`, exit 1, with zero `gh` calls; with
-  `HIVEMIND_AUTO_MERGE` unset it still prints `MERGE=off`. Empty is the default.
+  seconds, or written with a leading zero (`abc`, `100`, `-1`, `1 `, `1.5`,
+  `00`, `01`, `08`), prints `MERGE_ERROR=bad-reread-delay`, exit 1, with zero
+  `gh` calls; with `HIVEMIND_AUTO_MERGE` unset it still prints `MERGE=off`.
+  Empty is the default. A wait between re-reads that fails prints
+  `MERGE_ERROR=reread-wait-failed`, exit 1, with no call after it.
 
 - **Record gate off.** A PR whose files hold no `docs/prds/`, `docs/initiatives/`
   or `docs/adr/` path, no `RENAMED` file and no next page makes no git call and

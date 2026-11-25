@@ -256,8 +256,9 @@ for bad_setting in fast MERGE "squash " auto; do
   expect_case "setting:bad-'$bad_setting'-zero-gh" "$case_dir" "MERGE=skipped:bad-setting" 0 0 0
 done
 
-# A re-read delay that is not 0 to 99 whole seconds fails before any gh call, after the method.
-for bad_delay in abc 100 -1 "1 " 1.5; do
+# A re-read delay that is not 0 to 99 whole seconds with no leading zero fails before any gh call,
+# after the method.
+for bad_delay in abc 100 -1 "1 " 1.5 00 01 08; do
   case_dir="$(new_case "setting-bad-delay-${bad_delay// /_}")"
   run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_REREAD_DELAY="$bad_delay" bash "$MERGE_APPROVED" o r 5 automated "$SELF"
   expect_case "setting:bad-reread-delay-'$bad_delay'-zero-gh" "$case_dir" "MERGE_ERROR=bad-reread-delay" 1 0 0
@@ -272,15 +273,6 @@ write_read "$case_dir" 1 '.'
 write_read "$case_dir" 2 "$MERGED_EDIT"
 run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_REREAD_DELAY= bash "$MERGE_APPROVED" o r 5 automated "$SELF"
 expect_case "setting:empty-reread-delay-default" "$case_dir" "MERGE=merged" 0 2 1
-
-# A leading zero is accepted: the value reaches only sleep, never shell arithmetic, so 08 is 8.
-for zero_delay in 00 01 08; do
-  case_dir="$(new_case "setting-zero-delay-$zero_delay")"
-  write_read "$case_dir" 1 '.'
-  write_read "$case_dir" 2 "$MERGED_EDIT"
-  run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_REREAD_DELAY="$zero_delay" bash "$MERGE_APPROVED" o r 5 automated "$SELF"
-  expect_case "setting:leading-zero-reread-delay-$zero_delay" "$case_dir" "MERGE=merged" 0 2 1
-done
 
 # ── Argument checks: MERGE_ERROR, exit 1, no gh call ─────────────────────────
 # arg_case <name> <reason> <arg>...: the arguments are checked before the setting and before gh.
