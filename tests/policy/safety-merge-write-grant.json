@@ -1,0 +1,42 @@
+{
+  "rule": "Merge-write skill grants exactly merge-approved.sh by plugin-root path, runs no command, and the review watch invokes it right before every merge call, reporting a refused merge call as MERGE=skipped:permission-denied",
+  "description": "plugin/skills/merge-write/SKILL.md is the model-only skill whose allowed-tools pre-approve the review watch's opt-in merge script for the rest of the turn that invokes it. A skill grant lasts only for the turn that invokes the skill, and the merge runs turns after hivemind:github-review-loop is invoked, so the watch skill holds no merge grant of its own and re-invokes merge-write in the merge call's own turn. The source pin holds the grant claim: its allowed-tools pre-approve exactly one script, by its plugin-root path, for the rest of the turn that invokes it. Three consumer pins in the same file hold the rest of the rule: the skill runs no command; the timing obligation, invoke it right before that call, after any other skill call; and the ban on any other skill invocation between the grant and the call. Two consumer pins in plugin/skills/github-review-loop/SKILL.md hold the watch side. The first carries the invocation: right before every merge call, in the same turn, invoke hivemind:merge-write with no other skill call between, and a refused Skill call does not skip the merge call. The second carries the fallback for a merge call the permission system refuses: it is reported as MERGE=skipped:permission-denied, routed like the other skipped lines with no retry, and its Next action names the per-machine allow rule for permissions.allow in .claude/settings.local.json. The set_check reads the top-level allowed-tools key with extract_frontmatter_key, which runs check16_collect_entries, the frontmatter reader CHECK 16 uses in tools/policy_check.sh, and requires, in equal mode with expected_counts, exactly the one Bash entry, once and in the double-quoted plugin-root form. An added or widened grant fails as an extra, a dropped grant fails as missing, and a duplicated grant fails its count. set_check is used because an added grant is the threat, and a presence pin can only notice deletion. What this fixture does not check: (a) the presence pins are whole-file, not section-scoped, so a pinned sentence that moves out of its section, such as the invoke sentence leaving the merge rule, stays green; (b) the grant set of plugin/skills/github-review-loop/SKILL.md is not checked, so a merge-approved.sh grant re-added there is invisible to this fixture; (c) a new skill or agent that grants or calls merge-approved.sh is an absence defect no presence pin can find; (d) the pins prove nothing about runtime grant behavior, such as whether Claude Code honors the skill's allowed-tools for the rest of the turn, whether the auto-mode classifier passes the call, or whether a deny, ask or managed-only rule overrides them; (e) files is a literal list that names only the merge-write skill and is blind to grants in any other skill or settings file; (f) surrounding prose can invert the meaning of a pinned sentence while its words stay intact, because a pin claims word-sequence presence, never meaning.",
+  "source": {
+    "file": "plugin/skills/merge-write/SKILL.md",
+    "pattern": "Its allowed-tools pre-approve exactly one script, by its plugin-root path, for the rest of the turn that invokes it"
+  },
+  "consumers": [
+    {
+      "file": "plugin/skills/merge-write/SKILL.md",
+      "pattern": "This skill runs no command."
+    },
+    {
+      "file": "plugin/skills/merge-write/SKILL.md",
+      "pattern": "Invoke it right before that call, after any other skill call."
+    },
+    {
+      "file": "plugin/skills/merge-write/SKILL.md",
+      "pattern": "No other skill invocation may come between the grant and the call."
+    },
+    {
+      "file": "plugin/skills/github-review-loop/SKILL.md",
+      "pattern": "Right before every merge call, in the same turn, invoke `hivemind:merge-write` (Skill tool), with no other skill call between; a refused Skill call does not skip the merge call."
+    },
+    {
+      "file": "plugin/skills/github-review-loop/SKILL.md",
+      "pattern": "A refused merge call (a permission or auto-mode denial, not a script exit) is `MERGE=skipped:permission-denied`, routed the same with no retry; its `Next action` also names the rule `Bash(bash \"<the script's full path>\" *)` for `permissions.allow` in `.claude/settings.local.json`."
+    }
+  ],
+  "set_check": {
+    "extract_frontmatter_key": "allowed-tools",
+    "expected_set": [
+      "Bash(bash \"${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/merge-approved.sh\" *)"
+    ],
+    "expected_counts": {
+      "Bash(bash \"${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/merge-approved.sh\" *)": 1
+    },
+    "files": [
+      { "path": "plugin/skills/merge-write/SKILL.md", "mode": "equal" }
+    ]
+  }
+}

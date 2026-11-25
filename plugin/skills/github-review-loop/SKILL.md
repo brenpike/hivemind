@@ -10,14 +10,13 @@ allowed-tools:
   - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh" *)
   - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/exit-precedence.sh" *)
   - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh" *)
-  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/merge-approved.sh" *)
   - Bash(date +%s)
 shell: bash
 ---
 
 # GitHub Review Loop
 
-Watch one open PR and drive remediation to a terminal state. Classifying feedback is `hivemind:github-reviewer` fix-mode work, never this skill's. The loop runs in the main session: a subagent dispatch orphans any Monitor armed inside it, and only the top-level orchestrator can spawn the reviewer (ADR-0005).
+Watch one open PR and drive remediation to a terminal state. Classifying feedback is `hivemind:github-reviewer` fix-mode work, never this skill's. The loop runs in the main session (ADR-0005).
 
 Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` whole, `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` whole, `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` whole.
 
@@ -92,8 +91,7 @@ with the step-2 seed as arg 8. Quote the seed (it contains `|`) and pass it
 verbatim: never lowercase, trim or re-wrap it. The poll emits only on a real delta
 or terminal state. The first poll may fire `CHANGED` off cycle
 0's own `Fixed in <SHA>` replies, because the seed predates them; `prefilter.sh`
-absorbs that as `PREFILTER_SKIP`. Over-reporting is safe and under-reporting loses
-findings, so add no duplicate-suppression.
+absorbs that as `PREFILTER_SKIP`. Add no duplicate-suppression.
 
 An arm that returns without printing a marker that ends the poll (a terminal marker,
 `REVIEWER_APPROVED` or `REVIEWER_SETTLED`, step 5) expired; the watch has not ended. Re-arm for the
@@ -112,8 +110,7 @@ about to consume the state it snapshots, at exactly two capture sites: step 2, b
 cycle 0, and step 5, before a dispatch. The QUIET-EXIT CHECK (`--check` reads a
 pending seed and prints none), an arm boundary (step 4) and every re-arm capture
 nothing: each reuses the seed it carries, and a fresh `--snapshot` there is
-forbidden. `prefilter.sh` absorbs the resulting duplicate wakes, and re-fires on our
-own `Fixed in <SHA>` replies, as `PREFILTER_SKIP`.
+forbidden. `prefilter.sh` absorbs the resulting duplicate wakes as `PREFILTER_SKIP`.
 
 **5. Per event.** `CHANGED` → run
 `bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh" <OWNER> <REPO> <PR_NUMBER> <reviewer_filter> <SELF_LOGIN>`:
@@ -149,15 +146,20 @@ pending seed in the next arm's first poll or in the QUIET-EXIT CHECK. A
 
 Merge rule. Only an approval return whose QUIET-EXIT CHECK reports `UNCHANGED` runs
 `bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/merge-approved.sh" <OWNER> <REPO> <PR_NUMBER> <reviewer_filter> <SELF_LOGIN>`,
-once; no other end runs it, `merge-advised` included. Route its one line:
+once; no other end runs it, `merge-advised` included. Right before every merge call,
+in the same turn, invoke `hivemind:merge-write` (Skill tool), with no other skill call
+between; a refused Skill call does not skip the merge call. Route the script's one line:
 `MERGE=off` → map the terminal via `loop-state.sh cycle-decision <current_count> <max_cycles> 0 approval-clean`
 (`approval-clean` emits `EXIT_REASON=clean`). `MERGE=merged` or `MERGE=merged-admin`
 → `pr-merged` via `loop-state.sh token-map STATE=MERGED`, the line under `Issues`.
 `MERGE=wait:*` ends nothing: arm per step 4 with the pending seed for the time left
 in the current window; that arm opens no window and is not a capture site.
-`MERGE=skipped:*`, `MERGE_ERROR=`, a non-zero exit or a refused call → the
-`approval-clean` terminal, the line under `Issues` and `Next action` telling the
-human to merge.
+`MERGE=skipped:*`, `MERGE_ERROR=` or a non-zero exit → the `approval-clean` terminal,
+the line under `Issues` and `Next action` telling the human to merge.
+A refused merge call (a permission or auto-mode denial, not a script exit) is
+`MERGE=skipped:permission-denied`, routed the same with no retry; its `Next action`
+also names the rule `Bash(bash "<the script's full path>" *)` for `permissions.allow`
+in `.claude/settings.local.json`.
 
 **6. Reviewer-return handling.** `clean` → keep watching. `planner-escalation` |
 `blocked` | `injection-suspect` | `high-severity-rejection` | `user-input-required`
@@ -217,8 +219,7 @@ seed. `CI_FAILED` likewise.
 `REVIEWER_APPROVED` → confirmation pass (step 5). `STATE=MERGED` /
 `STATE=CLOSED` → the `token-map` terminal (step 5). `CHECK_ERROR` or non-zero exit →
 retry once, then terminal `blocked`. A confirmation return the check routes elsewhere
-ends no cycle and maps no terminal. Only the moment between the check and the
-terminal report stays unwatched, the bounded gap every terminal has.
+ends no cycle and maps no terminal.
 
 ## Dispatch contract
 

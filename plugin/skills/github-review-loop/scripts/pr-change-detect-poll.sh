@@ -943,8 +943,10 @@ fi
 # so a gap always exists after the last look; the same gap is WATCH_TIMEOUT's
 # final sleep interval and an expired arm's last interval, inherited from
 # main. Bounded impact: seconds or one poll interval, on a PR the loop no
-# longer owns; agents never merge, and the activity stays on the PR for the
-# human who merges. Obvious remediation considered and rejected on the merits:
+# longer owns; with HIVEMIND_AUTO_MERGE unset the activity stays on the PR for
+# the human who merges, and with it set merge-approved.sh reads the PR again
+# and re-applies its gates before its merge call, leaving only the gap
+# ADR-0044 decision 15 records. Obvious remediation considered and rejected on the merits:
 # keeping a poll alive past the terminal needs a Monitor running after the
 # loop returns (forbidden; nothing would consume its events) or TaskStop (the
 # dependency the self-exit removed).

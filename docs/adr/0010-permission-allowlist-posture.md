@@ -439,3 +439,37 @@ This amendment records the permission posture for local review after ADR-0042 (`
 - **The node rule is removed.** The hand-written `Bash(node /path/to/.claude/plugins/cache/openai-codex/codex/*)` rule and its docs are removed. The devcontainer no longer seeds it (ADR-0042, Implementation decisions, item 5).
 - **Not verified: the grant in a subagent in auto mode.** The local reviewer runs as a subagent. Whether the skill grant applies to its call in auto mode is not verified. https://github.com/brenpike/hivemind/issues/580 tracks this.
 - **A refusal stops local review as blocked.** When the permission system refuses the `run-review.sh` call, local review ends blocked, not skipped. So a broken grant is noticed. User decision (ADR-0042, Implementation decisions, item 7).
+
+## Amendment 2026-11-25: the opt-in merge gets a per-turn skill grant (issue 674)
+
+This amendment records the permission posture for the opt-in merge's `merge-approved.sh` call (https://github.com/brenpike/hivemind/issues/674). Decisions 1 to 6 are unchanged: no seed rule and no settings rule is added. The merge side is recorded in ADR-0044 (`docs/adr/0044-settled-approval-and-opt-in-auto-merge.md`, Amendment 2026-11-25). This does not settle the NON-FINDING recorded in the Findings section. That open question and its prohibition stand as written.
+
+**Cause.** The watch skill `hivemind:github-review-loop` held the `merge-approved.sh` grant in its `allowed-tools`. A skill grant lasts only for the turn that invokes the skill, and the merge runs turns later. In auto mode the classifier judged the call and denied it (consumer PR #710).
+
+**Decision.**
+
+- **The skill.** `plugin/skills/merge-write/SKILL.md` runs no command. Its `allowed-tools` holds exactly `Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/merge-approved.sh" *)`. It sets `user-invocable: false`.
+- **When it runs.** The watch invokes `hivemind:merge-write` with the Skill tool right before each `merge-approved.sh` call.
+- **The watch skill drops its grant.** `hivemind:github-review-loop` no longer holds the `merge-approved.sh` grant.
+- **No hook and no seed rule.** No PreToolUse hook allows the call. seed-hive writes no rule for it.
+
+**Why a new skill.**
+
+- `hivemind:review-writes` is invoked by the `github-reviewer` subagent. Adding the merge grant there would hand merge reach to the reviewer, and that skill is pinned to exactly three grants (Amendment 2026-11-14).
+- Invoking the watch skill again right before the merge would re-apply its grant, but it would also reload the watch's whole procedure.
+- This is a forced home, like `hivemind:review-writes`: the skill exists to carry the grant and moves no procedure (`docs/engineering-principles.md` P8).
+
+**Documented facts relied on.** Read 2026-11-25 from the official docs. They are documented, not verified live in this repository.
+
+- **A skill grant lasts for the invoking turn.** "The grant clears when you send your next message ... invoking the skill again re-applies it for that turn" (https://code.claude.com/docs/en/skills).
+- The other facts of Amendment 2026-11-14 hold: `${CLAUDE_PLUGIN_ROOT}` is substituted in a plugin skill's `allowed-tools`, `user-invocable: false` keeps the skill model-invocable, and a matching allow rule resolves before the classifier.
+
+**The fallback.** When the permission system still refuses the call, the script never runs. The watch writes `MERGE=skipped:permission-denied` under `Issues`, ends `clean`, and its `Next action` tells the user to merge by hand and names the rule `Bash(bash "<the script's full path>" *)` for `permissions.allow` in the gitignored `.claude/settings.local.json` (ADR-0044, decision 27). A classifier-blocked call can also be approved under `/permissions`, **Recently blocked** tab.
+
+**Residuals.**
+
+- Any agent that invokes the skill gets the grant for its turn. The grant is bounded by the exact script path and by the script's own opt-in and gates: it merges nothing unless `HIVEMIND_AUTO_MERGE` is set, and only after its approval, thread and check gates pass.
+- In auto mode the classifier judges the Skill call itself.
+- Managed `allowManagedPermissionRulesOnly`, `autoMode.classifyAllShell`, and deny and ask rules defeat the grant. The refused call then takes the fallback.
+- The fallback rule holds a versioned path. It goes stale after each plugin update, as Amendment 2026-11-13 records.
+- Not verified live: the grant on the merge call in auto mode.
