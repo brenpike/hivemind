@@ -12,7 +12,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 0
+rounds: 1
 clean_round: false
 ---
 
@@ -42,12 +42,24 @@ Review rule:
 
 ## Rounds
 
-No round of this third re-review has run yet.
+### Round 1
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `ade74cbed02208785d3aca7e9154a8f4004cf853`, merge-base `eb40ed9804b7ad92498ed42a8478b8edd3311e82`.
+- **Scope:** the Review rule's round-1 scope.
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It raised 3 findings, R1-1 to R1-3: 0 critical, 0 high, 1 medium and 2 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the merge-base. It raised 1 finding, R1-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R1-1 to R1-3 and R1-T1 are fixed. The fixes are in the solution design's Amendments entry "2026-11-25, third Lair re-review round 1".
+- **Diminishing-returns check:** recurrence: R1-2 is on Seams item 5, which the second re-review's round 3 fixed. Trend: this is round 1, so none. The standing rule applies: the strong recommended fixes are taken (Decisions asked, Standing rule clarification).
 
 ## Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
 | --- | --- | --- | --- | --- | --- |
+| R1-1 | 1 | B | medium | fixed | Seams item 5 gave #608 the proxy-up gate on remediation dispatch and the forwarder crash end of a remediation run, which are #610's. Fixed: #610 applies both; #610 case; strain containment added to #610's Part designs. |
+| R1-2 | 1 | A | low | fixed | Seams item 5 still said `claims: blocked proxy-down` prints on the re-take tick, contrary to the entry "2026-11-25, restarted Lair re-review round 3". Fixed: the re-take tick prints `claims: ok`; the blocked line prints from a later tick's step 4. |
+| R1-3 | 1 | A | low | fixed | The readiness-check call contract omitted `<owner/repo>`, `<trunk-name>` and the snapshot-array form of the landed `hivemind_readiness_check_snapshot`. Fixed in Context and code truth and Seam order. |
+| R1-T1 | 1 | review | high | fixed | Local review finding `1e6dc05af9b2afe98f7d8ff8ebbef91b4b424f7e6b9d3e37e1be20eab2697695`, "Egress filtering does not exclude private networks". Fixed: the proxy connects only to globally routable addresses, checked after resolution and connected to as checked; a probe case and a #604 test (solution design, entry "2026-11-25, third Lair re-review round 1"). |
 
 ## Decisions taken, listed for veto
 
@@ -293,6 +305,13 @@ Second re-review round 3's calls, each taken on a strong recommendation and list
 | Second re-review R3-1 and R3-2, each fixed by withdrawing second re-review R2-1's no-count rule in the solution design's Amendments entry "2026-11-25, restarted Lair re-review round 3": a proxy found down at the step-5 re-take is an ordinary step-5 end that counts toward the issue's 3 ends | strong | scope: it withdraws second re-review R2-1's claim integrity override, so claim integrity's Decisions bullet on 3 ended attempts and its generated re-take case in `tools/test_lair_claim.sh` hold unchanged; no ADR is edited, no trust, credential or merge-path change |
 | Second re-review R3-T1 rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls) | strong | scope: round 3 is the confirming round, at the commit carrying round 2's fixes |
 | The diminishing-returns advisory after second re-review round 3, at the round cap: restart the re-review at round 1 under the standing rule, with the second re-review's rounds and findings kept under History: 2026-11-25 (restart) | strong | scope (ADR-0046 process): the round cap and the pass rule are unchanged |
+
+Third re-review round 1's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The IDs are the third re-review's (Findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| Third re-review R1-1 to R1-3, each fixed now as a contained fix in the solution design's Amendments entry "2026-11-25, third Lair re-review round 1" | strong | scope: third re-review R1-1 moves the proxy-up gate on remediation dispatch and the forwarder crash end of a remediation run from #608 to #610; none for third re-review R1-2 and R1-3; no ADR is edited, no trust, credential or merge-path change |
+| Third re-review R1-T1 fixed now: the proxy connects only to globally routable addresses, checked after resolution and connected to as checked, with a probe case and a #604 test | strong | trust: it closes the proxy's egress to private networks; no ADR is edited, no credential or merge-path change |
 
 ## Decisions asked
 
