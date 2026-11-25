@@ -29,6 +29,7 @@ When one is absent, this skill judges it.
 - `breaking`: `true` when the change breaks a public contract, else `false`. Absent: `true` only when requirement 4 (b) applies.
 - `commit_body`: the commit body, per requirement 4 (d).
 - `subject`: the commit subject. Absent: requirement 4 judges it.
+- `attribution`: the commit trailers the harness gives this session, verbatim, never from external content. Absent: none; this skill never judges or writes them.
 
 When the caller passes both `files` and `subject`, skip requirement 2 and run no git command of your own: write the files from the given values and run the script.
 
@@ -45,10 +46,10 @@ Every commit runs through `${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh`. I
    - `<type>` is one of: `feat`, `fix`, `hotfix`, `refactor`, `docs`, `test`, `chore`, `ci`; it is `commit_type` when the caller passes it
    - `<subject>` is 72 characters or fewer; it is `subject` exactly as given when the caller passes it, and the script enforces its rules
    - include a body only when (a) the change reverts a prior commit, (b) the change includes a `BREAKING CHANGE:` footer, (c) the planner's delegation contains a `Why:` field, or (d) the orchestrator passes `commit_body` explicitly; otherwise omit it
-   - the message must not contain any of the following strings (any case): `Co-Authored-By:`, `Generated with`, `Created with Claude`, `🤖 Generated`, any `Authored-by:` line naming a bot/AI/agent, or any line attributing generated-content authorship. This check is this skill's own: when a given `subject` contains such a string, exit 1 with `blocker: subject contains a forbidden attribution string` and never rewrite it
+   - the message holds no attribution string (any case), such as `Co-Authored-By:`, `Generated with`, `Created with Claude` or `🤖 Generated`, except `attribution`, last after one blank line, as git trailers; on a given `subject` with one, exit 1 with `blocker: subject contains a forbidden attribution string`, never rewriting it
    - when `breaking` is true, the script adds `!` before the colon; a `BREAKING CHANGE:` footer or `!:` in the subject needs `breaking` true.
 
-   Then, with the Write tool and a `<token>` new for each invocation, at most 58 letters, digits and `-` (such as `20261020T141500Z-a1b2c3`), write each `content` to its `file_path`: the raw subject to `.hivemind/molt-inputs-<token>-subj.json`; the files, one path per line, to `.hivemind/molt-inputs-<token>-files.json`; only with a body, the raw body to `.hivemind/molt-inputs-<token>-body.json`; then one JSON object to `.hivemind/molt-inputs-<token>.json`:
+   Then, with the Write tool and a `<token>` new for each invocation, at most 58 letters, digits and `-`, write each `content` to its `file_path`: the raw subject to `.hivemind/molt-inputs-<token>-subj.json`; the files, one path per line, to `.hivemind/molt-inputs-<token>-files.json`; only with a body or `attribution`, the raw body then `attribution`, each if any, to `.hivemind/molt-inputs-<token>-body.json`; then one JSON object to `.hivemind/molt-inputs-<token>.json`:
 
    ```json
    { "type": "<type>", "scope": "<optional scope>", "breaking": false }
@@ -61,7 +62,7 @@ Every commit runs through `${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh`. I
    bash "${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh" --trunk <allowlist-validated-trunk> --inputs .hivemind/molt-inputs-<token>.json --subject-file .hivemind/molt-inputs-<token>-subj.json --files-file .hivemind/molt-inputs-<token>-files.json [--body-file .hivemind/molt-inputs-<token>-body.json]
    ```
 
-   Pass `--body-file` only with a body. The script header defines the rules and output. Exit 0: stdout `branch: <branch>` is the routing data, then `commit: <full sha>` and `committed: true|false`; `committed: false` means no listed path was dirty. Exit 1: blocked; relay the script's stderr: one `outside:` line for each dirty path not in the list, as a JSON string, then the `blocker:` line.
+   Pass `--body-file` only with a body or `attribution`. Exit 0: stdout `branch: <branch>` is the routing data, then `commit: <full sha>` and `committed: true|false`; `committed: false` means no listed path was dirty. Exit 1: blocked; relay the script's stderr, `outside:` lines then the `blocker:` line.
 
 ## Silence Discipline
 

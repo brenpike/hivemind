@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-## [14.4.1] - 2026-11-25
+## [14.4.2] - 2026-11-25
 
 ### Added
 
@@ -34,6 +34,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 No prose budget raised. New budget entry for `merge-write`.
 
 Issue: #674.
+
+## [14.4.1] - 2026-11-25
+
+### Changed
+
+- `hivemind:molt` takes the harness commit trailers through an optional `attribution` input and appends them verbatim; it adds no other attribution.
+- `hivemind:push-branch` drops its unused attribution ban.
+
+### Fixed
+
+- `hivemind:open-plan-pr` appends the harness PR attribution lines through an optional `attribution` input and writes no attribution of its own.
+
+No prose budget raised.
+
+Issue: #675.
 
 ## [14.4.0] - 2026-11-24
 
