@@ -46,8 +46,8 @@
 # line that starts with `BREAKING CHANGE:` or `BREAKING-CHANGE:` is refused, so the marker
 # bump-type reads always agrees with `breaking`. The message is
 #   <type>[(<scope>)][!]: <subject>
-# followed by a blank line and the body when there is one. The rule that the message carries no
-# attribution string is the caller's judgment (the molt SKILL.md), not checked here.
+# followed by a blank line and the body when there is one. Which attribution lines the message
+# carries is the caller's judgment (the molt SKILL.md), not checked here.
 #
 # SUBJECT FILE (read once, whole, with hivemind_read_input_file into the private `subject.txt`,
 # which must be byte for byte the file; its text enters no shell or jq program source): the subject is the whole file less one final line feed. It must be

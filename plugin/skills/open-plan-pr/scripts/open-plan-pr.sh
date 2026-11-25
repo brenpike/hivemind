@@ -50,8 +50,8 @@
 # than title and draft`). The title reaches gh as one
 # `--title=<value>` argument from a quoted shell variable, and the body and the comment as files
 # in the private work folder (`--body-file=<path>`), so none of them is ever part of shell source
-# or an argument's text. The rule that the PR content carries no attribution string is the
-# caller's judgment (the open-plan-pr SKILL.md), not checked here.
+# or an argument's text. Which attribution lines the PR content carries is the caller's
+# judgment (the open-plan-pr SKILL.md), not checked here.
 #
 # BODY FILE (read once, by READ, into the private `body.md`; its text enters no shell or jq
 # program source): the whole file is the PR body. It must be valid UTF-8 text with no control
