@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Auto-merge denied by auto mode (#674), and the skipped:refused of PR #672, where an UNKNOWN merge-state re-read skipped the `--admin` retry.
+- README and the website said agents never merge, which opt-in auto-merge (ADR-0044) made false; they now say agents merge only when `HIVEMIND_AUTO_MERGE` is set, and the website's settings table lists the auto-merge settings and `HIVEMIND_DESIGN_REVIEW_MODEL`.
 
 No prose budget raised. New budget entry for `merge-write`.
 

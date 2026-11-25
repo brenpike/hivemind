@@ -422,7 +422,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">PR</h3>
-              <p>A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (<code>hivemind:open-plan-pr</code>). The validation (with its version check) and local review gates each hold only for the commit they ended on, so a later commit reruns the gates it invalidates. At a loop cap (local review iteration limit, break-fix-break, replan cap, gate rerun cap, wait cap) validation passes first, then the run opens a draft PR that says why and lists the open findings. The PR body is built in code from the plan digest, the steps and the run record: gates, slow cases, rejected and undone findings, approvals, and decisions. When the run reuses an open PR, the same run record goes in a PR comment instead. The final message and the run record list each call the run took for you under "Decided for you", except accepting the plan, accepting a remediation plan, and rerunning a gate after a later commit. A plan or remediation plan acceptance is listed anyway when the plan changes a file outside your stated limits. A gate rerun is never listed. The final message and the run record on the PR are the run's decision journal. A step whose own output failed ends the run with its cause instead of asking you to retry. Agents never merge. You do.</p>
+              <p>A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (<code>hivemind:open-plan-pr</code>). The validation (with its version check) and local review gates each hold only for the commit they ended on, so a later commit reruns the gates it invalidates. At a loop cap (local review iteration limit, break-fix-break, replan cap, gate rerun cap, wait cap) validation passes first, then the run opens a draft PR that says why and lists the open findings. The PR body is built in code from the plan digest, the steps and the run record: gates, slow cases, rejected and undone findings, approvals, and decisions. When the run reuses an open PR, the same run record goes in a PR comment instead. The final message and the run record list each call the run took for you under "Decided for you", except accepting the plan, accepting a remediation plan, and rerunning a gate after a later commit. A plan or remediation plan acceptance is listed anyway when the plan changes a file outside your stated limits. A gate rerun is never listed. The final message and the run record on the PR are the run's decision journal. A step whose own output failed ends the run with its cause instead of asking you to retry.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Instinct fallback</h3>
@@ -485,7 +485,7 @@
             </article>
             <article class="panel card" role="region" aria-labelledby="lifecycle-watch-heading">
               <h3 class="xg" id="lifecycle-watch-heading">Default PR watch</h3>
-              <p>Watching is the default. It is off only when your original request explicitly says not to watch the PR, or when <code>HIVEMIND_SKIP_PR_WATCH</code> is set. When a script run opened or reused a PR, the overlord runs <code>hivemind:github-review-loop</code> for that PR in the main session. <code>hivemind:github-review-loop</code> dispatches the <code>github-reviewer</code> to fix, push, reply to, and resolve feedback from any automated reviewer bot (<code>reviewer_filter</code> defaults to <code>automated</code>: every Bot account that reviewed or 👍'd the PR, plus those named in <code>HIVEMIND_PR_REVIEWERS</code>, which adds logins and never narrows; <code>github-actions[bot]</code> counts only when listed) until approval, merge, close, or an idle hour. <code>max_watch_duration</code> (default <code>3600</code> seconds) is an idle window, re-armed after each remediation cycle. A reviewer question or a high-severity rejection goes to the overlord, which asks you only an Ask Set question and takes any other with its recommendation; the answer goes back to the GitHub reviewer. Agents never merge. <code>merge-advised</code> is advice to you.</p>
+              <p>Watching is the default. It is off only when your original request explicitly says not to watch the PR, or when <code>HIVEMIND_SKIP_PR_WATCH</code> is set. When a script run opened or reused a PR, the overlord runs <code>hivemind:github-review-loop</code> for that PR in the main session. <code>hivemind:github-review-loop</code> dispatches the <code>github-reviewer</code> to fix, push, reply to, and resolve feedback from any automated reviewer bot (<code>reviewer_filter</code> defaults to <code>automated</code>: every Bot account that reviewed or 👍'd the PR, plus those named in <code>HIVEMIND_PR_REVIEWERS</code>, which adds logins and never narrows; <code>github-actions[bot]</code> counts only when listed) until approval, merge, close, or an idle hour. <code>max_watch_duration</code> (default <code>3600</code> seconds) is an idle window, re-armed after each remediation cycle. A reviewer question or a high-severity rejection goes to the overlord, which asks you only an Ask Set question and takes any other with its recommendation; the answer goes back to the GitHub reviewer. Agents merge only when you set <code>HIVEMIND_AUTO_MERGE</code>, after the watch ends clean on an approval; otherwise you merge. <code>merge-advised</code> is advice to you, and the watch never merges on it.</p>
             </article>
           </div>
         </div>
@@ -661,6 +661,22 @@
                   <td><code>HIVEMIND_SKIP_PR_WATCH</code></td>
                   <td>When set to any non-empty value, the overlord never watches PRs after opening them. Unset or empty: the default post-PR watch runs.</td>
                 </tr>
+                <tr>
+                  <td><code>HIVEMIND_AUTO_MERGE</code></td>
+                  <td>Opt-in merge after the post-PR watch. The value is the merge method: <code>merge</code>, <code>squash</code> or <code>rebase</code>. Unset or empty: the watch never merges, and you do. When set, after the watch ends clean on an approval, the fixed script <code>merge-approved.sh</code> merges the PR once, with no AI judgment, and only when the PR is open and not a draft, an automated reviewer reviewed or 👍'd it, no reviewer's latest review requests changes, every review thread is settled, and the head commit's checks all pass. It merges with <code>--match-head-commit</code>, so a push after its check is never merged. A PR that touches <code>docs/prds/</code>, <code>docs/initiatives/</code> or <code>docs/adr/</code>, or that renames a file or has more than 100 files, also gets a review-record check; a record that does not pass, or a check the script cannot run, leaves the merge to you. Pending or failed CI keeps the watch running. The merge call runs under the <code>hivemind:merge-write</code> grant; a refused call leaves the merge to you.</td>
+                </tr>
+                <tr>
+                  <td><code>HIVEMIND_AUTO_MERGE_ADMIN</code></td>
+                  <td>Checked by presence (any non-empty value), and read only when <code>HIVEMIND_AUTO_MERGE</code> is set. When GitHub refuses the plain merge, for example under a branch protection rule, the script retries once with <code>--admin</code>, and only when its own check saw every check pass. Unset or empty: a refused merge is left for you.</td>
+                </tr>
+                <tr>
+                  <td><code>HIVEMIND_AUTO_MERGE_REREAD_DELAY</code></td>
+                  <td>Read only when <code>HIVEMIND_AUTO_MERGE</code> is set. Whole seconds, 0 to 99, that the script waits before each re-read of a merge state GitHub reports as not yet settled, after a refused plain merge; it re-reads at most 2 more times. Unset or empty: 5. Any other value stops the script before any GitHub call, and you merge.</td>
+                </tr>
+                <tr>
+                  <td><code>HIVEMIND_DESIGN_REVIEW_MODEL</code></td>
+                  <td>The model of the cerebrate pass in <code>hivemind:design-review</code>. Unset or empty: the pass runs on cerebrate's own model. A malformed value also falls back, and the skill tells you it is invalid.</td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -706,7 +722,7 @@
   <footer class="site-foot">
     <div class="wrap">
       <div class="panel foot-inner">
-        <p><strong>Hivemind</strong> · MIT License · Agents never merge. You do.</p>
+        <p><strong>Hivemind</strong> · MIT License · Agents merge only if you opt in. Otherwise you do.</p>
         <nav class="foot-nav" aria-label="Footer">
           <a href="./index.html">Home</a>
           <a href="./functionality.html">How it works</a>
