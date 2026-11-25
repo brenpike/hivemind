@@ -13,6 +13,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [14.4.1] - 2026-11-25
+
+### Added
+
+- The `hivemind:merge-write` skill (hidden, model-only): pre-approves `merge-approved.sh` for the invoking turn and runs no command. The post-PR watch invokes it right before each merge call. A refused merge call is reported as `MERGE=skipped:permission-denied`, naming the allow rule to add.
+- The `merge-approved.sh` output lines `MERGE=wait:merge-state-unknown` (an UNKNOWN merge state after a refused merge is re-read a bounded number of times, then the watch keeps running and retries) and `MERGE=skipped:admin-refused` (the `--admin` retry was refused).
+- The setting `HIVEMIND_AUTO_MERGE_REREAD_DELAY`.
+
+### Changed
+
+- `hivemind:github-review-loop` no longer grants `merge-approved.sh` in its `allowed-tools`: that grant expired before the merge turn.
+- ADR-0044 and ADR-0010 amendments 2026-11-25.
+
+### Fixed
+
+- Auto-merge denied by auto mode (#674), and the skipped:refused of PR #672, where an UNKNOWN merge-state re-read skipped the `--admin` retry.
+
+No prose budget raised. New budget entry for `merge-write`.
+
+Issue: #674.
+
 ## [14.4.0] - 2026-11-24
 
 ### Added

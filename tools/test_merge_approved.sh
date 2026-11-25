@@ -576,37 +576,37 @@ refused_case "refused:clean-admin-set"  "$PR.mergeStateStatus = \"CLEAN\""   "ME
 refused_case "refused:unstable"         "$PR.mergeStateStatus = \"UNSTABLE\"" "MERGE=skipped:refused" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
 refused_case "refused:has-hooks"        "$PR.mergeStateStatus = \"HAS_HOOKS\"" "MERGE=skipped:refused" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
 
-# An UNKNOWN re-read is read again, at most 3 more times. unknown_case <name> <settled-edit> <line>
-# <reads> <merges> [env...]: the plain merge exits 1; reads 2 to 4 show UNKNOWN and read 5, the
+# An UNKNOWN re-read is read again, at most 2 more times. unknown_case <name> <settled-edit> <line>
+# <reads> <merges> [env...]: the plain merge exits 1; reads 2 and 3 show UNKNOWN and read 4, the
 # last re-read allowed, is the base body after <settled-edit>; an admin rerun, when reached, exits
-# 0 and read 6, the confirm read, shows MERGED.
+# 0 and read 5, the confirm read, shows MERGED.
 UNKNOWN_EDIT="$PR.mergeStateStatus = \"UNKNOWN\""
 unknown_case() {
   local case_name="$1" fixture_edit="$2" want_line="$3" want_reads="$4" want_merges="$5" case_dir read_number
   shift 5
   case_dir="$(new_case "$case_name")"
   write_read "$case_dir" 1 '.'
-  for read_number in 2 3 4; do
+  for read_number in 2 3; do
     write_read "$case_dir" "$read_number" "$UNKNOWN_EDIT"
   done
-  write_read "$case_dir" 5 "$fixture_edit"
-  write_read "$case_dir" 6 "$MERGED_EDIT"
+  write_read "$case_dir" 4 "$fixture_edit"
+  write_read "$case_dir" 5 "$MERGED_EDIT"
   printf '1' >"$case_dir/merge-1.status"
   run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash "$@" bash "$MERGE_APPROVED" o r 5 automated "$SELF"
   expect_case "$case_name" "$case_dir" "$want_line" 0 "$want_reads" "$want_merges"
 }
-unknown_case "refused:unknown" "$UNKNOWN_EDIT" "MERGE=wait:merge-state-unknown" 5 1 HIVEMIND_AUTO_MERGE_ADMIN=1
-unknown_case "refused:unknown-no-admin" "$UNKNOWN_EDIT" "MERGE=wait:merge-state-unknown" 5 1
-unknown_case "refused:unknown-settles-blocked-admin" "$PR.mergeStateStatus = \"BLOCKED\"" "MERGE=merged-admin" 6 2 \
+unknown_case "refused:unknown" "$UNKNOWN_EDIT" "MERGE=wait:merge-state-unknown" 4 1 HIVEMIND_AUTO_MERGE_ADMIN=1
+unknown_case "refused:unknown-no-admin" "$UNKNOWN_EDIT" "MERGE=wait:merge-state-unknown" 4 1
+unknown_case "refused:unknown-settles-blocked-admin" "$PR.mergeStateStatus = \"BLOCKED\"" "MERGE=merged-admin" 5 2 \
   HIVEMIND_AUTO_MERGE_ADMIN=1
-unknown_case "refused:unknown-settles-blocked-no-admin" "$PR.mergeStateStatus = \"BLOCKED\"" "MERGE=skipped:blocked" 5 1
-unknown_case "refused:unknown-settles-dirty" "$PR.mergeStateStatus = \"DIRTY\"" "MERGE=skipped:conflicts" 5 1 \
+unknown_case "refused:unknown-settles-blocked-no-admin" "$PR.mergeStateStatus = \"BLOCKED\"" "MERGE=skipped:blocked" 4 1
+unknown_case "refused:unknown-settles-dirty" "$PR.mergeStateStatus = \"DIRTY\"" "MERGE=skipped:conflicts" 4 1 \
   HIVEMIND_AUTO_MERGE_ADMIN=1
-unknown_case "refused:unknown-settles-clean" "$PR.mergeStateStatus = \"CLEAN\"" "MERGE=skipped:refused" 5 1 \
+unknown_case "refused:unknown-settles-clean" "$PR.mergeStateStatus = \"CLEAN\"" "MERGE=skipped:refused" 4 1 \
   HIVEMIND_AUTO_MERGE_ADMIN=1
 unknown_case "refused:unknown-settles-blocked-checks-failed" \
   "$PR.mergeStateStatus = \"BLOCKED\" | $PR.commits.nodes[0].commit.statusCheckRollup.state = \"FAILURE\"" \
-  "MERGE=wait:checks-failed" 5 1 HIVEMIND_AUTO_MERGE_ADMIN=1
+  "MERGE=wait:checks-failed" 4 1 HIVEMIND_AUTO_MERGE_ADMIN=1
 
 case_dir="$(new_case refused-unknown-head-moved)"
 write_read "$case_dir" 1 '.'

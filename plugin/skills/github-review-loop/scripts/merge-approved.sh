@@ -211,7 +211,7 @@
 # script then reads the PR again through the same query and checks (§4), the
 # re-read. GitHub can report mergeStateStatus UNKNOWN while it recomputes the
 # state after the refused call, so while a re-read shows UNKNOWN the script
-# waits HIVEMIND_AUTO_MERGE_REREAD_DELAY seconds and re-reads, at most 3 more
+# waits HIVEMIND_AUTO_MERGE_REREAD_DELAY seconds and re-reads, at most 2 more
 # times. The head check (a) runs on every re-read; b-e judge the last one:
 #   a. headRefOid differs from the first read              wait:head-moved
 #   b. mergeStateStatus is DIRTY                           skipped:conflicts
@@ -329,7 +329,11 @@ case "$MERGE_METHOD" in
   *) echo "MERGE=skipped:bad-setting"; exit 0 ;;
 esac
 
-MERGE_STATE_REREADS=3
+# INVARIANT: with the default 5 second re-read delay, the gh reads and waits of
+# the longest path, a DOCS TOUCH PR whose `--admin` rerun follows two UNKNOWN
+# re-reads (6 reads of 45 seconds, 2 waits of 5), total 280 seconds, under the
+# Lair's 300 second child timeout. A third re-read would make it 330.
+MERGE_STATE_REREADS=2
 REREAD_DELAY_SECONDS="${HIVEMIND_AUTO_MERGE_REREAD_DELAY:-5}"
 [[ "$REREAD_DELAY_SECONDS" =~ ^[0-9]{1,2}$ ]] || merge_approved_fail "bad-reread-delay"
 
