@@ -12,7 +12,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 1
+rounds: 2
 clean_round: false
 ---
 
@@ -52,6 +52,16 @@ Review rule:
 - **Result:** not clean. Every finding is disposed below, so none is open: R1-1 to R1-3 and R1-T1 are fixed. The fixes are in the solution design's Amendments entry "2026-11-25, third Lair re-review round 1".
 - **Diminishing-returns check:** recurrence: R1-2 is on Seams item 5, which the second re-review's round 3 fixed. Trend: this is round 1, so none. The standing rule applies: the strong recommended fixes are taken (Decisions asked, Standing rule clarification).
 
+### Round 2
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `e6694a0e70dd166a6f1750941992862bb4204e27`, previous commit `ade74cbed02208785d3aca7e9154a8f4004cf853`.
+- **Scope:** a confirming round over the change since the previous round's reviewed commit and round 1's fixes, the solution design's Amendments entry "2026-11-25, third Lair re-review round 1".
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It raised 3 findings, R2-1 to R2-3: 0 critical, 0 high, 1 medium and 2 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the previous commit `ade74cbed02208785d3aca7e9154a8f4004cf853`. It raised 1 finding, R2-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R2-T1, R2-1 and R2-2 are fixed by removal, since the maintainer's veto of R1-T1's fix withdraws the text they attack, and R2-3 is fixed. The fixes are in the solution design's Amendments entry "2026-11-25, third Lair re-review round 2".
+- **Diminishing-returns check:** fired. Recurrence: R2-T1, R2-1 and R2-2 all hit round 1's R1-T1 egress fix. Trend: the high did not fall, R1-T1 in round 1 and R2-T1 in round 2. The advisory went to the maintainer with three options; the maintainer answered 3, back out the private-network rule, and vetoed R1-T1's fix (Decisions asked, Third re-review round 2 advisory (2026-11-25)).
+
 ## Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
@@ -59,7 +69,11 @@ Review rule:
 | R1-1 | 1 | B | medium | fixed | Seams item 5 gave #608 the proxy-up gate on remediation dispatch and the forwarder crash end of a remediation run, which are #610's. Fixed: #610 applies both; #610 case; strain containment added to #610's Part designs. |
 | R1-2 | 1 | A | low | fixed | Seams item 5 still said `claims: blocked proxy-down` prints on the re-take tick, contrary to the entry "2026-11-25, restarted Lair re-review round 3". Fixed: the re-take tick prints `claims: ok`; the blocked line prints from a later tick's step 4. |
 | R1-3 | 1 | A | low | fixed | The readiness-check call contract omitted `<owner/repo>`, `<trunk-name>` and the snapshot-array form of the landed `hivemind_readiness_check_snapshot`. Fixed in Context and code truth and Seam order. |
-| R1-T1 | 1 | review | high | fixed | Local review finding `1e6dc05af9b2afe98f7d8ff8ebbef91b4b424f7e6b9d3e37e1be20eab2697695`, "Egress filtering does not exclude private networks". Fixed: the proxy connects only to globally routable addresses, checked after resolution and connected to as checked; a probe case and a #604 test (solution design, entry "2026-11-25, third Lair re-review round 1"). |
+| R1-T1 | 1 | review | high | rejected | Local review finding `1e6dc05af9b2afe98f7d8ff8ebbef91b4b424f7e6b9d3e37e1be20eab2697695`, "Egress filtering does not exclude private networks". The fix taken in round 1 was vetoed by the maintainer (Decisions asked, Third re-review round 2 advisory (2026-11-25)): strain containment's residual "network egress with the user's credentials" stands as that part design states it. A later finding asking for a private-network egress rule repeats this decision. |
+| R2-T1 | 2 | review | high | fixed | Local review finding `54c0e6b594347003410e0f3e5087047bab09a11ab14ac78f9ee688966ba41295`, "Private-address deny policy has no deterministic classification contract". Fixed by withdrawing R1-T1's fix: the deny policy it attacks no longer exists (solution design, entry "2026-11-25, third Lair re-review round 2"). |
+| R2-1 | 2 | B | medium | fixed | R1-T1's fix had no P26 fallback on Linux for a corporate-proxy-only network or a private GHES or model gateway; the Lair would stop claiming with no stated cause. Fixed by withdrawing R1-T1's fix: the rule it attacks no longer exists. |
+| R2-2 | 2 | A | low | fixed | The proxy's answer to a refused address was undefined, and `private-address` was missing from #608's acceptance-criteria edit. Fixed by withdrawing R1-T1's fix: the refusal and its probe code no longer exist. |
+| R2-3 | 2 | A | low | fixed | A trailing `.git` on the `<owner/repo>` taken from the repository URL breaks `rc_target_path`, giving `design_link_invalid`. Fixed: `<owner/repo>` is normalized by stripping a trailing `.git` (solution design, entry "2026-11-25, third Lair re-review round 2"). |
 
 ## Decisions taken, listed for veto
 
@@ -311,7 +325,13 @@ Third re-review round 1's calls, each taken on a strong recommendation and liste
 | Decision | Recommendation strength | What it touches |
 | --- | --- | --- |
 | Third re-review R1-1 to R1-3, each fixed now as a contained fix in the solution design's Amendments entry "2026-11-25, third Lair re-review round 1" | strong | scope: third re-review R1-1 moves the proxy-up gate on remediation dispatch and the forwarder crash end of a remediation run from #608 to #610; none for third re-review R1-2 and R1-3; no ADR is edited, no trust, credential or merge-path change |
-| Third re-review R1-T1 fixed now: the proxy connects only to globally routable addresses, checked after resolution and connected to as checked, with a probe case and a #604 test | strong | trust: it closes the proxy's egress to private networks; no ADR is edited, no credential or merge-path change |
+| Third re-review R1-T1 fixed now: the proxy connects only to globally routable addresses, checked after resolution and connected to as checked, with a probe case and a #604 test. Vetoed by the maintainer on 2026-11-25 and withdrawn (Decisions asked, Third re-review round 2 advisory (2026-11-25)). | strong | trust: it closes the proxy's egress to private networks; no ADR is edited, no credential or merge-path change |
+
+Third re-review round 2's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The IDs are the third re-review's (Findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| Third re-review R2-3 fixed now: the `<owner/repo>` taken from the repository URL is normalized by stripping a trailing `.git`, in the solution design's Amendments entry "2026-11-25, third Lair re-review round 2" | strong | scope: it touches none; the fix is reversible; no ADR is edited, no trust, credential or merge-path change |
 
 ## Decisions asked
 
@@ -365,6 +385,11 @@ Third re-review round 1's calls, each taken on a strong recommendation and liste
 - **Round 2 diminishing-returns advisory (2026-11-25).** The diminishing-returns advisory (D35), asked after the first re-review's round 2. The maintainer answered 1 on 2026-11-25.
   - The question: what to do with the round's findings, 7 of 10 of which come from first re-review R1-T1's clone mechanism. Options: (1) narrow the claim and hand the rest to the slice that builds it as a tracked follow-up; (2) accept the rest as recorded residuals; (3) keep going.
   - Answer: "1". Narrow answer B to a requirement and hand the clone mechanism to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7162158378)). Simplify first re-review R1-3. Applied: first re-review R2-1 to R2-4, R2-7 and R2-8 deferred to #608; first re-review R2-T1, R2-5 and R2-9 fixed in the solution design, and R2-6 in this record; First re-review round 2's calls under Decisions taken, listed for veto.
+
+- **Third re-review round 2 advisory (2026-11-25).** The diminishing-returns advisory (D35), asked after the third re-review's round 2, whose R2-T1, R2-1 and R2-2 all hit round 1's R1-T1 egress fix. The maintainer answered 3 on 2026-11-25.
+  - The question: what to do with the round's findings. Options: (1) narrow the private-network rule to a one-line rule and hand its details to #604; (2) keep going and specify the rule fully now; (3) back out the private-network rule, leaving strain containment's existing accepted risk.
+  - Reply, verbatim, in two messages: "When did I ask for such a garbage restriction? I do not want that insane, unworkable and brain-dead restriction in place. Put it on a rocket to the sun. Jesus" and then "The private network restriction".
+  - Outcome: answer 3, and a veto of R1-T1's fix, which had been taken under the standing rule and listed for veto (Decisions taken, listed for veto, Third re-review round 1's calls). Applied: the solution design's Amendments entry "2026-11-25, third Lair re-review round 2" withdraws R1-T1's fix; R1-T1 is rejected (Findings); R2-T1, R2-1 and R2-2 are fixed by that removal.
 
 ## Residuals
 
