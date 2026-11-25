@@ -94,8 +94,11 @@ A merge call that exits 0 is followed by the confirm read. A case that expects
   `files` connection or page flag, a file path or changeType that is not a
   string, a head that does not match the last commit, or no commit prints
   `malformed-read`. Each of these makes no merge call.
-- **Refused merge.** The plain merge exits 1 and a second read decides:
-  - a moved head prints `wait:head-moved`;
+- **Refused merge.** The plain merge exits 1 and a second read decides. A
+  second read showing `UNKNOWN` is read again, at most 3 more times, and the
+  last read decides; the suite exports `HIVEMIND_AUTO_MERGE_REREAD_DELAY=0`, so
+  no case waits:
+  - a moved head on any re-read prints `wait:head-moved`, with no further read;
   - `DIRTY` prints `skipped:conflicts`;
   - `BLOCKED` or `BEHIND` with the admin setting unset or empty prints
     `skipped:blocked`, since an empty value is off;
@@ -107,8 +110,23 @@ A merge call that exits 0 is followed by the confirm read. A case that expects
     line prints and no `--admin` call is made. A re-read showing a new
     `CHANGES_REQUESTED`, from the Bot or a human, prints `skipped:no-approval`
     this way;
-  - an `--admin` refusal, or any other state, prints `skipped:refused`;
-  - a failed or incomplete re-read prints `MERGE_ERROR`.
+  - an `--admin` refusal prints `skipped:admin-refused` (2 reads, 2 merge
+    calls);
+  - `UNKNOWN` on all 4 re-reads prints `wait:merge-state-unknown` (5 reads, 1
+    merge call), with or without the admin setting;
+  - `UNKNOWN` that settles on the last re-read follows that state: `BLOCKED`
+    with the admin setting reruns with `--admin` (`merged-admin`, 6 reads, 2
+    merge calls), `BLOCKED` without it prints `skipped:blocked`, `BLOCKED` with
+    a failed rollup prints `wait:checks-failed`, `DIRTY` prints
+    `skipped:conflicts` and `CLEAN` prints `skipped:refused`;
+  - any other state (`CLEAN`, `UNSTABLE`, `HAS_HOOKS`) prints
+    `skipped:refused`;
+  - a failed or incomplete re-read, the first or a later one, prints
+    `MERGE_ERROR`.
+- **Re-read delay.** `HIVEMIND_AUTO_MERGE_REREAD_DELAY` outside 0 to 99 whole
+  seconds (`abc`, `100`, `-1`, `1 `, `1.5`) prints
+  `MERGE_ERROR=bad-reread-delay`, exit 1, with zero `gh` calls; with
+  `HIVEMIND_AUTO_MERGE` unset it still prints `MERGE=off`. Empty is the default.
 
 - **Record gate off.** A PR whose files hold no `docs/prds/`, `docs/initiatives/`
   or `docs/adr/` path, no `RENAMED` file and no next page makes no git call and
@@ -149,7 +167,8 @@ A merge call that exits 0 is followed by the confirm read. A case that expects
   - The `--admin` path: after a refused plain merge, a `BLOCKED` re-read on the
     same base reruns with `--admin` and the same `--match-head-commit`
     (`merged-admin`, 4 reads, 2 merge calls); a `BLOCKED` re-read on a moved
-    base prints `wait:base-moved` with no `--admin` call.
+    base prints `wait:base-moved` with no `--admin` call, as does an `UNKNOWN`
+    re-read followed by a `BLOCKED` one on a moved base (4 reads).
 
 ## Properties over every case
 

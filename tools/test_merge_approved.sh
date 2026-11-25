@@ -24,6 +24,8 @@
 # are derived inline from one clean base body with one jq edit each, so a case differs from the
 # merge-ready PR in one place. A merge call that exits 0 is followed by the confirm read, so a case
 # that expects merged or merged-admin serves one more read, the base body with state MERGED.
+# HIVEMIND_AUTO_MERGE_REREAD_DELAY is exported as 0, so the re-reads of an UNKNOWN mergeStateStatus
+# after a refused merge run without a wait; the delay cases set their own value.
 #
 # Five properties are checked over EVERY case after the cases run:
 #   - no merge call carries --auto or --delete-branch, and every merge call carries
@@ -47,6 +49,7 @@ set -u
 
 unset HIVEMIND_AUTO_MERGE HIVEMIND_AUTO_MERGE_ADMIN HIVEMIND_PR_REVIEWERS GH_HOST
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
+export HIVEMIND_AUTO_MERGE_REREAD_DELAY=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=lib/scratch.sh
@@ -252,6 +255,23 @@ for bad_setting in fast MERGE "squash " auto; do
   run_case "$case_dir" HIVEMIND_AUTO_MERGE="$bad_setting" bash "$MERGE_APPROVED" o r 5 automated "$SELF"
   expect_case "setting:bad-'$bad_setting'-zero-gh" "$case_dir" "MERGE=skipped:bad-setting" 0 0 0
 done
+
+# A re-read delay that is not 0 to 99 whole seconds fails before any gh call, after the method.
+for bad_delay in abc 100 -1 "1 " 1.5; do
+  case_dir="$(new_case "setting-bad-delay-${bad_delay// /_}")"
+  run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_REREAD_DELAY="$bad_delay" bash "$MERGE_APPROVED" o r 5 automated "$SELF"
+  expect_case "setting:bad-reread-delay-'$bad_delay'-zero-gh" "$case_dir" "MERGE_ERROR=bad-reread-delay" 1 0 0
+done
+
+case_dir="$(new_case setting-bad-delay-off)"
+run_case "$case_dir" HIVEMIND_AUTO_MERGE_REREAD_DELAY=abc bash "$MERGE_APPROVED" o r 5 automated "$SELF"
+expect_case "setting:bad-reread-delay-merge-off" "$case_dir" "MERGE=off" 0 0 0
+
+case_dir="$(new_case setting-empty-delay-default)"
+write_read "$case_dir" 1 '.'
+write_read "$case_dir" 2 "$MERGED_EDIT"
+run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_REREAD_DELAY= bash "$MERGE_APPROVED" o r 5 automated "$SELF"
+expect_case "setting:empty-reread-delay-default" "$case_dir" "MERGE=merged" 0 2 1
 
 # ── Argument checks: MERGE_ERROR, exit 1, no gh call ─────────────────────────
 # arg_case <name> <reason> <arg>...: the arguments are checked before the setting and before gh.
@@ -554,7 +574,57 @@ refused_case "refused:blocked-admin-thread-reopened" \
   "MERGE=skipped:open-threads" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
 refused_case "refused:clean-admin-set"  "$PR.mergeStateStatus = \"CLEAN\""   "MERGE=skipped:refused" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
 refused_case "refused:unstable"         "$PR.mergeStateStatus = \"UNSTABLE\"" "MERGE=skipped:refused" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
-refused_case "refused:unknown"          "$PR.mergeStateStatus = \"UNKNOWN\"" "MERGE=skipped:refused" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
+refused_case "refused:has-hooks"        "$PR.mergeStateStatus = \"HAS_HOOKS\"" "MERGE=skipped:refused" 1 HIVEMIND_AUTO_MERGE_ADMIN=1
+
+# An UNKNOWN re-read is read again, at most 3 more times. unknown_case <name> <settled-edit> <line>
+# <reads> <merges> [env...]: the plain merge exits 1; reads 2 to 4 show UNKNOWN and read 5, the
+# last re-read allowed, is the base body after <settled-edit>; an admin rerun, when reached, exits
+# 0 and read 6, the confirm read, shows MERGED.
+UNKNOWN_EDIT="$PR.mergeStateStatus = \"UNKNOWN\""
+unknown_case() {
+  local case_name="$1" fixture_edit="$2" want_line="$3" want_reads="$4" want_merges="$5" case_dir read_number
+  shift 5
+  case_dir="$(new_case "$case_name")"
+  write_read "$case_dir" 1 '.'
+  for read_number in 2 3 4; do
+    write_read "$case_dir" "$read_number" "$UNKNOWN_EDIT"
+  done
+  write_read "$case_dir" 5 "$fixture_edit"
+  write_read "$case_dir" 6 "$MERGED_EDIT"
+  printf '1' >"$case_dir/merge-1.status"
+  run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash "$@" bash "$MERGE_APPROVED" o r 5 automated "$SELF"
+  expect_case "$case_name" "$case_dir" "$want_line" 0 "$want_reads" "$want_merges"
+}
+unknown_case "refused:unknown" "$UNKNOWN_EDIT" "MERGE=wait:merge-state-unknown" 5 1 HIVEMIND_AUTO_MERGE_ADMIN=1
+unknown_case "refused:unknown-no-admin" "$UNKNOWN_EDIT" "MERGE=wait:merge-state-unknown" 5 1
+unknown_case "refused:unknown-settles-blocked-admin" "$PR.mergeStateStatus = \"BLOCKED\"" "MERGE=merged-admin" 6 2 \
+  HIVEMIND_AUTO_MERGE_ADMIN=1
+unknown_case "refused:unknown-settles-blocked-no-admin" "$PR.mergeStateStatus = \"BLOCKED\"" "MERGE=skipped:blocked" 5 1
+unknown_case "refused:unknown-settles-dirty" "$PR.mergeStateStatus = \"DIRTY\"" "MERGE=skipped:conflicts" 5 1 \
+  HIVEMIND_AUTO_MERGE_ADMIN=1
+unknown_case "refused:unknown-settles-clean" "$PR.mergeStateStatus = \"CLEAN\"" "MERGE=skipped:refused" 5 1 \
+  HIVEMIND_AUTO_MERGE_ADMIN=1
+unknown_case "refused:unknown-settles-blocked-checks-failed" \
+  "$PR.mergeStateStatus = \"BLOCKED\" | $PR.commits.nodes[0].commit.statusCheckRollup.state = \"FAILURE\"" \
+  "MERGE=wait:checks-failed" 5 1 HIVEMIND_AUTO_MERGE_ADMIN=1
+
+case_dir="$(new_case refused-unknown-head-moved)"
+write_read "$case_dir" 1 '.'
+write_read "$case_dir" 2 "$UNKNOWN_EDIT"
+write_read "$case_dir" 3 "$UNKNOWN_EDIT | $PR.headRefOid = \$head_b | $PR.commits.nodes[0].commit.oid = \$head_b"
+write_read "$case_dir" 4 "$PR.mergeStateStatus = \"BLOCKED\""
+printf '1' >"$case_dir/merge-1.status"
+run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 5 automated "$SELF"
+expect_case "refused:unknown-head-moved" "$case_dir" "MERGE=wait:head-moved" 0 3 1
+
+case_dir="$(new_case refused-unknown-reread-fails)"
+write_read "$case_dir" 1 '.'
+write_read "$case_dir" 2 "$UNKNOWN_EDIT"
+write_read "$case_dir" 3 "$UNKNOWN_EDIT"
+printf '1' >"$case_dir/read-3.status"
+printf '1' >"$case_dir/merge-1.status"
+run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 5 automated "$SELF"
+expect_case "refused:unknown-reread-fails" "$case_dir" "MERGE_ERROR=graphql-read-failed" 1 3 1
 
 case_dir="$(new_case refused-admin-refused)"
 write_read "$case_dir" 1 '.'
@@ -562,7 +632,7 @@ write_read "$case_dir" 2 "$PR.mergeStateStatus = \"BLOCKED\""
 printf '1' >"$case_dir/merge-1.status"
 printf '1' >"$case_dir/merge-2.status"
 run_case "$case_dir" HIVEMIND_AUTO_MERGE=rebase HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 5 automated "$SELF"
-expect_case "refused:admin-refused" "$case_dir" "MERGE=skipped:refused" 0 2 2
+expect_case "refused:admin-refused" "$case_dir" "MERGE=skipped:admin-refused" 0 2 2
 
 case_dir="$(new_case "refused:blocked-admin-confirm-open")"
 write_read "$case_dir" 1 '.'
@@ -586,7 +656,8 @@ printf '1' >"$case_dir/merge-1.status"
 run_case "$case_dir" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 5 automated "$SELF"
 expect_case "refused:reread-incomplete" "$case_dir" "MERGE_ERROR=read-incomplete" 1 2 1
 
-for admin_case in refused:blocked-admin refused:behind-admin refused:blocked-admin-confirm-open; do
+for admin_case in refused:blocked-admin refused:behind-admin refused:blocked-admin-confirm-open \
+    refused:unknown-settles-blocked-admin; do
   case_dir="$CASES_DIR/$admin_case"
   want_admin="MERGE 2 after_head=$HEAD_A after_rollup=SUCCESS after_reviews=COMMENTED argv=pr merge 5 --repo o/r --squash --match-head-commit $HEAD_A --admin"
   if grep -qxF "$want_admin" "$case_dir/calls.log"; then
@@ -885,6 +956,16 @@ printf '1' >"$RECORD_CASE_DIR/merge-1.status"
 run_case "$RECORD_CASE_DIR" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 11 automated "$SELF"
 expect_case "record:admin-base-moved" "$RECORD_CASE_DIR" "MERGE=wait:base-moved" 0 3 1
 
+# An UNKNOWN re-read is read again; the last re-read is the fresh read before --admin.
+new_record_case "record:admin-unknown-base-moved" $ORIGIN_REMOTE
+write_read "$RECORD_CASE_DIR" 1 "$PASS_EDIT"
+write_read "$RECORD_CASE_DIR" 2 "$PASS_EDIT"
+write_read "$RECORD_CASE_DIR" 3 "$PASS_EDIT | $PR.mergeStateStatus = \"UNKNOWN\""
+write_read "$RECORD_CASE_DIR" 4 "$PASS_EDIT | $PR.mergeStateStatus = \"BLOCKED\" | $PR.baseRefOid = \"$BASE_A\""
+printf '1' >"$RECORD_CASE_DIR/merge-1.status"
+run_case "$RECORD_CASE_DIR" HIVEMIND_AUTO_MERGE=squash HIVEMIND_AUTO_MERGE_ADMIN=1 bash "$MERGE_APPROVED" o r 11 automated "$SELF"
+expect_case "record:admin-unknown-base-moved" "$RECORD_CASE_DIR" "MERGE=wait:base-moved" 0 4 1
+
 # ── Properties over every case ───────────────────────────────────────────────
 # check_merge_review_states <case> <call_line> <after_reviews>: fail the merge call when the read
 # before it held a review state outside APPROVED, COMMENTED or DISMISSED.
@@ -932,6 +1013,7 @@ for calls_log in "$CASES_DIR"/*/calls.log; do
   case_env_admin="no"
   case "$case_name" in
     refused:blocked-admin|refused:behind-admin|refused-admin-refused|refused:blocked-admin-confirm-open) case_env_admin="yes" ;;
+    refused:unknown-settles-blocked-admin) case_env_admin="yes" ;;
     record:admin-merged|record:admin-base-moved) case_env_admin="yes" ;;
   esac
   case "$case_name" in

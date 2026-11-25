@@ -63,6 +63,10 @@
       "pattern": "returns control to whatever invoked it"
     },
     {
+      "file": "plugin/skills/merge-write/SKILL.md",
+      "pattern": "returns control to whatever invoked it"
+    },
+    {
       "file": "plugin/skills/plan-to-prd/SKILL.md",
       "pattern": "returns control to whatever invoked it"
     },
@@ -88,6 +92,10 @@
     },
     {
       "file": "plugin/skills/github-review-loop/SKILL.md",
+      "pattern": "the caller then continues from the point at which it invoked this skill"
+    },
+    {
+      "file": "plugin/skills/merge-write/SKILL.md",
       "pattern": "the caller then continues from the point at which it invoked this skill"
     },
     {

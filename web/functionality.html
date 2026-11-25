@@ -294,6 +294,10 @@
                 <td>Model-only (hidden from <code>/</code>); runs no command. Pre-approves <code>push-branch.sh</code>, <code>reply-resolve.sh</code> and <code>react-marker.sh</code> for the invoking turn. Invoked by <code>github-reviewer</code> right before its first GitHub write.</td>
               </tr>
               <tr>
+                <td><code>hivemind:merge-write</code></td>
+                <td>Model-only (hidden from <code>/</code>); runs no command. Pre-approves <code>merge-approved.sh</code> for the invoking turn. Invoked by <code>hivemind:github-review-loop</code> right before each opt-in merge call.</td>
+              </tr>
+              <tr>
                 <td><code>hivemind:open-plan-pr</code></td>
                 <td>Open a pull request after completion, validation, and versioning gates pass, through a committed script that pushes through <code>push-branch.sh</code>, then reuses an open PR on the same head, base and commit (posting an optional comment there) or creates the PR, optionally as a draft, and verifies it. It takes the PR body from its own file (<code>--body-file</code>). Used by the workflow scripts and on Instinct.</td>
               </tr>

@@ -40,10 +40,11 @@
 #                                  verify error (exit 0)
 #   MERGE=skipped:record-blocked   the PR touches docs and record verify, merge
 #                                  mode, fails a review record (exit 0)
-#   MERGE=wait:head-moved          the plain merge was refused and the PR head
-#                                  is no longer the commit that was read, or the
-#                                  PR touches docs and the fresh read before a
-#                                  merge call shows a new head (exit 0)
+#   MERGE=wait:head-moved          the plain merge was refused and a re-read
+#                                  shows a PR head other than the commit that
+#                                  was read, or the PR touches docs and the
+#                                  fresh read before a merge call shows a new
+#                                  head (exit 0)
 #   MERGE=wait:base-moved          the PR touches docs and the fresh read before
 #                                  a merge call shows a baseRefOid other than
 #                                  the one the record gate verified (exit 0)
@@ -53,14 +54,22 @@
 #   MERGE=skipped:blocked          refused; mergeStateStatus is BLOCKED or
 #                                  BEHIND and HIVEMIND_AUTO_MERGE_ADMIN is
 #                                  unset or empty (exit 0)
-#   MERGE=skipped:refused          refused for any other mergeStateStatus, or
-#                                  the `--admin` rerun was refused too (exit 0)
+#   MERGE=skipped:admin-refused    refused; mergeStateStatus is BLOCKED or
+#                                  BEHIND, and the `--admin` rerun exited
+#                                  non-zero (exit 0)
+#   MERGE=wait:merge-state-unknown refused; mergeStateStatus is still UNKNOWN
+#                                  after the bounded re-reads of §5 (exit 0)
+#   MERGE=skipped:refused          refused; the last re-read shows a
+#                                  mergeStateStatus other than DIRTY, BLOCKED,
+#                                  BEHIND or UNKNOWN (exit 0)
 #   MERGE=wait:merge-pending       a merge call, plain or `--admin`, exited 0
 #                                  but the confirm read shows the PR not MERGED:
 #                                  OPEN (queued in a merge queue, or GitHub
 #                                  lag) or CLOSED (exit 0)
-#   MERGE_ERROR=<reason>           bad arguments, a failed bootstrap, or a
-#                                  failed or incomplete read (exit 1)
+#   MERGE_ERROR=<reason>           bad arguments, a failed bootstrap, a bad
+#                                  re-read delay (`bad-reread-delay`), a failed
+#                                  wait between re-reads (`reread-wait-failed`),
+#                                  or a failed or incomplete read (exit 1)
 # `wait:*` means the watch keeps running: pending or failed CI is fixed or
 # awaited, and the merge is tried again at the next settled approval.
 # `wait:merge-pending` makes no further merge call: the poll's STATE=MERGED or
@@ -76,6 +85,13 @@
 #   HIVEMIND_PR_REVIEWERS      optional; more Bot logins for the Automated
 #                              Reviewer set. Passed to jq as `--arg` data, never
 #                              as program text. It only adds to the set.
+#   HIVEMIND_AUTO_MERGE_REREAD_DELAY
+#                              optional; whole seconds, 0 to 99, waited before
+#                              each re-read of an UNKNOWN mergeStateStatus (§5).
+#                              Unset or empty is 5. Any other value is
+#                              `MERGE_ERROR=bad-reread-delay`, checked after
+#                              HIVEMIND_AUTO_MERGE and before any gh call. The
+#                              test suite sets it to 0.
 #
 # 3. ARGUMENTS
 # ------------
@@ -128,7 +144,8 @@
 # Failed reads: gh exits non-zero (`graphql-read-failed`), the envelope check
 # fails (`graphql-<token>`), the shape check fails (`shape-<token>`).
 # The same read, with both checks and the projection, runs again after a
-# refused plain merge (the re-read), after every merge call that exits 0
+# refused plain merge (the re-read, repeated while UNKNOWN, §5), after every
+# merge call that exits 0
 # (the confirm read, §5) and, on a DOCS TOUCH PR, after the record gate (the
 # fresh read, §5); each fails as above.
 #
@@ -191,25 +208,30 @@
 # follows the confirm read, so a plain call that exits 0 never reaches
 # `--admin`.
 # A plain merge that exits non-zero is REFUSED; its output is discarded. The
-# script then reads the PR again through the same query and checks (§4):
+# script then reads the PR again through the same query and checks (§4), the
+# re-read. GitHub can report mergeStateStatus UNKNOWN while it recomputes the
+# state after the refused call, so while a re-read shows UNKNOWN the script
+# waits HIVEMIND_AUTO_MERGE_REREAD_DELAY seconds and re-reads, at most 3 more
+# times. The head check (a) runs on every re-read; b-e judge the last one:
 #   a. headRefOid differs from the first read              wait:head-moved
 #   b. mergeStateStatus is DIRTY                           skipped:conflicts
 #   c. mergeStateStatus is BLOCKED or BEHIND:
 #      - HIVEMIND_AUTO_MERGE_ADMIN unset or empty          skipped:blocked
-#      - set, DOCS TOUCH, and the re-read, which is the
-#        fresh read before the `--admin` call, shows a
+#      - set, DOCS TOUCH, and the last re-read, which is
+#        the fresh read before the `--admin` call, shows a
 #        baseRefOid other than the first read's            wait:base-moved
-#      - set, and a gate of 1-7 fails on the re-read       that gate's line
-#      - set, and gates 1-7 all hold on the re-read: rerun the same command
-#        with `--admin` and the same `--match-head-commit`
+#      - set, and a gate of 1-7 fails on the last re-read  that gate's line
+#      - set, and gates 1-7 all hold on the last re-read: rerun the same
+#        command with `--admin` and the same `--match-head-commit`
 #          exit 0, confirm read MERGED                     merged-admin
 #          exit 0, confirm read not MERGED                 wait:merge-pending
-#          non-zero                                        skipped:refused
-#   d. any other mergeStateStatus                          skipped:refused
+#          non-zero                                        skipped:admin-refused
+#   d. mergeStateStatus is still UNKNOWN                   wait:merge-state-unknown
+#   e. any other mergeStateStatus                          skipped:refused
 # So `--admin` runs only after a refused plain merge, only with the admin
-# setting set to a non-empty value, and only when both reads passed every
-# gate of 1-7 on the same head, and on a DOCS TOUCH PR the same baseRefOid
-# the record gate verified. A standing block prints skipped:no-approval
+# setting set to a non-empty value, and only when the first read and the last
+# re-read passed every gate of 1-7 on the same head, and on a DOCS TOUCH PR
+# the same baseRefOid the record gate verified. A standing block prints skipped:no-approval
 # on either read, so a review that requests changes between the two reads
 # stops the retry before any `--admin` call.
 # Every merge call carries `--match-head-commit`, so a commit pushed after the
@@ -241,7 +263,7 @@
 # before any gh or git call; sourcing defines functions only.
 #
 # P18 floor: `set -euo pipefail`. Every expected non-zero status (gh, git, jq,
-# a shared check) is tested by `if` or `||` and routed to merge_approved_fail,
+# sleep, a shared check) is tested by `if` or `||` and routed to merge_approved_fail,
 # to a refused-merge branch or to a record gate line, so errexit never ends a
 # run without its one line.
 #
@@ -250,7 +272,8 @@
 # repository; with no git, or no repository, that gate prints
 # skipped:record-unread. coreutils `timeout` (or `gtimeout`) bounds each read
 # when present, the record gate's fetch included; merge calls are never
-# wrapped, so a merge is never cut off mid-flight.
+# wrapped, so a merge is never cut off mid-flight. `sleep` waits between the
+# re-reads of an UNKNOWN mergeStateStatus.
 
 set -euo pipefail
 
@@ -305,6 +328,10 @@ case "$MERGE_METHOD" in
   merge|squash|rebase) ;;
   *) echo "MERGE=skipped:bad-setting"; exit 0 ;;
 esac
+
+MERGE_STATE_REREADS=3
+REREAD_DELAY_SECONDS="${HIVEMIND_AUTO_MERGE_REREAD_DELAY:-5}"
+[[ "$REREAD_DELAY_SECONDS" =~ ^[0-9]{1,2}$ ]] || merge_approved_fail "bad-reread-delay"
 
 GH_READ_TIMEOUT_SECONDS=45
 GIT_FETCH_TIMEOUT_SECONDS=120
@@ -607,6 +634,26 @@ read_unmoved() {
   fi
 }
 
+# reread_after_refusal: the re-read after a refused plain merge (§5). Reads the
+# PR; while the read shows mergeStateStatus UNKNOWN, waits REREAD_DELAY_SECONDS
+# and reads again, at most MERGE_STATE_REREADS more times. Prints
+# MERGE=wait:head-moved and fails when any read shows a head other than
+# GATED_HEAD; else leaves the last read in the READ_* fields.
+reread_after_refusal() {
+  local reread_count=0
+  read_pr
+  while :; do
+    if [ "$READ_HEAD" != "$GATED_HEAD" ]; then
+      echo "MERGE=wait:head-moved"; return 1
+    fi
+    [ "$READ_MERGE_STATE" = "UNKNOWN" ] || return 0
+    [ "$reread_count" -lt "$MERGE_STATE_REREADS" ] || return 0
+    reread_count=$((reread_count + 1))
+    sleep "$REREAD_DELAY_SECONDS" </dev/null >/dev/null 2>&1 || merge_approved_fail "reread-wait-failed"
+    read_pr
+  done
+}
+
 read_pr
 gates_hold || exit 0
 
@@ -623,10 +670,7 @@ if run_merge; then
   confirm_merge "MERGE=merged"; exit 0
 fi
 
-read_pr
-if [ "$READ_HEAD" != "$GATED_HEAD" ]; then
-  echo "MERGE=wait:head-moved"; exit 0
-fi
+reread_after_refusal || exit 0
 case "$READ_MERGE_STATE" in
   DIRTY)
     echo "MERGE=skipped:conflicts" ;;
@@ -640,8 +684,10 @@ case "$READ_MERGE_STATE" in
     elif run_merge --admin; then
       confirm_merge "MERGE=merged-admin"
     else
-      echo "MERGE=skipped:refused"
+      echo "MERGE=skipped:admin-refused"
     fi ;;
+  UNKNOWN)
+    echo "MERGE=wait:merge-state-unknown" ;;
   *)
     echo "MERGE=skipped:refused" ;;
 esac
