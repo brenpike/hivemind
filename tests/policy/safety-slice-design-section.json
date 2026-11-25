@@ -1,0 +1,38 @@
+{
+  "rule": "Slice design section",
+  "description": "P3 coupling. plugin/skills/prd-to-issues/SKILL.md owns the issue body's `## Design` section. The source pin carries the section's format: the issue-body template, from the Dependencies section's \"None\" through the `## Design` heading and its Solution design, Heading, ADR, Review record and Prototype lines, so a Design section that leaves the template, or loses or reorders a line, turns the suite red. Further pins in the same file each carry one load-bearing clause: the section is the fifth and appears only under a seed epic; the count rule (exactly one Solution design line, at least one Heading line, one ADR line per ADR, exactly one Review record line) with its Prototype condition (only when `design-gate` reports ui yes); the link form (a bare path or a blob link at the trunk `design-gate` names); the seed condition's first clause, the ensure-parent call that passes the slug; its second clause with its obligation (only when ensure-parent reports seed true is the seed reused as the epic, with its body never edited); and the gate's outcomes (refuse stops and publishes nothing, pass gives each slice the Design section, any other epic slices with no Design section, no Prototype line and no refusal). The hard-rule pin carries the carve-out: no file paths or code snippets, except the `## Design` links. Deleting or inverting any pinned clause turns the suite red. Residuals: a pin proves only that these word sequences exist in the named file, not that the skill obeys them or that published issues match the format; every pin is whole-file, so a clause that moves out of its section stays green; a rewrite-around that keeps the pinned bytes, a new rule elsewhere that contradicts them, or another skill that writes issue bodies without the Design section is invisible.",
+  "source": {
+    "file": "plugin/skills/prd-to-issues/SKILL.md",
+    "pattern": "\"None\". ## Design - Solution design: [docs/initiatives/<slug>/solution-design.md](<link>) - Heading: <exact heading text> - ADR: [<path>](<link>) - Review record: [docs/initiatives/<slug>/review-record.md](<link>) - Prototype: [docs/initiatives/<slug>/prototype/index.html](<link>) ```"
+  },
+  "consumers": [
+    {
+      "file": "plugin/skills/prd-to-issues/SKILL.md",
+      "pattern": "The fifth, `## Design`, appears only under a seed epic"
+    },
+    {
+      "file": "plugin/skills/prd-to-issues/SKILL.md",
+      "pattern": "`## Design` holds exactly one Solution design line, at least one Heading line, one per solution-design heading the slice is bound by, one ADR line per ADR and exactly one Review record line. It has the Prototype line only when `design-gate` reports `\"ui\": \"yes\"`."
+    },
+    {
+      "file": "plugin/skills/prd-to-issues/SKILL.md",
+      "pattern": "A `<link>` is a bare path or `https://github.com/<owner>/<repo>/blob/<trunk>/<path>`, with `<trunk>` from `design-gate`."
+    },
+    {
+      "file": "plugin/skills/prd-to-issues/SKILL.md",
+      "pattern": "ensure-parent --existing-number <n> --slug <slug> [--repo owner/repo]"
+    },
+    {
+      "file": "plugin/skills/prd-to-issues/SKILL.md",
+      "pattern": "Only when it reports `\"seed\": true`, reuse the seed as the epic and never edit its body, so its marker line stays first."
+    },
+    {
+      "file": "plugin/skills/prd-to-issues/SKILL.md",
+      "pattern": "On `\"result\": \"refuse\"`, stop, name its `reasons`, and publish nothing. On `pass`, each slice gets the `## Design` section. Under any other epic, slice as today: no Design section, no Prototype line, no refusal."
+    },
+    {
+      "file": "plugin/skills/prd-to-issues/SKILL.md",
+      "pattern": "**No file paths or code snippets**, except the `## Design` links: no `src/...`, no module or directory names as the unit of work, no function bodies, signatures, or pseudocode."
+    }
+  ]
+}
