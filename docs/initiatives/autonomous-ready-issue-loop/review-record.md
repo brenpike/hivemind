@@ -12,7 +12,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 0
+rounds: 1
 clean_round: false
 ---
 
@@ -42,12 +42,28 @@ Review rule:
 
 ## Rounds
 
-No round of this restarted re-review has run yet.
+### Round 1
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `2a8a1e9f453592b3066c2a85d50bbe201d8fc8a1`, merge-base `eb40ed9804b7ad92498ed42a8478b8edd3311e82`.
+- **Scope:** the Review rule's round-1 scope, the change since `66c4858d`: #668's ADR-0045 amendment, "Amendment 2026-11-24"; #672's solution design Amendments entry of 2026-11-24; the PRD's `**UI:**` line. Each is checked against the whole PRD and solution design, with the part designs read as the text they supersede.
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It raised 7 findings, R1-1 to R1-7: 0 critical, 0 high, 4 medium and 3 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the merge-base. It raised 1 finding, R1-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R1-1 to R1-7 are fixed, and R1-T1 is rejected as a repeat of the maintainer's answer 1 (Decisions asked, Round 2 diminishing-returns advisory (2026-11-25)). The fixes are in the solution design's Amendments entry "2026-11-25, restarted Lair re-review round 1".
+- **Diminishing-returns check:** no signal fired on recurrence. The findings are on the containment join's seams, a surface no earlier round of this restarted review fixed; the first re-review's surfaces (the checkout requirement, #607) drew only R1-6 (low) and R1-T1 (a rejected repeat). Trend: this is round 1, so none. The standing rule applies: the strong recommended fixes are taken (Decisions asked, Standing rule clarification).
 
 ## Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
 | --- | --- | --- | --- | --- | --- |
+| R1-1 | 1 | B | medium | fixed | Strain containment's per-tick forwarder and proxy checks had no place in the tick order and no claim or remediation guard. Fixed: Seams item 5 places them; the proxy-up read is a re-taken tick guard and gates remediation; `claims: blocked proxy-down`; #608 tick cases. |
+| R1-2 | 1 | A | medium | fixed | #608 and strain containment's "Linux egress" (#604) both claimed the proxy. Fixed: #604 builds the proxy, relay and forwarder; #608 starts, stops and checks them. |
+| R1-3 | 1 | B | medium | fixed | A strain-written branch name, checked only by `git check-ref-format`, reached the rescue command the user runs. Fixed: read via the head-check helper; identifier gate and 255-byte cap; a fixed rescue text otherwise; #608 case. |
+| R1-4 | 1 | A | medium | fixed | #615 has landed (`readiness-check.sh`, snapshot mode), but Context and code truth said no check exists, and the Snapshot rule bound only #615. Fixed: code truth updated; the rule covers any change adding a GitHub field the check reads. |
+| R1-5 | 1 | A | low | fixed | The "Lair-written settings" contract missed strain containment's overrides. Fixed. |
+| R1-6 | 1 | A | low | fixed | #607's ADR-0026 amendment would record a narrowing not applied. Fixed: it states no gate is waived until the signal's entry lands. |
+| R1-7 | 1 | B | low | fixed | No case pinned the Lair's own tmux calls to `-L default`. Fixed: #608 case. |
+| R1-T1 | 1 | review | high | rejected | Local review finding `25044206254f97df512158b9acb5faf15f0477c15b774052e79974d09708f213`, "The checkout-isolation guard cannot be implemented from the stated requirement". Reason: it repeats the maintainer's answer 1 (Decisions asked, Round 2 diminishing-returns advisory (2026-11-25)), which narrowed the claim to a requirement and deferred the mechanism to #608. #608's design lands as a dated Amendments entry that stales this record before build. The finding's added cases (object alternates, shared object dirs, restart and adoption, tests) were added to #608's scope: https://github.com/brenpike/hivemind/issues/608#issuecomment-7162789441. |
 
 ## Decisions taken, listed for veto
 
@@ -270,6 +286,13 @@ First re-review round 3's calls, each taken on a strong recommendation and liste
 | First re-review R3-1's fix: the Decisions asked entry "Round 1, finding R1-T1 (2026-11-24)" gains its narrowing of 2026-11-25, and the entry "Round 2 diminishing-returns advisory (2026-11-25)" says first re-review R2-6 is fixed in this record | strong | none: it corrects this record's bookkeeping |
 | First re-review R3-T1 rejected: a round's fixes land after it and the next confirming round checks them, and round 3 was that pass for round 2's fixes | strong | scope: ADR-0046's review process; no ADR is edited, no trust, credential or merge-path change |
 | The diminishing-returns advisory after first re-review round 3, at the round cap: restart the re-review at round 1 under the standing rule, with the first re-review's rounds and findings kept under History: 2026-11-25 | strong | scope: ADR-0046's review process; the round cap and the pass rule are unchanged |
+
+Restarted re-review round 1's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked. The IDs are this restarted re-review's (Findings):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| R1-1 to R1-7, each fixed now as a contained fix in the solution design's Amendments entry "2026-11-25, restarted Lair re-review round 1" | strong | trust: R1-1 puts the proxy-up read in the tick as a guard on claims and remediation, and R1-3 gates a strain-written branch name before it reaches the rescue command; scope: R1-2 assigns the proxy, relay and forwarder to #604 and their start, stop and check to #608, and R1-4 widens the Snapshot rule to any change adding a field the readiness check reads; none for R1-5, R1-6 and R1-7; no ADR is edited, no credential or merge-path change |
+| R1-T1 rejected as a repeat of the maintainer's answer 1 (Decisions asked, Round 2 diminishing-returns advisory (2026-11-25)), its added cases moved to #608's scope | strong | scope: the checkout-isolation mechanism stays #608's to design, through a dated Amendments entry before build |
 
 ## Decisions asked
 
