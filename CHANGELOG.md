@@ -13,6 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [14.5.0] - 2026-11-25
+
+### Added
+
+- The `triage-ops.sh` subcommand `readiness <commit> --overlay <json>`: it checks a batch of issues with the shared readiness check library in one call, after applying a label and blocked-by overlay, and prints the library's JSON lines.
+- `triage-ops.sh deps-add --blocked-by-number`.
+
+### Changed
+
+- `hivemind:triage-backlog` proposes and applies `readiness:ready` only for an issue that passes the readiness check, with the reason codes in Notes. At apply it writes the native blocked-by edge for each Dependencies ref, then re-checks before applying ready.
+- `readiness:blocked` is kept only for a block with no issue link.
+
+No prose budget raised.
+
+Issue: #620.
+
 ## [14.4.2] - 2026-11-25
 
 ### Added
