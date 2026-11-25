@@ -2,7 +2,8 @@
 #
 # Behavioral unit runner for the prd-to-issues MECHANISM substrate (native sub-issues, STEP-002).
 #
-# OFFLINE jq/bash TEST — CI-runnable with ONLY jq + bash present (NO gh / network / auth). It
+# OFFLINE jq/bash/git TEST — CI-runnable with ONLY jq + bash + git present (NO gh / network /
+# auth: the live cases put a recording gh stub first on PATH and use local repositories). It
 # drives the pure transform core of:
 #   plugin/skills/prd-to-issues/scripts/subissue-ops.sh
 # via its documented offline seam (SUBISSUE_OPS_OFFLINE=1 + the --response-file injection flag),
@@ -35,6 +36,7 @@ EXPECTED_DIR="$PI_DIR/expected"
 [ -d "$PI_DIR" ] || { echo "FAIL: prd-to-issues fixture dir missing: $PI_DIR" >&2; exit 2; }
 [ -d "$EXPECTED_DIR" ] || { echo "FAIL: expected-output dir missing: $EXPECTED_DIR" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite" >&2; exit 2; }
+command -v git >/dev/null 2>&1 || { echo "FAIL: git is required to run this suite" >&2; exit 2; }
 
 make_scratch_dir TMPDIR_TEST
 trap 'rm -rf "$TMPDIR_TEST"' EXIT
@@ -116,6 +118,21 @@ run_exit1_case() {
     pass "$case_name" "exit=$status (args: $*)"
   else
     failed "$case_name" "expected nonzero exit, got 0 (args: $*; stdout: $out)"
+  fi
+}
+
+# run_exit2_case <case> -- <ops-arg...>
+# Asserts the OFFLINE script exited with EXACTLY 2 (a usage error caught before any read).
+run_exit2_case() {
+  local case_name="$1"; shift
+  [ "$1" = "--" ] && shift
+  local out status
+  out="$(SUBISSUE_OPS_OFFLINE=1 bash "$OPS" "$@" 2>/dev/null)"
+  status=$?
+  if [ "$status" -eq 2 ]; then
+    pass "$case_name" "exit=2 (args: $*)"
+  else
+    failed "$case_name" "expected exit 2, got $status (args: $*; stdout: $out)"
   fi
 }
 
@@ -395,6 +412,374 @@ for live_case in \
     failed "$cname:live-response-file-rejected" "expected exit 2, got $LIVE_STATUS (live path must reject --response-file)"
   fi
 done
+
+# ── ensure-parent --slug: seed issue marker (#617) ─────────────────────────────────
+# With --existing-number and --slug the resolve read carries the epic body; seed is true only when
+# its first line is the seed issue marker naming the slug. A CRLF marker line still counts.
+# Another initiative's marker, or no marker, gives seed false. All four fixtures share number 7
+# and id I_epic7, so one not-seed golden covers both negative cases.
+SEED_SLUG="demo-initiative"
+run_case "ensure-parent:seed-marker" "$EXPECTED_DIR/ensure-parent-seed.json" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" \
+  --response-file "$PI_DIR/ensure-parent-seed-response.json"
+run_case "ensure-parent:seed-marker-crlf" "$EXPECTED_DIR/ensure-parent-seed.json" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" \
+  --response-file "$PI_DIR/ensure-parent-seed-crlf-response.json"
+run_case "ensure-parent:other-seed-marker" "$EXPECTED_DIR/ensure-parent-not-seed.json" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" \
+  --response-file "$PI_DIR/ensure-parent-other-seed-response.json"
+run_case "ensure-parent:no-seed-marker" "$EXPECTED_DIR/ensure-parent-not-seed.json" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" \
+  --response-file "$PI_DIR/ensure-parent-no-marker-response.json"
+
+# --slug is valid only with --existing-number, and a malformed slug is a usage error: both exit 2.
+# The existing body-less resolve fixture under --slug has no string body, so it fails closed.
+run_exit2_case "ensure-parent:slug-without-existing-number-exit2" -- \
+  ensure-parent --title epic --body anchor --slug "$SEED_SLUG" \
+  --response-file "$PI_DIR/ensure-parent-seed-response.json"
+run_exit2_case "ensure-parent:malformed-slug-exit2" -- \
+  ensure-parent --existing-number 7 --slug "Demo_Initiative" \
+  --response-file "$PI_DIR/ensure-parent-seed-response.json"
+run_exit1_case "ensure-parent:slug-body-less-resolve-exit1" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" \
+  --response-file "$PI_DIR/ensure-parent-resolve-response.json"
+
+# ── Scratch git environment and the recording gh stub ──────────────────────────────
+# Git runs with a scratch HOME and no system config, so no user hook, template or signing setting
+# reaches the scratch repositories. The gh stub records the first two argv words of every call and
+# answers `api graphql` with the file named by SUBISSUE_TEST_GH_RESPONSE; any other call exits 1.
+export HOME="$TMPDIR_TEST/home"
+export GIT_CONFIG_NOSYSTEM=1
+export GIT_AUTHOR_NAME=subissue-test GIT_AUTHOR_EMAIL=subissue-test@example.invalid
+export GIT_COMMITTER_NAME=subissue-test GIT_COMMITTER_EMAIL=subissue-test@example.invalid
+mkdir -p "$HOME" || { echo "FAIL: cannot create scratch HOME" >&2; exit 2; }
+
+GH_STUB_DIR="$TMPDIR_TEST/gh-bin"
+GH_LOG="$TMPDIR_TEST/gh-calls.log"
+mkdir -p "$GH_STUB_DIR" || { echo "FAIL: cannot create the gh stub dir" >&2; exit 2; }
+# shellcheck disable=SC2016 # the stub's own $-expansions are written literally
+printf '%s\n' '#!/bin/sh' \
+  'printf "%s %s\n" "$1" "$2" >>"$SUBISSUE_TEST_GH_LOG"' \
+  'if [ "$1 $2" = "api graphql" ]; then cat "$SUBISSUE_TEST_GH_RESPONSE"; exit 0; fi' \
+  'exit 1' >"$GH_STUB_DIR/gh" \
+  && chmod +x "$GH_STUB_DIR/gh" \
+  || { echo "FAIL: cannot write the recording gh stub" >&2; exit 2; }
+
+# setup_fail <message>: a scratch setup step failed; the suite cannot run.
+setup_fail() { echo "FAIL: setup: $1" >&2; exit 2; }
+
+# run_live_ops <dir> <gh-response> -- <ops-arg...>
+# Runs subissue-ops.sh LIVE (SUBISSUE_OPS_OFFLINE unset) in <dir> with the recording gh stub first
+# on PATH, after emptying the gh call log. Sets LIVE_OUT (stdout) and LIVE_STATUS.
+run_live_ops() {
+  local dir="$1" gh_response="$2"; shift 2
+  [ "$1" = "--" ] && shift
+  : >"$GH_LOG" || setup_fail "cannot empty the gh call log"
+  LIVE_STATUS=0
+  LIVE_OUT="$(cd "$dir" && env -u SUBISSUE_OPS_OFFLINE PATH="$GH_STUB_DIR:$PATH" \
+    SUBISSUE_TEST_GH_LOG="$GH_LOG" SUBISSUE_TEST_GH_RESPONSE="$gh_response" \
+    bash "$OPS" "$@" 2>/dev/null)" || LIVE_STATUS=$?
+}
+
+# count_gh_calls <first-two-words>: prints how many logged gh calls began with those words.
+count_gh_calls() { grep -c -x -F -- "$1" "$GH_LOG"; }
+
+# ── ensure-parent --slug: live seed resolve ────────────────────────────────────────
+# Live with --repo, the seed resolve makes exactly ONE `api graphql` call and never creates or
+# edits an issue, so the seed's marker line stays first. A second run gives the same output: no
+# duplicate epic.
+SEED_GOLDEN="$(canon <"$EXPECTED_DIR/ensure-parent-seed.json")"
+SEED_FIRST_OUT=""
+for seed_run in 1 2; do
+  run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo demo-owner/demo-repo
+  seed_actual="$(printf '%s' "$LIVE_OUT" | canon 2>/dev/null)"
+  graphql_calls="$(count_gh_calls "api graphql")"
+  total_calls="$(wc -l <"$GH_LOG" | tr -d ' ')"
+  if [ "$LIVE_STATUS" -eq 0 ] && [ "$seed_actual" = "$SEED_GOLDEN" ] \
+    && [ "$graphql_calls" = 1 ] && [ "$total_calls" = 1 ]; then
+    pass "ensure-parent:live-seed-resolve-run$seed_run" "one api graphql call, no issue create or edit"
+  else
+    failed "ensure-parent:live-seed-resolve-run$seed_run" "status=$LIVE_STATUS graphql=$graphql_calls total=$total_calls
+    gh calls: $(tr '\n' ';' <"$GH_LOG")
+    expected: $SEED_GOLDEN
+    actual:   $seed_actual"
+  fi
+  [ "$seed_run" = 1 ] && SEED_FIRST_OUT="$LIVE_OUT"
+done
+if [ -n "$LIVE_OUT" ] && [ "$LIVE_OUT" = "$SEED_FIRST_OUT" ]; then
+  pass "ensure-parent:live-seed-rerun-identical" "second run output equals the first"
+else
+  failed "ensure-parent:live-seed-rerun-identical" "first: $SEED_FIRST_OUT second: $LIVE_OUT"
+fi
+
+# A malformed slug, and --slug without --existing-number, exit 2 live BEFORE any gh call.
+for slug_case in \
+  "malformed-slug:--existing-number 7 --slug demo--initiative --repo demo-owner/demo-repo" \
+  "slug-without-existing-number:--title epic --body anchor --slug demo-initiative --repo demo-owner/demo-repo" ; do
+  cname="${slug_case%%:*}"
+  # shellcheck disable=SC2086 # intentional word-split of the fixed, author-static arg string
+  run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+    ensure-parent ${slug_case#*:}
+  if [ "$LIVE_STATUS" -eq 2 ] && [ ! -s "$GH_LOG" ]; then
+    pass "ensure-parent:live-$cname-exit2" "exit=2, no gh call"
+  else
+    failed "ensure-parent:live-$cname-exit2" "status=$LIVE_STATUS gh calls: $(tr '\n' ';' <"$GH_LOG")"
+  fi
+done
+
+# ── design-gate: offline, one scratch repository per case ──────────────────────────
+# Each case builds its own scratch repository, commits a design state on branch main and writes a
+# --trunk-response-file holding that commit's id. design-gate reads every document at the commit
+# through the shared readiness check library, so work-tree files never count.
+DG_SLUG="demo-initiative"
+DG_PRD="docs/prds/$DG_SLUG.md"
+DG_INDEX="docs/initiatives/$DG_SLUG/prototype/index.html"
+DG_NOTES="docs/initiatives/$DG_SLUG/prototype/notes.md"
+DG_RECORD="docs/initiatives/$DG_SLUG/review-record.md"
+DG_REPO_SEQ=0
+
+# create_repo <var> [<branch>]: assigns <var> a fresh scratch repository under TMPDIR_TEST whose
+# HEAD names refs/heads/<branch> (default main).
+create_repo() {
+  local repo_dir branch="${2:-main}"
+  DG_REPO_SEQ=$((DG_REPO_SEQ + 1))
+  repo_dir="$TMPDIR_TEST/repo.$DG_REPO_SEQ"
+  git init -q "$repo_dir" || setup_fail "git init $repo_dir"
+  git -C "$repo_dir" symbolic-ref HEAD "refs/heads/$branch" || setup_fail "symbolic-ref in $repo_dir"
+  printf -v "$1" '%s' "$repo_dir"
+}
+
+# write_file <repo> <path> <bytes>: writes <bytes> to <path> in the work tree of <repo>.
+write_file() {
+  mkdir -p "$1/$(dirname "$2")" && printf '%s' "$3" >"$1/$2" || setup_fail "cannot write $1/$2"
+}
+
+# copy_prd <repo> <fixture-name>: places a PRD fixture at the demo initiative's PRD path.
+copy_prd() {
+  mkdir -p "$1/docs/prds" && cp "$PI_DIR/$2" "$1/$DG_PRD" || setup_fail "cannot copy $2"
+}
+
+# remove_file <repo> <path>: deletes one work-tree file of <repo>.
+remove_file() {
+  rm -f -- "${1:?}/${2:?}" || setup_fail "cannot remove $1/$2"
+}
+
+# hash_path <repo> <path>: prints the blob id of the work-tree file, or of empty bytes when absent.
+hash_path() {
+  if [ -e "$1/$2" ]; then
+    git -C "$1" hash-object -- "$2"
+  else
+    printf '' | git -C "$1" hash-object --stdin
+  fi
+}
+
+# write_record <repo> <verdict> <rounds> <open-medium> <clean-round> <stamp-path>...
+# Writes the review record whose front matter stamps each <stamp-path> with its work-tree blob id.
+write_record() {
+  local repo="$1" verdict="$2" rounds="$3" medium="$4" clean="$5" path blob
+  local record=$'---\nstamps:\n'
+  shift 5
+  for path in "$@"; do
+    blob="$(hash_path "$repo" "$path")" || setup_fail "hash-object $path"
+    record+="  - path: $path"$'\n'"    blob: $blob"$'\n'
+  done
+  record+="verdict: $verdict"$'\nopen:\n  critical: 0\n  high: 0\n'
+  record+="  medium: $medium"$'\n  low: 0\n'"rounds: $rounds"$'\n'"clean_round: $clean"$'\n---\n\n# Review record\n'
+  write_file "$repo" "$DG_RECORD" "$record"
+}
+
+# stage_passing_design <repo>: writes a UI yes PRD, both prototype files and a passing record
+# stamping both with their blob ids, without committing.
+stage_passing_design() {
+  copy_prd "$1" design-gate-prd-ui-yes.md
+  write_file "$1" "$DG_INDEX" $'<!doctype html>\n<title>Demo</title>\n'
+  write_file "$1" "$DG_NOTES" $'# Prototype notes\n\nDemo screen.\n'
+  write_record "$1" pass 2 0 true "$DG_INDEX" "$DG_NOTES"
+}
+
+# commit_paths <repo> [<path>...]: commits exactly <path>... (default: the whole work tree).
+commit_paths() {
+  local repo="$1"; shift
+  if [ "$#" -eq 0 ]; then
+    git -C "$repo" add -A || setup_fail "git add in $repo"
+  else
+    git -C "$repo" add -- "$@" || setup_fail "git add in $repo"
+  fi
+  git -C "$repo" -c commit.gpgsign=false commit -q --no-verify -m "design state" \
+    || setup_fail "git commit in $repo"
+}
+
+# write_trunk_response <file> <name> <oid>: writes a repository.defaultBranchRef response.
+write_trunk_response() {
+  jq -n -c --arg name "$2" --arg oid "$3" \
+    '{data: {repository: {defaultBranchRef: {name: $name, target: {oid: $oid}}}}}' >"$1" \
+    || setup_fail "cannot write $1"
+}
+
+# run_design_gate <repo> <trunk-file>: runs design-gate OFFLINE in <repo>. Sets DG_OUT, DG_STATUS.
+run_design_gate() {
+  DG_STATUS=0
+  DG_OUT="$(cd "$1" && SUBISSUE_OPS_OFFLINE=1 bash "$OPS" design-gate --slug "$DG_SLUG" \
+    --trunk-response-file "$2" 2>/dev/null)" || DG_STATUS=$?
+}
+
+# assert_design_case <case> <repo> <ui> <result> <reasons-json>
+# Writes a trunk response naming main at the repository's HEAD commit, runs design-gate offline
+# and asserts exit 0 and exactly {commit, trunk:"main", slug, ui, result, reasons}.
+assert_design_case() {
+  local case_name="$1" repo="$2" ui="$3" result="$4" reasons="$5" commit trunk_file
+  commit="$(git -C "$repo" rev-parse HEAD)" || setup_fail "rev-parse HEAD in $repo"
+  trunk_file="$repo.trunk.json"
+  write_trunk_response "$trunk_file" main "$commit"
+  run_design_gate "$repo" "$trunk_file"
+  if [ "$DG_STATUS" -eq 0 ] && printf '%s' "$DG_OUT" | jq -e --arg commit "$commit" \
+      --arg slug "$DG_SLUG" --arg ui "$ui" --arg result "$result" --argjson reasons "$reasons" '
+      (keys | sort) == ["commit","reasons","result","slug","trunk","ui"]
+      and .commit == $commit and .trunk == "main" and .slug == $slug
+      and .ui == $ui and .result == $result and .reasons == $reasons' >/dev/null 2>&1; then
+    pass "$case_name" "ui=$ui result=$result reasons=$reasons"
+  else
+    failed "$case_name" "status=$DG_STATUS expected ui=$ui result=$result reasons=$reasons
+    actual: $DG_OUT"
+  fi
+}
+
+# UI no passes; a PRD with no UI line reads as no and passes.
+create_repo DG_REPO; copy_prd "$DG_REPO" design-gate-prd-ui-no.md; commit_paths "$DG_REPO"
+assert_design_case "design-gate:ui-no-pass" "$DG_REPO" no pass '[]'
+create_repo DG_REPO; copy_prd "$DG_REPO" design-gate-prd-no-ui-line.md; commit_paths "$DG_REPO"
+assert_design_case "design-gate:no-ui-line-pass" "$DG_REPO" no pass '[]'
+
+# UI yes with both prototype files and a passing record stamping both passes.
+create_repo DG_REPO; stage_passing_design "$DG_REPO"; commit_paths "$DG_REPO"
+assert_design_case "design-gate:ui-yes-pass" "$DG_REPO" yes pass '[]'
+
+# A missing index.html, or notes.md committed as a symlink, fails the Document existence test.
+create_repo DG_REPO; stage_passing_design "$DG_REPO"; remove_file "$DG_REPO" "$DG_INDEX"
+commit_paths "$DG_REPO"
+assert_design_case "design-gate:index-missing-refuse" "$DG_REPO" yes refuse '["prototype_missing"]'
+create_repo DG_REPO; stage_passing_design "$DG_REPO"; remove_file "$DG_REPO" "$DG_NOTES"
+ln -s index.html "$DG_REPO/$DG_NOTES" || setup_fail "symlink notes.md"
+commit_paths "$DG_REPO"
+assert_design_case "design-gate:notes-symlink-refuse" "$DG_REPO" yes refuse '["prototype_missing"]'
+
+# No docs/initiatives/<slug>/ at all: both prototype_missing and record_missing.
+create_repo DG_REPO; copy_prd "$DG_REPO" design-gate-prd-ui-yes.md; commit_paths "$DG_REPO"
+assert_design_case "design-gate:no-initiative-dir-refuse" "$DG_REPO" yes refuse \
+  '["prototype_missing","record_missing"]'
+
+# Each pass-rule clause maps to its own code.
+create_repo DG_REPO; stage_passing_design "$DG_REPO"
+write_record "$DG_REPO" fail 2 0 true "$DG_INDEX" "$DG_NOTES"; commit_paths "$DG_REPO"
+assert_design_case "design-gate:verdict-fail-refuse" "$DG_REPO" yes refuse '["record_not_passed"]'
+create_repo DG_REPO; stage_passing_design "$DG_REPO"
+write_record "$DG_REPO" pass 4 0 true "$DG_INDEX" "$DG_NOTES"; commit_paths "$DG_REPO"
+assert_design_case "design-gate:rounds-4-refuse" "$DG_REPO" yes refuse '["record_rounds_exceeded"]'
+create_repo DG_REPO; stage_passing_design "$DG_REPO"
+write_record "$DG_REPO" pass 2 1 true "$DG_INDEX" "$DG_NOTES"; commit_paths "$DG_REPO"
+assert_design_case "design-gate:open-medium-refuse" "$DG_REPO" yes refuse '["record_open"]'
+
+# A record stamping only index.html leaves notes.md unstamped.
+create_repo DG_REPO; stage_passing_design "$DG_REPO"
+write_record "$DG_REPO" pass 2 0 true "$DG_INDEX"; commit_paths "$DG_REPO"
+assert_design_case "design-gate:notes-unstamped-refuse" "$DG_REPO" yes refuse \
+  '["record_unstamped:docs/initiatives/demo-initiative/prototype/notes.md"]'
+
+# Front matter that does not parse gives record_malformed.
+create_repo DG_REPO; stage_passing_design "$DG_REPO"
+write_file "$DG_REPO" "$DG_RECORD" $'---\nverdict: pass\n---\n\n# Review record\n'
+commit_paths "$DG_REPO"
+assert_design_case "design-gate:record-malformed-refuse" "$DG_REPO" yes refuse '["record_malformed"]'
+
+# Prototype files present only in the work tree, never committed, still refuse.
+create_repo DG_REPO; stage_passing_design "$DG_REPO"
+commit_paths "$DG_REPO" "$DG_PRD" "$DG_RECORD"
+if [ -f "$DG_REPO/$DG_INDEX" ] && [ -f "$DG_REPO/$DG_NOTES" ]; then
+  assert_design_case "design-gate:work-tree-only-prototype-refuse" "$DG_REPO" yes refuse \
+    '["prototype_missing"]'
+else
+  failed "design-gate:work-tree-only-prototype-refuse" "setup lost the work-tree prototype files"
+fi
+
+# A commit id absent from the repository, or a branch name in its place, exits nonzero with no
+# output.
+create_repo DG_REPO; copy_prd "$DG_REPO" design-gate-prd-ui-no.md; commit_paths "$DG_REPO"
+for dg_oid_case in "absent-commit:0123456789abcdef0123456789abcdef01234567" "branch-name:main"; do
+  cname="${dg_oid_case%%:*}"
+  write_trunk_response "$DG_REPO.$cname.json" main "${dg_oid_case#*:}"
+  run_design_gate "$DG_REPO" "$DG_REPO.$cname.json"
+  if [ "$DG_STATUS" -ne 0 ] && [ -z "$DG_OUT" ]; then
+    pass "design-gate:$cname-exit-nonzero" "exit=$DG_STATUS, no output"
+  else
+    failed "design-gate:$cname-exit-nonzero" "status=$DG_STATUS output: $DG_OUT"
+  fi
+done
+
+# --trunk-response-file without SUBISSUE_OPS_OFFLINE is rejected (exit 2) before any gh call.
+DG_HEAD="$(git -C "$DG_REPO" rev-parse HEAD)" || setup_fail "rev-parse HEAD in $DG_REPO"
+write_trunk_response "$DG_REPO.live-reject.json" main "$DG_HEAD"
+run_live_ops "$DG_REPO" "$DG_REPO.live-reject.json" -- \
+  design-gate --slug "$DG_SLUG" --trunk-response-file "$DG_REPO.live-reject.json"
+if [ "$LIVE_STATUS" -eq 2 ] && [ ! -s "$GH_LOG" ]; then
+  pass "design-gate:live-response-file-rejected" "exit=2, no gh call"
+else
+  failed "design-gate:live-response-file-rejected" "status=$LIVE_STATUS gh calls: $(tr '\n' ';' <"$GH_LOG")"
+fi
+
+# ── design-gate: live, local bare origin ───────────────────────────────────────────
+# A source repository pushes a passing UI yes design to a local bare origin. A consumer repository
+# that lacks that commit runs design-gate live: the gh stub answers defaultBranchRef with origin's
+# main commit id and the fetch brings the commit in. The fetch writes FETCH_HEAD only: the
+# consumer's refs, local branches and remote-tracking refs alike, are unchanged, and the result
+# equals the offline run's.
+create_repo DG_SOURCE; stage_passing_design "$DG_SOURCE"; commit_paths "$DG_SOURCE"
+DG_LIVE_COMMIT="$(git -C "$DG_SOURCE" rev-parse HEAD)" || setup_fail "rev-parse source HEAD"
+DG_ORIGIN="$TMPDIR_TEST/origin.git"
+git init -q --bare "$DG_ORIGIN" || setup_fail "git init --bare"
+git -C "$DG_SOURCE" push -q "$DG_ORIGIN" main:refs/heads/main || setup_fail "push to origin"
+create_repo DG_CONSUMER work
+write_file "$DG_CONSUMER" README.md $'consumer\n'; commit_paths "$DG_CONSUMER"
+git -C "$DG_CONSUMER" remote add origin "$DG_ORIGIN" || setup_fail "remote add origin"
+DG_LIVE_TRUNK="$TMPDIR_TEST/live-trunk.json"
+write_trunk_response "$DG_LIVE_TRUNK" main "$DG_LIVE_COMMIT"
+
+if git -C "$DG_CONSUMER" cat-file -e "$DG_LIVE_COMMIT" 2>/dev/null; then
+  setup_fail "consumer already holds the origin commit"
+fi
+DG_REFS_BEFORE="$(git -C "$DG_CONSUMER" for-each-ref --format='%(refname) %(objectname)')" \
+  || setup_fail "for-each-ref before"
+run_live_ops "$DG_CONSUMER" "$DG_LIVE_TRUNK" -- \
+  design-gate --slug "$DG_SLUG" --repo demo-owner/demo-repo
+DG_LIVE_OUT="$LIVE_OUT"
+DG_LIVE_STATUS="$LIVE_STATUS"
+DG_LIVE_GRAPHQL="$(count_gh_calls "api graphql")"
+DG_REFS_AFTER="$(git -C "$DG_CONSUMER" for-each-ref --format='%(refname) %(objectname)')" \
+  || setup_fail "for-each-ref after"
+
+if [ "$DG_LIVE_STATUS" -eq 0 ] && [ "$DG_LIVE_GRAPHQL" = 1 ] && printf '%s' "$DG_LIVE_OUT" \
+    | jq -e --arg commit "$DG_LIVE_COMMIT" \
+      '.commit == $commit and .trunk == "main" and .ui == "yes" and .result == "pass"
+       and .reasons == []' >/dev/null 2>&1; then
+  pass "design-gate:live-pass" "one api graphql call, commit fetched"
+else
+  failed "design-gate:live-pass" "status=$DG_LIVE_STATUS graphql=$DG_LIVE_GRAPHQL output: $DG_LIVE_OUT"
+fi
+if [ "$DG_REFS_AFTER" = "$DG_REFS_BEFORE" ] \
+  && ! git -C "$DG_CONSUMER" rev-parse --verify -q refs/remotes/origin/main >/dev/null \
+  && ! git -C "$DG_CONSUMER" rev-parse --verify -q refs/heads/main >/dev/null \
+  && grep -q -F "$DG_LIVE_COMMIT" "$DG_CONSUMER/.git/FETCH_HEAD" 2>/dev/null; then
+  pass "design-gate:live-fetch-head-only" "no local branch, no remote-tracking ref"
+else
+  failed "design-gate:live-fetch-head-only" "refs before: $DG_REFS_BEFORE
+    refs after:  $DG_REFS_AFTER"
+fi
+run_design_gate "$DG_CONSUMER" "$DG_LIVE_TRUNK"
+if [ "$DG_STATUS" -eq 0 ] && [ -n "$DG_OUT" ] && [ "$DG_OUT" = "$DG_LIVE_OUT" ]; then
+  pass "design-gate:live-equals-offline" "live and offline output identical"
+else
+  failed "design-gate:live-equals-offline" "live: $DG_LIVE_OUT offline: $DG_OUT (status $DG_STATUS)"
+fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────────
 echo

@@ -134,6 +134,7 @@ ENTRY_ROWS=(
     "plugin/skills/github-review-loop/scripts/reply-resolve.sh|SCRIPT_DIR|replyresolve_fail|cannot-self-locate"
     "plugin/skills/design-review/scripts/design-review.sh|script_dir|design_review_fail|cannot-self-locate"
     "plugin/skills/triage-backlog/scripts/triage-ops.sh|script_dir|triage_ops_fail|$SELF_LOCATE_REASON"
+    "plugin/skills/prd-to-issues/scripts/subissue-ops.sh|script_dir|subissue_ops_fail|$SELF_LOCATE_REASON"
 )
 
 POLL_SCRIPT_PATH='plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh'
@@ -163,6 +164,7 @@ STAGE2_ROWS=(
     "plugin/skills/github-review-loop/scripts/ledger-reconstruct.sh|plugin_root|../../..|cannot-resolve-plugin-root"
     "plugin/skills/design-review/scripts/design-review.sh|shared_dir|../../_shared|cannot-resolve-shared-dir"
     "plugin/skills/triage-backlog/scripts/triage-ops.sh|shared_dir|../../_shared|cannot resolve skills/_shared from the script directory; refusing to proceed"
+    "plugin/skills/prd-to-issues/scripts/subissue-ops.sh|shared_dir|../../_shared|cannot resolve skills/_shared from the script directory; refusing to proceed"
 )
 
 # build_std_source_row <path> <path-expr dir> <lib> -> prints a SOURCE_ROWS row carrying the
@@ -226,6 +228,7 @@ SOURCE_ROWS=(
     'plugin/skills/github-review-loop/scripts/merge-approved.sh|$SCRIPT_DIR/../../_shared/record-verify.sh|missing-record-verify|unparseable-record-verify|record-verify.sh'
     'plugin/skills/design-review/scripts/design-review.sh|$shared_dir/readiness-check.sh|missing-readiness-check|unparseable-readiness-check|readiness-check.sh'
     'plugin/skills/design-review/scripts/design-review.sh|$shared_dir/record-verify.sh|missing-record-verify|unparseable-record-verify|record-verify.sh'
+    "$(build_std_source_row plugin/skills/prd-to-issues/scripts/subissue-ops.sh '$shared_dir' readiness-check.sh)"
 )
 
 # ── Table helpers ───────────────────────────────────────────────────────────
@@ -268,6 +271,7 @@ emitter_contract() {
         merge_approved_fail) EC_RC=1; EC_CHANNEL=out; EC_PREFIX='MERGE_ERROR=' ;;
         design_review_fail) EC_RC=2; EC_CHANNEL=err; EC_PREFIX='design-review-error: ' ;;
         triage_ops_fail)  EC_RC=1; EC_CHANNEL=err; EC_PREFIX='triage-ops: ' ;;
+        subissue_ops_fail) EC_RC=2; EC_CHANNEL=err; EC_PREFIX='subissue-ops: ' ;;
         *) return 1 ;;
     esac
 }
