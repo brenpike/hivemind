@@ -23,7 +23,7 @@ Stop and report, writing no design, when:
 - the slug does not match;
 - the PRD is missing;
 - the UI line is invalid;
-- the PRD says `**UI:** yes` and either prototype file is missing, or `notes.md` has no filled `## Verdict` section: the UI prototype stage is not done, so the design is out of order.
+- the PRD says `**UI:** yes` and the UI prototype stage is not done, so the design is out of order: `index.html` or `notes.md` is missing, or `notes.md` has no filled `## Verdict` section.
 
 When the design file exists, read it and return it revised, keeping what the PRD change does not touch. A design whose first non-blank line after its `# ` title is exactly `**Status:** delivered` is history: never change it; stop and report it.
 
