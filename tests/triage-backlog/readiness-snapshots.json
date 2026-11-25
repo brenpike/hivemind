@@ -1,0 +1,493 @@
+{
+  "untriaged": {
+    "201": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": []
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "applied": {
+    "201": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:high"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:low"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150,
+            "state": "OPEN"
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "dropped": {
+    "201": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:high"
+          },
+          {
+            "name": "difficulty:low"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150,
+            "state": "OPEN"
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "no-edge": {
+    "201": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:high"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:low"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": []
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ready": {
+    "201": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:high"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:low"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150,
+            "state": "OPEN"
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "locked": {
+    "201": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:high"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:low"
+          },
+          {
+            "name": "triage:locked"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150,
+            "state": "OPEN"
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "batch": {
+    "201": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:high"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:low"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150,
+            "state": "OPEN"
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ]
+        }
+      }
+    },
+    "202": {
+      "number": 202,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": []
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150,
+            "state": "OPEN"
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "truncated": {
+    "201": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:high"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:low"
+          }
+        ],
+        "pageInfo": {
+          "hasNextPage": true
+        }
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150,
+            "state": "OPEN"
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "malformed": {
+    "201": {
+      "number": 201,
+      "state": "UNKNOWN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:high"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:low"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150,
+            "state": "OPEN"
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
