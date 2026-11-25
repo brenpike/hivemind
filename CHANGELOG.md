@@ -13,6 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [14.6.0] - 2026-11-25
+
+### Added
+
+- The `hivemind:solution-design` skill: turns a PRD into solution design content with every template section, each decision naming its ADR or the ADR condition it fails. It writes no file.
+- The Design-decision rule in `plugin/governance/decision-autonomy.md` (Review Calls).
+- The consumer-assertion fixture `tests/policy/safety-design-decision-rule.json`.
+- The offline suite `tools/test_solution_design.sh` with its Lair fixture run in `tests/solution-design/`, registered in `tools/validate.sh`.
+
+### Changed
+
+- README and the website list `hivemind:solution-design` in their Skills rows.
+
+No prose budget raised. New budget entry for `solution-design`.
+
+Issue: #616.
+
 ## [14.5.0] - 2026-11-25
 
 ### Added

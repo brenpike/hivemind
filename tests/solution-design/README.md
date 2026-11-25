@@ -28,6 +28,16 @@ against that library:
 - every heading in the file is unique;
 - `## Open questions` reads exactly `None`;
 - the design is not marked `**Status:** delivered`;
-- each `### D<n>:` decision names its ADR or writes `No ADR: fails <condition>`;
+- every template section is filled, except `## Open questions` and
+  `## Amendments`;
+- the library's design check prints no reason code for the fixture;
+- each `### D<n>:` decision under `## Decisions` names its ADR or writes
+  `No ADR: fails <condition>`;
 - the `## ` sections of the template in `SKILL.md` match the library's
   section list, in the same order.
+
+Each check except the no-code check also runs on a scratch copy changed to
+break it, and must fail there: a section dropped, two sections swapped, a
+duplicate heading, `## Open questions` not `None`, the design marked
+delivered, a section emptied, a decision with no ADR line, and two sections
+swapped in the `SKILL.md` template.
