@@ -12,7 +12,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 0
+rounds: 1
 clean_round: false
 ---
 
@@ -42,12 +42,24 @@ Review rule:
 
 ## Rounds
 
-No round of this fifth re-review has run yet.
+### Round 1
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `879f4e3cd9d1cced56ac4cd6231209dddc789951`, merge-base `eb40ed9804b7ad92498ed42a8478b8edd3311e82`.
+- **Scope:** the Review rule's round-1 scope.
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It raised 3 findings, R1-1 to R1-3: 0 critical, 0 high, 2 medium and 1 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the merge-base. It raised 1 finding, R1-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R1-T1 and R1-3 are fixed (solution design, entry "2026-11-25, fifth Lair re-review round 1"), R1-1 is deferred with full scope to #608, and R1-2 is a recorded residual (Residuals).
+- **Diminishing-returns advisory:** recurrence: R1-T1 is on the upstream-proxy path that third re-review R1-T1's withdrawn fix covered. Trend: this is round 1, so none. The maintainer was asked and answered A (Decisions asked, Fifth re-review round 1 question (2026-11-25)).
 
 ## Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
 | --- | --- | --- | --- | --- | --- |
+| R1-T1 | 1 | review | high | fixed | Local review finding `c5df4a787cfc125962bb8ead2b7ed066698b704efc3342f699fa478056f1dd3d`, "Upstream proxy bypasses the local-address containment check": with the user's proxy settings set, the Lair's proxy forwards through that proxy, which resolves and connects itself, so the local-address refusal does not bound what it reaches. Fixed by narrowing the claim at the maintainer's answer A (Decisions asked, Fifth re-review round 1 question (2026-11-25)): no new refusal; Trust boundaries states that a strain reaches what that proxy reaches, within strain containment's residual "network egress with the user's credentials". |
+| R1-1 | 1 | B | medium | deferred | The proxy stops at Lair Stop, so strains in flight lose their only Linux network route until the next Start; their runs end `failed`, `stalled` or `timed-out` and count toward the breaker. Deferred with full scope to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7167068920)). Bounded impact: no proxy exists until #604 and #608 build it. |
+| R1-2 | 1 | B | medium | recorded | A strain can add `refs/replace/` refs or overwrite objects in the shared store, so strain launch's start configuration check, the moved-head check and Lair-mode `spawn-brood.sh`, which read that store without `--no-replace-objects`, could read substituted commits. Recorded as a residual under the maintainer's threat model (Decisions asked, Fifth re-review round 1 question (2026-11-25)), in this record's Residuals ([review-record.md](review-record.md)): it falls within [strain containment](strain-containment-design.md)'s residual "the shared object and ref store". |
+| R1-3 | 1 | B | low | fixed | Seams item 5's lead clause had #610 apply the proxy-up gate to remediation dispatch with no "On Linux", so macOS, which runs no proxy, would never dispatch a remediation. Fixed: the clause begins "on Linux" (solution design, entry "2026-11-25, fifth Lair re-review round 1"). |
 
 ## Decisions taken, listed for veto
 
@@ -338,6 +350,14 @@ Fourth re-review round 3's calls, each taken on a strong recommendation and list
 | Fourth re-review R3-1 fixed in this record: fourth re-review round 2's line is the `Diminishing-returns advisory:` line, and Fourth re-review round 2's calls gain the keep-going row | strong | none: it corrects this record's bookkeeping |
 | Fourth re-review R3-T1 rejected as a repeat of first re-review R3-T1, rejected and recorded (Decisions taken, listed for veto, First re-review round 3's calls) | strong | none: round 3 is the confirming round; no ADR is edited, no trust, credential or merge-path change |
 
+Fifth re-review round 1's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); R1-T1 was asked (Decisions asked, Fifth re-review round 1 question (2026-11-25)):
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| R1-1 deferred with full scope to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7167068920)) | strong | scope: it moves a #608 detail to #608's issue |
+| R1-2 recorded as a residual under the maintainer's threat model | strong | trust: it follows the maintainer's answer A and accepts no risk beyond strain containment's residual "the shared object and ref store" |
+| R1-3 fixed now: item 5's #610 clause begins "on Linux" | strong | none |
+
 ## Decisions asked
 
 - **Design-decision rule update.** The user's rule update of 2026-11-22, landed on `main` by PR #649 as the ADR-0046 amendment of 2026-11-22 to decision 8 and merged into this branch at `b9ca37df`. A design-stage decision with a strong recommendation is taken and listed for veto whatever it touches: PRD scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change. Only a decision with a weak or absent recommendation and an action that is irreversible now, outside the unmerged pull request, are asked. This record lists each taken decision with its recommendation strength and what it touches, in every table (Decisions taken, listed for veto). Every restarted round 2 fix had a strong recommendation, so none was asked.
@@ -401,6 +421,12 @@ Fourth re-review round 3's calls, each taken on a strong recommendation and list
   - Reply, verbatim: "1".
   - Outcome: answer 1. The re-review restarts at round 1 as the fifth re-review, with the fourth re-review's rounds and findings kept under History: 2026-11-25 (third restart).
 
+- **Fifth re-review round 1 question (2026-11-25).** Asked after the fifth re-review's round 1, on the local review tool's high finding R1-T1. The maintainer answered A on 2026-11-25.
+  - The question: with the user's proxy settings set, the Lair's proxy hands traffic to that proxy, so a strain reaches what it reaches. Options: A, state that plainly as part of strain containment's accepted egress risk, with nothing new blocked (recommended); B, refuse to start with proxy settings set, the piece vetoed with the private-network rule (Third re-review round 2 advisory (2026-11-25)).
+  - Reply, verbatim: "How is this fucking risky. My god. Is my machine compromised? What the fuck are you wasting my tokens trying to optimize for? Do I work for the US government? Jesus christ".
+  - Follow-up, verbatim: "Is the strain less secure than if I were to be running the same workload in my main sesssion on the same machine? No. So wtf are we doing".
+  - Outcome: answer A. Applied: the solution design's Amendments entry "2026-11-25, fifth Lair re-review round 1"; R1-T1 is fixed, and R1-2 is recorded under Residuals. Standing threat model for this design: the baseline is parity with the maintainer's own session: a strain must be no less safe than the same work run in the maintainer's main session on the same machine, which strain containment already exceeds. A later finding that asks for hardening beyond that baseline repeats this decision and is rejected (critical or high) or recorded (medium or low) citing it.
+
 ## Residuals
 
 - **A part-design edit with no Amendments entry stales no stamp.**
@@ -408,6 +434,11 @@ Fourth re-review round 3's calls, each taken on a strong recommendation and list
   - Ground: the stamp path allowlist (idea-to-ready design, Contracts and seams, "Slice design section format") admits no other file of this folder than the solution design and this record, so no part design can be stamped.
   - Bounded impact: a docs pull request never takes the Lair's auto tier (solution design, Component "Merge lane and auto tier"). The bound is the reviewer of the part-design pull request, when there is one, who sees the edit in its diff; a pull request that edits only a part design leaves this record unchanged. With `HIVEMIND_AUTO_MERGE` set, `merge-approved.sh` can merge a docs pull request after a Bot approval with no human review, the residual the idea-to-ready design records under D24.
   - Recorded: here, and under Reviewed documents.
+- **A strain can substitute commits in the shared store.**
+  - Scope: a strain can add `refs/replace/` refs or overwrite objects in the shared object and ref store, so strain launch's start configuration check, the moved-head check and Lair-mode `spawn-brood.sh`, which read that store without `--no-replace-objects`, can read substituted commits (R1-2).
+  - Ground: the maintainer's threat model (Decisions asked, Fifth re-review round 1 question (2026-11-25)): strains are not treated as attackers beyond what strain containment states.
+  - Bounded impact: the strain is an AI session the maintainer launches on the maintainer's own repository, and [strain containment](strain-containment-design.md)'s residual "the shared object and ref store" already accepts the shared store.
+  - Recorded: here.
 
 ## History: 2026-11-22
 
