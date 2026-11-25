@@ -12,7 +12,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 1
+rounds: 2
 clean_round: false
 ---
 
@@ -52,6 +52,16 @@ Review rule:
 - **Result:** not clean. Every finding is disposed below, so none is open: R1-1 to R1-7 are fixed, and R1-T1 is rejected on the maintainer's answer B (Decisions asked, Round 1, finding R1-T1 (2026-11-24)). The fixes are in the solution design's Amendments entry "2026-11-24, Lair re-review round 1".
 - **Diminishing-returns check:** no signal fired. This is round 1, so no earlier round of this re-review exists for recurrence or trend.
 
+### Round 2
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `542411ad8dc34f55c85539481c99b6093d23fa44`, previous round's reviewed commit `116241952cb82c7ce61cd0dd10dd61c3d2b26437`.
+- **Scope:** a confirming round over the change since `116241952cb82c7ce61cd0dd10dd61c3d2b26437` and round 1's fixes.
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It covered the diff and round 1's fixes, with `unfixed: none`. It raised 9 findings, R2-1 to R2-9: 0 critical, 0 high, 6 medium and 3 low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the previous round's reviewed commit. It raised 1 finding, R2-T1, high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R2-1 to R2-4, R2-7 and R2-8 are deferred to #608 on the maintainer's answer 1 (Decisions asked, Round 2 diminishing-returns advisory (2026-11-25)); R2-5, R2-6, R2-9 and R2-T1 are fixed.
+- **Diminishing-returns advisory:** fired after round 2. Recurrence: R1-T1's clone mechanism drew 7 of round 2's 10 findings, and R1-3's fix drew 1. Trend: severity did not fall, a high in each round, while each fix added surface. Options given: (1) narrow the claim and hand the rest to the slice that builds it as a tracked follow-up; (2) accept the rest as recorded residuals; (3) keep going. The maintainer's answer (2026-11-25): 1. Narrow answer B to a requirement and hand the clone mechanism to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7162158378)). Simplify R1-3.
+
 ## Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
@@ -63,7 +73,17 @@ Review rule:
 | R1-5 | 1 | A | low | fixed | Three statements of the stop "Strain containment cannot be confirmed" named the stop but not the case id. Fixed: "and the case id" added to all three. |
 | R1-6 | 1 | A | low | fixed | Part-design citations of PRD line numbers no longer match the PRD after its `**UI:**` line. Fixed: the new entry says they refer to the PRD before its `**UI:**` line. |
 | R1-7 | 1 | A | low | fixed | The 2026-11-24 entry made body edits it did not list. Fixed: the new entry names them. |
-| R1-T1 | 1 | review | high | rejected | Local review finding `2a58431ec67cd57997e612e667478ec71c07e717d6e7b103eddb5e1768885c16`, "Writable shared Git stores violate the repository's structural concurrency rule" (P16). Rejected on the maintainer's answer B (Decisions asked, Round 1, finding R1-T1 (2026-11-24)): the Lair now runs only from a clone it makes, so the user's unpushed work never shares a store with strains (solution design, Amendments entry "2026-11-24, Lair re-review round 1"). Siblings sharing the store stays strain containment's residual "the shared object and ref store", under ADR-0017's worktree model. Per-strain clones would change ADR-0017's model, `spawn-brood.sh` and `brood-status`. |
+| R1-T1 | 1 | review | high | rejected | Local review finding `2a58431ec67cd57997e612e667478ec71c07e717d6e7b103eddb5e1768885c16`, "Writable shared Git stores violate the repository's structural concurrency rule" (P16). Rejected on the maintainer's answer B (Decisions asked, Round 1, finding R1-T1 (2026-11-24)): the Lair runs only from a checkout sharing no store with the user's, so the user's unpushed work never shares a store with strains (solution design, Amendments entry "2026-11-24, Lair re-review round 1"). Siblings sharing the store stays strain containment's residual "the shared object and ref store", under ADR-0017's worktree model. Per-strain clones would change ADR-0017's model, `spawn-brood.sh` and `brood-status`. |
+| R2-1 | 2 | confirm | medium | deferred | Start's common-dir check admits a linked worktree of the clone, where the user's work would share the strains' store. Reason: the mechanism moved to the slice that builds it (Decisions asked, Round 2 diminishing-returns advisory (2026-11-25), answer 1). #608 |
+| R2-2 | 2 | confirm | medium | deferred | The clone step writes outside claim integrity's invariant Lock scope, so two clone steps can race. Reason: as R2-1. #608 |
+| R2-3 | 2 | confirm | medium | deferred | Clone-step failures have no recovery path, the record write is not crash-atomic, and no Failure modes rows exist for the codes. Reason: as R2-1. #608 |
+| R2-4 | 2 | confirm | medium | deferred | HTTPS clone credentials, no SSH fallback (P26), and the reftable default ref format. Reason: as R2-1. #608 |
+| R2-5 | 2 | confirm | medium | fixed | R1-3's "design departure" waiver could not be told apart from brief inputs. Fixed: until #607 designs a signal, decision 8 waives no architectural gate in `unattended`; the Verification case is on inputs only. |
+| R2-6 | 2 | confirm | medium | fixed | Round 1's veto list left out the calls made to apply answer B. Fixed: the round-2 veto entry lists the narrowing's calls; the mechanism's calls were removed with it. |
+| R2-7 | 2 | confirm | low | deferred | A fresh clone lacks `.claude/settings.local.json`; `brood-status`, the rescue push and start must run in the clone. Reason: as R2-1. #608 |
+| R2-8 | 2 | confirm | low | deferred | The Start check has no fixed step relative to the `extensions.refStorage` read. Reason: as R2-1. #608 |
+| R2-9 | 2 | confirm | low | fixed | #608's acceptance-criteria edit lacked the checkout requirement. Fixed in Seam order. |
+| R2-T1 | 2 | review | high | fixed | Local review finding `316072b38bd403bb30e930911be07844cf5b2eb0752aeb29e2c21ac0754dbce2`, "Clone bootstrap can strand the repository in an unrecoverable half-created state". Fixed: the bootstrap is removed from the design and answer B stays as a requirement. #608's mechanism design must make bootstrap crash-safe and recoverable (its issue comment lists this scope). |
 
 ## Decisions taken, listed for veto
 
@@ -269,6 +289,16 @@ Re-review round 1's calls, each the recommended fix of a finding, a strong recom
 | --- | --- | --- |
 | R1-1 to R1-7, each fixed now as a contained fix in the solution design's Amendments entry "2026-11-24, Lair re-review round 1" | strong | scope: R1-2 names strain containment in the sections the join left, and R1-1, R1-4, R1-6 and R1-7 add to the entry; trust: R1-3 carries ADR-0045's Amendment 2026-11-24 on #607 into the solution design; no ADR is edited, no credential or merge-path change |
 
+Round 2's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); the narrowing was asked as the round's diminishing-returns advisory and answered 1 (Decisions asked, Round 2 diminishing-returns advisory (2026-11-25)). The IDs are this re-review's, those of Findings above:
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| The narrowed requirement's wording: Start refuses a checkout that shares a store with any checkout the user works in | strong | trust, scope: it states the requirement answer B leaves; the mechanism is #608's to design |
+| #608 is the builder and designer of the mechanism, through a dated Amendments entry before build | strong | scope: the mechanism moves from this design to a slice that builds it |
+| R2-T1 disposed `fixed` by removing the defective text, with its scope moved to #608 | strong | scope: #608's mechanism design must make the bootstrap crash-safe and recoverable |
+| R2-5's simplification: decision 8 waives no architectural gate in `unattended` until #607 designs a signal | strong | merge path: no gate is waived; #607 may add a waiver with its own signal |
+| Round 1's R1-T1 application calls (the clone path, the record, the HTTPS clone and the codes) were superseded by the narrowing, so they are not listed as calls of round 1 | strong | trust, credentials: the HTTPS clone and its credential handling move to #608's design with the rest of the mechanism |
+
 ## Decisions asked
 
 - **Design-decision rule update.** The user's rule update of 2026-11-22, landed on `main` by PR #649 as the ADR-0046 amendment of 2026-11-22 to decision 8 and merged into this branch at `b9ca37df`. A design-stage decision with a strong recommendation is taken and listed for veto whatever it touches: PRD scope or acceptance criteria, an amendment of an accepted ADR, a trust-boundary, credential or merge-path change. Only a decision with a weak or absent recommendation and an action that is irreversible now, outside the unmerged pull request, are asked. This record lists each taken decision with its recommendation strength and what it touches, in every table (Decisions taken, listed for veto). Every restarted round 2 fix had a strong recommendation, so none was asked.
@@ -317,6 +347,10 @@ Re-review round 1's calls, each the recommended fix of a finding, a strong recom
 - **Round 1, finding R1-T1 (2026-11-24).** Asked after this re-review's round 1, on the local review tool's high finding R1-T1, "Writable shared Git stores violate the repository's structural concurrency rule" (P16). The maintainer answered B.
   - The question: how to dispose of R1-T1. Options: A, reject and keep the residual; B, the Lair runs only from its own clone, siblings keep sharing the store as a residual; C, per-strain clones, a redesign of ADR-0017's model.
   - Answer: "B". Applied: the solution design's Amendments entry "2026-11-24, Lair re-review round 1" states that the Lair runs only from a clone it makes, so the user's unpushed work never shares a store with strains. Siblings sharing the store stays strain containment's residual "the shared object and ref store", under ADR-0017's worktree model. R1-T1 is rejected with that reason.
+
+- **Round 2 diminishing-returns advisory (2026-11-25).** The diminishing-returns advisory (D35), asked after this re-review's round 2. The maintainer answered 1 on 2026-11-25.
+  - The question: what to do with the round's findings, 7 of 10 of which come from R1-T1's clone mechanism. Options: (1) narrow the claim and hand the rest to the slice that builds it as a tracked follow-up; (2) accept the rest as recorded residuals; (3) keep going.
+  - Answer: "1". Narrow answer B to a requirement and hand the clone mechanism to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7162158378)). Simplify R1-3. Applied: R2-1 to R2-4, R2-7 and R2-8 deferred to #608; R2-T1, R2-5, R2-6 and R2-9 fixed in the solution design; the Round 2 calls under Decisions taken, listed for veto.
 
 ## Residuals
 
