@@ -12,7 +12,7 @@ open:
   high: 0
   medium: 0
   low: 0
-rounds: 1
+rounds: 2
 clean_round: false
 ---
 
@@ -52,14 +52,27 @@ Review rule:
 - **Result:** not clean. Every finding is disposed below, so none is open: R1-T1 and R1-3 are fixed (solution design, entry "2026-11-25, fifth Lair re-review round 1"), R1-1 is deferred with full scope to #608, and R1-2 is a recorded residual (Residuals).
 - **Diminishing-returns advisory:** recurrence: R1-T1 is on the upstream-proxy path that third re-review R1-T1's withdrawn fix covered. Trend: this is round 1, so none. The maintainer was asked and answered A (Decisions asked, Fifth re-review round 1 question (2026-11-25)).
 
+### Round 2
+
+- **Date:** 2026-11-25.
+- **Reviewed commit:** `847e26ef9009dd7960deee316696beebb0fabe7c`, previous commit `879f4e3cd9d1cced56ac4cd6231209dddc789951`.
+- **Scope:** a confirming round over the change since the previous round's reviewed commit and round 1's fixes, the solution design's Amendments entry "2026-11-25, fifth Lair re-review round 1".
+- **Pass 1, planner pass:** reviewer `hivemind:cerebrate`, on cerebrate's own model (`model=default`), a fresh read-only pass with `Memory context: none`. It covered the diff and round 1's fixes and found no earlier finding unfixed (`unfixed: none`). It raised 1 finding, R2-1, low.
+- **Pass 2, local review tool pass:** reviewer the `codex-plugin` preset, through `hivemind:adaptation-cycle`, on the tool's own default model (ADR-0042 decision 7), base the previous commit `879f4e3cd9d1cced56ac4cd6231209dddc789951`. It raised 2 findings, R2-T1 and R2-T2, both high.
+- **Result:** not clean. Every finding is disposed below, so none is open: R2-1 is fixed (solution design, entry "2026-11-25, fifth Lair re-review round 2"), and R2-T1 and R2-T2 are rejected as repeats of the session-parity decision (Decisions asked, Fifth re-review round 1 question (2026-11-25)).
+- **Diminishing-returns advisory:** fired after round 2. Recurrence: R2-1 is on R1-2's disposition. Trend: severity fell to one low, which corrects wording. The maintainer's standing rule applies: a strong recommendation is taken (Decisions asked, Standing rule clarification). The conductor's recommendation, strong, taken and listed for veto: keep going to round 3 (Decisions taken, listed for veto, Fifth re-review round 2's calls).
+
 ## Findings
 
 | ID | Round | Angle | Severity | Disposition | Note |
 | --- | --- | --- | --- | --- | --- |
 | R1-T1 | 1 | review | high | fixed | Local review finding `c5df4a787cfc125962bb8ead2b7ed066698b704efc3342f699fa478056f1dd3d`, "Upstream proxy bypasses the local-address containment check": with the user's proxy settings set, the Lair's proxy forwards through that proxy, which resolves and connects itself, so the local-address refusal does not bound what it reaches. Fixed by narrowing the claim at the maintainer's answer A (Decisions asked, Fifth re-review round 1 question (2026-11-25)): no new refusal; Trust boundaries states that a strain reaches what that proxy reaches, within strain containment's residual "network egress with the user's credentials". |
 | R1-1 | 1 | B | medium | deferred | The proxy stops at Lair Stop, so strains in flight lose their only Linux network route until the next Start; their runs end `failed`, `stalled` or `timed-out` and count toward the breaker. Deferred with full scope to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7167068920)). Bounded impact: no proxy exists until #604 and #608 build it. |
-| R1-2 | 1 | B | medium | recorded | A strain can add `refs/replace/` refs or overwrite objects in the shared store, so strain launch's start configuration check, the moved-head check and Lair-mode `spawn-brood.sh`, which read that store without `--no-replace-objects`, could read substituted commits. Recorded as a residual under the maintainer's threat model (Decisions asked, Fifth re-review round 1 question (2026-11-25)), in this record's Residuals ([review-record.md](review-record.md)): it falls within [strain containment](strain-containment-design.md)'s residual "the shared object and ref store". |
+| R1-2 | 1 | B | medium | recorded | A strain can add `refs/replace/` refs or overwrite objects in the shared store, so strain launch's start configuration check, the moved-head check and Lair-mode `spawn-brood.sh`, which read that store without `--no-replace-objects`, could read substituted commits. Recorded as a residual under the maintainer's threat model (Decisions asked, Fifth re-review round 1 question (2026-11-25)), in this record's Residuals ([review-record.md](review-record.md)): it accepts, under that threat model, three Lair reads that [strain containment](strain-containment-design.md)'s residual "the shared object and ref store" does not cover (solution design, entry "2026-11-25, fifth Lair re-review round 2"). |
 | R1-3 | 1 | B | low | fixed | Seams item 5's lead clause had #610 apply the proxy-up gate to remediation dispatch with no "On Linux", so macOS, which runs no proxy, would never dispatch a remediation. Fixed: the clause begins "on Linux" (solution design, entry "2026-11-25, fifth Lair re-review round 1"). |
+| R2-1 | 2 | confirm | low | fixed | R1-2's disposition said the substitution falls within strain containment's residual "the shared object and ref store", but that residual's bullet "the Lair's own git reads use its own repository under `control/`, with replace objects off (merge lane, "Git and tool reads")" is false for the three reads R1-2 names. Fixed, wording only: the bullet holds only for the merge lane's tick reads, and R1-2's three reads are the recorded exception (solution design, entry "2026-11-25, fifth Lair re-review round 2"); R1-2's Note and Residuals reworded. |
+| R2-T1 | 2 | review | high | rejected | Local review finding `65deab31dc662e5971802c41aa17e122c22681fe315f114bc548be64bae5f6a9`, "Upstream-proxy exception leaves contradictory implementation requirements". Rejected: strain containment's Linux egress states both behaviors, the proxy checks the address it resolves and reaches remote hosts through the user's proxy settings when set, and the entry "2026-11-25, fifth Lair re-review round 1" states the consequence. Its ask, a separate upstream contract and proxy-path tests proving refusals, is hardening beyond the session-parity baseline and repeats that decision (Decisions asked, Fifth re-review round 1 question (2026-11-25)). |
+| R2-T2 | 2 | review | high | rejected | Local review finding `93211c41417323f1095317cec77285449573a70cf7c30870e607f8822ab91e20`, "Commit substitution exceeds the residual cited to accept it". Rejected: its over-claim part is R2-1, fixed; its ask, `--no-replace-objects` on every controller read, object-identity checks and adversarial tests, is hardening beyond the session-parity baseline and repeats that decision (Decisions asked, Fifth re-review round 1 question (2026-11-25)). |
 
 ## Decisions taken, listed for veto
 
@@ -355,8 +368,16 @@ Fifth re-review round 1's calls, each taken on a strong recommendation and liste
 | Decision | Recommendation strength | What it touches |
 | --- | --- | --- |
 | R1-1 deferred with full scope to #608 ([issue comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7167068920)) | strong | scope: it moves a #608 detail to #608's issue |
-| R1-2 recorded as a residual under the maintainer's threat model | strong | trust: it follows the maintainer's answer A and accepts no risk beyond strain containment's residual "the shared object and ref store" |
+| R1-2 recorded as a residual under the maintainer's threat model | strong | trust: it follows the maintainer's answer A and accepts, under that threat model, three Lair reads that strain containment's residual "the shared object and ref store" does not cover (solution design, entry "2026-11-25, fifth Lair re-review round 2") |
 | R1-3 fixed now: item 5's #610 clause begins "on Linux" | strong | none |
+
+Fifth re-review round 2's calls, each taken on a strong recommendation and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22 (Decisions asked, Standing rule clarification); none was asked:
+
+| Decision | Recommendation strength | What it touches |
+| --- | --- | --- |
+| R2-1 fixed now: wording only, in the solution design's Amendments entry "2026-11-25, fifth Lair re-review round 2" | strong | none: it corrects a claim and adds no check |
+| R2-T1 and R2-T2 rejected as repeats of the session-parity decision (Decisions asked, Fifth re-review round 1 question (2026-11-25)) | strong | trust: it follows the maintainer's answer |
+| Keep going to round 3 per the diminishing-returns advisory after fifth re-review round 2 | strong | none: the round count, within the 3-round cap |
 
 ## Decisions asked
 
@@ -437,7 +458,7 @@ Fifth re-review round 1's calls, each taken on a strong recommendation and liste
 - **A strain can substitute commits in the shared store.**
   - Scope: a strain can add `refs/replace/` refs or overwrite objects in the shared object and ref store, so strain launch's start configuration check, the moved-head check and Lair-mode `spawn-brood.sh`, which read that store without `--no-replace-objects`, can read substituted commits (R1-2).
   - Ground: the maintainer's threat model (Decisions asked, Fifth re-review round 1 question (2026-11-25)): strains are not treated as attackers beyond what strain containment states.
-  - Bounded impact: the strain is an AI session the maintainer launches on the maintainer's own repository, and [strain containment](strain-containment-design.md)'s residual "the shared object and ref store" already accepts the shared store.
+  - Bounded impact: the strain is an AI session the maintainer launches on the maintainer's own repository, and [strain containment](strain-containment-design.md)'s residual "the shared object and ref store" already accepts the shared store; its bullet on the Lair's own git reads covers only the merge lane's tick reads, not these three (solution design, entry "2026-11-25, fifth Lair re-review round 2").
   - Recorded: here.
 
 ## History: 2026-11-22

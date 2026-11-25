@@ -550,3 +550,9 @@ This entry, as any Amendments entry, stales the review record.
 R1-1 is deferred with full scope to #608 ([#608 comment](https://github.com/brenpike/hivemind/issues/608#issuecomment-7167068920)) and R1-2 is a recorded residual; neither changes text here.
 
 This entry, as any Amendments entry, stales the review record.
+
+**2026-11-25, fifth Lair re-review round 2.** This entry applies the fix of the fifth Lair re-review's round 2, run in PR #672, finding R2-1 in the [review record](review-record.md), its strong recommended fix, taken and listed for veto under ADR-0046 decision 8 as amended on 2026-11-22. The entries above stay as written; where this entry corrects them, this entry governs. It states:
+
+- Fifth re-review R2-1: [strain containment](strain-containment-design.md)'s bullet "the Lair's own git reads use its own repository under `control/`, with replace objects off (merge lane, "Git and tool reads")", under its residual "the shared object and ref store", holds only for the merge lane's tick reads. Strain launch's start configuration check, the moved-head check and Lair-mode `spawn-brood.sh` read the shared store, the recorded exception (review record, Residuals). This corrects the entry "2026-11-25, fifth Lair re-review round 1"'s "neither changes text here" for R1-2.
+
+This entry, as any Amendments entry, stales the review record.
