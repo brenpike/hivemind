@@ -330,6 +330,10 @@
                 <td>Turn an interrogated plan into a committed WHAT-only PRD.</td>
               </tr>
               <tr>
+                <td><code>hivemind:solution-design</code></td>
+                <td>Turn an initiative's PRD into the content of its solution design, with every template section filled. Resolves each design decision per the design-decision rule, naming its ADR or the ADR condition it fails; writes no file.</td>
+              </tr>
+              <tr>
                 <td><code>hivemind:design-review</code></td>
                 <td>Run one round of the design review of an initiative's PRD, solution design, ADRs and UI prototype from the main session: one fresh read-only cerebrate pass on the model <code>HIVEMIND_DESIGN_REVIEW_MODEL</code> names, plus one <code>hivemind:adaptation-cycle</code> pass when the design touches a trust boundary, credentials or the merge path. Returns the round's findings and the review record update; writes no file.</td>
               </tr>

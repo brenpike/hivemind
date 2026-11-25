@@ -421,6 +421,7 @@ All skills are invoked using the namespaced form:
 | `hivemind:plan-interrogation` | Interactive plan interview: challenges a plan against the project's domain model, sharpens terminology, and updates documentation (CONTEXT.md, ADRs) as decisions crystallise |
 | `hivemind:create-handoff` | Generate an optional session-resumption handoff doc from a plan |
 | `hivemind:plan-to-prd` | Turn an interrogated plan into a committed WHAT-only PRD |
+| `hivemind:solution-design` | Turn an initiative's PRD into the content of its solution design, with every template section filled. Resolves each design decision per the design-decision rule, naming its ADR or the ADR condition it fails; writes no file |
 | `hivemind:design-review` | Run one round of the design review of an initiative's PRD, solution design, ADRs and UI prototype from the main session: one fresh read-only cerebrate pass on the model `HIVEMIND_DESIGN_REVIEW_MODEL` names, plus one `hivemind:adaptation-cycle` pass when the design touches a trust boundary, credentials or the merge path. Returns the round's findings and the review record update; writes no file |
 | `hivemind:prd-to-issues` | Slice a PRD into vertically-sliced, brood-ready GitHub issues |
 | `hivemind:triage-backlog` | Judgment-driven triage of the entire open GitHub issue backlog across 7 mutually-exclusive label families (readiness/type/effort/moscow/priority/risk/difficulty) plus native GitHub issue dependencies; renders a delta table and applies labels behind a confirm gate; honors the human-only `triage:locked` control label |

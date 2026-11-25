@@ -1,0 +1,30 @@
+{
+  "rule": "Design-decision rule in Review Calls",
+  "description": "`plugin/governance/decision-autonomy.md` `### Review Calls` holds the design-decision rule: in the design stages a decision with a strong recommendation is taken and listed for veto whatever it touches, and only two kinds of design decision are asked. The source pin spans the end of the asked-list paragraph, the `**Design-decision rule.**` lead-in and the whole take clause in one word sequence, so it matches only while the rule stays the paragraph right after the asked list inside `### Review Calls`; deleting the lead-in, moving the rule out of the section, narrowing what a taken decision may touch, or dropping the veto listing turns the suite red. Four further pins in the same file carry the other load-bearing claims. (1) The first ask kind: a weak or absent recommendation is asked, never deferred; deleting it, or letting such a decision be deferred, turns the suite red. (2) The second ask kind: an action irreversible now, outside the unmerged pull request, is asked; deleting it turns the suite red. (3) The gate reads Promotion Gate clause 1 only, applied to the action taken now; widening or dropping that limit turns the suite red. (4) The design stages run no `decide()` and take or ask is judgment, checked by review; this pin spans the next heading, `## Disposition Vocabulary`, so it also anchors the rule as the last paragraph of `### Review Calls`, and deleting the clause or moving the rule turns the suite red. The consumer pin is the POINTER only: `plugin/skills/solution-design/SKILL.md` must still resolve each decision per the Review Calls section, so honest rewording of the rule body does not break it. What these pins honestly guarantee is exactly that these word sequences exist in the two named files; they claim nothing about meaning. Residuals, stated plainly: (1) every pin is whole-file: matching is not section-scoped, and the anchoring comes only from the adjacent text each span carries; (2) a meaning inversion that keeps the pinned bytes intact is invisible, such as new prose elsewhere that lets a design-stage run defer a weak recommendation or run `decide()`; (3) the sentence that the asks other rules set are unchanged, and the clause on when a later decision may defer a weak recommendation, are deliberately unpinned, so deleting either alone stays green; (4) `plugin/skills/design-review/SKILL.md` applies the confirming check of this rule with no pointer to the section and stays unpinned; (5) the pins see only the two files they name, and no fixture in this directory can detect a new design-stage consumer that takes or asks design decisions without pointing at the section, which is an absence defect per rule 7 of the pin-authoring contract.",
+  "source": {
+    "file": "plugin/governance/decision-autonomy.md",
+    "pattern": "`### Stop Conditions` surfaces. **Design-decision rule.** In the design stages, a decision with a strong recommendation is taken and listed for veto, in the review record and on the docs pull request, whatever it touches: PRD scope or acceptance criteria, an accepted-ADR amendment, or a trust-boundary, credential or merge-path change."
+  },
+  "consumers": [
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "Of design decisions only two kinds are asked: a weak or absent recommendation, asked, never deferred"
+    },
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "and an action irreversible now, outside the unmerged pull request."
+    },
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "The gate reads **Promotion Gate** clause 1 only, applied to the action taken now."
+    },
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "The design stages run no `decide()`; take or ask is judgment, checked by review. ## Disposition Vocabulary"
+    },
+    {
+      "file": "plugin/skills/solution-design/SKILL.md",
+      "pattern": "Resolve each decision per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls)"
+    }
+  ]
+}
