@@ -792,6 +792,22 @@ else
   failed "design-gate:live-equals-offline" "live: $DG_LIVE_OUT offline: $DG_OUT (status $DG_STATUS)"
 fi
 
+# A trunk that moved forward after the trunk read: origin's main gains a commit editing index.html.
+# The gate reads the fetched tip, not the older commit the read named, so it reports the new tip
+# and refuses on the now-stale stamp.
+write_file "$DG_SOURCE" "$DG_INDEX" $'edited after review\n'; commit_paths "$DG_SOURCE"
+DG_FF_COMMIT="$(git -C "$DG_SOURCE" rev-parse HEAD)" || setup_fail "rev-parse source HEAD"
+git -C "$DG_SOURCE" push -q "$DG_ORIGIN" main:refs/heads/main || setup_fail "fast-forward origin"
+run_live_ops "$DG_CONSUMER" "$DG_LIVE_TRUNK" -- \
+  design-gate --slug "$DG_SLUG" --repo demo-owner/demo-repo
+if [ "$LIVE_STATUS" -eq 0 ] && printf '%s' "$LIVE_OUT" | jq -e --arg commit "$DG_FF_COMMIT" \
+    --arg stale "record_stale:$DG_INDEX" \
+    '.commit == $commit and .result == "refuse" and .reasons == [$stale]' >/dev/null 2>&1; then
+  pass "design-gate:live-fast-forward-reads-tip" "fetched tip read, stale stamp refused"
+else
+  failed "design-gate:live-fast-forward-reads-tip" "status=$LIVE_STATUS output: $LIVE_OUT"
+fi
+
 # A trunk force-pushed to unrelated history after the trunk read: the read's commit is still in
 # the consumer's object store from the earlier fetch, but is no ancestor of the fetched tip, so
 # design-gate fails closed with no output.
@@ -805,6 +821,16 @@ if [ "$LIVE_STATUS" -ne 0 ] && [ -z "$LIVE_OUT" ]; then
   pass "design-gate:live-force-pushed-refuse" "exit=$LIVE_STATUS, no output"
 else
   failed "design-gate:live-force-pushed-refuse" "status=$LIVE_STATUS output: $LIVE_OUT"
+fi
+
+# A rejected value quoted in a diagnostic reaches stderr with no control byte.
+DIE_ERR="$(SUBISSUE_OPS_OFFLINE=1 bash "$OPS" design-gate --slug $'bad\033[31m\nslug' 2>&1 >/dev/null)"
+DIE_STATUS=$?
+if [ "$DIE_STATUS" -eq 2 ] && ! printf '%s' "$DIE_ERR" | LC_ALL=C grep -q $'\033' \
+    && [ "$(printf '%s\n' "$DIE_ERR" | wc -l | tr -d ' ')" = 1 ]; then
+  pass "die:control-bytes-dropped" "exit=2, one stderr line, no escape byte"
+else
+  failed "die:control-bytes-dropped" "status=$DIE_STATUS stderr: $(printf '%q' "$DIE_ERR")"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────────

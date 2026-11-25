@@ -162,8 +162,9 @@
 #              writes FETCH_HEAD only. The commit id must then name a local commit object that
 #              is FETCH_HEAD or its ancestor, else FAILS CLOSED (a force-pushed trunk, even when
 #              the old commit is still in the object store, or a --repo that is not the local
-#              clone). If trunk moved forward between the read and the fetch, the read's commit is
-#              an ancestor and passes. No branch name or local ref ever reaches the library: every document
+#              clone). The gate then reads, and reports as `commit`, the fetched tip's commit id,
+#              so a trunk that moved forward between the read and the fetch is read as it now
+#              stands. No branch name or local ref ever reaches the library: every document
 #              is read at the commit id, so files only in the working tree never count.
 #     documents (read at the commit ONLY through the shared library):
 #       - ui: docs/prds/<slug>.md via hivemind_doc_read under hivemind_readiness_jq_defs with
@@ -344,8 +345,10 @@ GQL_HEADER="GraphQL-Features: sub_issues"
 GQL_HEADER_ARGS=(-H "$GQL_HEADER")
 
 die() {
-  # Structured, nonzero failure to stderr — propagate, never swallow.
-  echo "$PROG: $1" >&2
+  # Structured, nonzero failure to stderr — propagate, never swallow. A message may quote a
+  # rejected untrusted value, so every control byte is dropped before it reaches a terminal or log.
+  printf '%s' "$PROG: $1" | LC_ALL=C tr -d '\000-\037\177' >&2
+  printf '\n' >&2
   exit "${2:-1}"
 }
 
@@ -1468,10 +1471,16 @@ cmd_design_gate() {
     || die "design-gate: trunk commit $commit is not in the local object store" 1
   # The trunk read and the fetch are two reads: a commit id already in the object store passes
   # the check above even when the remote branch was force-pushed away from it in between, so the
-  # fetched tip must equal it or descend from it.
+  # fetched tip must equal it or descend from it. The gate then reads the fetched tip, the newest
+  # trunk it holds, so a trunk that moved forward in between is read as it now stands.
   if ! is_offline; then
-    git --no-replace-objects merge-base --is-ancestor "$commit" FETCH_HEAD </dev/null >/dev/null 2>&1 \
+    local fetched=""
+    fetched="$(git --no-replace-objects rev-parse --verify -q 'FETCH_HEAD^{commit}' </dev/null 2>/dev/null)" \
+      && hivemind_readiness_commit_ok "$fetched" \
+      || die "design-gate: fetched trunk tip of remote '$remote' is unreadable" 1
+    git --no-replace-objects merge-base --is-ancestor "$commit" "$fetched" </dev/null >/dev/null 2>&1 \
       || die "design-gate: trunk commit $commit is not on the fetched trunk of remote '$remote'" 1
+    commit="$fetched"
   fi
 
   ui="$(read_prd_ui "$commit" "$slug")" || exit "$?"
