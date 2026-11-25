@@ -671,7 +671,7 @@
                 </tr>
                 <tr>
                   <td><code>HIVEMIND_AUTO_MERGE_REREAD_DELAY</code></td>
-                  <td>Read only when <code>HIVEMIND_AUTO_MERGE</code> is set. Whole seconds, 0 to 99, that the script waits before each re-read of a merge state GitHub reports as not yet settled, after a refused plain merge; it re-reads at most 2 more times. Unset or empty: 5. Any other value stops the script before any GitHub call, and you merge.</td>
+                  <td>Read only when <code>HIVEMIND_AUTO_MERGE</code> is set. Whole seconds, 0 to 99 written with no leading zero (<code>5</code>, not <code>05</code>), that the script waits before each re-read of a merge state GitHub reports as not yet settled, after a refused plain merge; it re-reads at most 2 more times. Unset or empty: 5. Any other value stops the script before any GitHub call, and you merge.</td>
                 </tr>
                 <tr>
                   <td><code>HIVEMIND_DESIGN_REVIEW_MODEL</code></td>
