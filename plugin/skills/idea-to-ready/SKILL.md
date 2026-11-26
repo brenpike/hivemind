@@ -55,14 +55,12 @@ Act on `stage`'s `next`:
   - `approval=kept` and `folded=no`: launch `compose --kind prototype-refine`, adding the maintainer's words when this session holds them.
   - `approval=kept` and `folded=yes`: the fold landed without the Verdict; launch only `compose --kind prototype-verdict`.
 - `design`: launch `compose --kind design`; the run writes the design hivemind:solution-design gives.
-- `review` or `re-review`: run design review rounds:
-  1. With the docs branch checked out at the pull request head, run `reviewed`.
-  2. Run hivemind:design-review with its `reviewed`, `merge_base` and `previous`, and `touches` as the record states it.
-  3. Post the round's findings, from every pass, and its record update with `comment --kind round --round <n> --commit <reviewed>`.
-  4. For a clean round after round 1, launch `compose --kind record-pass --commit <reviewed>`; else `compose --kind round` with the same round and commit.
-  5. After each record wave, post `comment --kind veto`, then re-run `stage`.
-
-  When the review has not converged by round 3, stop: tell the maintainer the initiative is split before its docs merge; the pull request stays a draft.
+- `review` or `re-review`: with the docs branch checked out at the pull request head, run `reviewed`, act on its `action`, then run `reviewed` again:
+  - `review`: run hivemind:design-review with the `reviewed`, `merge_base`, `previous` and `review_fix` it prints, and `touches` as the record states it. Post the round's findings, from every pass, and its record update with `comment --kind round --commit <reviewed> --clean yes|no`, `yes` for a round with no finding.
+  - `launch`: launch `compose --kind record`, then post `comment --kind veto`.
+  - `ask`: report the open findings and ask the maintainer, launch `compose --kind record` with the answer as the maintainer's words, then post `comment --kind veto`.
+  - `stop`: report the `reason`. On `cap-reached`, the initiative is split before its docs merge; the pull request stays a draft.
+  - `none`: re-run `stage`.
 - `mark-ready`: run `ready`. On `veto=missing` or `veto=stale`, post `comment --kind veto` and rerun it. On `record-verify-failed:` or `record=`, report it; the pull request stays a draft.
 - `merge-docs`: tell the maintainer the docs pull request awaits their merge.
 - `slice`: run hivemind:prd-to-issues naming the seed issue number.
@@ -74,13 +72,7 @@ Act on `stage`'s `next`:
 
 ## Review fix
 
-A local review or post-PR fix to a stamped document of a passing record:
-
-1. Run `redraft` and `reviewed`, and post the routed review text not already on the pull request with `comment --kind review`.
-2. Launch `compose --kind review-fix --commit <reviewed>`.
-3. Run `reviewed`, then one confirming round of hivemind:design-review with `review_fix` yes.
-4. With no new finding, launch `compose --kind record-pass --commit <reviewed>` of that round; with one, it becomes a re-review.
-5. Post `comment --kind veto`, then run `ready`.
+A local review or post-PR fix to a stamped document of a passing record: run `redraft`, post the routed review text not already on the pull request with `comment --kind review`, launch `compose --kind review-fix`, then continue as at `re-review`.
 
 ## Stops
 

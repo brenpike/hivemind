@@ -443,7 +443,8 @@ run_suites() {
 #                                      -> test_stage_derivation (the libraries keep their other routes
 #                                         by union)
 #   plugin/skills/idea-to-ready/**, plugin/skills/_shared/{readiness-check,record-verify,stage-derivation,
-#     containment}.sh, tests/idea-to-ready/**, tools/test_idea_to_ready.sh
+#     containment}.sh, design-review/scripts/design-review.sh, tests/idea-to-ready/**,
+#     tools/test_idea_to_ready.sh
 #                                      -> test_idea_to_ready (the libraries keep their other routes
 #                                         by union)
 #   plugin/skills/triage-backlog/scripts/*.sh, plugin/skills/_shared/readiness-check.sh,
@@ -612,6 +613,7 @@ map_path() {
      || "$p" == plugin/skills/_shared/record-verify.sh \
      || "$p" == plugin/skills/_shared/stage-derivation.sh \
      || "$p" == plugin/skills/_shared/containment.sh \
+     || "$p" == plugin/skills/design-review/scripts/design-review.sh \
      || "$p" == tests/idea-to-ready/* \
      || "$p" == tools/test_idea_to_ready.sh ]]; then
     add_selected "$SUITE_TEST_IDEA_TO_READY" "$p (idea-to-ready skill/shared libraries/fixture)"
@@ -1718,6 +1720,7 @@ self_test() {
     "plugin/skills/_shared/record-verify.sh|$SUITE_TEST_IDEA_TO_READY" \
     "plugin/skills/_shared/stage-derivation.sh|$SUITE_TEST_IDEA_TO_READY" \
     "plugin/skills/_shared/containment.sh|$SUITE_TEST_IDEA_TO_READY" \
+    "plugin/skills/design-review/scripts/design-review.sh|$SUITE_TEST_IDEA_TO_READY" \
     "tools/test_idea_to_ready.sh|$SUITE_TEST_IDEA_TO_READY" \
     "plugin/hooks/hooks.json|$SUITE_JSON_MANIFESTS" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_BROOD" \

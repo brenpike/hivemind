@@ -533,7 +533,8 @@ test_no_ready_label() {
 }
 
 # test_skill_frontmatter: asserts the guide skill is user-only, holds exactly its three allowed
-# tools, names the guide run marker line and lists no launch arg by its backticked name.
+# tools, names the guide run marker line, lists no launch arg by its backticked name and leaves
+# each record run to compose --kind record.
 test_skill_frontmatter() {
   local front tools want_tools
   front="$(awk 'NR == 1 && $0 == "---" { inside = 1; next } inside && $0 == "---" { exit } inside' "$SKILL_FILE")"
@@ -561,6 +562,13 @@ test_skill_frontmatter() {
     failed "skill:no-launch-args" "names a launch arg: $(grep -oE '`(request|references|draft|trunk|local_review|decisions)`' "$SKILL_FILE" | head -n 1)"
   else
     pass "skill:no-launch-args" "no backticked launch arg name"
+  fi
+  if ! grep -qF 'compose --kind record' "$SKILL_FILE"; then
+    failed "skill:record-delegated" "lacks compose --kind record"
+  elif grep -qF -e '--round' -e 'compose --kind round' -e 'record-pass' "$SKILL_FILE"; then
+    failed "skill:record-delegated" "names $(grep -oF -e '--round' -e 'compose --kind round' -e 'record-pass' "$SKILL_FILE" | head -n 1)"
+  else
+    pass "skill:record-delegated" "names compose --kind record, no --round, compose --kind round or record-pass"
   fi
 }
 
