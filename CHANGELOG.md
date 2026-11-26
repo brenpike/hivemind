@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [14.7.3] - 2026-11-26
+
+### Fixed
+
+- Local review now gives every review tool the whole review input (commit log, diff stat, full diff) in its prompt, so a review cannot approve after reading part of the diff. The codex-plugin preset runs the Codex plugin's `task` command (read-only) with Hivemind's prompt and reads its `.rawOutput` through the existing shape rules and schema check, in place of the adversarial-review command.
+- Review input over 65536 bytes for a tool that takes the prompt as a `{prompt}` argument, or over 262144 bytes on stdin and for the preset, skips local review as `too-large`, named in the PR body and final report. The standard-delivery skip_reason enum gains `too-large`.
+- The review-diff file under `.hivemind/review-loop/` and its two blockers are removed; `run-review.sh` writes nothing in the repository.
+- The ADR-0042 amendment, README rows and the CONTEXT.md Review Preset entry match.
+
+No prose budget raised.
+
+Issue: #684.
+
 ## [14.7.2] - 2026-11-26
 
 ### Fixed

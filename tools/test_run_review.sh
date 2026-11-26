@@ -10,33 +10,41 @@
 #     then the host PATH for git and jq. The pass-through `timeout` checks its `-k 5 <deadline>`
 #     prefix (all-digit deadline), logs its argv and the epoch second of its call, and execs the
 #     rest; the expiring ones exit 124 or 137 without running anything. The curated-PATH cases
-#     replace the host PATH with a dir of symlinks to the host tools the script, containment.sh
-#     and the fakes call, with no `timeout` or `gtimeout` among them. A slow fake `git` sleeps 3
-#     seconds on the snapshot's `ls-files --others`, then runs the real git. A fake `mktemp`
-#     answers the work-folder or the large-diff call with an existing decoy path (exit 1, or exit
-#     0 with a non-empty decoy) and passes every other call to the real mktemp.
+#     replace the host PATH with a dir of symlinks to the host tools the script and the fakes
+#     call, with no `timeout` or `gtimeout` among them. A slow fake `git` sleeps 3 seconds on the
+#     snapshot's `ls-files --others`, then runs the real git. A fake `mktemp` answers the
+#     work-folder call with an existing decoy path (exit 1, or exit 0 with a non-empty decoy) and
+#     passes every other call to the real mktemp.
 #   - TMPDIR: a scratch folder under the test tmpdir, where the script makes its work folder.
 #   - HOME: a scratch home. Only the preset cases install a fake Codex companion under it; the
-#     fake `node` runs that companion with bash.
+#     fake `node` logs its argv and runs that companion with bash. The fake companion records its
+#     argv and stdin and prints a reply file.
 #   - HIVEMIND_LOCAL_REVIEWER: unset, empty, `codex-plugin`, a malformed value, or a JSON argv
 #     that names the fake reviewer script. The fake reviewer reads its behavior from its OWN argv
 #     (capture dir, action, reply file), so no other environment setting reaches the script.
 #
 # Scratch repo: `main` holds README.md, src/a.txt, src/unchanged.txt and src/doomed.txt; branch
 # `feature` changes line 3 of src/a.txt, adds src/new.txt and deletes src/doomed.txt. Every case
-# reviews `feature` against `--base main` in its own `cp -a` copy of that repo.
+# reviews `feature` against `--base main` in its own `cp -a` copy of that repo. Two more templates
+# add one file on top of it: MID (review input of about 100 KiB, over 65536 and under 262144
+# bytes) and HUGE (about 300 KiB, over 262144 bytes), each file opening and closing with its own
+# marker line.
 #
 # Covered: argv `{prompt}` and stdin prompt delivery; every skip reason, including no timeout
-# tool; the `gtimeout` fallback; the deadline derived from the call budget and the
-# before-snapshot reserve; the output shape rules (bare JSON, one ```json or plain fence, prose
-# around one object or fence, non-ASCII prose) and their blockers (two fences, two objects, a
-# fenced array, a bracket or brace in the prose, empty output, an array) and schema violations;
-# out-of-diff filtering and its count; the finding_id formula against precomputed digests and
-# its field framing; tracked edit, untracked file and HEAD move each blocked with the change left
-# in place; the large-diff patch file; the preset argv, its object `.result` and its string
-# `.rawOutput` read by the same shape rules; cleanup removes only
-# what the run created (decoy paths from a fake mktemp survive, no work folder or patch file is
-# left) and the script holds no recursive delete and names every work file it writes.
+# tool and too-large; the input limits on both sides (MID inlined on stdin and for the preset,
+# skipped for a `{prompt}` argv; HUGE skipped on stdin and for the preset, with no reviewer run,
+# no timeout call, no work folder and no repository write); the `gtimeout` fallback; the
+# deadline derived from the call budget and the before-snapshot reserve; the output shape rules
+# (bare JSON, one ```json or plain fence, prose around one object or fence, non-ASCII prose) and
+# their blockers (two fences, two objects, a fenced array, a bracket or brace in the prose, empty
+# output, an array) and schema violations; out-of-diff filtering and its count; the finding_id
+# formula against precomputed digests and its field framing; tracked edit, untracked file and
+# HEAD move each blocked with the change left in place; the preset argv `<companion> task
+# --json`, its prompt on stdin (the generic prompt, focus inside it, never in argv), its string
+# `.rawOutput` read by the same shape rules and a `.result`-only reply refused; an old review
+# diff file left alone; cleanup removes only what the run created (decoy paths from a fake
+# mktemp survive, no work folder is left) and the script holds no recursive delete, names every
+# work file it writes and names no `.hivemind/` path and no `containment.sh`.
 #
 # Mirrors tools/test_prefilter.sh's pass/fail counter, per-case assertion and
 # exit-nonzero-on-any-fail convention. The only writes are under a tmpdir removed on EXIT.
@@ -87,12 +95,10 @@ pass() { echo "PASS [$1] $2"; PASS_COUNT=$((PASS_COUNT + 1)); }
 failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 
 USAGE_REASON='invalid arguments; usage: run-review.sh --base <ref> [-- <focus>]'
-# The large-diff file is a fresh mktemp file: review-diff. plus a 10-character random suffix.
-PATCH_DIR_REL='.hivemind/review-loop'
-PATCH_GLOB='review-diff.??????????'
 TIMEOUT_ARGS_LOG="$TMPDIR_TEST/timeout-args.log"
 TIMEOUT_EPOCH_LOG="$TMPDIR_TEST/timeout-epoch.log"
 NODE_LOG="$TMPDIR_TEST/node-companion-path.log"
+NODE_ARGV_LOG="$TMPDIR_TEST/node-argv.nul"
 REAL_GIT="$(type -P git)" || { echo "FAIL: git is not an executable on PATH" >&2; exit 2; }
 
 # The run-review.sh deadline bounds: the 570-second call budget, the 5-second kill grace, the
@@ -162,7 +168,7 @@ exec $(printf '%q' "$REAL_GIT") "\$@"
 STUB
 chmod +x "$BIN_SLOW_GIT/git"
 
-# INVARIANT: the curated bin holds every host tool the script, containment.sh and the fakes call,
+# INVARIANT: the curated bin holds every host tool the script and the fakes call,
 # and never `timeout` or `gtimeout`, so a curated-PATH run sees no timeout tool at all.
 CURATED_REQUIRED_TOOLS=(bash env date dirname basename jq git mktemp wc cat rm rmdir mkdir readlink xargs cmp grep cp)
 CURATED_OPTIONAL_TOOLS=(sha256sum shasum)
@@ -180,6 +186,7 @@ done
 cat >"$BIN_PASS/node" <<STUB
 #!/usr/bin/env bash
 printf '%s\n' "\$1" >$(printf '%q' "$NODE_LOG")
+printf '%s\0' "\$@" >$(printf '%q' "$NODE_ARGV_LOG")
 exec bash "\$@"
 STUB
 printf '#!/usr/bin/env bash\nexit 124\n' >"$BIN_EXPIRE_124/timeout"
@@ -212,13 +219,6 @@ case "$action" in
   edit-and-fail) printf 'reviewer edit\n' >>src/a.txt; exit 3 ;;
   add-untracked) printf 'reviewer note\n' >reviewer-note.txt ;;
   move-head) git commit -q --allow-empty -m 'reviewer commit' || exit 90 ;;
-  read-patch)
-    for patch_file in .hivemind/review-loop/review-diff.??????????; do
-      [ -f "$patch_file" ] || continue
-      printf '%s\n' "$patch_file" >>"$capture_dir/patch-names"
-      cp "$patch_file" "$capture_dir/patch-seen" 2>/dev/null || :
-    done
-    ;;
   *) printf 'fake-reviewer: unknown action %s\n' "$action" >&2; exit 91 ;;
 esac
 cat "$reply_file"
@@ -242,8 +242,14 @@ init_scratch_repo() {
 }
 
 TEMPLATE_REPO="$TMPDIR_TEST/template"
-LARGE_TEMPLATE_REPO="$TMPDIR_TEST/template-large"
-LARGE_MARKER='LARGE_DIFF_MARKER_LINE'
+MID_TEMPLATE_REPO="$TMPDIR_TEST/template-mid"
+HUGE_TEMPLATE_REPO="$TMPDIR_TEST/template-huge"
+MID_FIRST_MARKER='MID_INPUT_FIRST_MARKER_LINE'
+MID_LAST_MARKER='MID_INPUT_LAST_MARKER_LINE'
+HUGE_FIRST_MARKER='HUGE_INPUT_FIRST_MARKER_LINE'
+HUGE_LAST_MARKER='HUGE_INPUT_LAST_MARKER_LINE'
+ARGV_INPUT_LIMIT=65536
+STDIN_INPUT_LIMIT=262144
 
 # build_template_repo: main with four files, then `feature` with one changed, one added and one
 # deleted file.
@@ -266,22 +272,40 @@ build_template_repo() {
   git -C "$repo" add -A && git -C "$repo" commit -q -m 'feature change' || return 1
 }
 
-# build_large_template_repo: the template plus one commit adding a file over the 65536-byte
-# inline limit.
-build_large_template_repo() {
-  local repo="$LARGE_TEMPLATE_REPO" line_number
+# build_filler_template_repo <repo> <line count> <first marker> <last marker>: the template plus
+# one commit adding src/big.txt, <line count> filler lines between the two marker lines.
+build_filler_template_repo() {
+  local repo="$1" line_number
   cp -a "$TEMPLATE_REPO" "$repo" || return 1
   {
-    printf '%s\n' "$LARGE_MARKER"
-    for line_number in $(seq 1 2000); do
+    printf '%s\n' "$3"
+    for line_number in $(seq 1 "$2"); do
       printf 'filler line %05d of the large review input file\n' "$line_number"
     done
+    printf '%s\n' "$4"
   } >"$repo/src/big.txt"
   git -C "$repo" add -A && git -C "$repo" commit -q -m 'large change' || return 1
 }
 
+# diff_bytes <repo>: the byte count of the repo's `main...HEAD` diff, a lower bound of the
+# script's review input, which adds only the commit log, the diff stat and two header lines.
+diff_bytes() {
+  git -C "$1" diff --no-color --no-ext-diff main...HEAD | wc -c | tr -d ' '
+}
+
 build_template_repo || { echo "FAIL: cannot build the scratch template repo" >&2; exit 2; }
-build_large_template_repo || { echo "FAIL: cannot build the large scratch template repo" >&2; exit 2; }
+build_filler_template_repo "$MID_TEMPLATE_REPO" 2000 "$MID_FIRST_MARKER" "$MID_LAST_MARKER" \
+  || { echo "FAIL: cannot build the MID scratch template repo" >&2; exit 2; }
+build_filler_template_repo "$HUGE_TEMPLATE_REPO" 6000 "$HUGE_FIRST_MARKER" "$HUGE_LAST_MARKER" \
+  || { echo "FAIL: cannot build the HUGE scratch template repo" >&2; exit 2; }
+# INVARIANT: MID's input sits well inside (65536, 262144] and HUGE's over 262144; the 4096-byte
+# margin covers the log, stat and header lines the diff does not count.
+MID_DIFF_BYTES="$(diff_bytes "$MID_TEMPLATE_REPO")" || exit 2
+HUGE_DIFF_BYTES="$(diff_bytes "$HUGE_TEMPLATE_REPO")" || exit 2
+[ "$MID_DIFF_BYTES" -gt "$ARGV_INPUT_LIMIT" ] && [ "$MID_DIFF_BYTES" -lt $((STDIN_INPUT_LIMIT - 4096)) ] \
+  || { echo "FAIL: MID diff is $MID_DIFF_BYTES bytes, outside its band" >&2; exit 2; }
+[ "$HUGE_DIFF_BYTES" -gt "$STDIN_INPUT_LIMIT" ] \
+  || { echo "FAIL: HUGE diff is $HUGE_DIFF_BYTES bytes, not over $STDIN_INPUT_LIMIT" >&2; exit 2; }
 
 # new_repo <name> [template]: a fresh copy of the template; prints its path.
 new_repo() {
@@ -439,15 +463,14 @@ file_has_text() { [ -f "$1" ] && grep -Fq -- "$2" "$1"; }
 # file_lacks_text <file> <fixed text>
 file_lacks_text() { [ -f "$1" ] && ! grep -Fq -- "$2" "$1"; }
 
-# no_run_patch_files <repo>: no large-diff file made by a run is left in the review-loop folder.
-no_run_patch_files() { ! compgen -G "$1/$PATCH_DIR_REL/$PATCH_GLOB" >/dev/null; }
+# no_hivemind_dir <repo>: the run left no .hivemind folder in <repo>.
+no_hivemind_dir() { [ ! -e "$1/.hivemind" ]; }
 
-# one_patch_named_in <capture> <prompt file>: the reviewer saw exactly one large-diff file, and
-# the prompt names it.
-one_patch_named_in() {
-  [ -f "$1/patch-names" ] && [ "$(wc -l <"$1/patch-names")" -eq 1 ] \
-    && grep -Fq -- "$(cat "$1/patch-names")" "$2"
-}
+# git_status_clean <repo>: git status --porcelain prints nothing.
+git_status_clean() { [ -z "$(git -C "$1" status --porcelain)" ]; }
+
+# dir_has_no_entries <dir>: <dir> exists and holds nothing, dot files included.
+dir_has_no_entries() { [ -d "$1" ] && [ -z "$(ls -A -- "$1")" ]; }
 
 # argv_equals <capture> <expected elements...>: the recorded argv is exactly the elements.
 argv_equals() {
@@ -626,8 +649,8 @@ assert_check "argv:timeout-guard" "timeout got -k 5 <deadline in $DEADLINE_FAST_
   deadline_within "$DEADLINE_FAST_MIN" "$DEADLINE_MAX" "$FAKE_REVIEWER "
 assert_check "budget:kill-before-call-budget" "call second + deadline + kill grace <= $((CALL_BUDGET_SECONDS + 1))" \
   kill_within_call_budget "$ARGV_START_EPOCH"
-assert_check "argv:no-patch-file-small-diff" "small input writes no patch file" \
-  no_run_patch_files "$REPO"
+assert_check "argv:no-hivemind-folder" "the run leaves no .hivemind folder in the repository" \
+  no_hivemind_dir "$REPO"
 
 CAPTURE="$(new_capture gtimeout)" || exit 2
 REPO="$(new_repo gtimeout)" || exit 2
@@ -867,37 +890,62 @@ run_tree_case tree-edit-fail edit-and-fail
 assert_blocked "tree:check-precedes-exit-status" 'reviewer modified the working tree'
 assert_check "tree:edit-fail-left-in-place" "src/a.txt is still modified" tracked_file_modified "$REPO" src/a.txt
 
-# ── Large diff: patch file mode ────────────────────────────────────────────────
+# ── Input limits: whole input inline or too-large ──────────────────────────────
 
-CAPTURE="$(new_capture large)" || exit 2
-REPO="$(new_repo large "$LARGE_TEMPLATE_REPO")" || exit 2
-run_review "$REPO" "$EMPTY_HOME" "$BIN_PASS" set "$(reviewer_setting "$CAPTURE" read-patch "$BARE_REPLY" no)" --base main
-assert_success "large:success" '.base == "main"'
-assert_check "large:patch-written" "the reviewer read the patch file during the run" \
-  file_has_text "$CAPTURE/patch-seen" "+$LARGE_MARKER"
-assert_check "large:patch-holds-diff" "the patch file holds the full diff" \
-  file_has_text "$CAPTURE/patch-seen" '+line 3 MARKER_CHANGED_LINE'
-assert_check "large:prompt-points-at-patch" "the prompt names the one patch file the reviewer saw" \
-  one_patch_named_in "$CAPTURE" "$CAPTURE/stdin.txt"
-assert_check "large:prompt-not-inlined" "the prompt does not inline the diff" \
-  file_lacks_text "$CAPTURE/stdin.txt" "$LARGE_MARKER"
-assert_check "large:patch-removed" "the patch file is gone after the run" no_run_patch_files "$REPO"
+# MID over the 65536-byte `{prompt}` limit: skipped before any snapshot or reviewer run.
+CAPTURE="$(new_capture too-large-argv)" || exit 2
+REPO="$(new_repo too-large-argv "$MID_TEMPLATE_REPO")" || exit 2
+RR_TMPDIR="$TMPDIR_TEST/run-tmp-too-large"
+mkdir -p "$RR_TMPDIR" || exit 2
+: >"$TIMEOUT_ARGS_LOG"
+run_review "$REPO" "$EMPTY_HOME" "$BIN_PASS" set "$(reviewer_setting "$CAPTURE" reply "$BARE_REPLY" yes)" --base main
+assert_skip "too-large:argv-skipped" 'skipped: too-large'
+assert_check "too-large:argv-reviewer-never-ran" "the reviewer never ran" test ! -e "$CAPTURE/argv.nul"
+assert_check "too-large:argv-no-timeout-call" "the timeout tool was never called" test ! -s "$TIMEOUT_ARGS_LOG"
+assert_check "too-large:argv-tmpdir-empty" "a too-large run leaves nothing in TMPDIR" dir_has_no_entries "$RR_TMPDIR"
+assert_check "too-large:argv-no-hivemind-folder" "a too-large run leaves no .hivemind folder" no_hivemind_dir "$REPO"
+assert_check "too-large:argv-git-status-clean" "a too-large run leaves git status empty" git_status_clean "$REPO"
+RR_TMPDIR="$RUN_TMPDIR"
 
-# A file already in the review-loop folder, such as one left by an older run, is never reused,
-# overwritten or removed.
-CAPTURE="$(new_capture large-stale)" || exit 2
-REPO="$(new_repo large-stale "$LARGE_TEMPLATE_REPO")" || exit 2
-mkdir -p "$REPO/$PATCH_DIR_REL"
-printf 'EXISTING_FILE_CONTENT\n' >"$REPO/$PATCH_DIR_REL/review-diff.patch"
-run_review "$REPO" "$EMPTY_HOME" "$BIN_PASS" set "$(reviewer_setting "$CAPTURE" read-patch "$BARE_REPLY" no)" --base main
-assert_success "large-stale:success" '.base == "main"'
-assert_check "large-stale:existing-file-kept" "the existing file is unchanged" \
-  test "$(cat "$REPO/$PATCH_DIR_REL/review-diff.patch")" = 'EXISTING_FILE_CONTENT'
-assert_check "large-stale:fresh-file-read" "the reviewer read a fresh file holding the diff" \
-  file_has_text "$CAPTURE/patch-seen" "+$LARGE_MARKER"
-assert_check "large-stale:prompt-names-fresh-file" "the prompt names the fresh file, not the existing one" \
-  one_patch_named_in "$CAPTURE" "$CAPTURE/stdin.txt"
-assert_check "large-stale:fresh-file-removed" "only the fresh file is removed" no_run_patch_files "$REPO"
+# MID under the 262144-byte stdin limit: inlined whole.
+CAPTURE="$(new_capture inline-stdin-mid)" || exit 2
+REPO="$(new_repo inline-stdin-mid "$MID_TEMPLATE_REPO")" || exit 2
+run_review "$REPO" "$EMPTY_HOME" "$BIN_PASS" set "$(reviewer_setting "$CAPTURE" reply "$BARE_REPLY" no)" --base main
+assert_success "inline:stdin-mid-inlined" '.base == "main"'
+assert_check "inline:stdin-mid-first-marker" "the stdin prompt holds the first filler marker" \
+  file_has_text "$CAPTURE/stdin.txt" "+$MID_FIRST_MARKER"
+assert_check "inline:stdin-mid-last-marker" "the stdin prompt holds the last filler marker" \
+  file_has_text "$CAPTURE/stdin.txt" "+$MID_LAST_MARKER"
+assert_check "inline:stdin-mid-no-file-mode" "the stdin prompt holds no too-large-to-inline text" \
+  file_lacks_text "$CAPTURE/stdin.txt" 'too large to inline'
+assert_check "inline:stdin-mid-no-hivemind-folder" "the run leaves no .hivemind folder" no_hivemind_dir "$REPO"
+
+# HUGE over the 262144-byte stdin limit: skipped.
+CAPTURE="$(new_capture too-large-stdin)" || exit 2
+REPO="$(new_repo too-large-stdin "$HUGE_TEMPLATE_REPO")" || exit 2
+: >"$TIMEOUT_ARGS_LOG"
+run_review "$REPO" "$EMPTY_HOME" "$BIN_PASS" set "$(reviewer_setting "$CAPTURE" reply "$BARE_REPLY" no)" --base main
+assert_skip "too-large:stdin-skipped" 'skipped: too-large'
+assert_check "too-large:stdin-reviewer-never-ran" "the reviewer never ran" test ! -e "$CAPTURE/argv.nul"
+assert_check "too-large:stdin-no-timeout-call" "the timeout tool was never called" test ! -s "$TIMEOUT_ARGS_LOG"
+assert_check "too-large:stdin-no-hivemind-folder" "a too-large run leaves no .hivemind folder" no_hivemind_dir "$REPO"
+
+# No timeout tool is still tool-missing before too-large.
+CAPTURE="$(new_capture no-timeout-huge)" || exit 2
+run_review_curated "$REPO" "$EMPTY_HOME" "$BIN_NONE" set "$(reviewer_setting "$CAPTURE" reply "$BARE_REPLY" no)" --base main
+assert_skip "skip:no-timeout-before-too-large" 'skipped: tool-missing'
+
+# An old review diff file from an earlier version is never read, changed or removed.
+CAPTURE="$(new_capture old-diff-file)" || exit 2
+REPO="$(new_repo old-diff-file)" || exit 2
+mkdir -p "$REPO/.hivemind/review-loop"
+printf 'EXISTING_FILE_CONTENT\n' >"$REPO/.hivemind/review-loop/review-diff.patch"
+run_review "$REPO" "$EMPTY_HOME" "$BIN_PASS" set "$(reviewer_setting "$CAPTURE" reply "$BARE_REPLY" no)" --base main
+assert_success "leftover:old-diff-file-success" '.base == "main"'
+assert_check "leftover:old-diff-file-kept" "the old review diff file is unchanged" \
+  test "$(cat "$REPO/.hivemind/review-loop/review-diff.patch")" = 'EXISTING_FILE_CONTENT'
+assert_check "leftover:old-diff-file-alone" "the review-loop folder holds only the old file" \
+  test "$(ls -A "$REPO/.hivemind/review-loop")" = 'review-diff.patch'
 
 # ── Preset: fake node + fake companion ─────────────────────────────────────────
 
@@ -922,21 +970,36 @@ cat $(printf '%q' "$3")
 STUB
 }
 
-PRESET_REPLY="$(write_reply preset "$(jq -nc --argjson review "$BASE_REVIEW" '{status: 0, result: $review}')")" || exit 2
-PRESET_ARGV=(adversarial-review --base main --scope branch --wait --json)
+# task_reply <name> <rawOutput JSON value>: a preset reply in the companion's `task --json` shape;
+# prints its path.
+task_reply() {
+  write_reply "$1" "$(jq -nc --argjson raw "$2" \
+    '{status: 0, threadId: "thread-1", rawOutput: $raw, touchedFiles: [], reasoningSummary: null}')"
+}
+
+PRESET_REPLY="$(task_reply preset "$(jq -nc --arg t "$BASE_REVIEW" '$t')")" || exit 2
+PRESET_ARGV=(task --json)
 
 CAPTURE="$(new_capture preset)" || exit 2
 PRESET_HOME="$(make_preset_home preset "$CAPTURE" "$PRESET_REPLY")" || exit 2
+PRESET_VERSION_COMPANION="$PRESET_HOME/.claude/plugins/cache/openai-codex/codex/1.0.6/scripts/codex-companion.mjs"
 REPO="$(new_repo preset)" || exit 2
 : >"$TIMEOUT_ARGS_LOG"
+rm -f "$NODE_ARGV_LOG"
 run_review "$REPO" "$PRESET_HOME" "$BIN_PASS" set 'codex-plugin' --base main
-assert_success "preset:result-used" \
+assert_success "preset:success" \
   "[.findings[].finding_id] == [\"$ID_A_TXT\", \"$ID_NEW_TXT\"] and .dropped_outside_diff == 3"
-assert_check "preset:argv" "node got the companion then the preset argv" \
+assert_check "preset:argv" "node got exactly <companion> task --json" \
+  argv_equals "$NODE_ARGV_LOG" "$PRESET_VERSION_COMPANION" task --json
+assert_check "preset:companion-argv" "the companion got exactly task --json" \
   argv_equals "$CAPTURE/argv.nul" "${PRESET_ARGV[@]}"
-assert_check "preset:stdin-empty" "the companion's stdin was empty" test ! -s "$CAPTURE/stdin.txt"
+assert_check "preset:stdin-prompt" "the companion's stdin carries the prompt" \
+  file_has_text "$CAPTURE/stdin.txt" 'Target: branch diff against main'
+assert_check "preset:same-prompt-as-generic" "the companion's stdin equals the generic prompt" \
+  cmp -s "$CAPTURE/stdin.txt" "$ARGV_CAPTURE/prompt.txt"
 assert_check "preset:timeout-guard" "timeout got -k 5 <deadline in $DEADLINE_FAST_MIN..$DEADLINE_MAX> node <companion>" \
-  deadline_within "$DEADLINE_FAST_MIN" "$DEADLINE_MAX" "node $PRESET_HOME/.claude/plugins/cache/openai-codex/codex/1.0.6/scripts/codex-companion.mjs "
+  deadline_within "$DEADLINE_FAST_MIN" "$DEADLINE_MAX" "node $PRESET_VERSION_COMPANION "
+assert_check "preset:no-hivemind-folder" "the preset run leaves no .hivemind folder" no_hivemind_dir "$REPO"
 
 CAPTURE="$(new_capture preset-unset)" || exit 2
 PRESET_HOME="$(make_preset_home preset-unset "$CAPTURE" "$PRESET_REPLY")" || exit 2
@@ -953,11 +1016,15 @@ assert_success "preset:empty-setting-uses-companion" '.base == "main"'
 CAPTURE="$(new_capture preset-focus)" || exit 2
 PRESET_HOME="$(make_preset_home preset-focus "$CAPTURE" "$PRESET_REPLY")" || exit 2
 run_review "$REPO" "$PRESET_HOME" "$BIN_PASS" set 'codex-plugin' --base main -- '  look at auth  '
-assert_check "preset:focus-argv" "the trimmed focus follows --" \
-  argv_equals "$CAPTURE/argv.nul" "${PRESET_ARGV[@]}" -- 'look at auth'
+assert_check "preset:focus-in-prompt" "the trimmed focus lands in the prompt" \
+  file_has_text "$CAPTURE/stdin.txt" 'User focus: look at auth'
+assert_check "preset:focus-not-in-argv" "the focus never reaches argv" \
+  argv_equals "$CAPTURE/argv.nul" "${PRESET_ARGV[@]}"
 run_review "$REPO" "$PRESET_HOME" "$BIN_PASS" set 'codex-plugin' --base main -- '--dangerous flag'
-assert_check "preset:dash-focus-prefixed" "a focus starting with - gets the focus: prefix" \
-  argv_equals "$CAPTURE/argv.nul" "${PRESET_ARGV[@]}" -- 'focus: --dangerous flag'
+assert_check "preset:dash-focus-in-prompt" "a focus starting with - lands verbatim in the prompt" \
+  file_has_text "$CAPTURE/stdin.txt" 'User focus: --dangerous flag'
+assert_check "preset:dash-focus-not-in-argv" "a focus starting with - never reaches argv" \
+  argv_equals "$CAPTURE/argv.nul" "${PRESET_ARGV[@]}"
 
 CAPTURE="$(new_capture preset-newest)" || exit 2
 OLD_CAPTURE="$(new_capture preset-oldest)" || exit 2
@@ -969,6 +1036,29 @@ run_review "$REPO" "$PRESET_HOME" "$BIN_PASS" set 'codex-plugin' --base main
 assert_check "preset:newest-companion" "the newest companion by mtime ran" \
   test "$(cat "$NODE_LOG")" = "$PRESET_HOME/.claude/plugins/cache/openai-codex/codex/2.0.0/scripts/codex-companion.mjs"
 
+# MID under the 262144-byte preset limit: inlined whole on the companion's stdin.
+CAPTURE="$(new_capture preset-mid)" || exit 2
+PRESET_HOME="$(make_preset_home preset-mid "$CAPTURE" "$PRESET_REPLY")" || exit 2
+MID_REPO="$(new_repo preset-mid "$MID_TEMPLATE_REPO")" || exit 2
+run_review "$MID_REPO" "$PRESET_HOME" "$BIN_PASS" set 'codex-plugin' --base main
+assert_success "inline:preset-mid-inlined" '.base == "main"'
+assert_check "inline:preset-mid-first-marker" "the companion's stdin holds the first filler marker" \
+  file_has_text "$CAPTURE/stdin.txt" "+$MID_FIRST_MARKER"
+assert_check "inline:preset-mid-last-marker" "the companion's stdin holds the last filler marker" \
+  file_has_text "$CAPTURE/stdin.txt" "+$MID_LAST_MARKER"
+
+# HUGE over the 262144-byte preset limit: skipped, node never runs.
+CAPTURE="$(new_capture preset-huge)" || exit 2
+PRESET_HOME="$(make_preset_home preset-huge "$CAPTURE" "$PRESET_REPLY")" || exit 2
+HUGE_REPO="$(new_repo preset-huge "$HUGE_TEMPLATE_REPO")" || exit 2
+rm -f "$NODE_LOG" "$NODE_ARGV_LOG"
+: >"$TIMEOUT_ARGS_LOG"
+run_review "$HUGE_REPO" "$PRESET_HOME" "$BIN_PASS" set 'codex-plugin' --base main
+assert_skip "too-large:preset-skipped" 'skipped: too-large'
+assert_check "too-large:preset-node-never-ran" "node never ran" test ! -e "$NODE_LOG"
+assert_check "too-large:preset-companion-never-ran" "the companion never ran" test ! -e "$CAPTURE/argv.nul"
+assert_check "too-large:preset-no-timeout-call" "the timeout tool was never called" test ! -s "$TIMEOUT_ARGS_LOG"
+
 # run_preset_reply_case <name> <reply file>: one preset run printing <reply file>.
 run_preset_reply_case() {
   local capture preset_home
@@ -977,42 +1067,33 @@ run_preset_reply_case() {
   run_review "$REPO" "$preset_home" "$BIN_PASS" set 'codex-plugin' --base main
 }
 
-run_preset_reply_case preset-string-result "$(write_reply preset-string '{"result":"looks fine"}')"
-assert_blocked "preset:non-object-result-blocked" 'unexpected output shape'
-run_preset_reply_case preset-no-result "$(write_reply preset-no-result '{"status":0}')"
-assert_blocked "preset:missing-result-blocked" 'unexpected output shape'
+run_preset_reply_case preset-result-only \
+  "$(write_reply preset-result-only "$(jq -nc --argjson review "$BASE_REVIEW" '{status: 0, result: $review}')")"
+assert_blocked "preset:result-object-only-blocked" 'unexpected output shape'
+run_preset_reply_case preset-no-raw-output "$(write_reply preset-no-raw-output '{"status":0}')"
+assert_blocked "preset:missing-raw-output-blocked" 'unexpected output shape'
 run_preset_reply_case preset-prose "$(write_reply preset-prose "$(printf 'Done.\n%s\n' "$(cat "$PRESET_REPLY")")")"
 assert_blocked "preset:prose-blocked" 'unexpected output shape'
-run_preset_reply_case preset-schema "$(write_reply preset-schema '{"result":{"verdict":"approve"}}')"
+run_preset_reply_case preset-schema "$(task_reply preset-schema '"{\"verdict\":\"approve\"}"')"
 assert_blocked "preset:schema-violation-blocked" 'output does not match schema'
 
-# raw_output_reply <name> <rawOutput JSON value> [result JSON value]: a preset reply in the
-# companion's parse-failure form; prints its path.
-raw_output_reply() {
-  write_reply "$1" "$(jq -nc --argjson raw "$2" --argjson result "${3:-null}" \
-    '{status: 0, result: $result, rawOutput: $raw, parseError: "Unexpected token H in JSON at position 0"}')"
-}
-
 RAW_PROSE_TEXT="$(printf 'Here is my review:\n%s' "$BASE_REVIEW")"
-run_preset_reply_case preset-raw-prose "$(raw_output_reply preset-raw-prose "$(jq -nc --arg t "$RAW_PROSE_TEXT" '$t')")"
+run_preset_reply_case preset-raw-prose "$(task_reply preset-raw-prose "$(jq -nc --arg t "$RAW_PROSE_TEXT" '$t')")"
 assert_success "preset:prose-raw-output-accepted" \
   "[.findings[].finding_id] == [\"$ID_A_TXT\", \"$ID_NEW_TXT\"] and .dropped_outside_diff == 3"
 
 RAW_FENCED_TEXT="$(printf '```json\n%s\n```' "$BASE_REVIEW")"
-run_preset_reply_case preset-raw-fenced "$(raw_output_reply preset-raw-fenced "$(jq -nc --arg t "$RAW_FENCED_TEXT" '$t')")"
+run_preset_reply_case preset-raw-fenced "$(task_reply preset-raw-fenced "$(jq -nc --arg t "$RAW_FENCED_TEXT" '$t')")"
 assert_success "preset:fenced-raw-output-accepted" '.base == "main" and (.findings | length) == 2'
 
 RAW_TWO_OBJECTS_TEXT="$(printf '%s\n%s' "$BASE_REVIEW" "$BASE_REVIEW")"
-run_preset_reply_case preset-raw-two "$(raw_output_reply preset-raw-two "$(jq -nc --arg t "$RAW_TWO_OBJECTS_TEXT" '$t')")"
+run_preset_reply_case preset-raw-two "$(task_reply preset-raw-two "$(jq -nc --arg t "$RAW_TWO_OBJECTS_TEXT" '$t')")"
 assert_blocked "preset:two-objects-raw-output-blocked" 'unexpected output shape'
 
-run_preset_reply_case preset-raw-object "$(raw_output_reply preset-raw-object "$BASE_REVIEW")"
+run_preset_reply_case preset-raw-object "$(task_reply preset-raw-object "$BASE_REVIEW")"
 assert_blocked "preset:non-string-raw-output-blocked" 'unexpected output shape'
 
-run_preset_reply_case preset-result-wins "$(raw_output_reply preset-result-wins '"garbage {["' "$BASE_REVIEW")"
-assert_success "preset:object-result-wins-over-raw-output" '.base == "main" and (.findings | length) == 2'
-
-run_preset_reply_case preset-raw-schema "$(raw_output_reply preset-raw-schema '"Review: {\"verdict\":\"approve\"}"')"
+run_preset_reply_case preset-raw-schema "$(task_reply preset-raw-schema '"Review: {\"verdict\":\"approve\"}"')"
 assert_blocked "preset:raw-output-schema-violation-blocked" 'output does not match schema'
 
 # ── Cleanup: only what the run created ─────────────────────────────────────────
@@ -1049,21 +1130,8 @@ make_decoy_dir() {
   printf '%s\n' "$decoy"
 }
 
-# make_decoy_file <name>: an existing file holding the sentinel text; prints its path.
-make_decoy_file() {
-  local decoy="$DECOYS/$1"
-  printf '%s\n' "$SENTINEL_TEXT" >"$decoy" || return 1
-  printf '%s\n' "$decoy"
-}
-
 # decoy_dir_intact <dir>: the folder and its sentinel file still exist, the sentinel unchanged.
 decoy_dir_intact() { [ -d "$1" ] && [ -f "$1/sentinel" ] && [ "$(cat "$1/sentinel")" = "$SENTINEL_TEXT" ]; }
-
-# decoy_file_intact <file>: the file still exists with the sentinel text unchanged.
-decoy_file_intact() { [ -f "$1" ] && [ "$(cat "$1")" = "$SENTINEL_TEXT" ]; }
-
-# dir_has_no_entries <dir>: <dir> exists and holds nothing, dot files included.
-dir_has_no_entries() { [ -d "$1" ] && [ -z "$(ls -A -- "$1")" ]; }
 
 # no_run_work_dirs <dir>: no run-review.* work folder is left in <dir>.
 no_run_work_dirs() { ! compgen -G "$1/run-review.*" >/dev/null; }
@@ -1078,16 +1146,6 @@ run_decoy_dir_case() {
   run_review "$repo" "$EMPTY_HOME" "$bin_dir" set "$(reviewer_setting "$(new_capture "$1")" reply "$BARE_REPLY" no)" --base main
 }
 
-# run_decoy_patch_case <name> <exit code>: one large-diff run whose diff-file mktemp prints an
-# existing decoy file and exits <exit code>; sets DECOY and REPO.
-run_decoy_patch_case() {
-  local bin_dir="$FAKES/bin-$1"
-  DECOY="$(make_decoy_file "$1")" || return 1
-  write_fake_mktemp "$bin_dir" file "$DECOY" "$2" || return 1
-  REPO="$(new_repo "$1" "$LARGE_TEMPLATE_REPO")" || return 1
-  run_review "$REPO" "$EMPTY_HOME" "$bin_dir" set "$(reviewer_setting "$(new_capture "$1")" read-patch "$BARE_REPLY" no)" --base main
-}
-
 run_decoy_dir_case cleanup-dir-fail 1
 assert_blocked "cleanup:dir-mktemp-fail-blocked" 'cannot create a private work folder'
 assert_check "cleanup:dir-mktemp-fail-decoy-kept" "a failed mktemp's existing folder and its file survive" \
@@ -1097,15 +1155,6 @@ assert_blocked "cleanup:dir-not-empty-blocked" 'cannot create a private work fol
 assert_check "cleanup:dir-not-empty-decoy-kept" "a non-empty folder from mktemp and its file survive" \
   decoy_dir_intact "$DECOY"
 
-run_decoy_patch_case cleanup-patch-fail 1
-assert_blocked "cleanup:patch-mktemp-fail-blocked" 'cannot prepare the review diff file'
-assert_check "cleanup:patch-mktemp-fail-decoy-kept" "a failed mktemp's existing file survives" \
-  decoy_file_intact "$DECOY"
-run_decoy_patch_case cleanup-patch-not-empty 0
-assert_blocked "cleanup:patch-not-empty-blocked" 'cannot prepare the review diff file'
-assert_check "cleanup:patch-not-empty-decoy-kept" "a non-empty file from mktemp survives" \
-  decoy_file_intact "$DECOY"
-
 RR_TMPDIR="$TMPDIR_TEST/run-tmp-normal"
 mkdir -p "$RR_TMPDIR" || exit 2
 REPO="$(new_repo cleanup-normal)" || exit 2
@@ -1113,15 +1162,7 @@ run_review "$REPO" "$EMPTY_HOME" "$BIN_PASS" set "$(reviewer_setting "$(new_capt
 assert_success "cleanup:normal-success" '.base == "main"'
 assert_check "cleanup:normal-no-work-dir" "a normal run leaves no run-review.* folder" no_run_work_dirs "$RR_TMPDIR"
 assert_check "cleanup:normal-tmpdir-empty" "a normal run leaves nothing in TMPDIR" dir_has_no_entries "$RR_TMPDIR"
-assert_check "cleanup:normal-no-patch" "a normal run leaves no patch file" no_run_patch_files "$REPO"
-
-RR_TMPDIR="$TMPDIR_TEST/run-tmp-large"
-mkdir -p "$RR_TMPDIR" || exit 2
-REPO="$(new_repo cleanup-large "$LARGE_TEMPLATE_REPO")" || exit 2
-run_review "$REPO" "$EMPTY_HOME" "$BIN_PASS" set "$(reviewer_setting "$(new_capture cleanup-large)" read-patch "$BARE_REPLY" no)" --base main
-assert_success "cleanup:large-success" '.base == "main"'
-assert_check "cleanup:large-tmpdir-empty" "a large-diff run leaves nothing in TMPDIR" dir_has_no_entries "$RR_TMPDIR"
-assert_check "cleanup:large-no-patch" "a large-diff run leaves no patch file" no_run_patch_files "$REPO"
+assert_check "cleanup:normal-no-hivemind-folder" "a normal run leaves no .hivemind folder" no_hivemind_dir "$REPO"
 RR_TMPDIR="$RUN_TMPDIR"
 
 # has_recursive_rm <file>: <file> holds an rm call with a recursive flag (-r, -R, -rf, -fr, ...
@@ -1157,6 +1198,23 @@ assert_check "static:work-files-listed" "every work file the script writes is in
   work_names_listed "$RUN_REVIEW"
 assert_check "static:unlisted-probe" "the list check flags an appended unlisted work file" \
   eval '! work_names_listed "$STATIC_PROBES/with-unlisted.sh" 2>/dev/null'
+
+# names_repo_write <file>: <file> names a `.hivemind/` path or `containment.sh`, the marks of a
+# write inside the repository.
+names_repo_write() {
+  grep -Eq '\.hivemind/|containment\.sh' "$1"
+}
+
+cp "$RUN_REVIEW" "$STATIC_PROBES/with-hivemind-path.sh" \
+  && printf 'mkdir -p -- "$repo_root/.hivemind/review-loop"\n' >>"$STATIC_PROBES/with-hivemind-path.sh" || exit 2
+cp "$RUN_REVIEW" "$STATIC_PROBES/with-containment.sh" \
+  && printf '. "$shared_dir/containment.sh"\n' >>"$STATIC_PROBES/with-containment.sh" || exit 2
+assert_check "static:no-repo-write" "run-review.sh names no .hivemind/ path and no containment.sh" \
+  eval '! names_repo_write "$RUN_REVIEW"'
+assert_check "static:repo-write-probe-hivemind" "the repo-write check flags an appended .hivemind/ path" \
+  names_repo_write "$STATIC_PROBES/with-hivemind-path.sh"
+assert_check "static:repo-write-probe-containment" "the repo-write check flags an appended containment.sh" \
+  names_repo_write "$STATIC_PROBES/with-containment.sh"
 
 # Every run of the suite shared RUN_TMPDIR; none may leave a work folder there.
 assert_check "cleanup:suite-no-work-dir" "no run of the suite left a run-review.* folder" \

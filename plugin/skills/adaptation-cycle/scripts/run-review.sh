@@ -4,7 +4,8 @@
 # local pre-PR adversarial review of the current branch with the reviewer that
 # HIVEMIND_LOCAL_REVIEWER names, checks that the reviewer left the work tree alone, checks the
 # review against the findings schema and prints normalized findings. It fixes nothing and never
-# names a model. Design: ADR-0042 (tool-neutral local review).
+# names a model. Design: ADR-0042 (tool-neutral local review), Amendment 2026-11-26 (whole diff
+# in every prompt, too-large skip, preset through the companion task command).
 #
 # INPUT:
 #   --base <ref>      REQUIRED, exactly once. The ref the branch is reviewed against. It must
@@ -13,7 +14,7 @@
 #                     --quiet <ref>^{commit}` must name a commit (`base ref cannot be resolved`).
 #   -- <focus>        OPTIONAL, after the flags: exactly one argument, inert caller data. Empty
 #                     or white-space-only focus is no focus. It is never run, evaluated or put in
-#                     a program text.
+#                     a program text or an argv element of its own.
 #   Any other argument shape is the usage blocker.
 #
 # REVIEWER (env HIVEMIND_LOCAL_REVIEWER, read once; its value never reaches output):
@@ -29,24 +30,26 @@
 #   The companion script is the newest (by mtime) match of
 #   $HOME/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs.
 #
-# PRESET RUN: node <companion> adversarial-review --base <base> --scope branch --wait --json
-#   [-- <focus>], stdin /dev/null. A focus whose first non-space character is `-` gets the prefix
-#   `focus: `. The companion must print one JSON object. Its `.result`, when an object, is the
-#   review, even when `.rawOutput` differs. Otherwise its `.rawOutput`, when a string, is read
-#   as a generic reply (RESULT CHECKS). Otherwise the result is the output shape blocker.
-#
-# GENERIC RUN: the prompt is references/adversarial-review.md with its leading HTML comment
-#   removed and its placeholders filled in one jq pass (a filled value is never scanned again):
+# PROMPT (both runs): references/adversarial-review.md with its leading HTML comment removed and
+#   its placeholders filled in one jq pass (a filled value is never scanned again):
 #   {{TARGET_LABEL}} `branch diff against <base>`, {{USER_FOCUS}} the focus or `No extra focus
-#   provided.`, {{REVIEW_COLLECTION_GUIDANCE}}, {{REVIEW_INPUT}} and {{OUTPUT_SCHEMA}} (the text
-#   of references/review-output.schema.json). A template missing a placeholder is the blocker
-#   `cannot build the review prompt`. The review input is the commit log (<base>..HEAD), the
-#   diff stat and `git diff --no-color --no-ext-diff <base>...HEAD`. Input of at most 65536 bytes
-#   goes inline. Larger input is written to a new file .hivemind/review-loop/review-diff.<random>
-#   (made by mktemp, so it never reuses or overwrites an existing file, in a contained folder,
-#   see _shared/containment.sh) before the before-snapshot, the prompt points at that file, and
-#   only that file is removed after the after-check. A `{prompt}` element is replaced whole by the
-#   prompt as one argv element, with stdin /dev/null; otherwise the prompt goes on stdin.
+#   provided.`, {{REVIEW_COLLECTION_GUIDANCE}} a fixed sentence saying the input is inlined,
+#   {{REVIEW_INPUT}} and {{OUTPUT_SCHEMA}} (the text of references/review-output.schema.json). A
+#   template missing a placeholder is the blocker `cannot build the review prompt`. The review
+#   input is the commit log (<base>..HEAD), the diff stat and `git diff --no-color --no-ext-diff
+#   <base>...HEAD`; every reviewer gets it whole, inline. Its byte count (wc -c) is compared with
+#   the limit: 65536 bytes when the generic setting has a `{prompt}` element, else 262144 bytes
+#   (stdin and the preset). Input over the limit is `skipped: too-large`, decided after the branch
+#   diff and before the prompt, the before-snapshot and any reviewer run. The script never writes
+#   inside the repository.
+#
+# PRESET RUN: node <companion> task --json, with the prompt on stdin (the task command's
+#   read-only sandbox is its default). The companion must print one JSON object whose `.rawOutput`
+#   is a string; that string is read as a generic reply (RESULT CHECKS). Any other output,
+#   including an object `.result` with no string `.rawOutput`, is the output shape blocker.
+#
+# GENERIC RUN: a `{prompt}` element is replaced whole by the prompt as one argv element, with
+#   stdin /dev/null; otherwise the prompt goes on stdin.
 #
 # EXECUTION: from the top of the work tree, only under `<timeout> -k 5 <deadline>`, where
 #   <timeout> is the executable `timeout` on PATH, else `gtimeout` (resolved by `type -P`, so a
@@ -59,10 +62,10 @@
 #   after-check, less the 5-second kill grace. A deadline under MIN_REVIEW_SECONDS (60) is
 #   `skipped: timed-out` without running the reviewer. stdout and stderr go to files in a private
 #   mktemp folder. The EXIT trap removes only the files the script writes there, each by its name
-#   in WORK_FILE_NAMES, then the folder itself only when it is empty, and the large-diff file;
-#   it never deletes recursively. It acts only on a path mktemp created (exit 0) and the checks
-#   confirmed: the folder a real, empty directory, the diff file an empty regular file, neither
-#   a symlink. A path that fails them is the creation blocker and is left in place.
+#   in WORK_FILE_NAMES, then the folder itself only when it is empty; it never deletes
+#   recursively. It acts only on a folder mktemp created (exit 0) and the checks confirmed: a
+#   real, empty directory, not a symlink. A folder that fails them is the creation blocker and is
+#   left in place.
 #
 # BEFORE/AFTER CHECK: before the run the script records HEAD, `git status --porcelain=v1 -z
 #   --untracked-files=all --no-renames`, and for every path of `git ls-files -z --cached --others
@@ -73,7 +76,7 @@
 #
 # RESULT CHECKS, in order, after the before/after check:
 #   exit 124 or 137   `skipped: timed-out`
-#   exit 126 or 127   `skipped: tool-missing`
+#   exit 126 or 127   `skipped: tool-missing` (126 also covers an argv too long to exec)
 #   other non-zero    `skipped: tool-failed`, then `stderr_excerpt: <JSON string>`: the trimmed
 #                     stderr (stdout when stderr is blank, as the preset reports failures there),
 #                     cut to its last 300 code points with `...` in front when cut.
@@ -83,10 +86,10 @@
 #                     fenced block, when the reply holds exactly two ``` marks and the first is
 #                     ```json or ``` followed by a line break (spaces or tabs may come first);
 #                     (c) the text from the first `{` to the last `}`, when no `{`, `}`, `[` or
-#                     `]` lies outside it. When no rule yields one, or the preset output has
-#                     neither an object `.result` nor a string `.rawOutput`, the result is
-#                     `unexpected output shape` with `raw_excerpt: <JSON string>` (the first 200
-#                     code points of the trimmed stdout). The review must then match review-output.schema.json (verdict, summary, findings,
+#                     `]` lies outside it. When no rule yields one, or the preset output has no
+#                     string `.rawOutput`, the result is `unexpected output shape` with
+#                     `raw_excerpt: <JSON string>` (the first 200 code points of the trimmed
+#                     stdout). The review must then match review-output.schema.json (verdict, summary, findings,
 #                     next_steps, no other key; each finding exactly severity, title, body, file,
 #                     line_start, line_end, confidence, recommendation, with integer lines >= 1,
 #                     line_end >= line_start and confidence in 0..1); else `output does not
@@ -104,17 +107,17 @@
 #        {"base", "verdict", "summary", "findings", "next_steps", "dropped_outside_diff"}
 #      each finding being the reviewer's fields with `finding_id` first.
 #   0  skip: `skipped: <reason>` on stdout, reason exactly no-reviewer | bad-setting |
-#      tool-missing | tool-failed | timed-out; tool-failed adds the stderr_excerpt line.
-#      tool-missing also covers no `timeout` or `gtimeout` executable on PATH; timed-out also
-#      covers a deadline under the 60-second floor (EXECUTION).
+#      tool-missing | tool-failed | timed-out | too-large; tool-failed adds the stderr_excerpt
+#      line. tool-missing also covers no `timeout` or `gtimeout` executable on PATH; timed-out
+#      also covers a deadline under the 60-second floor (EXECUTION); too-large is review input
+#      over its limit (PROMPT).
 #   1  blocked: NOTHING on stdout. stderr carries `blocker: <fixed reason>` as its FIRST line,
 #      then detail lines: `raw_excerpt: <JSON string>` (unexpected output shape), or for the
 #      working tree blocker an optional `head_moved: true` line and up to 50
 #      `changed_path: <JSON string>` lines, then `changed_path_more: <n>` when there are more.
 #      Other fixed reasons: usage, the two base ref reasons, `jq not found`, `git not found`,
 #      `not inside a git work tree`, `no sha256 tool found`, `cannot compute the branch diff`,
-#      `cannot prepare the review diff file`, `cannot build the review prompt`, `cannot
-#      snapshot the working tree`, `cannot remove the review diff file`, `cannot compute a
+#      `cannot build the review prompt`, `cannot snapshot the working tree`, `cannot compute a
 #      finding id`, `cannot create a private work folder`, `cannot self-locate the script
 #      directory`, `review references missing`.
 #
@@ -123,7 +126,9 @@
 # reports its changes); paths that are not UTF-8 are compared after jq's decoding only when
 # the changed paths are listed. The reviewer command is operator config and is trusted to be
 # what the operator chose; the script only keeps any shell out of the path between the setting
-# and the exec. An after-check that outlasts its reserve ends the call at the Bash tool's cap,
+# and the exec. A reviewer that truncates, drops or compacts part of its own prompt is not seen:
+# the script proves only that the whole input was sent. An after-check that outlasts its reserve
+# ends the call at the Bash tool's cap,
 # and the skill then blocks with `review timed out`, never passes. A reviewer that leaves its
 # process group escapes the timeout's kill (the operator-configured command is trusted). The
 # stderr_excerpt and raw_excerpt are not redacted, per ADR-0042 Implementation decisions item 9.
@@ -136,14 +141,13 @@ set -euo pipefail
 SECONDS=0
 
 work_dir=''
-patch_path=''
 
 # INVARIANT: every file the script writes in $work_dir is named here (snapshot files as
 # <prefix>.<suffix>); cleanup removes exactly these names, so a name missing here leaves the
 # folder behind instead of being deleted with it.
 WORK_FILE_NAMES=(
   argv.nul candidate.json changed-paths.txt changed.nul ids.txt kept.json prompt.txt
-  raw-output.txt review-input-pointer.txt review-input.txt review.json stderr stdout
+  raw-output.txt review-input.txt review.json stderr stdout
   before.hashes before.head before.kinds before.list before.regular before.snap before.status
   after.hashes after.head after.kinds after.list after.regular after.snap after.status
 )
@@ -151,9 +155,6 @@ readonly WORK_FILE_NAMES
 
 remove_private_files() {
   local name work_paths=()
-  if [ -n "$patch_path" ] && { [ -f "$patch_path" ] || [ -L "$patch_path" ]; }; then
-    rm -f -- "$patch_path" 2>/dev/null || :
-  fi
   if [ -n "$work_dir" ] && [ -d "$work_dir" ] && [ ! -L "$work_dir" ]; then
     for name in "${WORK_FILE_NAMES[@]}"; do
       work_paths+=("$work_dir/$name")
@@ -180,11 +181,11 @@ skip_review() {
 }
 
 usage_reason='invalid arguments; usage: run-review.sh --base <ref> [-- <focus>]'
-readonly INLINE_INPUT_LIMIT=65536
+readonly ARGV_INPUT_LIMIT=65536
+readonly STDIN_INPUT_LIMIT=262144
 readonly CALL_BUDGET_SECONDS=570
 readonly MIN_REVIEW_SECONDS=60
 readonly REVIEW_KILL_GRACE_SECONDS=5
-readonly PATCH_DIR_REL='.hivemind/review-loop'
 
 base=''
 base_seen=false
@@ -213,10 +214,6 @@ script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d"
 template_path="$script_dir/../references/adversarial-review.md"
 schema_path="$script_dir/../references/review-output.schema.json"
 [ -f "$template_path" ] && [ -f "$schema_path" ] || blocker 'review references missing'
-shared_dir="$(CDPATH= cd -- "$script_dir/../../_shared" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot self-locate the script directory"
-[ -f "$shared_dir/containment.sh" ] || blocker "review references missing"
-# shellcheck source=../../_shared/containment.sh
-. "$shared_dir/containment.sh" || blocker "review references missing"
 
 command -v jq >/dev/null 2>&1 || blocker 'jq not found'
 command -v git >/dev/null 2>&1 || blocker 'git not found'
@@ -302,6 +299,24 @@ new_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/run-review.XXXXXX" 2>/dev/null)" || b
   || blocker 'cannot create a private work folder'
 work_dir="$new_work_dir"
 
+# setting_argv: the generic setting's elements, `{prompt}` kept as is; input_limit: the review
+# input byte limit for the reviewer's prompt delivery.
+setting_argv=()
+has_prompt_slot=false
+if [ "$reviewer_mode" = 'generic' ]; then
+  printf '%s' "$setting" | jq -j '.[] | (., "\u0000")' >"$work_dir/argv.nul" 2>/dev/null || skip_review 'bad-setting'
+  while IFS= read -r -d '' element; do
+    setting_argv+=("$element")
+    [ "$element" != '{prompt}' ] || has_prompt_slot=true
+  done <"$work_dir/argv.nul"
+  [ "${#setting_argv[@]}" -ge 1 ] || skip_review 'bad-setting'
+fi
+if [ "$has_prompt_slot" = true ]; then
+  input_limit="$ARGV_INPUT_LIMIT"
+else
+  input_limit="$STDIN_INPUT_LIMIT"
+fi
+
 git diff --name-only -z --no-renames --diff-filter=d "$base...HEAD" >"$work_dir/changed.nul" 2>/dev/null || blocker 'cannot compute the branch diff'
 
 # Fills the template in one pass: the leading HTML comment goes, then every {{NAME}} whose NAME
@@ -342,68 +357,43 @@ write_review_input() {
   git diff --no-color --no-ext-diff "$base...HEAD" || return 1
 }
 
-# build_generic_prompt: write the filled prompt to $work_dir/prompt.txt, and the review diff
-# file when the review input is over the inline limit.
-build_generic_prompt() {
-  local input_path="$work_dir/review-input.txt" input_bytes guidance input_text_path canon_root patch_rel
-  local new_patch_path
-  write_review_input >"$input_path" 2>/dev/null || blocker 'cannot compute the branch diff'
-  input_bytes="$(wc -c <"$input_path")" || blocker 'cannot compute the branch diff'
-  input_bytes=$((input_bytes + 0))
-  if [ "$input_bytes" -le "$INLINE_INPUT_LIMIT" ]; then
-    guidance='The commit log, diff stat and full diff are inlined in the repository context below. Read other repository files as needed for context, without changing anything.'
-    input_text_path="$input_path"
-  else
-    canon_root="$(hivemind_assert_contained "$repo_root" "$PATCH_DIR_REL" 2>/dev/null)" || blocker 'cannot prepare the review diff file'
-    [ -n "$canon_root" ] || blocker 'cannot prepare the review diff file'
-    mkdir -p -- "$canon_root/$PATCH_DIR_REL" || blocker 'cannot prepare the review diff file'
-    new_patch_path="$(mktemp "$canon_root/$PATCH_DIR_REL/review-diff.XXXXXXXXXX")" || blocker 'cannot prepare the review diff file'
-    [ -n "$new_patch_path" ] && [ -f "$new_patch_path" ] && [ ! -L "$new_patch_path" ] && [ ! -s "$new_patch_path" ] \
-      || blocker 'cannot prepare the review diff file'
-    patch_path="$new_patch_path"
-    patch_rel="$PATCH_DIR_REL/${patch_path##*/}"
-    cat -- "$input_path" >"$patch_path" || blocker 'cannot prepare the review diff file'
-    guidance="The change is too large to inline. Before you review, read the file $patch_rel at the repository root with your file-read tool: it holds the commit log, diff stat and full diff. Read other repository files as needed for context, without changing anything."
-    input_text_path="$work_dir/review-input-pointer.txt"
-    printf 'The commit log, diff stat and full diff against %s are in %s at the repository root (%s bytes).\n' \
-      "$base" "$patch_rel" "$input_bytes" >"$input_text_path" || blocker 'cannot prepare the review diff file'
-  fi
+# build_review_prompt: write the filled prompt to $work_dir/prompt.txt with the review input
+# inline.
+build_review_prompt() {
+  local guidance='The commit log, diff stat and full diff are inlined in the repository context below. Read other repository files as needed for context, without changing anything.'
   jq -n -j \
     --rawfile template "$template_path" \
     --rawfile schema "$schema_path" \
-    --rawfile input "$input_text_path" \
+    --rawfile input "$work_dir/review-input.txt" \
     --arg target "branch diff against $base" \
     --arg focus "${focus_text:-No extra focus provided.}" \
     --arg guidance "$guidance" \
     "$FILL_PROGRAM" >"$work_dir/prompt.txt" 2>/dev/null || blocker 'cannot build the review prompt'
 }
 
+write_review_input >"$work_dir/review-input.txt" 2>/dev/null || blocker 'cannot compute the branch diff'
+input_bytes="$(wc -c <"$work_dir/review-input.txt")" || blocker 'cannot compute the branch diff'
+input_bytes=$((input_bytes + 0))
+[ "$input_bytes" -le "$input_limit" ] || skip_review 'too-large'
+build_review_prompt
+
 run_argv=()
-stdin_path='/dev/null'
+stdin_path="$work_dir/prompt.txt"
 if [ "$reviewer_mode" = 'preset' ]; then
-  run_argv=(node "$companion_path" adversarial-review --base "$base" --scope branch --wait --json)
-  if [ -n "$focus_text" ]; then
-    case "$focus_text" in
-      -*) run_argv+=(-- "focus: $focus_text") ;;
-      *) run_argv+=(-- "$focus_text") ;;
-    esac
-  fi
+  run_argv=(node "$companion_path" task --json)
 else
-  build_generic_prompt
-  printf '%s' "$setting" | jq -j '.[] | (., "\u0000")' >"$work_dir/argv.nul" 2>/dev/null || skip_review 'bad-setting'
-  prompt_text="$(cat -- "$work_dir/prompt.txt" && printf x)" || blocker 'cannot build the review prompt'
-  prompt_text="${prompt_text%x}"
-  has_prompt_slot=false
-  while IFS= read -r -d '' element; do
+  if [ "$has_prompt_slot" = true ]; then
+    prompt_text="$(cat -- "$work_dir/prompt.txt" && printf x)" || blocker 'cannot build the review prompt'
+    prompt_text="${prompt_text%x}"
+    stdin_path='/dev/null'
+  fi
+  for element in "${setting_argv[@]}"; do
     if [ "$element" = '{prompt}' ]; then
       run_argv+=("$prompt_text")
-      has_prompt_slot=true
     else
       run_argv+=("$element")
     fi
-  done <"$work_dir/argv.nul"
-  [ "${#run_argv[@]}" -ge 1 ] || skip_review 'bad-setting'
-  [ "$has_prompt_slot" = true ] || stdin_path="$work_dir/prompt.txt"
+  done
 fi
 
 # take_snapshot <prefix>: record HEAD (<prefix>.head), git status (<prefix>.status) and the kind
@@ -486,11 +476,6 @@ if [ "$tree_changed" = true ]; then
   blocker 'reviewer modified the working tree' ${change_lines[@]+"${change_lines[@]}"}
 fi
 
-if [ -n "$patch_path" ]; then
-  rm -f -- "$patch_path" || blocker 'cannot remove the review diff file'
-  patch_path=''
-fi
-
 # Trimmed text cut to its first or last $n code points, as a JSON string.
 EXCERPT_PROGRAM='
   (sub("\\A\\s+"; "") | sub("\\s+\\z"; "")) as $t
@@ -560,13 +545,9 @@ extract_review() {
 
 if [ "$reviewer_mode" = 'preset' ]; then
   jq -s -e "$ONE_OBJECT_CHECK" <"$work_dir/stdout" >/dev/null 2>&1 || shape_blocker
-  if jq -e '.result | type == "object"' <"$work_dir/stdout" >/dev/null 2>&1; then
-    jq -c '.result' <"$work_dir/stdout" >"$work_dir/review.json" 2>/dev/null || shape_blocker
-  else
-    jq -e '.rawOutput | type == "string"' <"$work_dir/stdout" >/dev/null 2>&1 || shape_blocker
-    jq -j '.rawOutput' <"$work_dir/stdout" >"$work_dir/raw-output.txt" 2>/dev/null || shape_blocker
-    extract_review "$work_dir/raw-output.txt" || shape_blocker
-  fi
+  jq -e '.rawOutput | type == "string"' <"$work_dir/stdout" >/dev/null 2>&1 || shape_blocker
+  jq -j '.rawOutput' <"$work_dir/stdout" >"$work_dir/raw-output.txt" 2>/dev/null || shape_blocker
+  extract_review "$work_dir/raw-output.txt" || shape_blocker
 else
   extract_review "$work_dir/stdout" || shape_blocker
 fi

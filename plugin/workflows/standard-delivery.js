@@ -672,7 +672,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '66337c2e3e61c8ed';
+const BUILD_ID = '7567148b982bd953';
 
 function supportedSchemaKeywords(){
 return[
@@ -4607,7 +4607,7 @@ user_question:{type:'question',text:'The question the user answers about the fin
 blocker:{type:'string',text:'What blocked the review.',isExternal:true,bounds:{maxLength:300}},
 stage:{type:'string',text:'The loop stage that was blocked.'},
 retry_minutes:{type:'integer',text:'Minutes until the blocking service is back, 1 or more.'},
-skip_reason:{type:'string',text:'Why the review could not run.',bounds:{enum:['no-reviewer','bad-setting','tool-missing','tool-failed','timed-out']}}
+skip_reason:{type:'string',text:'Why the review could not run.',bounds:{enum:['no-reviewer','bad-setting','tool-missing','tool-failed','timed-out','too-large']}}
 };
 }
 function describeReviewField(entry){

@@ -10408,7 +10408,7 @@ const ROW_TESTS = {
     });
   },
   'SD-86': () => {
-    const SKIP_CODES = ['no-reviewer', 'bad-setting', 'tool-missing', 'tool-failed', 'timed-out'];
+    const SKIP_CODES = ['no-reviewer', 'bad-setting', 'tool-missing', 'tool-failed', 'timed-out', 'too-large'];
     const skippedReview = (skipReason) => ({ ...REVIEW_CLEAN, exit_reason: 'skipped', skip_reason: skipReason });
     for (const code of SKIP_CODES) {
       test('a review skipped with ' + code + ' goes on to the pull request with local review dropped, and the body and the complete message name the skip', async () => {
@@ -10447,12 +10447,13 @@ const ROW_TESTS = {
       assert.deepEqual({ ...main.routeLocalReview(skippedReview('timed-out'), run) }, { held: false });
       assert.equal(run.reviewSkip, 'timed-out');
     });
-    test('REVIEW_SCHEMA requires skip_reason under skipped, as one of the five codes, and refuses it under any other exit_reason', () => {
+    test('REVIEW_SCHEMA requires skip_reason under skipped, as one of the six codes the local-reviewer names, and refuses it under any other exit_reason', () => {
       assert.deepEqual(readReviewerContract('## Output Contract').conditional.skipped, ['skip_reason']);
       const schema = main.buildReviewSchema();
       assert.deepEqual([...schema.properties.skip_reason.enum], SKIP_CODES);
       for (const code of SKIP_CODES) {
         assert.equal(main.describeReviewProblem(skippedReview(code)), undefined, code);
+        assert.ok(reviewerText.includes('`' + code + '`'), code);
       }
       const { skip_reason: dropped, ...missing } = skippedReview('no-reviewer');
       assert.equal(dropped, 'no-reviewer');
