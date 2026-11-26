@@ -922,15 +922,16 @@ ANCHOR_SHA="$(git -C "$REPO" rev-parse HEAD)" || exit 2
 run_review "$REPO" "$EMPTY_HOME" "$BIN_MOVE_GIT" set "$(reviewer_setting "$CAPTURE" reply "$BARE_REPLY" no)" --base main
 assert_blocked "tree:head-move-during-collection-blocked" 'cannot compute the branch diff'
 assert_check "tree:head-move-during-collection-no-run" "the reviewer never ran" dir_has_no_entries "$CAPTURE"
-# anchored_reads: the changed-path, log, stat and diff reads each name the anchor, none HEAD.
+# anchored_reads: the logged log and diff calls are exactly the changed-path, log, stat and diff
+# reads, in order, each naming the anchor; any added, dropped or changed read fails.
 anchored_reads() {
-  ! grep -q 'HEAD' "$MOVE_GIT_LOG" \
-    && grep -Fxq -- "diff --name-only -z --no-renames --diff-filter=d main...$ANCHOR_SHA" "$MOVE_GIT_LOG" \
-    && grep -Fxq -- "log --no-color --no-decorate --format=%h %s main..$ANCHOR_SHA" "$MOVE_GIT_LOG" \
-    && grep -Fxq -- "diff --no-color --no-ext-diff --stat main...$ANCHOR_SHA" "$MOVE_GIT_LOG" \
-    && grep -Fxq -- "diff --no-color --no-ext-diff main...$ANCHOR_SHA" "$MOVE_GIT_LOG"
+  printf '%s\n' \
+    "diff --name-only -z --no-renames --diff-filter=d main...$ANCHOR_SHA" \
+    "log --no-color --no-decorate --format=%h %s main..$ANCHOR_SHA" \
+    "diff --no-color --no-ext-diff --stat main...$ANCHOR_SHA" \
+    "diff --no-color --no-ext-diff main...$ANCHOR_SHA" | cmp -s - "$MOVE_GIT_LOG"
 }
-assert_check "tree:head-anchor-every-read" "every branch-diff read names the anchored commit, none HEAD" anchored_reads
+assert_check "tree:head-anchor-every-read" "the branch-diff reads are exactly the four anchored ones" anchored_reads
 
 # ── Input limits: whole input inline or too-large ──────────────────────────────
 

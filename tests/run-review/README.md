@@ -76,8 +76,8 @@ Covered behavior:
   blocked, and the change stays in place.
 - HEAD anchor: a commit made after the script reads HEAD and before its
   before-snapshot is blocked as `cannot compute the branch diff`, and the
-  reviewer never runs. The changed-path, log, stat and diff reads each name the
-  commit read first, never `HEAD`.
+  reviewer never runs. The `log` and `diff` calls are exactly the changed-path,
+  log, stat and diff reads, in order, each naming the commit read first.
 - No repository write: normal, preset and too-large runs leave no `.hivemind`
   folder. An old `.hivemind/review-loop/review-diff.patch` is left unchanged
   and alone.
