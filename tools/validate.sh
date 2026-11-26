@@ -77,6 +77,7 @@ SUITE_TEST_DESIGN_REVIEW='test_design_review.sh'
 SUITE_VERIFY_RECORDS='verify_records.sh'
 SUITE_TEST_STAGE_DERIVATION='test_stage_derivation.sh'
 SUITE_TEST_SOLUTION_DESIGN='test_solution_design.sh'
+SUITE_TEST_IDEA_TO_READY='test_idea_to_ready.sh'
 
 # Full suite, in CI order. Used by --all and by every FAIL-CLOSED escalation.
 ALL_SUITES=(
@@ -116,6 +117,7 @@ ALL_SUITES=(
   "$SUITE_VERIFY_RECORDS"
   "$SUITE_TEST_STAGE_DERIVATION"
   "$SUITE_TEST_SOLUTION_DESIGN"
+  "$SUITE_TEST_IDEA_TO_READY"
 )
 
 # KNOWN_SUITES: the tools/*.sh validation suites this dispatcher knows about. --self-test
@@ -157,6 +159,7 @@ KNOWN_SUITES=(
   verify_records.sh
   test_stage_derivation.sh
   test_solution_design.sh
+  test_idea_to_ready.sh
 )
 
 # NON_SUITE_TOOLS: tools/*.sh files that are NOT validation suites (so --self-test does not
@@ -439,6 +442,11 @@ run_suites() {
 #     tools/test_stage_derivation.sh
 #                                      -> test_stage_derivation (the libraries keep their other routes
 #                                         by union)
+#   plugin/skills/idea-to-ready/**, plugin/skills/_shared/{readiness-check,record-verify,stage-derivation,
+#     containment}.sh, design-review/scripts/design-review.sh, tests/idea-to-ready/**,
+#     tools/test_idea_to_ready.sh
+#                                      -> test_idea_to_ready (the libraries keep their other routes
+#                                         by union)
 #   plugin/skills/triage-backlog/scripts/*.sh, plugin/skills/_shared/readiness-check.sh,
 #     tests/triage-backlog/**
 #                                      -> test_triage_ops (triage-ops.sh loads the library; the
@@ -589,6 +597,26 @@ map_path() {
      || "$p" == tests/solution-design/* \
      || "$p" == tools/test_solution_design.sh ]]; then
     add_selected "$SUITE_TEST_SOLUTION_DESIGN" "$p (solution-design skill/readiness check library/fixture)"
+    matched=1
+  fi
+
+  # test_idea_to_ready: the idea-to-ready guide skill (SKILL.md and the idea-to-ready.sh engine),
+  # the four libraries the engine sources (readiness-check.sh, record-verify.sh,
+  # stage-derivation.sh, containment.sh), its fixture dir and its behavior suite. The skill and
+  # libraries are ALSO plugin/* files (policy_check prose-lints them via the wholesale rule below),
+  # but policy_check NEVER EXECUTES bash, so without this rule an edit would only be prose-linted,
+  # never behaviorally exercised. The libraries keep their other routes by union. It runs BEFORE
+  # (and does NOT return early from) the tools/** escalation below: a real edit to
+  # tools/test_idea_to_ready.sh still fail-closes to the full suite via that leg.
+  if [[ "$p" == plugin/skills/idea-to-ready/* \
+     || "$p" == plugin/skills/_shared/readiness-check.sh \
+     || "$p" == plugin/skills/_shared/record-verify.sh \
+     || "$p" == plugin/skills/_shared/stage-derivation.sh \
+     || "$p" == plugin/skills/_shared/containment.sh \
+     || "$p" == plugin/skills/design-review/scripts/design-review.sh \
+     || "$p" == tests/idea-to-ready/* \
+     || "$p" == tools/test_idea_to_ready.sh ]]; then
+    add_selected "$SUITE_TEST_IDEA_TO_READY" "$p (idea-to-ready skill/shared libraries/fixture)"
     matched=1
   fi
 
@@ -1392,6 +1420,7 @@ self_test() {
     ["verify_records.sh"]="docs/initiatives/x/review-record.md"
     ["test_stage_derivation.sh"]="tests/stage-derivation/README.md"
     ["test_solution_design.sh"]="tests/solution-design/README.md"
+    ["test_idea_to_ready.sh"]="tests/idea-to-ready/README.md"
   )
   local script_name expected_suite suite_path probe_path hit
   for script_name in "${KNOWN_SUITES[@]}"; do
@@ -1631,7 +1660,7 @@ self_test() {
   #     skill, library and harness legs, the test_merge_approved record gate library legs, the
   #     verify_records record, stamped doc, library and suite legs (and the docs/adr/**
   #     policy_check leg it unions with), the test_stage_derivation library and harness legs, the
-  #     test_triage_ops readiness-check library leg, the test_solution_design skill, library and
+  #     test_idea_to_ready skill, library and harness legs, the test_triage_ops readiness-check library leg, the test_solution_design skill, library and
   #     harness legs, the test_subissue_ops readiness-check library leg, and the hooks.json
   #     json-manifests parse leg, that the
   #     KNOWN_SUITES probe (#1) does not reach must route to its suite. #1 probes each entrypoint
@@ -1685,6 +1714,14 @@ self_test() {
     "plugin/skills/_shared/readiness-check.sh|$SUITE_TEST_SOLUTION_DESIGN" \
     "tools/test_solution_design.sh|$SUITE_TEST_SOLUTION_DESIGN" \
     "plugin/skills/_shared/readiness-check.sh|$SUITE_TEST_SUBISSUE_OPS" \
+    "plugin/skills/idea-to-ready/scripts/idea-to-ready.sh|$SUITE_TEST_IDEA_TO_READY" \
+    "plugin/skills/idea-to-ready/SKILL.md|$SUITE_TEST_IDEA_TO_READY" \
+    "plugin/skills/_shared/readiness-check.sh|$SUITE_TEST_IDEA_TO_READY" \
+    "plugin/skills/_shared/record-verify.sh|$SUITE_TEST_IDEA_TO_READY" \
+    "plugin/skills/_shared/stage-derivation.sh|$SUITE_TEST_IDEA_TO_READY" \
+    "plugin/skills/_shared/containment.sh|$SUITE_TEST_IDEA_TO_READY" \
+    "plugin/skills/design-review/scripts/design-review.sh|$SUITE_TEST_IDEA_TO_READY" \
+    "tools/test_idea_to_ready.sh|$SUITE_TEST_IDEA_TO_READY" \
     "plugin/hooks/hooks.json|$SUITE_JSON_MANIFESTS" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_BROOD" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_RC_BROOD"; do

@@ -216,6 +216,7 @@ describe('overlord Engine section', () => {
       '`pr-feedback-remediation`',
       'without asking, said in one line',
       'continues from the branch\'s last commit',
+      'A started `standard-delivery` run, except a guide run, that fails or ends blocked',
       'reported as it ended',
       'says it switched and where the run stopped',
       '`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State)',
@@ -278,6 +279,46 @@ describe('overlord standard-delivery launch args', () => {
       assert.equal(typeof launch.problem, 'string', `readDeliveryLaunch accepted ${argName} ${JSON.stringify(INVALID_LAUNCH_VALUES[argName])}`);
     });
   }
+});
+
+describe('overlord guide run', () => {
+  const guideMarker = '`hivemind-guide-run: <slug>`';
+  const guideRunLead = 'A guide run is a request whose line 1 is exactly ' + guideMarker + '.';
+  const guideRunArgNames = ['request', 'references', 'draft'];
+  const engineParagraphs = engineSection.split('\n\n').filter((paragraph) => paragraph.trim() !== '');
+  const guideRunParagraph = engineParagraphs.find((paragraph) => paragraph.startsWith(guideRunLead)) ?? '';
+  const guideSkillText = readFileSync(repoRoot + 'plugin/skills/idea-to-ready/SKILL.md', 'utf8').replace(/\r/g, '');
+  const launchArgNames = readDeliveryLaunchArgNames();
+
+  /** Returns each backticked launch arg name in text, in order. */
+  function readBacktickedLaunchArgNames(text) {
+    return [...text.matchAll(/`([a-z_]+)`/g)].map((match) => match[1]).filter((name) => launchArgNames.includes(name));
+  }
+
+  test('Engine has the guide-run paragraph right after its opening paragraph', () => {
+    assert.notEqual(guideRunParagraph, '', `## Engine has no paragraph starting ${guideRunLead}`);
+    assert.equal(engineParagraphs.indexOf(guideRunParagraph), 1, 'the guide-run paragraph does not sit right after the Engine opening paragraph');
+  });
+  test('the guide-run paragraph sets request, references from line 2 only, and draft, and returns a failed or blocked run to the guide', () => {
+    for (const phrase of [
+      guideRunLead,
+      '`request` is that whole request',
+      '`references` holds only the number in line 2 when line 2 is exactly `Docs pull request: #<n>`, else nothing',
+      '`draft` is `true`',
+      'A started guide run that fails or ends blocked returns to the guide, which re-derives its stage.',
+    ]) {
+      assert.ok(guideRunParagraph.includes(phrase), `guide-run paragraph lacks ${phrase}`);
+    }
+  });
+  test('the guide-run paragraph overrides only request, references and draft and restates no launch-arg template', () => {
+    const overriddenNames = readBacktickedLaunchArgNames(guideRunParagraph);
+    assert.deepEqual([...new Set(overriddenNames)].sort(), [...guideRunArgNames].sort());
+    assert.ok(!guideRunParagraph.includes('only these args'), 'guide-run paragraph restates the launch-arg template');
+  });
+  test('the guide skill names the same marker line and no launch arg', () => {
+    assert.ok(guideSkillText.includes(guideMarker), `the guide SKILL.md lacks ${guideMarker}`);
+    assert.deepEqual(readBacktickedLaunchArgNames(guideSkillText), [], 'the guide SKILL.md names a launch arg');
+  });
 });
 
 describe('overlord pull request hand-off and opt-in', () => {

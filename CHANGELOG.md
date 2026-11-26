@@ -13,6 +13,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [14.9.0] - 2026-11-26
+
+### Added
+
+- The user-only `hivemind:idea-to-ready` guide skill and its engine script `idea-to-ready.sh`, with the subcommands `list`, `stage`, `handoff`, `seed`, `standalone`, `reviewed`, `compose`, `comment`, `approval`, `redraft` and `ready`. The engine deletes each guide inputs file after the GitHub write it fed succeeds. The `compose` close-out accepts `--pr none`.
+- The offline suite `tools/test_idea_to_ready.sh` with its cases in `tests/idea-to-ready/`.
+- The consumer-assertion fixtures `tests/policy/safety-prd-ui-line.json` and `tests/policy/safety-ui-prototype-carve-out.json`.
+
+### Changed
+
+- The overlord `## Engine guide-run rule`: a request whose line 1 is `hivemind-guide-run: <slug>` gets the guide-run request, references and draft. A started guide run that fails or ends blocked returns to the guide, not the Instinct takeover. Other overlord prose is trimmed to fit.
+- The changeling carve-out for `docs/initiatives/<slug>/prototype/index.html`.
+- `hivemind:plan-to-prd` writes the `**UI:** yes|no` line.
+- `tools/validate.sh` and `tools/test_script_bootstrap.sh` register the suite and the script.
+- README lists `hivemind:idea-to-ready` in its Skills table.
+- Since the pull request opened: the engine derives the review record's next action, which `reviewed` prints; `compose --kind record` replaces `round` and `record-pass`; `comment --kind round` takes `--clean`; `tools/validate.sh` routes `design-review.sh` to the idea-to-ready suite.
+
+No prose budget raised. New budget entry for `idea-to-ready`.
+
+Issue: #622.
+
 ## [14.8.0] - 2026-11-26
 
 ### Added
