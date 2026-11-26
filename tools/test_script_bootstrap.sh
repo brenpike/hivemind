@@ -133,6 +133,7 @@ ENTRY_ROWS=(
     "plugin/skills/github-review-loop/scripts/react-marker.sh|SCRIPT_DIR|react_marker_fail|cannot-self-locate"
     "plugin/skills/github-review-loop/scripts/reply-resolve.sh|SCRIPT_DIR|replyresolve_fail|cannot-self-locate"
     "plugin/skills/design-review/scripts/design-review.sh|script_dir|design_review_fail|cannot-self-locate"
+    "plugin/skills/idea-to-ready/scripts/idea-to-ready.sh|script_dir|idea_to_ready_fail|cannot-self-locate"
     "plugin/skills/triage-backlog/scripts/triage-ops.sh|script_dir|triage_ops_fail|$SELF_LOCATE_REASON"
     "plugin/skills/prd-to-issues/scripts/subissue-ops.sh|script_dir|subissue_ops_fail|$SELF_LOCATE_REASON"
 )
@@ -163,6 +164,7 @@ STAGE2_ROWS=(
     "plugin/skills/spawn-brood/scripts/spawn-brood.sh|plugin_root|../../..|$PLUGIN_ROOT_REASON"
     "plugin/skills/github-review-loop/scripts/ledger-reconstruct.sh|plugin_root|../../..|cannot-resolve-plugin-root"
     "plugin/skills/design-review/scripts/design-review.sh|shared_dir|../../_shared|cannot-resolve-shared-dir"
+    "plugin/skills/idea-to-ready/scripts/idea-to-ready.sh|shared_dir|../../_shared|cannot-resolve-shared-dir"
     "plugin/skills/triage-backlog/scripts/triage-ops.sh|shared_dir|../../_shared|cannot resolve skills/_shared from the script directory; refusing to proceed"
     "plugin/skills/prd-to-issues/scripts/subissue-ops.sh|shared_dir|../../_shared|cannot resolve skills/_shared from the script directory; refusing to proceed"
 )
@@ -228,6 +230,10 @@ SOURCE_ROWS=(
     'plugin/skills/github-review-loop/scripts/merge-approved.sh|$SCRIPT_DIR/../../_shared/record-verify.sh|missing-record-verify|unparseable-record-verify|record-verify.sh'
     'plugin/skills/design-review/scripts/design-review.sh|$shared_dir/readiness-check.sh|missing-readiness-check|unparseable-readiness-check|readiness-check.sh'
     'plugin/skills/design-review/scripts/design-review.sh|$shared_dir/record-verify.sh|missing-record-verify|unparseable-record-verify|record-verify.sh'
+    'plugin/skills/idea-to-ready/scripts/idea-to-ready.sh|$shared_dir/readiness-check.sh|missing-readiness-check|unparseable-readiness-check|readiness-check.sh'
+    'plugin/skills/idea-to-ready/scripts/idea-to-ready.sh|$shared_dir/record-verify.sh|missing-record-verify|unparseable-record-verify|record-verify.sh'
+    'plugin/skills/idea-to-ready/scripts/idea-to-ready.sh|$shared_dir/stage-derivation.sh|missing-stage-derivation|unparseable-stage-derivation|stage-derivation.sh'
+    'plugin/skills/idea-to-ready/scripts/idea-to-ready.sh|$shared_dir/containment.sh|missing-containment|unparseable-containment|containment.sh'
     "$(build_std_source_row plugin/skills/prd-to-issues/scripts/subissue-ops.sh '$shared_dir' readiness-check.sh)"
 )
 
@@ -270,6 +276,7 @@ emitter_contract() {
         replyresolve_fail) EC_RC=1; EC_CHANNEL=out; EC_PREFIX='REPLYRESOLVE_ERROR=' ;;
         merge_approved_fail) EC_RC=1; EC_CHANNEL=out; EC_PREFIX='MERGE_ERROR=' ;;
         design_review_fail) EC_RC=2; EC_CHANNEL=err; EC_PREFIX='design-review-error: ' ;;
+        idea_to_ready_fail) EC_RC=2; EC_CHANNEL=err; EC_PREFIX='idea-to-ready-error: ' ;;
         triage_ops_fail)  EC_RC=1; EC_CHANNEL=err; EC_PREFIX='triage-ops: ' ;;
         subissue_ops_fail) EC_RC=2; EC_CHANNEL=err; EC_PREFIX='subissue-ops: ' ;;
         *) return 1 ;;

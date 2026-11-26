@@ -30,10 +30,11 @@
 # file, `.hivemind/guide-inputs-<token>.json` (<token> 1 to 64 of [A-Za-z0-9-]), relative to the
 # folder the script runs in or absolute. Each inputs file passes hivemind_inputs_path_problem
 # (kind guide) and the containment guard before its one read, hivemind_read_input_file, into a
-# private copy; a file that is not valid UTF-8 is refused. The script never deletes an inputs
-# file. A title is one line, the ending newline dropped, with a non-space character and no
-# control character; a body has a non-space character and no control character but newline, tab
-# and carriage return.
+# private copy; a file that is not valid UTF-8 is refused. Only comment deletes an inputs file,
+# its --body-file, and only once the post has succeeded (see comment); seed and standalone never
+# delete one, and a failure of any subcommand keeps every inputs file. A title is one line, the
+# ending newline dropped, with a non-space character and no control character; a body has a
+# non-space character and no control character but newline, tab and carriage return.
 #
 # READS. The repository is `gh repo view`'s nameWithOwner. The trunk is one GraphQL read of
 # defaultBranchRef {name target{oid}}, then `git fetch --refmap= origin refs/heads/<trunk>`,
@@ -126,7 +127,14 @@
 #            takes no flag but the pull request and posts the record's `## Decisions taken,
 #            listed for veto` section at the head, its heading line then its body, or `None` when
 #            empty (record-missing when there is no record). Prints comment=<url>, or
-#            comment=posted when gh's URL is off its shape. Exit 0.
+#            comment=posted when gh's URL is off its shape. After the post succeeds, the
+#            --body-file is deleted, so no untracked inputs file is left to make a later reviewed
+#            print head=dirty: only when it still passes hivemind_inputs_path_problem (kind
+#            guide), its leaf under the canonical start folder's .hivemind is a regular file and
+#            not a symlink, and git lists no index entry for it; the rm runs from inside that
+#            .hivemind after cd -P and a pwd -P re-check, so it never follows a symlink. When the
+#            file is not deleted, prints inputs=kept after the comment line. A failed post exits
+#            before the delete, so the file is kept for a retry. Exit 0.
 #   approval Prints approval=none with no counting approval comment. Else, for the latest one,
 #            approval=stale when its commit is not the head or its ancestor or index.html is
 #            missing at either commit, else approval=kept then folded=yes when index.html's blob
@@ -692,6 +700,26 @@ create_issue() {
   fi
 }
 
+# remove_guide_input <path-arg>: deletes the inputs file the caller read from <path-arg>, by the
+# rule in the comment contract. Returns 0 when it deleted the file and 1 when the file is kept.
+remove_guide_input() {
+  local canon_start="" canon_hivemind="" leaf="${1##*/}" tracked=""
+  hivemind_inputs_path_problem "$START_DIR" "$1" guide >/dev/null 2>&1 || return 1
+  canon_start="$(hivemind_canon_root "$START_DIR")" || return 1
+  canon_hivemind="${canon_start%/}/.hivemind"
+  if [ -L "$canon_hivemind/$leaf" ] || [ ! -f "$canon_hivemind/$leaf" ]; then
+    return 1
+  fi
+  tracked="$(git_run -C "$canon_start" ls-files --cached -- ".hivemind/$leaf")" || return 1
+  [ -z "$tracked" ] || return 1
+  (
+    CDPATH='' cd -P -- "$canon_hivemind" 2>/dev/null || exit 1
+    [ "$(pwd -P)" = "$canon_hivemind" ] || exit 1
+    if [ -L "./$leaf" ] || [ ! -f "./$leaf" ]; then exit 1; fi
+    rm -f -- "./$leaf" 2>/dev/null
+  )
+}
+
 # post_comment <body-file>: posts the comment and appends comment=<url> to OUT.
 post_comment() {
   local url="" suffix=""
@@ -1250,6 +1278,9 @@ run_comment() {
       || idea_to_ready_fail workdir-failed
   fi
   post_comment "$body_file"
+  if [ "$have_body" -eq 1 ] && ! remove_guide_input "$body_arg"; then
+    OUT+="inputs=kept"$'\n'
+  fi
   printf '%s' "$OUT"
 }
 

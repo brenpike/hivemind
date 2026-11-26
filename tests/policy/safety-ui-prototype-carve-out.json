@@ -1,0 +1,18 @@
+{
+  "rule": "UI prototype changeling carve-out",
+  "description": "P3 consumer-assertion: plugin/agents/changeling.md (## Prototype Carve-Out) lifts its ## Do Not Own list and Hard Stop Rules for exactly one path, docs/initiatives/<slug>/prototype/index.html: the ?variant= switcher, the left and right arrow key cycling and in-memory stub state, with its 3 to 5 variants the intended alternatives and the maintainer's verdict settling material visual decisions. The source pin is one sentence spanning the path-only scope, the three lifted behaviors, the two lifted lists, the variants clause and the verdict clause, so dropping or widening the scope, or removing any lifted behavior, list or clause, fails it. The consumer pins plugin/skills/idea-to-ready/scripts/idea-to-ready.sh, whose fixed wording names a hivemind:changeling step with exact file scope as the only owner of prototype/index.html, in the build run and in the fix-run owner line; the notes.md owner stays a drone. Honest capability statement: both pins are whole-file word-sequence presence, never meaning. The source pin cannot show the carve-out reaches no other path or that a changeling step never edits another file, a rewrite-around that keeps the pinned bytes stays green, and the heading ## Prototype Carve-Out is not pinned, so moving the sentence under another heading stays green. The consumer pins hold the engine's wording, not its dispatch: they cannot show a run sends the step to the changeling, and a new run kind that names a different owner for index.html is invisible to them.",
+  "source": {
+    "file": "plugin/agents/changeling.md",
+    "pattern": "For `docs/initiatives/<slug>/prototype/index.html` only, the `?variant=` switcher, `←`/`→` key cycling and in-memory stub state lift `## Do Not Own` and the Hard Stop Rules; its 3 to 5 variants are the intended alternatives; the maintainer's verdict settles material visual decisions."
+  },
+  "consumers": [
+    {
+      "file": "plugin/skills/idea-to-ready/scripts/idea-to-ready.sh",
+      "pattern": "a hivemind:changeling step with exact file scope writes $folder/prototype/index.html with 3 to 5 structurally different variants behind the ?variant= switcher"
+    },
+    {
+      "file": "plugin/skills/idea-to-ready/scripts/idea-to-ready.sh",
+      "pattern": "A fix to docs/initiatives/$SLUG/prototype/index.html is a hivemind:changeling step with exact file scope"
+    }
+  ]
+}

@@ -28,13 +28,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 . "$SCRIPT_DIR/lib/scratch.sh" || exit 2
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 ENGINE="$REPO_ROOT/plugin/skills/idea-to-ready/scripts/idea-to-ready.sh"
+SKILL_FILE="$REPO_ROOT/plugin/skills/idea-to-ready/SKILL.md"
 RC_LIB="$REPO_ROOT/plugin/skills/_shared/readiness-check.sh"
 RV_LIB="$REPO_ROOT/plugin/skills/_shared/record-verify.sh"
 SD_LIB="$REPO_ROOT/plugin/skills/_shared/stage-derivation.sh"
 CASES="$REPO_ROOT/tests/idea-to-ready/cases.json"
 ROUTES="$REPO_ROOT/tests/idea-to-ready/gh-routes.json"
 
-for required_file in "$ENGINE" "$RC_LIB" "$RV_LIB" "$SD_LIB" "$CASES" "$ROUTES"; do
+for required_file in "$ENGINE" "$SKILL_FILE" "$RC_LIB" "$RV_LIB" "$SD_LIB" "$CASES" "$ROUTES"; do
   [ -f "$required_file" ] || { echo "FAIL: file under test missing: $required_file" >&2; exit 2; }
 done
 command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite" >&2; exit 2; }
@@ -61,8 +62,8 @@ jq -e 'type == "object" and (keys == ["cases", "docs", "scenarios"])
   and all(.cases[]; (.name | type) == "string" and (.scenario | type) == "string"
     and (.args | type) == "array" and (.routes | type) == "array" and (.expect | type) == "object"
     and (keys - ["args", "bodies", "clone", "compare", "compare_tail", "cwd", "detach", "dirty", "expect",
-                 "gh_has", "gh_lacks", "inputs", "name", "no_gh", "no_git", "request", "routes", "scenario",
-                 "stdout_lacks", "symlinks"] == []))' "$CASES" >/dev/null 2>&1 \
+                 "files_absent", "files_present", "gh_has", "gh_lacks", "inputs", "name", "no_gh", "no_git",
+                 "request", "routes", "scenario", "staged", "stdout_lacks", "symlinks"] == []))' "$CASES" >/dev/null 2>&1 \
   || setup_fail "cases file missing or off its shape: $CASES"
 jq -e '.routes | type == "object" and all(.[]; (.args | type) == "array" and (has("json") or has("raw")))' \
   "$ROUTES" >/dev/null 2>&1 || setup_fail "routes file missing or off its shape: $ROUTES"
@@ -329,6 +330,10 @@ run_case() {
     mkdir -p "$(dirname "$dir/clone/$line")" || setup_fail "symlink dir $name"
     ln -s "$encoded" "$dir/clone/$line" || setup_fail "symlink $name"
   done < <(case_field "$index" '(.symlinks // {}) | to_entries[] | "\(.key)\t\(.value)"')
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    "$REAL_GIT" -C "$dir/clone" add -f -- "$line" || setup_fail "stage $line in $name"
+  done < <(case_field "$index" '(.staged // [])[]')
   cwd="$(case_field "$index" '.cwd // ""')"
   if [ -n "$cwd" ]; then
     mkdir -p "$dir/clone/$cwd" || setup_fail "cwd $name"
@@ -399,6 +404,18 @@ run_case() {
     [ -n "$want" ] || continue
     if grep -qF -- "$want" "$dir/gh.log"; then failed "$name:gh-lacks" "a gh call holds $want"; else pass "$name:gh-lacks" "$want"; fi
   done < <(case_field "$index" '(.gh_lacks // [])[]')
+  while IFS= read -r want; do
+    [ -n "$want" ] || continue
+    if [ -e "$dir/clone/$want" ] || [ -L "$dir/clone/$want" ]; then
+      failed "$name:file-absent" "$want is still there"
+    else
+      pass "$name:file-absent" "$want"
+    fi
+  done < <(case_field "$index" '(.files_absent // [])[]')
+  while IFS= read -r want; do
+    [ -n "$want" ] || continue
+    if [ -f "$dir/clone/$want" ]; then pass "$name:file-present" "$want"; else failed "$name:file-present" "$want is gone"; fi
+  done < <(case_field "$index" '(.files_present // [])[]')
   if [ "$(case_field "$index" '.no_gh // false')" = true ]; then
     if [ -s "$dir/gh.log" ]; then failed "$name:no-gh" "gh ran: $(head -n 1 "$dir/gh.log")"; else pass "$name:no-gh" "no gh call"; fi
   fi
@@ -474,6 +491,39 @@ test_no_ready_label() {
   fi
 }
 
+# test_skill_frontmatter: asserts the guide skill is user-only, holds exactly its three allowed
+# tools, names the guide run marker line and lists no launch arg by its backticked name.
+test_skill_frontmatter() {
+  local front tools want_tools
+  front="$(awk 'NR == 1 && $0 == "---" { inside = 1; next } inside && $0 == "---" { exit } inside' "$SKILL_FILE")"
+  if grep -qx 'name: idea-to-ready' <<<"$front" && grep -qx 'disable-model-invocation: true' <<<"$front"; then
+    pass "skill:user-only" "name idea-to-ready, disable-model-invocation: true"
+  else
+    failed "skill:user-only" "frontmatter lacks name idea-to-ready or disable-model-invocation: true"
+  fi
+  tools="$(awk '/^allowed-tools:$/ { inside = 1; next } inside && /^  - / { sub(/^  - /, ""); print; next } { inside = 0 }' \
+    <<<"$front" | LC_ALL=C sort)"
+  # shellcheck disable=SC2016
+  want_tools="$(printf '%s\n' 'Read(~/.claude/plugins/cache/brenpike/hivemind/**)' \
+    'Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/idea-to-ready/scripts/idea-to-ready.sh" *)' 'Skill' | LC_ALL=C sort)"
+  if [ "$tools" = "$want_tools" ]; then
+    pass "skill:allowed-tools" "exactly the cache Read, the engine Bash and Skill"
+  else
+    failed "skill:allowed-tools" "got: $tools"
+  fi
+  if grep -qF '`hivemind-guide-run: <slug>`' "$SKILL_FILE"; then
+    pass "skill:marker" "names the guide run marker line"
+  else
+    failed "skill:marker" "lacks \`hivemind-guide-run: <slug>\`"
+  fi
+  if grep -qE '`(request|references|draft|trunk|local_review|decisions)`' "$SKILL_FILE"; then
+    failed "skill:no-launch-args" "names a launch arg: $(grep -oE '`(request|references|draft|trunk|local_review|decisions)`' "$SKILL_FILE" | head -n 1)"
+  else
+    pass "skill:no-launch-args" "no backticked launch arg name"
+  fi
+}
+
+test_skill_frontmatter
 test_cases
 test_no_ready_label
 

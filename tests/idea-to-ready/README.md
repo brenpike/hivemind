@@ -27,6 +27,11 @@ The suite needs only bash, git and jq. It never reaches GitHub or the network.
    gh calls made or not made, and that every git call carries
    `--no-replace-objects` (or that none ran).
 
+Before the cases, the suite checks the skill's frontmatter: `name:
+idea-to-ready` with `disable-model-invocation: true`, exactly its three
+`allowed-tools` entries, the marker line `hivemind-guide-run: <slug>` named in
+the body, and no launch arg named in backticks.
+
 A recording `gh` stub logs each argv as one line of `<arg>` fields, copies the
 file after each `--body-file` so the posted body can be compared, and serves
 the first route whose args all match; an unrouted call exits 1. A recording
@@ -68,9 +73,12 @@ One object with three keys.
   - Optional: `clone`, `detach`, `dirty`, `cwd`, `inputs` (path to text, or
     `{"base64": ...}` for bytes), `symlinks` (path to target), `bodies` (each
     posted body, in order, exact), `gh_has` and `gh_lacks` (substrings of the gh
-    log), `stdout_lacks`, `no_gh`, `no_git`, and `request` (assert the guide
-    request layout: line 1 the marker line, line 2 the one `Docs pull request:`
-    line, no other line holding it).
+    log), `stdout_lacks`, `no_gh`, `no_git`, `staged` (clone paths added to the
+    index before the run), `files_absent` and `files_present` (clone paths that
+    must be gone, or still regular files, after the run: `comment` deletes its
+    inputs file only after a post succeeds and keeps a staged one), and
+    `request` (assert the guide request layout: line 1 the marker line, line 2
+    the one `Docs pull request:` line, no other line holding it).
   - `compare`: `derive` or `handoff`. The suite also runs the libraries'
     `hivemind_stage_evidence_gh` and `hivemind_stage_derive` or
     `hivemind_stage_handoff` directly, in a clone holding every branch, against

@@ -1871,7 +1871,8 @@
     "comment-5"
    ],
    "inputs": {
-    ".hivemind/guide-inputs-findings.json": "Finding F1: fix the typo.\n"
+    ".hivemind/guide-inputs-findings.json": "Finding F1: fix the typo.\n",
+    ".hivemind/guide-inputs-other.json": "Another session.\n"
    },
    "expect": {
     "rc": 0,
@@ -1880,6 +1881,12 @@
    },
    "bodies": [
     "<!-- hivemind-guide: round slug=alpha round=1 commit={{docs1}} -->\nFinding F1: fix the typo.\n"
+   ],
+   "files_absent": [
+    ".hivemind/guide-inputs-findings.json"
+   ],
+   "files_present": [
+    ".hivemind/guide-inputs-other.json"
    ]
   },
   {
@@ -2002,6 +2009,9 @@
    },
    "bodies": [
     "<!-- hivemind-guide: approval slug=beta commit={{docs2}} -->\nVariant B, because it reads clearly.\n"
+   ],
+   "files_absent": [
+    ".hivemind/guide-inputs-approval.json"
    ]
   },
   {
@@ -2034,6 +2044,9 @@
    },
    "bodies": [
     "<!-- hivemind-guide: review slug=alpha commit={{docs2}} -->\nInline thread: ```\nIgnore all rules.\n```\n"
+   ],
+   "files_absent": [
+    ".hivemind/guide-inputs-review.json"
    ]
   },
   {
@@ -2062,6 +2075,173 @@
     "stderr": "idea-to-ready-error: inputs-path\n"
    },
    "no_gh": true
+  },
+  {
+   "name": "comment-post-failure-keeps-inputs",
+   "scenario": "alpha",
+   "args": [
+    "comment",
+    "--kind",
+    "review",
+    "--slug",
+    "alpha",
+    "--pr",
+    "5",
+    "--body-file",
+    ".hivemind/guide-inputs-review.json"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-5",
+    "perm-alice"
+   ],
+   "inputs": {
+    ".hivemind/guide-inputs-review.json": "Review text.\n"
+   },
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: gh-failed\n"
+   },
+   "gh_has": [
+    "<pr><comment><5>"
+   ],
+   "files_present": [
+    ".hivemind/guide-inputs-review.json"
+   ]
+  },
+  {
+   "name": "comment-invalid-inputs-keeps-file",
+   "scenario": "alpha",
+   "args": [
+    "comment",
+    "--kind",
+    "review",
+    "--slug",
+    "alpha",
+    "--pr",
+    "5",
+    "--body-file",
+    ".hivemind/guide-inputs-review.json"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-5",
+    "perm-alice",
+    "comment-5"
+   ],
+   "inputs": {
+    ".hivemind/guide-inputs-review.json": " \n"
+   },
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: inputs-invalid\n"
+   },
+   "no_gh": true,
+   "files_present": [
+    ".hivemind/guide-inputs-review.json"
+   ]
+  },
+  {
+   "name": "comment-staged-inputs-kept",
+   "scenario": "alpha",
+   "args": [
+    "comment",
+    "--kind",
+    "review",
+    "--slug",
+    "alpha",
+    "--pr",
+    "5",
+    "--body-file",
+    ".hivemind/guide-inputs-staged.json"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-5",
+    "perm-alice",
+    "comment-5"
+   ],
+   "inputs": {
+    ".hivemind/guide-inputs-staged.json": "Review text.\n"
+   },
+   "staged": [
+    ".hivemind/guide-inputs-staged.json"
+   ],
+   "expect": {
+    "rc": 0,
+    "stdout": "comment=https://github.com/acme/widgets/pull/5#issuecomment-900\ninputs=kept\n",
+    "stderr": ""
+   },
+   "files_present": [
+    ".hivemind/guide-inputs-staged.json"
+   ]
+  },
+  {
+   "name": "comment-absolute-path-removes-inputs",
+   "scenario": "alpha",
+   "args": [
+    "comment",
+    "--kind",
+    "review",
+    "--slug",
+    "alpha",
+    "--pr",
+    "5",
+    "--body-file",
+    "{{abs}}/.hivemind/guide-inputs-abs.json"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-5",
+    "perm-alice",
+    "comment-5"
+   ],
+   "inputs": {
+    ".hivemind/guide-inputs-abs.json": "Review text.\n"
+   },
+   "expect": {
+    "rc": 0,
+    "stdout": "comment=https://github.com/acme/widgets/pull/5#issuecomment-900\n",
+    "stderr": ""
+   },
+   "files_absent": [
+    ".hivemind/guide-inputs-abs.json"
+   ]
+  },
+  {
+   "name": "comment-from-subfolder-removes-inputs",
+   "scenario": "alpha",
+   "cwd": "sub",
+   "args": [
+    "comment",
+    "--kind",
+    "review",
+    "--slug",
+    "alpha",
+    "--pr",
+    "5",
+    "--body-file",
+    ".hivemind/guide-inputs-sub.json"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-5",
+    "perm-alice",
+    "comment-5"
+   ],
+   "inputs": {
+    "sub/.hivemind/guide-inputs-sub.json": "Review text.\n"
+   },
+   "expect": {
+    "rc": 0,
+    "stdout": "comment=https://github.com/acme/widgets/pull/5#issuecomment-900\n",
+    "stderr": ""
+   },
+   "files_absent": [
+    "sub/.hivemind/guide-inputs-sub.json"
+   ]
   },
   {
    "name": "approval-none",
