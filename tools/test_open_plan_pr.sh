@@ -195,6 +195,10 @@ TITLE_REASON='title must be one line of text'
 BODY_REASON='body must be text with no control characters other than newline and tab'
 DRAFT_REASON='draft must be true or false'
 COMMENT_REASON='comment must be non-blank text with no control characters other than newline and tab'
+BODY_DATA_BLOCK_REASON='body file holds a whole data block, not its content'
+COMMENT_DATA_BLOCK_REASON='comment file holds a whole data block, not its content'
+WRAPPED_BODY='{"path":".hivemind/pr-inputs-x-body.json","content":"Closes #1\n\nText"}'
+WRAPPED_COMMENT='{"path":".hivemind/pr-inputs-x-comment.json","content":"Decisions"}'
 COMMENT_POST_REASON='the PR comment could not be posted'
 MERGE_REASON='a merge is in progress'
 UNMERGED_REASON='the index has unmerged paths'
@@ -1095,6 +1099,59 @@ test_comment_field_refusals() {
     assert_equal comment-fields-no-gh 0 "$(call_count pr-list)" "no gh call"
 }
 
+# ── Whole data block ────────────────────────────────────────────────────────
+
+# assert_body_passes <name> <body text> -> opens the PR in a new world with <body text> as the body
+# file and asserts gh pr create got it byte for byte.
+assert_body_passes() {
+    create_world "$1"
+    write_body "$2"
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    assert_success "$1" "$WORK_TREE" "$(expected_block true)" \
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL"
+    assert_equal "$1-verbatim" "$2x" "$(cat "$GH_STUB_DIR/pr-create.1.body"; printf 'x')" "body passed byte for byte"
+}
+
+# A body or comment file holding a whole data block, a JSON object with both `path` and `content`,
+# is refused after the reads and deletes, before any push or gh call. Any other text passes.
+test_whole_data_block() {
+    create_world data-block
+    assert_body_refused data-block-body "$WRAPPED_BODY" "$BODY_DATA_BLOCK_REASON"
+    assert_body_refused data-block-body-line-feed "$WRAPPED_BODY"$'\n' "$BODY_DATA_BLOCK_REASON"
+    assert_body_refused data-block-body-extra-key '{"title":"t","path":"p","content":"c"}' "$BODY_DATA_BLOCK_REASON"
+    assert_body_refused data-block-body-spaced "$(printf ' \n{"content":"c",\t"path":"p"}\n\n')" "$BODY_DATA_BLOCK_REASON"
+    write_body "$WRAPPED_BODY"
+    assert_input_refused data-block-body-before-draft '{"title":"t","draft":"yes"}' "$BODY_DATA_BLOCK_REASON"
+    write_body "$WRAPPED_BODY"
+    assert_input_refused data-block-body-after-title '{"title":""}' "$TITLE_REASON"
+    assert_comment_refused data-block-comment "$WRAPPED_COMMENT" "$COMMENT_DATA_BLOCK_REASON"
+    assert_comment_refused data-block-comment-line-feed "$WRAPPED_COMMENT"$'\n' "$COMMENT_DATA_BLOCK_REASON"
+    assert_comment_refused data-block-comment-after-draft "$WRAPPED_COMMENT" "$DRAFT_REASON" '{"title":"t","draft":"yes"}'
+    write_body "$WRAPPED_BODY"
+    assert_comment_refused data-block-body-before-comment "$WRAPPED_COMMENT" "$BODY_DATA_BLOCK_REASON"
+    assert_equal data-block-no-gh 0 "$(call_count pr-list)" "no gh call"
+    assert_equal data-block-no-comment 0 "$(call_count pr-comment)" "no gh pr comment"
+
+    assert_body_passes data-block-path-only '{"path":".hivemind/pr-inputs-x-body.json"}'
+    assert_body_passes data-block-content-only '{"content":"Closes #1\n\nText"}'
+    assert_body_passes data-block-markdown "$(printf 'Closes #1\n\n- one\nx')"
+    assert_body_passes data-block-array '[{"path":"p","content":"c"}]'
+    assert_body_passes data-block-string '"{\"path\":\"p\",\"content\":\"c\"}"'
+    assert_body_passes data-block-trailing-text '{"path":"p","content":"c"} more'
+    assert_body_passes data-block-two-values '{"path":"p","content":"c"} {}'
+    assert_body_passes data-block-invalid-json '{"path":"p","content":'
+    assert_body_passes data-block-empty ''
+
+    create_world data-block-comment-pass
+    write_comment '{"content":"Decisions"}'
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    assert_success data-block-comment-pass "$WORK_TREE" "$(expected_comment_block true false)" \
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --body-file "$BODY_REL" \
+        --comment-file "$COMMENT_REL"
+}
+
 # Each comment file refusal comes before any read, so it keeps the inputs, body and comment files.
 test_comment_file_refusals() {
     local outside_dir="$WORKDIR/outside-comment"
@@ -1875,6 +1932,7 @@ test_invalid_utf8
 test_byte_exact_reads
 test_draft
 test_comment_field_refusals
+test_whole_data_block
 test_comment_file_refusals
 test_comment_kept_paths
 test_comment

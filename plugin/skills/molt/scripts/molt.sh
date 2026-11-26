@@ -35,14 +35,17 @@
 # be byte for byte the file, then parsed by jq from that copy as exactly one JSON value into a
 # private copy; no field enters shell or jq program source, per
 # ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md, Inert Inputs-File Navigator Pattern). It
-# holds only fixed values. Fields, checked in this order, first failure wins, with
-# the subject, body and files rules (SUBJECT FILE, BODY FILE, FILES FILE) after them:
+# holds only fixed values. Fields, checked in this order, first failure wins, with the whole data
+# block rules, then the subject, body and files rules (SUBJECT FILE, BODY FILE, FILES FILE) after
+# them:
 #   type      REQUIRED. feat|fix|hotfix|refactor|docs|test|chore|ci.
 #   scope     optional. A string that passes hivemind_assert_identifier.
 #   breaking  optional. true or false. true adds `!` before the colon of the subject line.
 # No other field is allowed, so a `subject`, `body` or `files` field is refused (`inputs have a
-# field other than type, scope and breaking`). The rules then run in this order: subject, body,
-# the breaking marker, files. When breaking is not true, a subject that contains `!:` or a body
+# field other than type, scope and breaking`). The rules then run in this order: the whole data
+# block rule of the subject file, then of the files file, then of the body file, then subject,
+# body, the breaking marker, files. So a whole data block gets its own blocker, never the subject
+# line, subject length or files path reason. When breaking is not true, a subject that contains `!:` or a body
 # line that starts with `BREAKING CHANGE:` or `BREAKING-CHANGE:` is refused, so the marker
 # bump-type reads always agrees with `breaking`. The message is
 #   <type>[(<scope>)][!]: <subject>
@@ -52,13 +55,19 @@
 # SUBJECT FILE (read once, whole, with hivemind_read_input_file into the private `subject.txt`,
 # which must be byte for byte the file; its text enters no shell or jq program source): the subject is the whole file less one final line feed. It must be
 # one line of text with a non-space character and no control character, a carriage return
-# included, at most 72 characters (Unicode code points).
+# included, at most 72 characters (Unicode code points). Before those rules, a file whose whole
+# text parses as one JSON object holding both a `path` and a `content` key, other keys or not, is
+# a whole data block, not its content, and is refused (`subject file holds a whole data block, not
+# its content`). Text that is not JSON, not one JSON value, or JSON that is not such an object
+# passes this rule. The text is a jq variable, never jq program source.
 #
 # BODY FILE (only with --body-file; read once, whole, with hivemind_read_input_file into the
 # private `body.txt`, which must be byte for byte the file; its text enters no shell or jq program
 # source): the whole file is the body. It must be text with no
 # control character other than newline and tab. A body of only spaces, tabs and newlines, an
-# empty file included, is the same as no body.
+# empty file included, is the same as no body. Before that rule, a whole data block (see SUBJECT
+# FILE) is refused (`body file holds a whole data block, not its content`); an absent body file
+# reads as empty and passes.
 #
 # FILES FILE (only with --files-file; read once, whole, with hivemind_read_input_file into the
 # private `files.txt`, which must be byte for byte the file; its text enters no shell or jq program
@@ -67,7 +76,9 @@
 # list, as is an absent --files-file. Each path is non-empty, has no control character, a
 # carriage return included, no leading `/`, and no empty, `.`, `..` or `.git` (any case) path
 # component, so a blank line among the paths is refused. A path that names a directory in the
-# work tree (not a symlink) is refused.
+# work tree (not a symlink) is refused. Before the path rule, a whole data block (see SUBJECT
+# FILE) is refused (`files file holds a whole data block, not its content`); an absent files file
+# reads as empty and passes.
 #
 # DISTINCT FILES: the inputs, subject, files and body file paths must name four different files.
 # A path that names an earlier one, by any spelling or a hard link (`-ef`), is refused before any
@@ -111,8 +122,10 @@
 #                (`subject file cannot be read`, `files file cannot be read`, `body file cannot be
 #                read`) or its copy is not byte for byte the file (`subject file is not valid
 #                UTF-8`, `files file is not valid UTF-8`, `body file is not valid UTF-8`); or a
-#                field rule, the subject, body or files rule above is broken (one fixed reason per
-#                rule).
+#                field rule, a whole data block rule (`subject file holds a whole data block, not
+#                its content`, `files file holds a whole data block, not its content`, `body file
+#                holds a whole data block, not its content`), or the subject, body or files rule
+#                above is broken (one fixed reason per rule).
 #   in progress  a merge (MERGE_HEAD), rebase (rebase-merge, rebase-apply, REBASE_HEAD),
 #                cherry-pick (CHERRY_PICK_HEAD), revert (REVERT_HEAD), cherry-pick or revert
 #                sequence (sequencer), or bisect (BISECT_START, BISECT_LOG), each looked up with
@@ -495,8 +508,8 @@ def files_value:
 '
 derived_args=(--rawfile subject_text "$subject_copy" --rawfile body_text "$body_copy" --rawfile files_text "$files_copy")
 
-# The field rules from the header, in order: the inputs fields, then the subject, body, breaking
-# marker and files rules. Prints the fixed reason of the first rule broken, or an empty line when
+# The field rules from the header, in order: the inputs fields, the whole data block rules, then
+# the subject, body, breaking marker and files rules. Prints the fixed reason of the first rule broken, or an empty line when
 # every rule holds.
 validate_program='
 def type_names: ["feat", "fix", "hotfix", "refactor", "docs", "test", "chore", "ci"];
@@ -509,12 +522,17 @@ def is_exact_path:
 def has_breaking_marker:
   (subject_value | contains("!:"))
   or (("\n" + body_value) | test("\nBREAKING[ -]CHANGE:"));
+def is_whole_data_block:
+  (try fromjson catch null) | if type == "object" then has("path") and has("content") else false end;
 if type != "object" then "inputs must be a JSON object"
 elif (keys - known_keys | length) > 0 then "inputs have a field other than type, scope and breaking"
 elif (.type | type) != "string" then "type must be one of feat fix hotfix refactor docs test chore ci"
 elif (.type as $type_name | any(type_names[]; . == $type_name) | not) then "type must be one of feat fix hotfix refactor docs test chore ci"
 elif has("scope") and ((.scope | type) != "string" or .scope == "" or (.scope | is_one_line | not)) then "scope contains characters outside the safe allowlist"
 elif has("breaking") and (.breaking | type) != "boolean" then "breaking must be true or false"
+elif ($subject_text | is_whole_data_block) then "subject file holds a whole data block, not its content"
+elif ($files_text | is_whole_data_block) then "files file holds a whole data block, not its content"
+elif ($body_text | is_whole_data_block) then "body file holds a whole data block, not its content"
 elif (subject_value | is_one_line | not) or (subject_value | test("[^ ]") | not) then "subject must be one line of text"
 elif (subject_value | length) > 72 then "subject must be 72 characters or fewer"
 elif (body_value | is_text_block | not) then "body must be text with no control characters other than newline and tab"

@@ -5728,9 +5728,10 @@ const ROW_TESTS = {
     const HASH = '#';
     /**
      * Returns text with each backslash escape and each single-backtick code
-     * span removed, the text GitHub could read as markup.
+     * span removed in one pass from the left, so a backslash inside a span
+     * stays literal, the text GitHub could read as markup.
      */
-    const readOutsideCode = (text) => text.replace(/\\[\\`[\]<>&]/g, '').replace(/`[^`\n]+`/g, '');
+    const readOutsideCode = (text) => text.replace(/\\[\\`[\]<>&]|`[^`\n]+`/g, '');
     const hasLiveMarkup = (text) => /@\w|#\d|GH-\d|https?:|www\.|[[\]<>&`\\]/i.test(readOutsideCode(text));
     test('the body holds the digest, the steps and the run record, and the comment its lead and the same run record: reversible effects, gates with their commits, every decision not of a routine kind', async () => {
       const plan = effectPlan('Post a preview link.', true);
@@ -5816,7 +5817,7 @@ const ROW_TESTS = {
       assert.ok(!texts.body.includes('a1b2c3d4a1b2'), texts.body);
       assert.deepEqual([...main.buildRunRecordParts({ ...run, rejected: [] }, [], gates).map((part) => part.id)], ['gates', 'approvals']);
     });
-    test('neutralizePullRequestText puts each GitHub reference form in a code span and escapes backslashes, backticks, [, ], <, > and & elsewhere', () => {
+    test('neutralizePullRequestText keeps a lone code span as written, puts each GitHub reference form in a code span and escapes backslashes, backticks, [, ], <, > and & elsewhere, and joins a kept span with a wrapped reference beside it in one code span', () => {
       for (const [text, neutral] of [
         ['Ping @octocat and @org/team.', 'Ping `@octocat` and `@org/team`.'],
         [HASH + '12', '`' + HASH + '12`'],
@@ -5826,7 +5827,16 @@ const ROW_TESTS = {
         ['Read https://github.com/o/r/issues/7 and www.example.com/a', 'Read `https://github.com/o/r/issues/7` and `www.example.com/a`'],
         ['<b>bold</b>', '\\<b\\>bold\\</b\\>'],
         ['&' + HASH + '64;', '\\&`' + HASH + '64`;'],
-        ['a `b` c', 'a \\`b\\` c'],
+        ['a `b` c', 'a `b` c'],
+        ['Run `set -euo pipefail` first.', 'Run `set -euo pipefail` first.'],
+        ['Ask `@octocat` about `' + HASH + '12` and `<b>`.', 'Ask `@octocat` about `' + HASH + '12` and `<b>`.'],
+        ['Use `c:\\` then', 'Use `c:\\` then'],
+        ['x ``b`` y', 'x \\`\\`b\\`\\` y'],
+        ['an empty `` pair', 'an empty \\`\\` pair'],
+        ['`a\nb`', '\\`a\nb\\`'],
+        ['`a``b`', '\\`a\\`\\`b\\`'],
+        ['`b`@x and `c`', '`b``@x` and `c`'],
+        ['@x`b`' + HASH + '1', '`@x``b``' + HASH + '1`'],
         ['c:\\d\\', 'c:\\\\d\\\\'],
         ['[context](/brenpike/hivemind/issues/7)', '\\[context\\](/brenpike/hivemind/issues/7)'],
         ['[context](//github.com/o/r/issues/7)', '\\[context\\](//github.com/o/r/issues/7)'],

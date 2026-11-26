@@ -136,6 +136,9 @@ BODY_REASON='body must be text with no control characters other than newline and
 MARKER_REASON='the subject or body has a breaking change marker but breaking is not true'
 FILES_REASON='files must be an array of exact paths relative to the top of the work tree'
 DIRECTORY_REASON='a files entry names a directory'
+SUBJECT_BLOCK_REASON='subject file holds a whole data block, not its content'
+FILES_BLOCK_REASON='files file holds a whole data block, not its content'
+BODY_BLOCK_REASON='body file holds a whole data block, not its content'
 MERGE_REASON='a merge is in progress'
 UNMERGED_REASON='the index has unmerged paths'
 DETACHED_REASON='HEAD is detached'
@@ -701,6 +704,54 @@ test_inputs_field_refusals() {
     assert_input_refused field-files-directory "$DIRECTORY_REASON" '{"type":"feat"}' "$subject_ok" $'f.txt\nsub\n'
 }
 
+# assert_block_passes <name> <subject text> <expected message> [body text] -> writes inputs that
+# list f.txt with a fresh change, then asserts the run commits it with <expected message>.
+assert_block_passes() {
+    local name="$1" expected_message="$3"
+    printf '%s\n' "$name" >"$WORK_TREE/f.txt"
+    if [[ "$#" -ge 4 ]]; then
+        write_raw_inputs '{"type":"feat"}' "$2" $'f.txt\n' "$4"
+    else
+        write_raw_inputs '{"type":"feat"}' "$2" $'f.txt\n'
+    fi
+    assert_commit_run "$name" "$WORK_TREE" "$INPUTS_REL"
+    assert_committed "$name" "$(printf 'M\tf.txt')" "$expected_message"
+}
+
+# A subject, files or body file whose whole text is a JSON object holding both `path` and
+# `content` is refused with its own blocker, ahead of the subject line, subject length and files
+# path rules, and after the inputs field rules. Text that is not such an object commits.
+test_whole_data_block() {
+    local long_block wrapped_files
+    local subject_ok=$'s\n' files_ok=$'f.txt\n'
+    create_world whole-block
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    long_block='{"path":"plugin/skills/molt/scripts/molt.sh","content":"a long body of the file here"}'
+    wrapped_files='{"path":"sub//keep.txt","content":"x"}'
+
+    assert_equal block-subject-is-long yes "$([[ "${#long_block}" -gt 72 ]] && echo yes || echo no)" "fixture longer than 72 characters"
+    assert_input_refused block-subject-long "$SUBJECT_BLOCK_REASON" '{"type":"feat"}' "$long_block"$'\n' "$files_ok"
+    assert_input_refused block-subject-multiline "$SUBJECT_BLOCK_REASON" '{"type":"feat"}' $'{\n  "path": "f.txt",\n  "content": "x"\n}\n' "$files_ok"
+    assert_input_refused block-subject-extra-keys "$SUBJECT_BLOCK_REASON" '{"type":"feat"}' $'{"path":"a","content":"b","mode":"x"}\n' "$files_ok"
+    assert_input_refused block-files "$FILES_BLOCK_REASON" '{"type":"feat"}' "$subject_ok" "$wrapped_files"$'\n'
+    assert_input_refused block-body "$BODY_BLOCK_REASON" '{"type":"feat"}' "$subject_ok" "$files_ok" '{"path":"f.txt","content":"body"}'
+    assert_input_refused block-type-first "$TYPE_REASON" '{"type":"feature"}' "$long_block"$'\n' "$files_ok"
+    assert_input_refused block-subject-before-files "$SUBJECT_BLOCK_REASON" '{"type":"feat"}' "$long_block" "$wrapped_files"
+    assert_input_refused block-files-before-body "$FILES_BLOCK_REASON" '{"type":"feat"}' "$subject_ok" "$wrapped_files" "$long_block"
+    assert_input_refused block-body-before-subject-line "$BODY_BLOCK_REASON" '{"type":"feat"}' '' "$files_ok" "$long_block"
+
+    assert_block_passes block-pass-path-only $'{"path":"a"}\n' 'feat: {"path":"a"}'
+    assert_block_passes block-pass-content-only $'{"content":"b"}\n' 'feat: {"content":"b"}'
+    assert_block_passes block-pass-array $'[{"path":"a","content":"b"}]\n' 'feat: [{"path":"a","content":"b"}]'
+    assert_block_passes block-pass-string $'"path content"\n' 'feat: "path content"'
+    assert_block_passes block-pass-invalid $'{"path":"a","content":\n' 'feat: {"path":"a","content":'
+    assert_block_passes block-pass-trailing-garbage $'{"path":"a","content":"b"} x\n' 'feat: {"path":"a","content":"b"} x'
+    assert_block_passes block-pass-two-values $'{"path":"a","content":"b"} {"path":"a","content":"b"}\n' \
+        'feat: {"path":"a","content":"b"} {"path":"a","content":"b"}'
+    assert_block_passes block-pass-body-path-only "$subject_ok" $'feat: s\n\n{"path":"a"}' '{"path":"a"}'
+    assert_block_passes block-pass-body-empty "$subject_ok" 'feat: s' ''
+}
+
 # ── Inputs, subject, files and body file lifetime ───────────────────────────
 
 # assert_read_and_kept <name> <inputs rel> -> writes valid inputs that list nothing at <inputs
@@ -1246,7 +1297,7 @@ test_messages() {
 }
 
 # A subject, body and listed path holding JSON and markup characters (", \, ], }, [, { and <)
-# reach the commit byte for byte: the raw files are never parsed as JSON. A stray `]"\` copy fault
+# reach the commit byte for byte: the raw files' text is never decoded as JSON. A stray `]"\` copy fault
 # in the subject is plain text.
 test_raw_bytes() {
     local odd_text='a "q" \ ] } [ { <x>'
@@ -1521,6 +1572,7 @@ test_raw_file_refusals
 test_raw_file_unreadable
 test_invalid_utf8
 test_inputs_field_refusals
+test_whole_data_block
 test_inputs_file_lifetime
 test_git_state_refusals
 test_trunk_refusals

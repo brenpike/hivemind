@@ -55,13 +55,18 @@
 #
 # BODY FILE (read once, by READ, into the private `body.md`; its text enters no shell or jq
 # program source): the whole file is the PR body. It must be valid UTF-8 text with no control
-# character other than newline and tab, and it may be empty. Its path must not name the inputs file: a
+# character other than newline and tab, and it may be empty. Right after that rule, a body that is
+# a whole data block, text that parses as one JSON object holding both a `path` and a `content`
+# key, is refused (`body file holds a whole data block, not its content`); any other JSON, or text
+# that is not JSON, passes. Its path must not name the inputs file: a
 # path that names the same file, by any spelling or a hard link, is refused before either read.
 #
 # COMMENT FILE (only with --comment-file; read once, by READ, into the private `comment.md`; its
 # text enters no shell or jq program source): the whole file is the comment. It must be valid
 # UTF-8. Its rule is checked after the draft rule: text with a character other than space, newline
-# and tab, and no control character other than newline and tab. It is posted only on a reused PR (REUSE).
+# and tab, and no control character other than newline and tab. Right after that rule, a comment
+# that is a whole data block, as BODY FILE defines it, is refused (`comment file holds a whole data
+# block, not its content`). It is posted only on a reused PR (REUSE).
 # Its path must not name the inputs file or the body file: a path that names either, by any
 # spelling or a hard link, is refused before any read.
 #
@@ -107,7 +112,9 @@
 #                read (`body file cannot be read`) or is not valid UTF-8 (`body file is not valid
 #                UTF-8`); the comment file cannot be read (`comment file cannot be read`) or is
 #                not valid UTF-8 (`comment file is not valid UTF-8`); or a field rule, the body
-#                rule or the comment rule above is broken (one fixed reason per rule).
+#                rule or the comment rule above is broken (one fixed reason per rule), the body
+#                or comment whole data block rule included (`body file holds a whole data block,
+#                not its content`, `comment file holds a whole data block, not its content`).
 #   in progress  a merge, rebase, cherry-pick, revert, cherry-pick or revert sequence, or bisect,
 #                each looked up with `git rev-parse --git-path` so a linked worktree reads its own
 #                state (_shared/git-refusals.sh).
@@ -572,13 +579,16 @@ validate_program='
 def known_keys: ["title", "draft"];
 def is_one_line: explode | all(.[]; . >= 32 and . != 127);
 def is_text_block: explode | all(.[]; . == 9 or . == 10 or (. >= 32 and . != 127));
+def is_whole_data_block: (try fromjson catch null) | if type == "object" then has("path") and has("content") else false end;
 if type != "object" then "inputs must be a JSON object"
 elif (keys - known_keys | length) > 0 then "inputs have a field other than title and draft"
 elif (.title | type) != "string" then "title must be one line of text"
 elif (.title | is_one_line | not) or (.title | test("[^ ]") | not) then "title must be one line of text"
 elif ($body | is_text_block | not) then "body must be text with no control characters other than newline and tab"
+elif ($body | is_whole_data_block) then "body file holds a whole data block, not its content"
 elif has("draft") and (.draft | type) != "boolean" then "draft must be true or false"
 elif $comment_given and (($comment | is_text_block | not) or ($comment | test("[^ \t\n]") | not)) then "comment must be non-blank text with no control characters other than newline and tab"
+elif $comment_given and ($comment | is_whole_data_block) then "comment file holds a whole data block, not its content"
 else "" end
 '
 inputs_reason="$(jq -r --rawfile body "$body_file" --argjson comment_given "$comment_given" "${comment_jq_args[@]}" \
