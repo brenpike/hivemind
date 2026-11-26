@@ -21,7 +21,7 @@ Replace `{plugin-root}` with `${CLAUDE_PLUGIN_ROOT}`, only in the `command` stri
 
 ## Steps
 
-1. Write each `*_file` block in prompt order: its `content` string to its `path`, exactly as given.
+1. In prompt order, write each `*_file` block's decoded `content`, never the whole block, to its `path`.
 2. Run the command in exactly one Bash call, adding no quoting, redirection, `cd`, prefix or suffix.
 3. Exit 0: report `ran` with the stdout word for word. Any other exit: report `blocked` with the stderr word for word. A denied call or failed Write is also `blocked`, its error as the stderr; after a failed Write, run nothing.
 

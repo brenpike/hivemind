@@ -9059,7 +9059,7 @@ const ROW_TESTS = {
       assert.ok(synapseText.includes('Replace `{plugin-root}` with `${CLAUDE_PLUGIN_ROOT}`, only in the `command` string.'));
       assert.ok(synapseText.includes('- `body_file` and `comment_file`, only for a pull request: `{path, content}`.'));
       assert.ok(synapseText.includes('- `inputs_file`, only for a commit or pull request, and `subject_file` and `files_file`, only for a commit: `{path, content}`.'));
-      assert.ok(synapseText.includes('1. Write each `*_file` block in prompt order: its `content` string to its `path`, exactly as given.'));
+      assert.ok(synapseText.includes('1. In prompt order, write each `*_file` block\'s decoded `content`, never the whole block, to its `path`.'));
       assert.ok(!synapseText.includes('{token}'));
       assert.ok(!synapseText.includes('wherever they appear'));
       const run = await runWorkflow(LAUNCH, happyResults());
