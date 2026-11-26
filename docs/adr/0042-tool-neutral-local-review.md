@@ -97,6 +97,8 @@ These options were rejected:
 
 Recorded residual: a tool that truncates or compacts its own prompt is outside what the script can see. The impact is bounded. 256 KiB is about 70,000 to 85,000 tokens, well under the context windows of current reviewers.
 
+Threat-model residual: the reviewer's output has no byte cap. `run-review.sh` writes the reviewer's stdout and stderr to temporary files, and only the call's 570-second budget, with its process-group kill, bounds them. The reviewer is a command the operator set up. It runs with the user's own rights, so it could fill the disk without the script. Trunk has the same code. Run decision, 2026-11-26, under `plugin/governance/decision-autonomy.md` (`### Review Calls`), listed for veto on the PR.
+
 User decision, 2026-11-26: decision 3. Run decisions under the request's delegation, listed for veto on the PR: decisions 1 and 2 and the rejected options.
 
 Links: https://github.com/brenpike/hivemind/issues/684.
