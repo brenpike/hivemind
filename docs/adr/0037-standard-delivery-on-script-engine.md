@@ -3233,3 +3233,13 @@ The room came from shorter `meta.js` descriptions and phase details and from fol
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/676.
+
+### Local review findings 7c55c376 and 2dc34c61: the attribution arg is trusted harness text (2026-11-26)
+
+The findings: `readAttribution` takes any printable text, so a bad or compromised launcher could add commit trailers, split the trailer block, or put Markdown, links or mentions in a pull request body (7c55c376). `buildPullRequestTexts` appends the pr text after the size check and the forbidden-string check, so that text can hold a forbidden string and take the body past the cap (2dc34c61).
+
+**Threat model.** The launcher is the overlord. It supplies every launch arg and already holds commit and push authority, so it can write any commit or pull request text without the engine. A launcher that sends hostile attribution is already past any boundary `readAttribution` could guard, so a format check there adds no trust boundary. The arg is the overlord's own harness attribution, verbatim, never external content (see **Its source**). The forbidden-string check keeps attribution out of planner text; the harness text is that attribution, so it is exempt by design. The body bound is the stated worst case, `maxPullRequestTextLength()` plus 2 plus 1,000 characters.
+
+**Decision.** Keep the code. Add no trailer allowlist, no pr template and no check of the pr text against the forbidden strings or the body cap. Both findings are rejected, and a later finding that contests this threat model is a repeat.
+
+**Decided by.** The run, 2026-11-26, per `plugin/governance/decision-autonomy.md` (Review Calls), taking option A of the call on finding 7c55c376 (A: record this threat model and keep the code; B: check the trailer format and count the pr text in the size check; C: build the text from typed fields). The overlord agreed with the strong recommendation, and the pick is reversible and not architectural.
