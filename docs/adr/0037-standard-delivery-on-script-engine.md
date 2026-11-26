@@ -3130,3 +3130,51 @@ It updates these places in place, each with a dated note: the residuals "molt's 
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/595, https://github.com/brenpike/hivemind/issues/592, https://github.com/brenpike/hivemind/issues/538.
+
+## Amendment 2026-11-25: the runner scripts refuse a whole data block, and the neutralizer keeps planner code spans (issue 683)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/683. A pull request opened with a runner data block as its body.
+
+**Evidence.** In run wf_62cb0a39-1da, PR 681 opened with the raw `{path, content}` JSON block as its body, not the body text that block carried.
+
+**Root cause.** Step 1 of `plugin/agents/synapse.md` asked a small model to pull one field out of a JSON object, and nothing downstream checked what it wrote. A runner that wrote the whole block produced a file that every rule of `open-plan-pr.sh` and `molt.sh` accepted as text.
+
+**The change.**
+
+- **The PR script.** The `validate_program` of `open-plan-pr.sh` refuses, before any change or push, a body file holding a whole data block (`body file holds a whole data block, not its content`) and a comment file holding one (`comment file holds a whole data block, not its content`). A whole data block is text that parses as one JSON object holding both a `path` and a `content` key; any other JSON, and text that is not JSON, passes. The body rule runs right after the body text rule, and the comment rule right after the comment rule. Both reasons start with `body ` or `comment `, so `isInputsRefusal` (`plugin/workflow-src/lib/pr.js`) matches them unchanged.
+- **The commit script.** `molt.sh` refuses `subject file holds a whole data block, not its content`, `files file holds a whole data block, not its content` and `body file holds a whole data block, not its content`, in that order, after the inputs field rules and before the subject, body, breaking marker and files rules, so the named blocker wins over a subject line, subject length or path reason. An absent files or body file reads as empty and passes.
+- **The runner.** Step 1 of `plugin/agents/synapse.md` now reads: "1. In prompt order, write each `*_file` block's decoded `content`, never the whole block, to its `path`." The file is 1,721 of its 1,727 bytes.
+- **The neutralizer.** `neutralizePullRequestText` keeps a planner code span verbatim when it is one backtick, non-empty content with no backtick or line break, and one backtick, with no backtick touching either end. Everything else is neutralized as before. No fallback branch is needed: kept spans cannot touch each other, and a wrapped reference touching a kept span forms a double-backtick run inside one larger code span, so every mention, reference and URL still lands inside a code span as CommonMark pairs backticks. A stricter whole-text fallback was tried and did not fit `MAX_BUILT_SCRIPT_LENGTH` (193,000) with the seeded-sentence test variants. Fuzzed with 700k random strings under a CommonMark pairing model: no leak, and text with no kept span is byte-identical to before. Row SD-45 names the kept span.
+- **Escapes outside a kept span.** `[`, `<` and `>` stay escaped as `\[`, `\<` and `\>`, under the existing residual "Markdown forms outside the neutralizer render" of Amendment 2026-11-06: the pull request body is built in code and sent in its own file (issues 506 and 501).
+
+**What it amends.**
+
+- The "One neutralizer" bullet of Amendment 2026-11-06: the pull request body is built in code and sent in its own file (issues 506 and 501). A planner code span of the form above now stays as written, and each at-mention, issue reference, owner/repo reference, GH-N reference and URL outside it still sits in a code span.
+- The residual "the runner's copy has no digest check" of the same amendment, narrowed 2026-11-18 by Amendment 2026-11-18: the pull request comment is sent in its own file (issue 592). It narrows again: a whole-block copy can no longer become a PR body, reuse comment or commit text, but a wrong content copy is still unchecked. Still tracked as https://github.com/brenpike/hivemind/issues/538.
+
+**Options ruled out.**
+
+- **Removing the extraction step.** Giving the runner the raw text with the path outside it is not in the approved approach.
+- **Raising the build cap.** `MAX_BUILT_SCRIPT_LENGTH` stays 193,000.
+- **Narrowing the whole-data-block test.** Keying it on string values only, or on a `path` that names the holding file, is ruled out by the recorded decision below.
+
+**Recorded decision, with its repeat scope.** A later finding or plan that asks for the opposite of this is a repeat, rejected by citing this record per `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings).
+
+- **The whole-data-block test keys on both keys alone.** A JSON object holding both a `path` and a `content` key is refused, whatever their values. Decided by the user in the request for issue 683 (2026-11-25) and contested by local review that day, findings 522779151ccc70a6b82f602627ed35878fdba55e64eda78ac1575fe18fc8cf78 and 3aab23fc13316cd9d1e3ceee0f82f731b0f5dc2ab98e3806a87a1191d0f81f2a. Reason: `formatFileBlock` always emits both keys, so a narrowed test would refuse only a block the runner copied exactly and miss a crossed or re-spelled copy. Bounded impact: workflow-built text never parses as one JSON object, since the PR body always holds the Steps list and the reuse comment is a code-built lead. Only a caller that writes its own text, exactly such an object, is refused, with its named blocker, before any change or push. Not a recorded residual: no defect is left unfixed. Repeat scope: a finding that asks for a value-type check, a check that `path` equals the holding file, or removing the script refusal.
+
+**Enforcement.** Tests by execution:
+
+- `tools/test_open_plan_pr.sh` refuses a body and a comment file holding a whole data block, with or without a final line feed, extra keys or spacing, a body `{"path":false,"content":0}`, a body `{"path":"/docs","content":"text"}` and a comment whose `path` names the body file, before any push or `gh` call, pins its order against the title, draft and body rules, and passes a path-only object, a content-only object, Markdown, an array, a JSON string, trailing text and two values byte for byte.
+- `tools/test_molt.sh` refuses a whole data block in the subject, files and body files, including a long, multi-line or extra-key block, a subject `{"path":false,"content":0}` and a body `{"path":"/docs","content":"text"}`, pins the blocker order against the type, subject line and files rules, and commits a path-only object, a content-only object, an array, a JSON string, invalid JSON, trailing text and two values as plain text.
+- `tests/workflow-scripts/standard-delivery.test.mjs` pins the SD-45 neutralizer: a lone code span kept as written, each GitHub reference form in a code span, the escapes elsewhere, and a kept span joined with a wrapped reference beside it in one code span. The same file asserts the synapse step 1 wording.
+
+**Budget.** No prose budget raise and no length cap raise. Measured after the change:
+
+- `plugin/workflows/standard-delivery.js`: prose 41,958 of 42,084; length 192,859 of 193,000.
+- `plugin/workflows/pr-feedback-remediation.js`: prose 37,935 of 38,065; length 177,583.
+
+**Version.** Patch, 14.7.1. It is a fix: a whole data block written by the runner is refused before any change, and a planner code span renders as written.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/683, https://github.com/brenpike/hivemind/issues/538.

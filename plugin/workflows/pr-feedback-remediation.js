@@ -668,7 +668,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '8c2098c384211d5e';
+const BUILD_ID = '91f81921b30c442a';
 
 function supportedSchemaKeywords(){
 return[
@@ -4346,8 +4346,8 @@ gates.answer=ended.answer;
 }
 
 function neutralizePullRequestText(text){
-return text.split(/((?:https?:\/\/|www\.)[^\s`]+|(?<![\w.-])[\w.-]+\/[\w.-]+#\d+|#\d+|GH-\d+|@[\w-]+(?:\/[\w-]+)?)/i)
-.map((piece,index)=>(index%2===1?'`'+piece+'`':piece.replace(/[\\`[\]<>&]/g,'\\$&')))
+return text.split(/((?<!`)`[^`\r\n]+`(?!`)|(?:https?:\/\/|www\.)[^\s`]+|(?<![\w.-])[\w.-]+\/[\w.-]+#\d+|#\d+|GH-\d+|@[\w-]+(?:\/[\w-]+)?)/i)
+.map((piece,index)=>(index%2===0?piece.replace(/[\\`[\]<>&]/g,'\\$&'):piece[0]==='`'?piece:'`'+piece+'`'))
 .join('');
 }
 function buildPullRequestTitle(plan){
