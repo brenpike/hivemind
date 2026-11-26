@@ -17,7 +17,7 @@ Conduct an idea to ready issues from the main session. Nothing stores progress: 
 bash "${CLAUDE_PLUGIN_ROOT}/skills/idea-to-ready/scripts/idea-to-ready.sh" <subcommand> [--flag value]...
 ```
 
-Exit 2 stops the skill: report its stderr token. On `truncated`, report that a read was cut off; never guess past it.
+Exit 2 stops the skill: report its stderr token. On `truncated`, report the cut-off read; never guess past it.
 
 ## Start
 
@@ -25,7 +25,7 @@ Exit 2 stops the skill: report its stderr token. On `truncated`, report that a r
 - An idea: capture it, per `capture` below.
 - A slug: run `stage --slug <slug>`. Report the stage, the evidence and the next action, then start that action without asking to continue.
 
-Name every ignored issue and pull request a read reports. Re-run `stage` after every run and every write.
+Name every ignored issue and pull request a read reports. Re-run `stage` after each run and write.
 
 ## Text and data
 
@@ -59,7 +59,7 @@ Act on `stage`'s `next`:
   1. With the docs branch checked out at the pull request head, run `reviewed`.
   2. Run hivemind:design-review with its `reviewed`, `merge_base` and `previous`, and `touches` as the record states it.
   3. Post the round's findings, from every pass, and its record update with `comment --kind round --round <n> --commit <reviewed>`.
-  4. Launch `compose --kind round` with the same round and commit, or, for a clean round, `compose --kind record-pass --commit <reviewed>`.
+  4. For a clean round after round 1, launch `compose --kind record-pass --commit <reviewed>`; else `compose --kind round` with the same round and commit.
   5. After each record wave, post `comment --kind veto`, then re-run `stage`.
 
   When the review has not converged by round 3, stop: tell the maintainer the initiative is split before its docs merge; the pull request stays a draft.
