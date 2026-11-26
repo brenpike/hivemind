@@ -14,10 +14,13 @@ const resultLib = loadLibs([repoRoot + 'plugin/workflow-src/lib/result.js']);
 const DELIVERY_ID = 'standard-delivery';
 const REMEDIATION_ID = 'pr-feedback-remediation';
 const DELIVERY_ARGS_LEAD = 'When `<id>` is `standard-delivery`, the launch args also hold ';
-const DELIVERY_ARGS_SENTENCE = DELIVERY_ARGS_LEAD + '`local_review` and `draft`, and `decisions` only when the user settled a decision for this request before launch.';
+const DELIVERY_ARGS_SENTENCE = DELIVERY_ARGS_LEAD + '`local_review`, `draft` and `attribution`, and `decisions` only if the user settled a decision for this request before launch.';
 const DECISIONS_ENTRY_SENTENCE = 'Each `decisions` entry is one reply of the user\'s that settled one, word for word, after the question it answers, word for word, when it answers one; never your summary.';
-const VALID_LAUNCH_VALUES = { request: 'Add a cache to the facts step', trunk: 'main', references: [12], local_review: false, draft: true, decisions: ['Keep the cache in memory only.'] };
-const INVALID_LAUNCH_VALUES = { request: '   ', trunk: '-main', references: ['twelve'], local_review: 'yes', draft: 'no', decisions: ['   '] };
+const VALID_ATTRIBUTION = { commit: 'Co-Authored-By: Example Model <noreply@example.com>\nExample-Session: https://example.com/session', pr: 'Generated with Example\n\thttps://example.com/session' };
+const VALID_LAUNCH_VALUES = { request: 'Add a cache to the facts step', trunk: 'main', references: [12], local_review: false, draft: true, decisions: ['Keep the cache in memory only.'], attribution: VALID_ATTRIBUTION };
+const INVALID_LAUNCH_VALUES = { request: '   ', trunk: '-main', references: ['twelve'], local_review: 'yes', draft: 'no', decisions: ['   '], attribution: 'Co-Authored-By: Example Model' };
+const VALID_ATTRIBUTION_VALUES = [['commit and pr text', VALID_ATTRIBUTION], ['an empty object', {}], ['an absent arg', undefined]];
+const INVALID_ATTRIBUTION_VALUES = [['null', null], ['a string', 'Co-Authored-By: Example Model'], ['an array', ['Co-Authored-By: Example Model']], ['an unknown key', { commit: 'text', body: 'text' }], ['a non-string value', { commit: 1 }], ['text over 1000 characters', { pr: 'x'.repeat(1001) }], ['a carriage return', { commit: 'line one\rline two' }]];
 
 /**
  * Builds a workflow in memory and runs it without its last statement, the
@@ -213,6 +216,7 @@ describe('overlord Engine section', () => {
       '`pr-feedback-remediation`',
       'without asking, said in one line',
       'continues from the branch\'s last commit',
+      'A started `standard-delivery` run, except a guide run, that fails or ends blocked',
       'reported as it ended',
       'says it switched and where the run stopped',
       '`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State)',
@@ -251,7 +255,22 @@ describe('overlord standard-delivery launch args', () => {
     assert.equal(launch.localReview, VALID_LAUNCH_VALUES.local_review);
     assert.equal(launch.draft, VALID_LAUNCH_VALUES.draft);
     assert.equal(JSON.stringify(launch.decisions), JSON.stringify(VALID_LAUNCH_VALUES.decisions));
+    assert.deepEqual(structuredClone(launch.attribution), VALID_LAUNCH_VALUES.attribution);
   });
+  for (const [label, attribution] of VALID_ATTRIBUTION_VALUES) {
+    test(`readDeliveryLaunch takes ${label} as the attribution launch arg`, () => {
+      const launchArgs = { ...VALID_LAUNCH_VALUES, attribution: attribution };
+      const launch = deliveryFunctions.readDeliveryLaunch(launchArgs);
+      assert.equal(launch.problem, undefined, `readDeliveryLaunch refused the attribution ${JSON.stringify(attribution)}: ${launch.problem}`);
+      assert.deepEqual(structuredClone(launch.attribution), attribution ?? {});
+    });
+  }
+  for (const [label, attribution] of INVALID_ATTRIBUTION_VALUES) {
+    test(`readDeliveryLaunch refuses ${label} as the attribution launch arg`, () => {
+      const launch = deliveryFunctions.readDeliveryLaunch({ ...VALID_LAUNCH_VALUES, attribution: attribution });
+      assert.equal(typeof launch.problem, 'string', `readDeliveryLaunch accepted the attribution ${JSON.stringify(attribution)}`);
+    });
+  }
   for (const argName of launchArgNames) {
     test(`a bad ${argName} launch arg makes readDeliveryLaunch return a problem`, () => {
       assert.ok(Object.hasOwn(INVALID_LAUNCH_VALUES, argName), `no invalid test value for the launch arg ${argName}`);
@@ -260,6 +279,46 @@ describe('overlord standard-delivery launch args', () => {
       assert.equal(typeof launch.problem, 'string', `readDeliveryLaunch accepted ${argName} ${JSON.stringify(INVALID_LAUNCH_VALUES[argName])}`);
     });
   }
+});
+
+describe('overlord guide run', () => {
+  const guideMarker = '`hivemind-guide-run: <slug>`';
+  const guideRunLead = 'A guide run is a request whose line 1 is exactly ' + guideMarker + '.';
+  const guideRunArgNames = ['request', 'references', 'draft'];
+  const engineParagraphs = engineSection.split('\n\n').filter((paragraph) => paragraph.trim() !== '');
+  const guideRunParagraph = engineParagraphs.find((paragraph) => paragraph.startsWith(guideRunLead)) ?? '';
+  const guideSkillText = readFileSync(repoRoot + 'plugin/skills/idea-to-ready/SKILL.md', 'utf8').replace(/\r/g, '');
+  const launchArgNames = readDeliveryLaunchArgNames();
+
+  /** Returns each backticked launch arg name in text, in order. */
+  function readBacktickedLaunchArgNames(text) {
+    return [...text.matchAll(/`([a-z_]+)`/g)].map((match) => match[1]).filter((name) => launchArgNames.includes(name));
+  }
+
+  test('Engine has the guide-run paragraph right after its opening paragraph', () => {
+    assert.notEqual(guideRunParagraph, '', `## Engine has no paragraph starting ${guideRunLead}`);
+    assert.equal(engineParagraphs.indexOf(guideRunParagraph), 1, 'the guide-run paragraph does not sit right after the Engine opening paragraph');
+  });
+  test('the guide-run paragraph sets request, references from line 2 only, and draft, and returns a failed or blocked run to the guide', () => {
+    for (const phrase of [
+      guideRunLead,
+      '`request` is that whole request',
+      '`references` holds only the number in line 2 when line 2 is exactly `Docs pull request: #<n>`, else nothing',
+      '`draft` is `true`',
+      'A started guide run that fails or ends blocked returns to the guide, which re-derives its stage.',
+    ]) {
+      assert.ok(guideRunParagraph.includes(phrase), `guide-run paragraph lacks ${phrase}`);
+    }
+  });
+  test('the guide-run paragraph overrides only request, references and draft and restates no launch-arg template', () => {
+    const overriddenNames = readBacktickedLaunchArgNames(guideRunParagraph);
+    assert.deepEqual([...new Set(overriddenNames)].sort(), [...guideRunArgNames].sort());
+    assert.ok(!guideRunParagraph.includes('only these args'), 'guide-run paragraph restates the launch-arg template');
+  });
+  test('the guide skill names the same marker line and no launch arg', () => {
+    assert.ok(guideSkillText.includes(guideMarker), `the guide SKILL.md lacks ${guideMarker}`);
+    assert.deepEqual(readBacktickedLaunchArgNames(guideSkillText), [], 'the guide SKILL.md names a launch arg');
+  });
 });
 
 describe('overlord pull request hand-off and opt-in', () => {
@@ -330,10 +389,10 @@ describe('overlord watch escalation to pr-feedback-remediation', () => {
   test('the escalation args template, filled, passes readRemediationLaunch', () => {
     const template = escalationParagraph.match(/with args `(\{[^`]*\})` and no other key/);
     assert.ok(template, 'escalation paragraph has an args template');
-    const filled = template[1].replace('<the pull request number>', '42').replace('<the resolved trunk>', 'main');
+    const filled = template[1].replace('<PR number>', '42').replace('<the resolved trunk>', 'main').replace('<as above>', JSON.stringify(VALID_ATTRIBUTION));
     const launch = remediationFunctions.readRemediationLaunch(JSON.parse(filled));
     assert.equal(launch.problem, undefined, `readRemediationLaunch refused ${filled}: ${launch.problem}`);
-    assert.deepEqual(structuredClone(launch), { trunk: 'main', pr: '42' });
+    assert.deepEqual(structuredClone(launch), { trunk: 'main', pr: '42', attribution: VALID_ATTRIBUTION });
   });
 });
 

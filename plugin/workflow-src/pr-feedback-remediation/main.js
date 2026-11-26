@@ -20,9 +20,13 @@
  *
  * Inputs
  *   args   the Workflow args global. Only a plain object is read, and it
- *          may hold only launchKeys(): references and trunk from the
- *          launch, and answers, build and reply, the pause contract keys of
- *          lib/result.js. references and trunk are read through
+ *          may hold only launchKeys(): references, trunk and attribution
+ *          from the launch, and answers, build and reply, the pause
+ *          contract keys of lib/result.js. attribution, read by
+ *          readAttribution (lib/args.js), is {commit?, pr?} harness text:
+ *          commit trailers on each commit, pr text ending a created pull
+ *          request body; a reused pull request body and the comment never
+ *          carry it. references and trunk are read through
  *          readLaunchInputs (lib/args.js), which also refuses a resume of
  *          another build. references must name exactly one pull request,
  *          and trunk must pass isGitIdentifier (lib/identifier.js). Any
@@ -134,7 +138,7 @@ function maxPullRequestTextLength() {
 }
 
 function launchKeys() {
-  return ['references', 'trunk', 'answers', 'build', replyField()];
+  return ['references', 'trunk', 'attribution', 'answers', 'build', replyField()];
 }
 
 function relayedMessageSentence() {
@@ -162,7 +166,11 @@ function readRemediationLaunch(rawArgs) {
   if (!isGitIdentifier(launchInputs.trunk)) {
     return describeLaunchProblem('The trunk launch arg is not a safe git branch name');
   }
-  return { trunk: launchInputs.trunk, pr: launchInputs.references[0] };
+  const attributionInput = readAttribution(rawArgs);
+  if (attributionInput.problem !== undefined) {
+    return attributionInput;
+  }
+  return { trunk: launchInputs.trunk, pr: launchInputs.references[0], attribution: attributionInput.attribution };
 }
 
 function createRunState(launch, argsObject = {}) {
@@ -170,6 +178,7 @@ function createRunState(launch, argsObject = {}) {
     request: buildRemediationRequest(launch.pr),
     trunk: launch.trunk,
     pr: launch.pr,
+    attribution: launch.attribution,
     references: [launch.pr],
     relaySentence: relayedMessageSentence(),
     decisions: [],

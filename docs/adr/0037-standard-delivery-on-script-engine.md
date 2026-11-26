@@ -3178,3 +3178,69 @@ This amendment covers https://github.com/brenpike/hivemind/issues/683. A pull re
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/683, https://github.com/brenpike/hivemind/issues/538.
+
+## Amendment 2026-11-26: engine commits and pull requests carry the harness attribution (issue 676)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/676. Before it, no commit or pull request the engine made carried the attribution text the harness gives the overlord.
+
+**The user's decisions.** On 2026-11-26 the user took all three recommendations:
+
+- **Q1, the shape.** One launch arg, `attribution`, of the form `{"commit": "<text>", "pr": "<text>"}`. Ruled out: two flat args, and lists of lines.
+- **Q2, the remediation workflow.** `pr-feedback-remediation` takes the same arg. See ADR-0040, Amendment 2026-11-26: the remediation launch takes the harness attribution (issue 676).
+- **Q3, the runner word class.** The `--body-file` word class of `plugin/workflow-src/lib/facts.js` widens to take the molt form.
+
+**The change.**
+
+- **The launch arg.** `readAttribution` (`plugin/workflow-src/lib/args.js`) reads it. Absent gives `{}`. Else it must be a plain object whose only keys are `commit` and `pr`, each a string of at most 1,000 UTF-16 code units, with no control character but tab and line feed and no lone surrogate. Any other value stops the launch before any agent call. A missing or empty key means no attribution for that channel.
+- **Its source.** Only the overlord's own harness attribution, verbatim. Never external content. The engine never invents it.
+- **Resume.** It is a launch arg, so the overlord's resume rule sends it again. `resume_args` stays `{answers, build}`.
+- **Commits.** When the commit text is not empty, every engine commit passes `--body-file .hivemind/molt-inputs-<stem>-<label>-body.json` and a `body_file` block holding the raw text. This covers waves, fix rounds, review commits, the head check, and each retry under its own `-retry` label. `molt.sh` writes the subject, a blank line and the body, which git reads as trailers. `toCommitSubject` and `forbiddenSubjectTexts` are unchanged: planner text holding an attribution string still stops the run (SD-45) or falls back to the fixed subject (SD-66).
+- **The pull request.** `buildPullRequestTexts` appends a blank line and the pr text to the body only, raw, after the size check and the forbidden-string check. The title and the comment never carry it. A reused pull request keeps its body. The worst-case body is `maxPullRequestTextLength()` plus 2 plus 1,000 characters.
+- **The runner word class.** `runnerValuePatterns()` takes the molt or the pr inputs form for `--body-file`, as `plugin/hooks/synapse-gate.sh` already does. `--comment-file` stays the pr form alone.
+- **The runner text.** `plugin/agents/synapse.md` lists `body_file` with `inputs_file`, for a commit or pull request; `comment_file` stays pull request only (local review finding ec7fc19e). Row SD-74 names the commit `body_file` block. A test reads each block's runner kinds from the synapse Input section and checks every runner prompt, with and without attribution, against them. The file stays 1,721 of 1,727 bytes.
+- **Unchanged.** `molt.sh`, `open-plan-pr.sh` and `synapse-gate.sh`.
+- **The overlord.** The `## Engine` paragraphs of `plugin/agents/overlord.md` pass `attribution` on the `standard-delivery` launch and on the `pr-feedback-remediation` escalation launch.
+- **Contract rows.** SD-01, SD-42, SD-44, SD-45, SD-66 and SD-74 changed. SD-90 (launch attribution), SD-91 (commit attribution) and SD-92 (PR attribution) are new. PFR-01 changed and PFR-33 is new.
+
+**What it amends.** The workflow bullet of Amendment 2026-11-19: the commit subject and file list are sent in their own files (issue 595) said `--body-file` stays pr-only for the engine. The engine now also sends it in the molt form.
+
+**Enforcement.** Tests by execution:
+
+- `tests/workflow-scripts/args.test.mjs` pins `readAttribution`: absent, each passing value and each refusal.
+- `tests/workflow-scripts/facts.test.mjs` pins the `--body-file` class as the molt or pr form and `--comment-file` as the pr form alone.
+- `tests/workflow-scripts/standard-delivery.test.mjs` and `tests/workflow-scripts/pr-feedback-remediation.test.mjs` pin the launch read, the resume, each commit call with its own body path, the body end, the unchanged title and comment, and the stops a planner text or an oversized body still makes. Each commits through the real `molt.sh` and opens or reuses through the real `open-plan-pr.sh`, behind the real gate hook.
+- `tests/workflow-scripts/overlord-contract.test.mjs` pins the overlord launch text.
+
+**Budget.** No prose budget raise and no length cap raise. Measured after the change, against main:
+
+- `plugin/workflows/standard-delivery.js`: length 192,788 of 193,000, from 192,721; prose 41,593 of 42,084, from 41,897.
+- `plugin/workflows/pr-feedback-remediation.js`: length 177,634, from 176,946; prose 37,807 of 38,065, from 37,823.
+- `plugin/workflows/analysis-only.js`: length 63,726, from 63,693; prose 15,187, unchanged.
+- `plugin/agents/overlord.md`: 29,986 of 29,992 bytes, from 29,977.
+
+The room came from shorter `meta.js` descriptions and phase details and from folded launch readers.
+
+**Recorded residuals.**
+
+- **The pr text is added raw.**
+  - **Not covered.** The engine does not neutralize it. Trust rests on the overlord rule that it is only the harness's own text.
+  - **Bounded impact.** It is never external content, at most 1,000 characters, with no control character but tab and line feed, and never in a title, a comment or a commit subject.
+- **A blank line inside the commit text splits the trailers.** The harness gives contiguous lines. The engine does not check it.
+- **A resume from another session reruns calls.** A different `Claude-Session` line changes the commit and PR prompts, so those calls rerun rather than replay from the cache.
+- **Reviewer fix-pass commits carry no attribution.** The `github-reviewer` agent makes those commits, not engine code.
+
+**Version.** Minor, 14.8.0. It adds a launch arg and new commit and pull request text. Every built workflow script changed, so a run paused on an older build cannot resume.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/676.
+
+### Local review findings 7c55c376 and 2dc34c61: the attribution arg is trusted harness text (2026-11-26)
+
+The findings: `readAttribution` takes any printable text, so a bad or compromised launcher could add commit trailers, split the trailer block, or put Markdown, links or mentions in a pull request body (7c55c376). `buildPullRequestTexts` appends the pr text after the size check and the forbidden-string check, so that text can hold a forbidden string and take the body past the cap (2dc34c61).
+
+**Threat model.** The launcher is the overlord. It supplies every launch arg and already holds commit and push authority, so it can write any commit or pull request text without the engine. A launcher that sends hostile attribution is already past any boundary `readAttribution` could guard, so a format check there adds no trust boundary. The arg is the overlord's own harness attribution, verbatim, never external content (see **Its source**). The forbidden-string check keeps attribution out of planner text; the harness text is that attribution, so it is exempt by design. The body bound is the stated worst case, `maxPullRequestTextLength()` plus 2 plus 1,000 characters.
+
+**Decision.** Keep the code. Add no trailer allowlist, no pr template and no check of the pr text against the forbidden strings or the body cap. Both findings are rejected, and a later finding that contests this threat model is a repeat.
+
+**Decided by.** The run, 2026-11-26, per `plugin/governance/decision-autonomy.md` (Review Calls), taking option A of the call on finding 7c55c376 (A: record this threat model and keep the code; B: check the trailer format and count the pr text in the size check; C: build the text from typed fields). The overlord agreed with the strong recommendation, and the pick is reversible and not architectural.

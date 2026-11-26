@@ -15,7 +15,7 @@ shell: bash
 
 # Plan to PRD
 
-Synthesize an already-interrogated plan into a **PRD** — the committed, durable specification of WHAT an Initiative delivers, written to `docs/prds/<slug>.md`. This is a near-zero-interrogation transform: the heavy interrogation already happened upstream. Do not re-run forensic questioning here. Read the plan, draft the PRD, run the two confirm gates, write the file.
+Synthesize an already-interrogated plan into a **PRD** — the committed, durable specification of WHAT an Initiative delivers, written to `docs/prds/<slug>.md`. Read the plan, draft the PRD, run the two confirm gates, write the file.
 
 A PRD describes **WHAT** the Initiative delivers — never **HOW**. File scope, step sequencing, and the implementation path are the Directive's job, not the PRD's. The PRD is path-agnostic: producing it does not decide single-branch vs brood and does not force any execution path. That routing is decided downstream at implementation time, independent of this artifact.
 
@@ -60,23 +60,25 @@ Respect the glossary and ADRs when writing: use the project's canonical terms (n
 
 ## Near-zero interrogation
 
-The plan arrived interrogated. Do NOT re-open the design tree, re-eliminate options, or re-run forensic questioning — that work lives upstream and rerunning it is wasted effort and a worse experience for the user. Synthesize the PRD directly from the plan.
+The plan arrived interrogated. Do NOT re-open the design tree, re-eliminate options, or re-run forensic questioning; that work lives upstream. Synthesize the PRD directly from the plan.
 
 Run exactly TWO light confirm gates, each as a single question with your own recommended answer drawn from the plan:
 
 1. **Story completeness gate.** Present the user-story set you derived and ask: "Is this the complete set of user stories, or is one missing?" Adjust only if the user names a gap.
 2. **Scope boundary gate.** Present the `## Out of Scope` list you derived and ask: "Are these the right scope boundaries — anything to add or pull back in?" Adjust only if the user corrects a boundary.
 
-If the plan does not contain enough to populate a required PRD section, ask one targeted question to fill that specific gap — but do not turn the gap into a full re-interrogation. Anything genuinely unresolved goes into `## Further Notes` as an open question.
+If the plan does not contain enough to populate a required PRD section, or does not settle whether the initiative has a user-facing UI or UX surface, ask one targeted question to fill that specific gap, never a full re-interrogation. Anything genuinely unresolved goes into `## Further Notes` as an open question.
 
 ---
 
 ## PRD template
 
-Write the PRD with these nine sections, in this EXACT order. Every PRD uses this skeleton.
+Write the PRD with these nine sections, in this EXACT order, after the UI line. Every PRD uses this skeleton.
 
 ```markdown
 # PRD: <Initiative name>
+
+**UI:** yes|no
 
 ## Problem Statement
 The problem the Initiative solves and who has it. Why it matters now.
@@ -108,6 +110,8 @@ What this Initiative explicitly does NOT cover. The scope boundary confirmed in 
 ## Further Notes
 Open questions, deferred decisions, and any plan/ADR conflicts surfaced but not resolved here.
 ```
+
+The first non-blank line after the title is the UI line: write exactly `**UI:** yes` or `**UI:** no`, from the plan.
 
 ### WHAT-only discipline
 

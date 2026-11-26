@@ -1,0 +1,34 @@
+{
+  "rule": "PRD UI line written exactly and read exactly",
+  "description": "The PRD's UI line is a recorded fact that readers never judge: hivemind:plan-to-prd writes the first non-blank line after the PRD title as exactly `**UI:** yes` or `**UI:** no`, and four readers parse that exact literal. This fixture pins both ends of the contract. SOURCE (plugin/skills/plan-to-prd/SKILL.md): the PRD template span carries the `**UI:** yes|no` line directly after the `# PRD: <Initiative name>` title and before `## Problem Statement`, so deleting the line from the skeleton or moving it below a section turns the suite red. CONSUMERS in the writer file itself pin the other claim-carrying clauses: the exact-line rule (the first non-blank line after the title is the UI line, written exactly as one of the two literals from the plan; rewriting the literal or the position breaks the match) and the obligation to ask one targeted question when the plan does not settle whether the initiative has a user-facing UI or UX surface (the condition and the question obligation sit in one span, so inverting either one stops the match). CONSUMERS in the reader files pin the exact-literal parse each reader applies: plugin/skills/_shared/readiness-check.sh (rc_prd_ui: yes and no literals, with a `**UI:**` prefix of any other value read as invalid and a missing line read as no), plugin/skills/_shared/record-verify.sh (rv_ui: the same two literals, anything else invalid), plugin/skills/design-review/scripts/design-review.sh (dr_ui: the same two literals, anything else invalid), and plugin/skills/solution-design/SKILL.md (the stated validity rule). If a reader's literal drifts from the writer's, a PRD the writer produces reads as invalid, or a PRD the readers accept is no longer what the writer writes; each pin turns that edit red. What this fixture honestly guarantees: these word sequences exist in these named files, nothing about meaning. It cannot detect a rewrite-around that leaves the pinned bytes intact, cannot see a reader file it does not name (plugin/skills/_shared/stage-derivation.sh and plugin/skills/design-review/references/record-format.md describe the line in prose and are not pinned), and cannot prove the jq parse computes what the literals suggest; the behaviour of the readers is proved by their own suites, not here. The ask-one-question obligation is pinned as a word sequence, so the bound on the question (one, targeted, no re-interrogation) is carried only by the words in the pinned span.",
+  "source": {
+    "file": "plugin/skills/plan-to-prd/SKILL.md",
+    "pattern": "# PRD: <Initiative name> **UI:** yes|no ## Problem Statement"
+  },
+  "consumers": [
+    {
+      "file": "plugin/skills/plan-to-prd/SKILL.md",
+      "pattern": "The first non-blank line after the title is the UI line: write exactly `**UI:** yes` or `**UI:** no`, from the plan."
+    },
+    {
+      "file": "plugin/skills/plan-to-prd/SKILL.md",
+      "pattern": "or does not settle whether the initiative has a user-facing UI or UX surface, ask one targeted question to fill that specific gap"
+    },
+    {
+      "file": "plugin/skills/_shared/readiness-check.sh",
+      "pattern": "if . == \"**UI:** yes\" then \"yes\" elif . == \"**UI:** no\" then \"no\" elif . != null and startswith(\"**UI:**\") then \"invalid\" else \"no\" end;"
+    },
+    {
+      "file": "plugin/skills/_shared/record-verify.sh",
+      "pattern": "if . == \"**UI:** yes\" then \"yes\" elif . == \"**UI:** no\" then \"no\" else \"invalid\" end;"
+    },
+    {
+      "file": "plugin/skills/design-review/scripts/design-review.sh",
+      "pattern": "if . == \"**UI:** yes\" then \"yes\" elif . == \"**UI:** no\" then \"no\" else \"invalid\" end;"
+    },
+    {
+      "file": "plugin/skills/solution-design/SKILL.md",
+      "pattern": "Exactly `**UI:** yes` or `**UI:** no` is valid"
+    }
+  ]
+}

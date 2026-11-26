@@ -28,7 +28,8 @@
  * Inputs
  *   args   the Workflow args global, read with lib/args.js as analysis-only
  *          reads it: a string (the request), an object {request, trunk?,
- *          references?, local_review?, draft?, answers?, build?, reply?},
+ *          references?, local_review?, draft?, decisions?, attribution?,
+ *          answers?, build?, reply?},
  *          or undefined. request, trunk, references, local_review and draft
  *          come from the launch args only. local_review is true or false:
  *          absent means true, so the local review gate is configured unless
@@ -39,7 +40,12 @@
  *          only, is absent or a list of 1 to maxDecisions() non-blank
  *          strings of at most maxDecisionLength() code points each: the
  *          user's own replies settled before launch, word for word. Any
- *          other value stops the run before any agent call. answers and reply
+ *          other value stops the run before any agent call. attribution,
+ *          from the launch args only, is {commit?, pr?}, the harness text
+ *          for the commit and the pull request: absent means {}, and any
+ *          other value stops the run (lib/args.js readAttribution). The
+ *          first problem in the order local_review, draft, decisions,
+ *          attribution is the one the run stops on. answers and reply
  *          follow the result.js pause contract: answers['round-N'] holds the
  *          reply to round N, and reply answers the first round with no
  *          stored answer, only when answers is present. Round N is the
@@ -397,18 +403,10 @@ function readDeliveryLaunch(rawArgs) {
     return describeLaunchProblem('The trunk launch arg is not a safe git branch name');
   }
   const reviewInput = readBooleanLaunchArg(argsObject, 'local_review', true);
-  if (reviewInput.problem !== undefined) {
-    return reviewInput;
-  }
   const draftInput = readBooleanLaunchArg(argsObject, 'draft', false);
-  if (draftInput.problem !== undefined) {
-    return draftInput;
-  }
   const decisionsInput = readDecisions(argsObject);
-  if (decisionsInput.problem !== undefined) {
-    return decisionsInput;
-  }
-  return { argsObject: argsObject, request: argsObject.request, trunk: launchInputs.trunk, references: launchInputs.references, localReview: reviewInput.value, draft: draftInput.value, decisions: decisionsInput.decisions };
+  const attributionInput = readAttribution(argsObject);
+  return [reviewInput, draftInput, decisionsInput, attributionInput].find((input) => input.problem !== undefined) ?? { argsObject: argsObject, request: argsObject.request, ...launchInputs, localReview: reviewInput.value, draft: draftInput.value, ...decisionsInput, ...attributionInput };
 }
 
 function describeLaunchProblem(reason) {
@@ -420,18 +418,8 @@ function describeLaunchProblem(reason) {
  * undefined, or a launch problem for any other value, null included.
  */
 function readBooleanLaunchArg(argsObject, name, absentValue) {
-  const value = argsObject[name];
-  if (value === undefined) {
-    return { value: absentValue };
-  }
-  if (typeof value === 'boolean') {
-    return { value: value };
-  }
-  return describeLaunchProblem('The ' + name + ' launch arg must be true or false');
-}
-
-function isDecision(decision) {
-  return isNonEmptyString(decision) && Array.from(decision).length <= maxDecisionLength();
+  const { [name]: value = absentValue } = argsObject;
+  return typeof value === 'boolean' ? { value: value } : describeLaunchProblem('The ' + name + ' launch arg must be true or false');
 }
 
 /**
@@ -443,10 +431,7 @@ function readDecisions(argsObject) {
   if (decisions === undefined) {
     return { decisions: [] };
   }
-  if (Array.isArray(decisions) && decisions.length > 0 && decisions.length <= maxDecisions() && decisions.every(isDecision)) {
-    return { decisions: decisions.slice() };
-  }
-  return describeLaunchProblem('The decisions launch arg must be a list of 1 to ' + maxDecisions() + ' non-blank strings of at most ' + maxDecisionLength() + ' characters each');
+  return Array.isArray(decisions) && decisions.length > 0 && decisions.length <= maxDecisions() && decisions.every((decision) => isNonEmptyString(decision) && Array.from(decision).length <= maxDecisionLength()) ? { decisions: decisions.slice() } : describeLaunchProblem('The decisions launch arg must be a list of 1 to ' + maxDecisions() + ' non-blank strings of at most ' + maxDecisionLength() + ' characters each');
 }
 
 function createRunState(launch) {
@@ -457,6 +442,7 @@ function createRunState(launch) {
     localReview: launch.localReview,
     draft: launch.draft,
     decisions: launch.decisions ?? [],
+    attribution: launch.attribution ?? {},
     level: resolveLevel(undefined, AUTONOMY_TABLE),
     storedAnswers: readStoredAnswers(launch.argsObject),
     pendingReply: readPendingReply(launch.argsObject),

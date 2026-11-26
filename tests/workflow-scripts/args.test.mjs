@@ -189,6 +189,57 @@ describe('pause rounds', () => {
   });
 });
 
+describe('readAttribution', () => {
+  const problem = { problem: 'The attribution launch arg must be commit and pr text up to 1000 characters' };
+  const attributionLib = loadLibs([libDir + 'result.js', libDir + 'stop.js', libDir + 'args.js']);
+  attributionLib.describeLaunchProblem = (reason) => ({ problem: reason });
+  const accepted = [
+    ['commit and pr text with tab and LF', { commit: 'Co-Authored-By: Example <noreply@example.invalid>\nExample-Session: https://example.invalid/s', pr: '\u{1F916} Generated with Example\n\n\thttps://example.invalid/s' }],
+    ['an empty object', {}],
+    ['empty values', { commit: '', pr: '' }],
+    ['commit alone', { commit: 'C' }],
+    ['pr alone', { pr: 'P' }],
+    ['an astral pair', { pr: '\u{1F600}' }],
+    ['1000 characters', { commit: 'x'.repeat(1000) }],
+    ['500 astral pairs, 1000 UTF-16 units', { pr: '\u{1F600}'.repeat(500) }]
+  ];
+  const refused = [
+    ['null', null],
+    ['an array', ['C']],
+    ['a string', 'Co-Authored-By: Example'],
+    ['a number', 5],
+    ['an unknown key', { commit: 'C', body: 'B' }],
+    ['a toString key', { toString: 'x' }],
+    ['a non-string commit', { commit: 5 }],
+    ['a null pr', { pr: null }],
+    ['an object pr', { pr: { text: 'P' } }],
+    ['1001 characters', { commit: 'x'.repeat(1001) }],
+    ['501 astral pairs, 1002 UTF-16 units', { pr: '\u{1F600}'.repeat(501) }],
+    ['a CR', { commit: 'C\r\nD' }],
+    ['a NUL', { pr: 'P\u0000' }],
+    ['U+007F', { commit: 'C\u007f' }],
+    ['U+0085', { pr: 'P\u0085' }],
+    ['a lone high surrogate', { pr: 'P\uD83D' }],
+    ['a lone low surrogate', { commit: '\uDE00C' }]
+  ];
+  test('an absent attribution is {}', () => {
+    assert.deepEqual(read(attributionLib.readAttribution({})), { attribution: {} });
+    assert.deepEqual(read(attributionLib.readAttribution({ attribution: undefined })), { attribution: {} });
+  });
+  for (const [name, attribution] of accepted) {
+    test(`${name} passes as it is`, () => {
+      const result = attributionLib.readAttribution({ attribution: attribution });
+      assert.equal(result.attribution, attribution);
+      assert.equal(result.problem, undefined);
+    });
+  }
+  for (const [name, attribution] of refused) {
+    test(`${name} is the launch problem`, () => {
+      assert.deepEqual(read(attributionLib.readAttribution({ attribution: attribution })), problem);
+    });
+  }
+});
+
 /**
  * Returns the path of every workflow module and main.js the build bundles,
  * for every workflow.

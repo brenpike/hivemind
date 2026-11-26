@@ -388,7 +388,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'a7850d6d301e86ac';
+const BUILD_ID = '869fc00ec687cfc5';
 
 function supportedSchemaKeywords(){
 return[
@@ -1506,6 +1506,7 @@ function runnerValuePatterns(){
 const name=gitIdentifierPattern();
 const prFile=/^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/;
 const moltFile=/^\.hivemind\/molt-inputs-[A-Za-z0-9-]{1,64}\.json$/;
+const inputsFile=/^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/;
 return{
 '--trunk':name,
 '--base':name,
@@ -1515,10 +1516,10 @@ return{
 '--expect-commit':/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/,
 '--classification':/^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
 '--trunk-freshness':/^(?:fresh|stale|skipped)$/,
-'--inputs':/^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/,
+'--inputs':inputsFile,
 '--subject-file':moltFile,
 '--files-file':moltFile,
-'--body-file':prFile,
+'--body-file':inputsFile,
 '--comment-file':prFile
 };
 }

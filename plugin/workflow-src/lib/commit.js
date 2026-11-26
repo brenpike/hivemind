@@ -48,7 +48,8 @@
  *   head check after a reply. Its checked commit goes to observeHead
  *   (lib/record.js), as the branch commit does at each pass start. Its
  *   command carries --trunk, --inputs, --subject-file and, only when the
- *   file list is not empty, --files-file. The inputs_file content is the
+ *   file list is not empty, --files-file, and --body-file with
+ *   run.attribution.commit. The inputs_file content is the
  *   JSON text of only type and breaking, the subject_file content the raw
  *   code-built subject: a wave's from its plan steps, and fixed ones for
  *   the fix commit and the head check, and for the local review commit
@@ -78,7 +79,7 @@
  *   its line feed join cannot carry, are terminal.
  *   The commit runner calls agent() through runRunnerRelay (lib/runner.js),
  *   and its prompt follows its runner prompt and relayed reply rules, with
- *   inputs_file, subject_file and, with --files-file, files_file blocks.
+ *   a block per file word.
  *   The commit runner writes its own files and passes their paths to
  *   molt.sh (review finding fb4c129c), the paths buildInputsPath builds
  *   (issue 487), unique per call and run given a faithful facts relay; a
@@ -129,12 +130,12 @@ function toCommitSubject(text, fallbackSubject) {
  */
 function listCommitWords(run, label, files) {
   const buildPath = (suffix) => buildInputsPath(run, 'molt', label + suffix);
-  return ['--trunk', run.trunk, '--inputs', buildPath(''), '--subject-file', buildPath('-subj'), ...(files.length === 0 ? [] : ['--files-file', files.some((file) => /^$|\n/.test(file)) ? undefined : buildPath('-files')])];
+  return ['--trunk', run.trunk, '--inputs', buildPath(''), '--subject-file', buildPath('-subj'), ...(files.length === 0 ? [] : ['--files-file', files.some((file) => /^$|\n/.test(file)) ? undefined : buildPath('-files')]), ...(run.attribution?.commit ? ['--body-file', buildPath('-body')] : [])];
 }
 
-function buildCommitPrompt(words, files, plan, purpose, subject, pluginRoot) {
+function buildCommitPrompt(words, files, plan, purpose, subject, pluginRoot, body) {
   const inputs = JSON.stringify({ type: commitTypeMap()[plan.classification], breaking: plan.breaking });
-  return ['Run the command below to commit ' + purpose + '.', dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('molt', words, pluginRoot)), formatFileBlock(words, 2, inputs), formatFileBlock(words, 4, subject), ...(words[6] === undefined ? [] : [formatFileBlock(words, 6, files.join('\n'))])].join('\n');
+  return ['Run the command below to commit ' + purpose + '.', dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('molt', words, pluginRoot)), formatFileBlock(words, 2, inputs), formatFileBlock(words, 4, subject), ...(files.length === 0 ? [] : [formatFileBlock(words, 6, files.join('\n'))]), ...(body ? [formatFileBlock(words, words.length - 2, body)] : [])].join('\n');
 }
 
 function readOutsidePath(payload) {
@@ -200,7 +201,7 @@ async function runCommitStep(run, plan, commit, stepCauses) {
   const record =commit.stepName === 'wave' && RECORD_WRITES ? undefined : commit.files.find((file) => /^docs\/initiatives\/[^/]+\/review-record\.md$/i.test(file));
   const recordStop = record === undefined ? undefined : { problem: 'The commit step refused review record ' + encodeUntrustedText(record) + ', so ' + RUN_NAME + ' stopped.', terminal: true };
   const commandStop = describeCommandStop('commit', listWords(commit.label), listWords(commit.label + '-retry'));
-  const buildPrompt = (label) => addResumeNote(buildCommitPrompt(listWords(label), commit.files, plan, texts.purpose, subject, run.pluginRoot), run);
+  const buildPrompt = (label) => addResumeNote(buildCommitPrompt(listWords(label), commit.files, plan, texts.purpose, subject, run.pluginRoot, run.attribution?.commit), run);
   const checked = recordStop ?? commandStop ?? checkCommitRelay(await runRunnerRelay(buildPrompt, commit.label, 'Commit'), plan, texts.noun);
   if (checked.problem !== undefined) {
     return stopDelivery(stepCauses.concat([checked]), run, [], isReplan);
