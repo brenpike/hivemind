@@ -13,6 +13,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [14.7.0] - 2026-11-25
+
+### Added
+
+- `ensure-parent --slug <slug>` in `plugin/skills/prd-to-issues/scripts/subissue-ops.sh`, valid only with `--existing-number`: the resolve read also fetches the epic body and reports a `seed` field, true only when the body's seed issue marker names the PRD's slug. Without `--slug` the output is unchanged.
+- The `design-gate` subcommand of `subissue-ops.sh`: reads the PRD's UI line, the UI prototype files and the review record at the trunk commit fetched from GitHub, through the readiness check library, and returns `pass` or `refuse` with the readiness check's reason codes.
+- `hivemind:prd-to-issues` takes an optional seed issue number, reuses the seed as the epic without editing its body, and adds a `## Design` section to each slice under the seed, with a Prototype line only when the PRD's UI line is yes.
+- `hivemind:prd-to-issues` refuses to slice a UI initiative whose prototype is missing on trunk or not stamped by a passing review record, and publishes nothing.
+- The issue body rule "No file paths or code snippets" carves out the `## Design` links.
+- The safety fixture `tests/policy/safety-slice-design-section.json`, pinning the Design section and the carve-out; `tools/test_subissue_ops.sh` covers `--slug` and `design-gate` with new fixtures in `tests/prd-to-issues/`.
+
+### Changed
+
+- `subissue-ops.sh` sources `plugin/skills/_shared/readiness-check.sh` through the ADR-0020 prologue and is enrolled in `tools/test_script_bootstrap.sh`; `tools/validate.sh` routes the library to `test_subissue_ops`.
+
+No prose budget raised.
+
+Issue: #617.
+
 ## [14.6.0] - 2026-11-25
 
 ### Added

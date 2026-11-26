@@ -22,14 +22,19 @@
 #   - discover candidate child issues by EXACT title (attached AND unparented) so a
 #     create-before-attach partial failure is recoverable, not re-created,
 #   - surface a GitHub rejection of an attach (child already parented, cycle) as a
-#     STRUCTURED recoverable warning record instead of crashing.
+#     STRUCTURED recoverable warning record instead of crashing,
+#   - report whether a resolved epic is the SEED issue of an initiative (ensure-parent --slug:
+#     its body's first line is the seed issue marker naming that slug),
+#   - gate slicing on the initiative's design at the trunk commit (design-gate): the PRD's UI
+#     line, the UI prototype files and the review record, read ONLY through the shared readiness
+#     check library ${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-check.sh.
 # The split mirrors triage-ops.sh: a thin live `gh`/network shell wrapping a pure,
 # offline-exercisable transform core.
 #
 # 2. INPUT CONTRACT — per subcommand
 # ----------------------------------
 #   ensure-parent --title <str> --body <str>|--body-file <path|-> [--repo <owner/repo>]
-#                 [--existing-number <int>] [--response-file <path|->]
+#                 [--existing-number <int> [--slug <slug>]] [--response-file <path|->]
 #                 [--discovery-response-file <path|->]
 #     Idempotently CREATE-OR-FIND the PRD-level epic (parent) issue — ORPHAN-SAFE
 #     (closed-by-construction): when no --existing-number is supplied, ensure-parent first
@@ -55,10 +60,19 @@
 #              owner/repo charset guard find-by-title has (not the weak `*/*` glob).
 #     online (resolve path, --existing-number): GraphQL repository.issue(number) read
 #              of { number id }, routed through the SHARED kernel (see §4).
+#     --slug <slug> (seed check): valid ONLY with --existing-number (else exit 2); the slug must
+#              match ^[a-z0-9]+(-[a-z0-9]+)*$ (else exit 2). Both checks run BEFORE any gh call.
+#              The resolve read then also asks for the issue `body`; the shared kernel requires
+#              it to be a string, else FAILS CLOSED. The body reaches the library's
+#              hivemind_seed_marker_slug ONLY on stdin; `seed` is true only when that function
+#              prints exactly <slug> (a CRLF marker line counts; another slug or no marker gives
+#              false). The resolve path creates and edits no issue, so the seed's marker line
+#              stays. Without --slug every output is byte-identical to the contract before it.
 #     offline: with --response-file -> normalizes the injected raw GraphQL
 #              repository.issue response (number+id) through the shared kernel and
 #              emits the parent record (status resolved when --existing-number was given,
-#              else created — the create path's post-create node-id read). Title/body/create
+#              else created — the create path's post-create node-id read). With --slug the
+#              injected response carries the issue body and the seed record is emitted. Title/body/create
 #              are NOT exercised offline (no deterministic transform — creation is pure live
 #              side effect). With --discovery-response-file (no --existing-number) -> runs the
 #              discovery transform (shared kernel + exact-title filter + resolution rules) over
@@ -133,6 +147,51 @@
 #     a live invocation supplying it is REJECTED fail-closed via the shared guard
 #     (see §5) BEFORE any gh call.
 #
+#   design-gate --slug <slug> [--repo <owner/repo>] [--remote <name>] [--trunk-response-file <path|->]
+#     Design gate for slicing under a seed epic. Argument order: the slug is checked FIRST
+#     (required, ^[a-z0-9]+(-[a-z0-9]+)*$, else exit 2); --trunk-response-file on a live
+#     invocation is REJECTED (exit 2) via the shared guard (see §5); the remote (default `origin`)
+#     passes the identifier gate (^[A-Za-z0-9._/-]+$, no leading `-`, no `..`; else exit 2);
+#     owner/repo (explicit --repo, else the current checkout) is checked with assert_owner_repo.
+#     online (trunk read): ONE GraphQL read of repository.defaultBranchRef { name target { oid } },
+#              routed through the SHARED kernel (see §4). The trunk name passes the identifier
+#              gate and `git check-ref-format --branch`; the commit id must pass the library's
+#              hivemind_readiness_commit_ok (40 or 64 lowercase hex).
+#     online (fetch): `GIT_TERMINAL_PROMPT=0 git --no-replace-objects fetch --quiet --no-tags
+#              --no-recurse-submodules --no-prune --refmap= -- <remote> refs/heads/<trunk>`, which
+#              writes FETCH_HEAD only. The commit id must then name a local commit object that
+#              is FETCH_HEAD or its ancestor, else FAILS CLOSED (a force-pushed trunk, even when
+#              the old commit is still in the object store, or a --repo that is not the local
+#              clone). The gate then reads, and reports as `commit`, the fetched tip's commit id,
+#              so a trunk that moved forward between the read and the fetch is read as it now
+#              stands. No branch name or local ref ever reaches the library: every document
+#              is read at the commit id, so files only in the working tree never count.
+#     documents (read at the commit ONLY through the shared library):
+#       - ui: docs/prds/<slug>.md via hivemind_doc_read under hivemind_readiness_jq_defs with
+#         rc_doc_eval(rc_prd_ui): yes, no or invalid, or missing when the PRD fails the Document
+#         existence test.
+#       - ONLY when ui is yes:
+#         * docs/initiatives/<slug>/prototype/index.html and notes.md are each tested with
+#           hivemind_doc_entry (the Document existence test: a symlink, submodule or tree is
+#           missing); either one missing gives `prototype_missing`, once.
+#         * docs/initiatives/<slug>/review-record.md is read with hivemind_doc_read and piped to
+#           hivemind_record_front_matter: missing gives record_missing, unparseable gives
+#           record_malformed.
+#         * the pass rule (restating the readiness check's, clause for clause): record_not_passed
+#           (verdict not pass, clean_round not true, or rounds below 2), record_rounds_exceeded
+#           (rounds above 3), record_open (any open count above 0).
+#         * each stamped path failing the Document existence test, or whose blob at the commit
+#           differs from its stamp, gives record_stale:<path> (the staleness rule).
+#         * each prototype path missing from the record's stamps gives record_unstamped:<path>.
+#       ui missing or invalid gives no reason and no refusal: the readiness check fails such a
+#       slice at triage.
+#     offline: --trunk-response-file replaces the GraphQL read (same kernel) and the fetch is
+#              skipped, so the commit must already be in the local object store. REQUIRES
+#              --trunk-response-file offline (exit 2 otherwise); --repo, when given, is still
+#              checked.
+#     failure: a gh, git or fetch failure, a malformed read, or an unresolvable commit leaves
+#              stdout empty, prints ONE `subissue-ops:` stderr line and exits nonzero.
+#
 # 3. OUTPUT SCHEMA — JSON on stdout (compact)
 # -------------------------------------------
 #   ensure-parent:
@@ -140,6 +199,8 @@
 #       "status": "created"|"resolved"|"resolved-by-title" }
 #     `resolved-by-title` is emitted when the pre-create discovery found exactly ONE OPEN
 #     exact-title epic and resolved it instead of creating a duplicate (orphan-safety).
+#   ensure-parent --existing-number <int> --slug <slug>:
+#     { "number": <int>, "id": <node-id>, "status": "resolved", "seed": true|false }
 #
 #   attach-subissue payload (offline, --emit-payload):
 #     { "issueId": <parent-node-id>, "subIssueId": <child-node-id> }
@@ -166,6 +227,14 @@
 #     attached child — the skill reads it to decide attach (parent null) vs reuse/skip
 #     (already attached to the intended epic).
 #
+#   design-gate (one compact line, exit 0):
+#     { "commit": <object-id>, "trunk": <str>, "slug": <str>,
+#       "ui": "yes"|"no"|"invalid"|"missing",
+#       "result": "pass"|"refuse",
+#       "reasons": [ <readiness reason code>, ... ] }
+#     `reasons` is sorted and unique, and empty unless ui is yes. `result` is refuse ONLY when
+#     ui is yes and reasons is non-empty; otherwise pass.
+#
 # 4. INVARIANTS
 # -------------
 #   - SINGLE SHARED RESPONSE-SHAPE KERNEL: EVERY live gh/GraphQL read that informs a
@@ -175,8 +244,16 @@
 #     envelope, null/missing entity at the expected root path, non-array collection,
 #     or a null/wrong-typed field on any element — FAILS CLOSED (nonzero, structured
 #     kind record to stderr) before any decision or emission. Covered reads:
-#     ensure-parent's repository.issue resolve/normalize, list-children's per-page
-#     subIssues response (before accumulation). No subcommand bypasses this kernel.
+#     ensure-parent's repository.issue resolve/normalize (with --slug, its body too),
+#     list-children's per-page subIssues response (before accumulation), design-gate's
+#     defaultBranchRef trunk read. No subcommand bypasses this kernel.
+#   - SHARED READINESS CHECK LIBRARY. The script sources
+#     ${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-check.sh with the canonical ADR-0020
+#     prologue (C1 self-location, C2 shared dir, C4 source-or-die; emitter subissue_ops_fail,
+#     exit 2), so EVERY subcommand needs the library present and parseable. The seed marker parse,
+#     the Document existence test, document reads and the review record front matter parse are
+#     the library's; this script never re-implements them and never reads a document by branch
+#     name, local ref or working-tree path.
 #   - NATIVE SUB-ISSUES, NOT LABELS. This script wires the first-class GitHub
 #     parent/child hierarchy; it NEVER reads, writes, or grooms any `initiative:*`
 #     (or any other) label. Grouping is the native relationship, full stop.
@@ -233,8 +310,10 @@
 # normally come from gh is injected via --response-file (ensure-parent, attach-subissue,
 # list-children, find-by-title); ensure-parent's PRE-CREATE discovery enumeration is injected via
 # the dedicated --discovery-response-file seam (a repository.issues ENUMERATION response, distinct
-# from the --response-file repository.issue response); attach-subissue's payload-build artifact instead
-# needs the explicit --emit-payload opt-in (offline attach with NEITHER flag FAILS CLOSED). The
+# from the --response-file repository.issue response); design-gate's trunk read is injected via
+# --trunk-response-file (a repository.defaultBranchRef response; the fetch is skipped and the
+# documents are still read at that commit from the local object store); attach-subissue's
+# payload-build artifact instead needs the explicit --emit-payload opt-in (offline attach with NEITHER flag FAILS CLOSED). The
 # fixture flags are honored ONLY when SUBISSUE_OPS_OFFLINE is set; a live invocation
 # supplying any is REJECTED fail-closed (exit 2) BEFORE any gh call via the single
 # shared guard reject_fixture_flags_in_live_mode (one mechanism, no per-subcommand
@@ -242,11 +321,20 @@
 # a fixture spoof a created/attached/child/resolved-by-title state for a mutation that never
 # ran. Use `-` for stdin on any *-file flag. The pure transforms are factored as functions
 # reading from injected input (build_attach_payload, surface_attach_response,
-# normalize_parent_resolve, normalize_children, normalize_find_by_title, resolve_discovery) so
-# the test can drive each directly via the offline CLI with only jq + bash, no `gh`. Mirrors
+# normalize_parent_resolve, normalize_parent_seed, normalize_trunk_ref, normalize_children,
+# normalize_find_by_title, resolve_discovery) so the test can drive each directly via the
+# offline CLI with only jq + bash, no `gh`. Mirrors
 # triage-ops.sh's --response-file injection.
 
 set -euo pipefail
+
+subissue_ops_fail() { printf 'subissue-ops: %s\n' "$1" >&2; exit 2; }
+
+script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || subissue_ops_fail "cannot self-locate the script directory; refusing to proceed"
+shared_dir="$(CDPATH= cd -- "$script_dir/../../_shared" 2>/dev/null && pwd -P 2>/dev/null)" || subissue_ops_fail "cannot resolve skills/_shared from the script directory; refusing to proceed"
+[ -f "$shared_dir/readiness-check.sh" ] || subissue_ops_fail "required shared library missing: skills/_shared/readiness-check.sh; refusing to proceed"
+# shellcheck source=../../_shared/readiness-check.sh
+. "$shared_dir/readiness-check.sh" || subissue_ops_fail "failed to source skills/_shared/readiness-check.sh (unparseable); refusing to proceed"
 
 PROG="subissue-ops"
 
@@ -257,8 +345,10 @@ GQL_HEADER="GraphQL-Features: sub_issues"
 GQL_HEADER_ARGS=(-H "$GQL_HEADER")
 
 die() {
-  # Structured, nonzero failure to stderr — propagate, never swallow.
-  echo "$PROG: $1" >&2
+  # Structured, nonzero failure to stderr — propagate, never swallow. A message may quote a
+  # rejected untrusted value, so every control byte is dropped before it reaches a terminal or log.
+  printf '%s' "$PROG: $1" | LC_ALL=C tr -d '\000-\037\177' >&2
+  printf '\n' >&2
   exit "${2:-1}"
 }
 
@@ -335,6 +425,28 @@ assert_node_id() {
   case "$value" in
     '') die "$flag must be a non-empty node id" 2 ;;
     *[!A-Za-z0-9_=-]*) die "$flag contains an invalid node id (allowed charset: A-Za-z0-9_=-)" 2 ;;
+  esac
+}
+
+# assert_slug <subcmd> <slug>: the initiative slug gate shared by ensure-parent --slug and
+# design-gate --slug. The slug must match ^[a-z0-9]+(-[a-z0-9]+)*$; it is checked BEFORE any
+# gh/git call and fails CLOSED (exit 2) otherwise.
+assert_slug() {
+  local subcmd="$1" slug="$2"
+  case "$slug" in
+    ''|-*|*-|*--*|*[!abcdefghijklmnopqrstuvwxyz0123456789-]*)
+      die "$subcmd: --slug must match ^[a-z0-9]+(-[a-z0-9]+)*\$ (got '$slug')" 2 ;;
+  esac
+}
+
+# assert_git_identifier <subcmd> <label> <value>: the identifier gate design-gate applies to the
+# trunk name and the remote name before either reaches git. Charset ^[A-Za-z0-9._/-]+$, with no
+# leading `-` and no `..`; fails CLOSED (exit 2) otherwise. The rejected value is never echoed:
+# the trunk name is GitHub-supplied text.
+assert_git_identifier() {
+  local subcmd="$1" label="$2" value="$3"
+  case "$value" in
+    ''|-*|*..*|*[!A-Za-z0-9._/-]*) die "$subcmd: invalid $label (allowed charset: A-Za-z0-9._/-, no leading '-', no '..')" 2 ;;
   esac
 }
 
@@ -420,6 +532,50 @@ normalize_parent_resolve() {
     "{ number: .data.repository.issue.number,
        id: .data.repository.issue.id,
        status: \"$status\" }"
+}
+
+# normalize_parent_seed <response-json> <slug>: project a raw repository.issue GraphQL response
+# that also carries the issue `body` (ensure-parent --slug) into { number, id, status:"resolved",
+# seed }. FAIL-CLOSED via the shared kernel: on top of normalize_parent_resolve's checks, the
+# body must be a string. The body reaches the shared library's hivemind_seed_marker_slug ONLY on
+# stdin (never argv, never program text); `seed` is true only when that function prints exactly
+# <slug>. A marker naming another slug, or no marker, gives seed false. A library failure other
+# than "no marker" (exit 1) fails closed. Exit codes: 0 = normalized; 1 = fail-closed.
+normalize_parent_seed() {
+  local resp="$1" slug="$2" validated marker="" marker_rc=0 seed=false
+  validated="$(validate_response_shape "$resp" \
+    '.data.repository.issue' \
+    '(.number | type == "number")
+     and (.id | type == "string" and length > 0)
+     and (.body | type == "string")' \
+    '[]' \
+    'true' \
+    '.data.repository.issue | { number, id, body }')" || return 1
+  marker="$(printf '%s' "$validated" | jq -j '.body' | hivemind_seed_marker_slug)" || marker_rc=$?
+  case "$marker_rc" in
+    0) if [ "$marker" = "$slug" ]; then seed=true; fi ;;
+    1) ;;
+    *) die "ensure-parent: seed marker parse failed" 1 ;;
+  esac
+  printf '%s' "$validated" | jq -c --argjson seed "$seed" \
+    '{ number, id, status: "resolved", seed: $seed }'
+}
+
+# normalize_trunk_ref <response-json>: project a raw repository.defaultBranchRef GraphQL response
+# (design-gate's trunk read) into { name, oid }. FAIL-CLOSED via the shared kernel: a transport
+# error, `.errors` envelope, null/missing defaultBranchRef, or a non-string/empty name or
+# target.oid exits nonzero. The trunk ref carries no collection, so the collection slot is `[]`.
+# Exit codes: 0 = normalized; 1 = fail-closed.
+normalize_trunk_ref() {
+  local resp="$1"
+  validate_response_shape "$resp" \
+    '.data.repository.defaultBranchRef' \
+    '(.name | type == "string" and length > 0)
+     and (.target | type == "object")
+     and (.target.oid | type == "string" and length > 0)' \
+    '[]' \
+    'true' \
+    '.data.repository.defaultBranchRef | { name, oid: .target.oid }'
 }
 
 # normalize_children <response-json>: project a raw node(id:) subIssues GraphQL page
@@ -654,6 +810,28 @@ query($owner: String!, $repo: String!, $number: Int!) {
   }
 }'
 
+PARENT_SEED_QUERY='
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    issue(number: $number) {
+      number
+      id
+      body
+    }
+  }
+}'
+
+# design-gate's trunk read: the default branch name and its commit id (owner/name via gh -f as DATA).
+TRUNK_REF_QUERY='
+query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    defaultBranchRef {
+      name
+      target { oid }
+    }
+  }
+}'
+
 SUBISSUES_QUERY='
 query($id: ID!, $after: String) {
   node(id: $id) {
@@ -768,6 +946,7 @@ paginate_to_completeness() {
 
 cmd_ensure_parent() {
   local title="" body="" body_file="" repo="" existing_number="" response_file="" discovery_response_file=""
+  local slug="" slug_given=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --title) [ "$#" -ge 2 ] || die "missing value for --title" 2
@@ -784,6 +963,8 @@ cmd_ensure_parent() {
                response_file="$2"; shift 2 ;;
       --discovery-response-file) [ "$#" -ge 2 ] || die "missing value for --discovery-response-file" 2
                discovery_response_file="$2"; shift 2 ;;
+      --slug) [ "$#" -ge 2 ] || die "missing value for --slug" 2
+               slug="$2"; slug_given="1"; shift 2 ;;
       *) die "ensure-parent: unexpected argument '$1'" 2 ;;
     esac
   done
@@ -796,6 +977,13 @@ cmd_ensure_parent() {
   # usage bug rather than silently ignoring the injected discovery fixture.
   if [ -n "$discovery_response_file" ] && [ -n "$existing_number" ]; then
     die "ensure-parent: --discovery-response-file is invalid with --existing-number (discovery runs only on the create path)" 2
+  fi
+
+  # --slug asks whether the resolved epic is the seed issue of that initiative; it is meaningful
+  # ONLY on the resolve path. Both checks run BEFORE any gh call.
+  if [ -n "$slug_given" ]; then
+    [ -n "$existing_number" ] || die "ensure-parent: --slug is valid only with --existing-number" 2
+    assert_slug "ensure-parent" "$slug"
   fi
 
   if is_offline; then
@@ -820,6 +1008,10 @@ cmd_ensure_parent() {
     # as a repository.issue read; status tag is resolved when --existing-number was
     # given, else created (the create path's post-create node-id read).
     [ -n "$response_file" ] || die "offline ensure-parent requires --response-file" 2
+    if [ -n "$slug_given" ]; then
+      normalize_parent_seed "$(read_injected "$response_file")" "$slug"
+      return
+    fi
     local status="created"
     [ -n "$existing_number" ] && status="resolved"
     normalize_parent_resolve "$(read_injected "$response_file")" "$status"
@@ -848,6 +1040,13 @@ cmd_ensure_parent() {
     # RESOLVE path (idempotency key supplied): read the known epic's node id. Routed
     # through the shared kernel — a missing/malformed read FAILS CLOSED.
     number="$existing_number"
+    if [ -n "$slug_given" ]; then
+      resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$PARENT_SEED_QUERY" \
+                -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
+        || die "ensure-parent: GraphQL resolve failed for issue #$number" 1
+      normalize_parent_seed "$resp" "$slug"
+      return
+    fi
     resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$PARENT_RESOLVE_QUERY" \
               -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
       || die "ensure-parent: GraphQL resolve failed for issue #$number" 1
@@ -1101,6 +1300,200 @@ cmd_find_by_title() {
   run_title_search "find-by-title" "$owner_repo" "$title" || exit "$?"
 }
 
+# read_prd_ui <commit> <slug>: prints the PRD's UI value at <commit> — yes, no or invalid, or
+# missing when docs/prds/<slug>.md fails the Document existence test. The PRD is read ONLY through
+# the shared library: hivemind_doc_read frames the bytes (an empty prefix line, the document, then
+# its read status) into jq under hivemind_readiness_jq_defs with rc_doc_eval(rc_prd_ui), so the
+# UI line is parsed by the readiness check's own rules. A read or jq failure fails closed.
+read_prd_ui() {
+  local commit="$1" slug="$2" program ui="" read_rc=0
+  program="$(hivemind_readiness_jq_defs)"'
+rc_doc_eval(rc_prd_ui)'
+  ui="$(
+    {
+      printf '\n'
+      hivemind_doc_read "$commit" "docs/prds/$slug.md" 2>/dev/null || read_rc=$?
+      printf '\n%s' "$read_rc"
+    } | jq -Rsr "$program" 2>/dev/null
+  )" || die "design-gate: PRD read failed at the trunk commit" 1
+  case "$ui" in
+    yes|no|invalid|missing) printf '%s\n' "$ui" ;;
+    *) die "design-gate: PRD read failed at the trunk commit" 1 ;;
+  esac
+}
+
+# read_record_front_matter <commit> <path>: pipes the review record at <commit>, read with
+# hivemind_doc_read, into hivemind_record_front_matter. Prints the parsed front matter line (only
+# when both succeed), then one last line `<read-status> <parse-status>` so the caller can tell a
+# missing record (read 1), a failed read (read 2) and an unparseable record (read 0, parse 1) apart.
+read_record_front_matter() {
+  local -a statuses=()
+  if hivemind_doc_read "$1" "$2" 2>/dev/null | hivemind_record_front_matter; then
+    statuses=(0 0)
+  else
+    statuses=("${PIPESTATUS[@]}")
+  fi
+  printf '%s %s\n' "${statuses[0]}" "${statuses[1]}"
+}
+
+# design_reasons <commit> <slug>: prints the design gate's reasons for a UI slice as one compact
+# JSON array, sorted and unique, using the readiness check's own codes:
+#   prototype_missing          either prototype file fails the Document existence test (once)
+#   record_missing             the review record fails the Document existence test
+#   record_malformed           the review record's front matter does not parse
+#   record_not_passed          verdict not pass, clean_round not true, or rounds below 2
+#   record_rounds_exceeded     rounds above 3
+#   record_open                any open count above 0
+#   record_stale:<path>        a stamped path failing the Document existence test or holding
+#                              another blob than its stamp
+#   record_unstamped:<path>    a prototype path missing from the record's stamps
+# The pass rule restates the readiness check's rc_record_codes clause for clause, and the stale
+# rule its staleness rule. Every read is at <commit> through the shared library; a git failure
+# fails closed (nonzero, stdout empty).
+design_reasons() {
+  local commit="$1" slug="$2" path="" entry_rc=0 codes="" output="" record_status="" record_codes=""
+  local stamps="" stamp="" blob="" oid=""
+  local prototype_dir="docs/initiatives/$slug/prototype"
+  local -a prototypes=("$prototype_dir/index.html" "$prototype_dir/notes.md")
+  for path in "${prototypes[@]}"; do
+    entry_rc=0
+    hivemind_doc_entry "$commit" "$path" >/dev/null 2>&1 || entry_rc=$?
+    case "$entry_rc" in
+      0) ;;
+      1) codes="prototype_missing"$'\n' ;;
+      *) die "design-gate: prototype read failed at the trunk commit" 1 ;;
+    esac
+  done
+  output="$(read_record_front_matter "$commit" "docs/initiatives/$slug/review-record.md")"
+  record_status="${output##*$'\n'}"
+  case "$record_status" in
+    '0 0')
+      record_codes="$(printf '%s' "${output%$'\n'*}" \
+        | jq -r --arg index "${prototypes[0]}" --arg notes "${prototypes[1]}" '
+            [.stamps[].path] as $stamped
+            | (if .verdict != "pass" or .clean_round != true or .rounds < 2
+               then "record_not_passed" else empty end),
+              (if .rounds > 3 then "record_rounds_exceeded" else empty end),
+              (if any(.open[]; . > 0) then "record_open" else empty end),
+              ($index, $notes | select(. as $path | any($stamped[]; . == $path) | not)
+               | "record_unstamped:" + .)')" \
+        || die "design-gate: review record evaluation failed" 1
+      codes+="$record_codes"$'\n'
+      stamps="$(printf '%s' "${output%$'\n'*}" | jq -r '.stamps[] | .path + "\t" + .blob')" \
+        || die "design-gate: review record evaluation failed" 1
+      while IFS= read -r stamp; do
+        [ -n "$stamp" ] || continue
+        path="${stamp%%$'\t'*}"
+        blob="${stamp#*$'\t'}"
+        entry_rc=0
+        oid="$(hivemind_doc_entry "$commit" "$path" 2>/dev/null)" || entry_rc=$?
+        case "$entry_rc" in
+          0|1) ;;
+          *) die "design-gate: stamped document read failed at the trunk commit" 1 ;;
+        esac
+        if [ "$entry_rc" -ne 0 ] || [ "$oid" != "$blob" ]; then
+          codes+="record_stale:$path"$'\n'
+        fi
+      done <<<"$stamps" ;;
+    '1 '*) codes+="record_missing"$'\n' ;;
+    '0 1') codes+="record_malformed"$'\n' ;;
+    *) die "design-gate: review record read failed at the trunk commit" 1 ;;
+  esac
+  printf '%s' "$codes" | jq -R -s -c 'split("\n") | map(select(length > 0)) | unique' \
+    || die "design-gate: reason assembly failed" 1
+}
+
+cmd_design_gate() {
+  local slug="" slug_given="" repo="" remote="origin" trunk_response_file=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --slug) [ "$#" -ge 2 ] || die "missing value for --slug" 2
+               slug="$2"; slug_given="1"; shift 2 ;;
+      --repo) [ "$#" -ge 2 ] || die "missing value for --repo" 2
+               repo="$2"; shift 2 ;;
+      --remote) [ "$#" -ge 2 ] || die "missing value for --remote" 2
+               remote="$2"; shift 2 ;;
+      --trunk-response-file) [ "$#" -ge 2 ] || die "missing value for --trunk-response-file" 2
+               trunk_response_file="$2"; shift 2 ;;
+      *) die "design-gate: unexpected argument '$1'" 2 ;;
+    esac
+  done
+  [ -n "$slug_given" ] || die "design-gate: --slug is required" 2
+  assert_slug "design-gate" "$slug"
+  reject_fixture_flags_in_live_mode "design-gate" "--trunk-response-file=$trunk_response_file"
+  assert_git_identifier "design-gate" "remote name" "$remote"
+
+  local resp="" owner_repo="" trunk_ref="" trunk="" commit="" object_type="" ui="" reasons="[]"
+  if is_offline; then
+    [ -n "$trunk_response_file" ] || die "offline design-gate requires --trunk-response-file" 2
+    [ -z "$repo" ] || assert_owner_repo "design-gate" "$repo"
+    resp="$(read_injected "$trunk_response_file")"
+  else
+    if [ -n "$repo" ]; then
+      owner_repo="$repo"
+    else
+      require_gh "design-gate"
+      owner_repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
+        || die "design-gate: failed to resolve owner/repo (pass --repo)" 1
+    fi
+    assert_owner_repo "design-gate" "$owner_repo"
+    [ -n "$repo" ] && require_gh "design-gate"
+    resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$TRUNK_REF_QUERY" \
+              -f owner="${owner_repo%%/*}" -f name="${owner_repo#*/}" 2>/dev/null)" \
+      || die "design-gate: GraphQL trunk read failed" 1
+  fi
+
+  # INVARIANT: the extracted trunk name and commit id must equal the read byte for byte; command
+  # substitution strips trailing newlines, and the jq equality check rejects any value it altered.
+  trunk_ref="$(normalize_trunk_ref "$resp" 2>/dev/null)" \
+    || die "design-gate: malformed trunk read (defaultBranchRef name and target.oid required)" 1
+  trunk="$(printf '%s' "$trunk_ref" | jq -r '.name')"
+  commit="$(printf '%s' "$trunk_ref" | jq -r '.oid')"
+  printf '%s' "$trunk_ref" | jq -e --arg name "$trunk" --arg oid "$commit" \
+      '.name == $name and .oid == $oid' >/dev/null 2>&1 \
+    || die "design-gate: malformed trunk read (name or commit id not plain text)" 1
+  assert_git_identifier "design-gate" "trunk name" "$trunk"
+  git check-ref-format --branch "$trunk" >/dev/null 2>&1 \
+    || die "design-gate: trunk name fails git check-ref-format --branch" 1
+  hivemind_readiness_commit_ok "$commit" \
+    || die "design-gate: trunk commit id is not a full lowercase object id" 1
+
+  # INVARIANT: the fetch writes FETCH_HEAD only (empty refmap: no remote-tracking ref moves), and
+  # only the checked commit id, never a branch name or local ref, reaches the shared library.
+  if ! is_offline; then
+    GIT_TERMINAL_PROMPT=0 git --no-replace-objects fetch --quiet --no-tags --no-recurse-submodules \
+        --no-prune --refmap= -- "$remote" "refs/heads/$trunk" </dev/null >/dev/null 2>&1 \
+      || die "design-gate: fetch of the trunk from remote '$remote' failed" 1
+  fi
+  object_type="$(git --no-replace-objects cat-file -t "$commit" </dev/null 2>/dev/null)" \
+    || die "design-gate: trunk commit $commit is not in the local object store" 1
+  [ "$object_type" = commit ] \
+    || die "design-gate: trunk commit $commit is not in the local object store" 1
+  # The trunk read and the fetch are two reads: a commit id already in the object store passes
+  # the check above even when the remote branch was force-pushed away from it in between, so the
+  # fetched tip must equal it or descend from it. The gate then reads the fetched tip, the newest
+  # trunk it holds, so a trunk that moved forward in between is read as it now stands.
+  if ! is_offline; then
+    local fetched=""
+    fetched="$(git --no-replace-objects rev-parse --verify -q 'FETCH_HEAD^{commit}' </dev/null 2>/dev/null)" \
+      && hivemind_readiness_commit_ok "$fetched" \
+      || die "design-gate: fetched trunk tip of remote '$remote' is unreadable" 1
+    git --no-replace-objects merge-base --is-ancestor "$commit" "$fetched" </dev/null >/dev/null 2>&1 \
+      || die "design-gate: trunk commit $commit is not on the fetched trunk of remote '$remote'" 1
+    commit="$fetched"
+  fi
+
+  ui="$(read_prd_ui "$commit" "$slug")" || exit "$?"
+  if [ "$ui" = yes ]; then
+    reasons="$(design_reasons "$commit" "$slug")" || exit "$?"
+  fi
+  jq -c -n --arg commit "$commit" --arg trunk "$trunk" --arg slug "$slug" --arg ui "$ui" \
+    --argjson reasons "$reasons" \
+    '{ commit: $commit, trunk: $trunk, slug: $slug, ui: $ui,
+       result: (if $ui == "yes" and ($reasons | length) > 0 then "refuse" else "pass" end),
+       reasons: $reasons }'
+}
+
 # --- Dispatch ----------------------------------------------------------------
 
 usage() {
@@ -1108,10 +1501,15 @@ usage() {
 $PROG — deterministic mechanism for the hivemind prd-to-issues skill (native sub-issues).
 usage: $PROG <subcommand> [args]
 subcommands:
-  ensure-parent   --title <str> --body <str>|--body-file <path|-> [--repo <owner/repo>] [--existing-number <int>] [--response-file <path|->] [--discovery-response-file <path|->]
+  ensure-parent   --title <str> --body <str>|--body-file <path|-> [--repo <owner/repo>] [--existing-number <int> [--slug <slug>]] [--response-file <path|->] [--discovery-response-file <path|->]
   attach-subissue --parent-id <ID> --child-id <ID> [--response-file <path|->] | --emit-payload --parent-id <ID> --child-id <ID> (offline payload build)
   list-children   --parent-id <ID> [--response-file <path|->]
   find-by-title   --title <str> [--repo <owner/repo>] [--response-file <path|->]
+  design-gate     --slug <slug> [--repo <owner/repo>] [--remote <name>] [--trunk-response-file <path|->]
+--slug (ensure-parent, valid only with --existing-number) adds "seed": true only when the epic body's
+first line is the seed issue marker naming <slug>. design-gate reads the trunk commit (fetched into
+FETCH_HEAD only) and, when docs/prds/<slug>.md says UI yes, refuses on a prototype file failing the
+Document existence test or a review record that is missing, malformed, not passed, stale or unstamped.
 Set SUBISSUE_OPS_OFFLINE to drive the pure transforms over injected input (no gh).
 EOF
 }
@@ -1123,6 +1521,7 @@ case "$subcmd" in
   attach-subissue) cmd_attach_subissue "$@" ;;
   list-children)   cmd_list_children "$@" ;;
   find-by-title)   cmd_find_by_title "$@" ;;
+  design-gate)     cmd_design_gate "$@" ;;
   -h|--help)       usage; exit 0 ;;
   *)               die "unknown subcommand '$subcmd' (try --help)" 2 ;;
 esac

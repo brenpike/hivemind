@@ -447,6 +447,10 @@ run_suites() {
 #     tests/solution-design/**, tools/test_solution_design.sh
 #                                      -> test_solution_design (the library keeps its other routes
 #                                         by union)
+#   plugin/skills/prd-to-issues/scripts/*.sh, plugin/skills/_shared/readiness-check.sh,
+#     tests/prd-to-issues/*, tools/test_subissue_ops.sh
+#                                      -> test_subissue_ops (subissue-ops.sh sources the library; it
+#                                         keeps its other routes by union)
 #   tools/**                        -> FULL suite (validator bootstrap)
 #   .github/**                         -> FULL suite (CI bootstrap — the gate harness itself)
 #   outside plugin|.claude-plugin|tools|tests|.github and not fixture-pinned above
@@ -1050,8 +1054,11 @@ map_path() {
   # a plugin/* file (policy_check prose-lints it via the wholesale rule below), but policy_check
   # NEVER EXECUTES bash — so without this rule a subissue-ops edit would only be prose-linted, never
   # behaviorally exercised. Route both the script glob and its fixture dir to the behavioral suite.
-  # (tools/test_subissue_ops.sh itself is covered by the tools/** full-suite leg.)
+  # (tools/test_subissue_ops.sh itself is covered by the tools/** full-suite leg.) subissue-ops.sh
+  # sources plugin/skills/_shared/readiness-check.sh, so the library routes here too; it keeps its
+  # other routes by union.
   if [[ "$p" == plugin/skills/prd-to-issues/scripts/*.sh \
+     || "$p" == plugin/skills/_shared/readiness-check.sh \
      || "$p" == tools/test_subissue_ops.sh \
      || "$p" == tests/prd-to-issues/* ]]; then
     add_selected "$SUITE_TEST_SUBISSUE_OPS" "$p (subissue-ops script/fixture)"
@@ -1625,7 +1632,8 @@ self_test() {
   #     verify_records record, stamped doc, library and suite legs (and the docs/adr/**
   #     policy_check leg it unions with), the test_stage_derivation library and harness legs, the
   #     test_triage_ops readiness-check library leg, the test_solution_design skill, library and
-  #     harness legs, and the hooks.json json-manifests parse leg, that the
+  #     harness legs, the test_subissue_ops readiness-check library leg, and the hooks.json
+  #     json-manifests parse leg, that the
   #     KNOWN_SUITES probe (#1) does not reach must route to its suite. #1 probes each entrypoint
   #     script, so it would stay green if the schema-chain, shared-lib, harness, push-branch child
   #     or parse-gate selector were dropped. Probe each <path>|<suite> pair directly so removing
@@ -1676,6 +1684,7 @@ self_test() {
     "plugin/skills/solution-design/SKILL.md|$SUITE_TEST_SOLUTION_DESIGN" \
     "plugin/skills/_shared/readiness-check.sh|$SUITE_TEST_SOLUTION_DESIGN" \
     "tools/test_solution_design.sh|$SUITE_TEST_SOLUTION_DESIGN" \
+    "plugin/skills/_shared/readiness-check.sh|$SUITE_TEST_SUBISSUE_OPS" \
     "plugin/hooks/hooks.json|$SUITE_JSON_MANIFESTS" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_BROOD" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_RC_BROOD"; do
