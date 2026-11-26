@@ -59,7 +59,9 @@
 # text parses as one JSON object holding both a `path` and a `content` key, other keys or not, is
 # a whole data block, not its content, and is refused (`subject file holds a whole data block, not
 # its content`). Text that is not JSON, not one JSON value, or JSON that is not such an object
-# passes this rule. The text is a jq variable, never jq program source.
+# passes this rule. The text is a jq variable, never jq program source. The test reads only that
+# both keys are present, never their value types and never whether `path` names the file holding
+# it, by the user's decision recorded in ADR-0037, Amendment 2026-11-25 (issue 683).
 #
 # BODY FILE (only with --body-file; read once, whole, with hivemind_read_input_file into the
 # private `body.txt`, which must be byte for byte the file; its text enters no shell or jq program

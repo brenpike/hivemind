@@ -720,7 +720,11 @@ assert_block_passes() {
 
 # A subject, files or body file whose whole text is a JSON object holding both `path` and
 # `content` is refused with its own blocker, ahead of the subject line, subject length and files
-# path rules, and after the inputs field rules. Text that is not such an object commits.
+# path rules, and after the inputs field rules. Text that is not such an object commits. By the
+# user's decision recorded in ADR-0037, Amendment 2026-11-25 (issue 683), the test reads only that
+# both keys are present, never their value types and never whether `path` names the file holding
+# it, so a `{"path":false,"content":0}` subject and a `{"path":"/docs","content":"text"}` body are
+# refused too.
 test_whole_data_block() {
     local long_block wrapped_files
     local subject_ok=$'s\n' files_ok=$'f.txt\n'
@@ -735,6 +739,8 @@ test_whole_data_block() {
     assert_input_refused block-subject-extra-keys "$SUBJECT_BLOCK_REASON" '{"type":"feat"}' $'{"path":"a","content":"b","mode":"x"}\n' "$files_ok"
     assert_input_refused block-files "$FILES_BLOCK_REASON" '{"type":"feat"}' "$subject_ok" "$wrapped_files"$'\n'
     assert_input_refused block-body "$BODY_BLOCK_REASON" '{"type":"feat"}' "$subject_ok" "$files_ok" '{"path":"f.txt","content":"body"}'
+    assert_input_refused block-subject-nonstring-values "$SUBJECT_BLOCK_REASON" '{"type":"feat"}' $'{"path":false,"content":0}\n' "$files_ok"
+    assert_input_refused block-body-path-not-file "$BODY_BLOCK_REASON" '{"type":"feat"}' "$subject_ok" "$files_ok" '{"path":"/docs","content":"text"}'
     assert_input_refused block-type-first "$TYPE_REASON" '{"type":"feature"}' "$long_block"$'\n' "$files_ok"
     assert_input_refused block-subject-before-files "$SUBJECT_BLOCK_REASON" '{"type":"feat"}' "$long_block" "$wrapped_files"
     assert_input_refused block-files-before-body "$FILES_BLOCK_REASON" '{"type":"feat"}' "$subject_ok" "$wrapped_files" "$long_block"

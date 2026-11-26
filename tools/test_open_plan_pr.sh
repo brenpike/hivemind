@@ -1114,19 +1114,24 @@ assert_body_passes() {
 }
 
 # A body or comment file holding a whole data block, a JSON object with both `path` and `content`,
-# is refused after the reads and deletes, before any push or gh call. Any other text passes.
+# is refused after the reads and deletes, before any push or gh call. Any other text passes. By the
+# user's decision recorded in ADR-0037, Amendment 2026-11-25 (issue 683), the test reads only that
+# both keys are present: a value of any type, or a path naming another file, is still refused.
 test_whole_data_block() {
     create_world data-block
     assert_body_refused data-block-body "$WRAPPED_BODY" "$BODY_DATA_BLOCK_REASON"
     assert_body_refused data-block-body-line-feed "$WRAPPED_BODY"$'\n' "$BODY_DATA_BLOCK_REASON"
     assert_body_refused data-block-body-extra-key '{"title":"t","path":"p","content":"c"}' "$BODY_DATA_BLOCK_REASON"
     assert_body_refused data-block-body-spaced "$(printf ' \n{"content":"c",\t"path":"p"}\n\n')" "$BODY_DATA_BLOCK_REASON"
+    assert_body_refused data-block-body-non-string-values '{"path":false,"content":0}' "$BODY_DATA_BLOCK_REASON"
+    assert_body_refused data-block-body-other-path '{"path":"/docs","content":"text"}' "$BODY_DATA_BLOCK_REASON"
     write_body "$WRAPPED_BODY"
     assert_input_refused data-block-body-before-draft '{"title":"t","draft":"yes"}' "$BODY_DATA_BLOCK_REASON"
     write_body "$WRAPPED_BODY"
     assert_input_refused data-block-body-after-title '{"title":""}' "$TITLE_REASON"
     assert_comment_refused data-block-comment "$WRAPPED_COMMENT" "$COMMENT_DATA_BLOCK_REASON"
     assert_comment_refused data-block-comment-line-feed "$WRAPPED_COMMENT"$'\n' "$COMMENT_DATA_BLOCK_REASON"
+    assert_comment_refused data-block-comment-other-path '{"path":".hivemind/pr-inputs-x-body.json","content":"c"}' "$COMMENT_DATA_BLOCK_REASON"
     assert_comment_refused data-block-comment-after-draft "$WRAPPED_COMMENT" "$DRAFT_REASON" '{"title":"t","draft":"yes"}'
     write_body "$WRAPPED_BODY"
     assert_comment_refused data-block-body-before-comment "$WRAPPED_COMMENT" "$BODY_DATA_BLOCK_REASON"

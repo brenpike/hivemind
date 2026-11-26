@@ -58,7 +58,9 @@
 # character other than newline and tab, and it may be empty. Right after that rule, a body that is
 # a whole data block, text that parses as one JSON object holding both a `path` and a `content`
 # key, is refused (`body file holds a whole data block, not its content`); any other JSON, or text
-# that is not JSON, passes. Its path must not name the inputs file: a
+# that is not JSON, passes. That test reads only that both keys are present, never their value types
+# and never whether `path` names the file holding it, by the user's decision recorded in ADR-0037,
+# Amendment 2026-11-25 (issue 683). Its path must not name the inputs file: a
 # path that names the same file, by any spelling or a hard link, is refused before either read.
 #
 # COMMENT FILE (only with --comment-file; read once, by READ, into the private `comment.md`; its
