@@ -1,0 +1,18 @@
+{
+  "rule": "Solution design handback and UI prototype stop",
+  "description": "`plugin/skills/solution-design/SKILL.md` `## Handback` states the skill's output contract: it writes no file and returns the design's content together with each PRD or accepted-ADR change its taken decisions make, or a stop report or question, for workers with exact file scope to write in one pull request, then returns control to its invoker. The source pin holds that whole sentence, so dropping the no-write clause, the PRD and ADR changes, the exact file scope or the one-pull-request landing turns the suite red. Two consumer pins in the same file carry the other load-bearing clauses. (1) An existing design is read and returned revised, keeping what the PRD change does not touch; rewording it back to an in-place update turns the suite red. (2) With `**UI:** yes` the skill stops when the UI prototype stage is not done: `index.html` or `notes.md` is missing, or `notes.md` has no filled `## Verdict` section. The pin spans the `**UI:** yes` condition and both named files in one word sequence, so dropping either file, the verdict test or the UI condition that scopes them turns the suite red; the prototype paths in the skill's Inputs list are unpinned, so a rename there alone stays green. What these pins honestly guarantee is exactly that these word sequences exist in the named file; they claim nothing about meaning. Residuals, stated plainly: (1) every pin is whole-file, not section-scoped; (2) a meaning inversion elsewhere in the file that keeps the pinned bytes intact, such as new prose letting the skill write the design itself, is invisible; (3) the invoking writer and the design review that consume this output are not named, so a caller that drops the returned PRD or ADR change stays green.",
+  "source": {
+    "file": "plugin/skills/solution-design/SKILL.md",
+    "pattern": "The skill writes no file. It returns the design's content with each PRD or accepted-ADR change its taken decisions make, or the stop report or question above, for workers with exact file scope to write in one pull request, then returns control to whatever invoked it."
+  },
+  "consumers": [
+    {
+      "file": "plugin/skills/solution-design/SKILL.md",
+      "pattern": "When the design file exists, read it and return it revised, keeping what the PRD change does not touch."
+    },
+    {
+      "file": "plugin/skills/solution-design/SKILL.md",
+      "pattern": "the PRD says `**UI:** yes` and the UI prototype stage is not done, so the design is out of order: `index.html` or `notes.md` is missing, or `notes.md` has no filled `## Verdict` section."
+    }
+  ]
+}
