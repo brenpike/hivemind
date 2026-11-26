@@ -511,19 +511,15 @@ function waitForService(review, run) {
   return { rerun: true };
 }
 
-function buildBlockedReviewBrief() {
-  const brief = buildStepStopBrief(false);
-  return { ...brief, options: brief.options.concat(buildBriefOption('B', 'Skip local review for this run.', 'trivial', 'low')) };
-}
-
 /**
  * Asks the fix_cause step_stop question of a blocked review with no retry
- * time, led by describeReviewStop. A reply of B, read by readReplyChoices,
- * sets run.reviewSkip to user-reply and returns {held: false}; any other
- * reply returns {rerun: true}.
+ * time, led by describeReviewStop, on buildStepStopBrief(false) with the
+ * skip as its option B. A reply of B, read by readReplyChoices, sets
+ * run.reviewSkip to user-reply and returns {held: false}; any other reply
+ * returns {rerun: true}.
  */
 function askBlockedReview(review, run) {
-  const ask = { ...buildUndecidedAsk(STEP_STOP_KIND, buildBlockedReviewBrief(), run), stop: 'fix_cause' };
+  const ask = { ...buildUndecidedAsk(STEP_STOP_KIND, buildStepStopBrief(false, 'Skip local review for this run.'), run), stop: 'fix_cause' };
   const asked = askTail(ask, run, describeStopLead([{ problem: describeReviewStop(review, run.head) }], []));
   if (asked.answer === undefined) {
     return asked;

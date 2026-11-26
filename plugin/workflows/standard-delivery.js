@@ -672,7 +672,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '61b950d5a519ff14';
+const BUILD_ID = '66337c2e3e61c8ed';
 
 function supportedSchemaKeywords(){
 return[
@@ -750,17 +750,10 @@ failSchema(path,'properties must be an object');
 if(schema.additionalProperties!==undefined&&schema.additionalProperties!==false){
 failSchema(path,'additionalProperties must be false');
 }
-if(schema.minItems!==undefined&&!(Number.isInteger(schema.minItems)&&schema.minItems>=0)){
-failSchema(path,'minItems must be a non-negative integer');
+for(const keyword of['minItems','maxItems','minLength','maxLength']){
+if(schema[keyword]!==undefined&&!(Number.isInteger(schema[keyword])&&schema[keyword]>=0)){
+failSchema(path,keyword+' must be a non-negative integer');
 }
-if(schema.maxItems!==undefined&&!(Number.isInteger(schema.maxItems)&&schema.maxItems>=0)){
-failSchema(path,'maxItems must be a non-negative integer');
-}
-if(schema.minLength!==undefined&&!(Number.isInteger(schema.minLength)&&schema.minLength>=0)){
-failSchema(path,'minLength must be a non-negative integer');
-}
-if(schema.maxLength!==undefined&&!(Number.isInteger(schema.maxLength)&&schema.maxLength>=0)){
-failSchema(path,'maxLength must be a non-negative integer');
 }
 if(schema.pattern!==undefined){
 assertSchemaPattern(schema.pattern,path);
@@ -962,14 +955,14 @@ failTaggedSchema('variant '+value+' names field '+name+', which is not in proper
 function listTaggedValues(spec,tagValues,name){
 return tagValues.filter((value)=>listVariantFields(spec.variants[value]).indexOf(name)!==-1);
 }
-function joinTagValues(values){
-if(values.length<3){
-return values.join(' or ');
+function joinNames(names,conjunction){
+if(names.length<3){
+return names.join(' '+conjunction+' ');
 }
-return values.slice(0,-1).join(', ')+' or '+values[values.length-1];
+return names.slice(0,-1).join(', ')+' '+conjunction+' '+names[names.length-1];
 }
 function describeTaggedField(description,tag,values){
-const sentence='Only with '+tag+' '+joinTagValues(values)+'.';
+const sentence='Only with '+tag+' '+joinNames(values,'or')+'.';
 return description===undefined?sentence:description+' '+sentence;
 }
 function buildTaggedBranch(spec,value){
@@ -3295,16 +3288,17 @@ gate:buildBriefGate()
 function describeStopThen(isReplan){
 return isReplan?'plan again from fresh facts':'take the stopped step again';
 }
-function buildStepStopBrief(isReplan){
+function buildStepStopBrief(isReplan,other){
 const action=describeStopAction('fix_cause','commit any change and reply');
 const brief=buildTailBrief({
 kind:STEP_STOP_KIND,
 problem:action.charAt(0).toUpperCase()+action.slice(1)+'.',
 goOn:'Go on: '+describeStopThen(isReplan)+'.',
+other:other,
 strength:'strong',
 why:'Clearing it lets the step go on.'
 });
-return Object.assign(brief,{options:brief.options.slice(0,1)});
+return Object.assign(brief,{options:brief.options.slice(0,other===undefined?1:2)});
 }
 function buildApprovalBrief(stepText,change,isReplan){
 const brief=buildTailBrief({
@@ -3345,12 +3339,6 @@ return{id:id,summary:summary,steel_man:unshownBriefText(),straw_man:unshownBrief
 }
 function describeOnlyYou(action){
 return'Only you can '+action+'.';
-}
-function joinNames(names,conjunction){
-if(names.length<3){
-return names.join(' '+conjunction+' ');
-}
-return names.slice(0,-1).join(', ')+' '+conjunction+' '+names[names.length-1];
 }
 function listVersionOptions(values){
 if(values.version_check==='unreadable'){
@@ -3901,8 +3889,9 @@ return{type:'string',maxLength:400,description:subject+', in one or two short se
 function describeHeldChanges(){
 return'With stage destructive-fix-gate: each change held for approval, by gate category and the one item it changes, named exactly.';
 }
-function describeUnusableEdit(result){
-return describeUnusableResult('it returned no usable result.',result);
+function readUnusableEdit(result){
+const unusable=describeUnusableResult('it returned no usable result.',result);
+return{status:'blocked',reason:unusable.problem,nextAction:unusable.nextAction,agentFailure:unusable.agentFailure};
 }
 function buildWorkerSchema(){
 return buildTaggedSchema({
@@ -3967,8 +3956,7 @@ return()=>agent(prompt,options);
 }
 function readWorkerOutcome(step,result,approvals){
 if(!validateSchema(WORKER_SCHEMA,result).ok){
-const unusable=describeUnusableEdit(result);
-return{stepId:step.id,status:'blocked',reason:unusable.problem,nextAction:unusable.nextAction,agentFailure:unusable.agentFailure};
+return{stepId:step.id,...readUnusableEdit(result)};
 }
 if(result.outcome==='complete'){
 return{stepId:step.id,status:'complete'};
@@ -4104,8 +4092,7 @@ return outcome.result!==undefined||outcome.replan!==undefined;
 }
 function readGateEditOutcome(result,schema,approvals){
 if(!validateSchema(schema,result).ok){
-const unusable=describeUnusableEdit(result);
-return{status:'blocked',reason:unusable.problem,files:[],nextAction:unusable.nextAction,agentFailure:unusable.agentFailure};
+return{...readUnusableEdit(result),files:[]};
 }
 if(result.outcome==='blocked'){
 return{status:'blocked',reason:describeReason(result.blocker),files:result.files,...readGateHold(result,approvals)};
@@ -4773,8 +4760,8 @@ blocked:['blocker','stage'],
 skipped:['skip_reason']
 };
 }
-function fixLedgerPath(){
-return'.hivemind/review-loop/fix-ledger.yaml';
+function fixLedgerPath(branch){
+return'.hivemind/review-loop/'+branch.replace(/\//g,'~')+'.yaml';
 }
 function reviewQuestionKinds(){
 return{'user-input-required':REVIEW_QUESTION_KIND,'high-severity-rejection':HIGH_SEVERITY_REJECTION_KIND};
@@ -4798,7 +4785,7 @@ if(answer!==undefined){
 inputs.user_answer=answer;
 }
 if(run.resumeLedger){
-inputs.resume_from_ledger=fixLedgerPath();
+inputs.resume_from_ledger=fixLedgerPath(plan.branch);
 run.resumeLedger=false;
 }
 return[
@@ -4996,6 +4983,19 @@ run.answerLog.push(buildAnswerEntry({question:lead,labels:[],reply:reply,decided
 run.waits+=1;
 return{rerun:true};
 }
+function askBlockedReview(review,run){
+const ask={...buildUndecidedAsk(STEP_STOP_KIND,buildStepStopBrief(false,'Skip local review for this run.'),run),stop:'fix_cause'};
+const asked=askTail(ask,run,describeStopLead([{problem:describeReviewStop(review,run.head)}],[]));
+if(asked.answer===undefined){
+return asked;
+}
+if(!readReplyChoices(asked.answer.reply,[ask]).some((choice)=>choice.optionIndex===1)){
+return{rerun:true};
+}
+run.reviewSkip='user-reply';
+run.resumeLedger=false;
+return{held:false};
+}
 function routeLocalReview(review,run,plan){
 switch(localReviewRoutes()[review.exit_reason]){
 case'hold':
@@ -5011,7 +5011,7 @@ case'draft':
 return{draft:describeReviewOpen(review,run.head,'')+'.'};
 case'stop_rerun':
 run.resumeLedger=true;
-return review.retry_minutes>=1?waitForService(review,run):stopDelivery([{problem:describeReviewStop(review,run.head)}],run);
+return review.retry_minutes>=1?waitForService(review,run):askBlockedReview(review,run);
 case'stop':
 return stopDelivery([{problem:describeReviewStop(review,run.head),terminal:true}],run);
 case'skip':

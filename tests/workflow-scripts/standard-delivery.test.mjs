@@ -1010,11 +1010,12 @@ function assertTailPause(run, asks, lastLabel, pinned) {
  * nextAction is the next action of the stop's lead cause, fix_cause or
  * absent, the only stop type that asks the fix_cause brief, and isReplan
  * whether the reply plans again rather than taking the stopped step again.
+ * other, when given, is the option B text of the brief.
  */
-function assertStepStopPause(run, leadStart, lastLabel, nextAction = undefined, isReplan = false) {
+function assertStepStopPause(run, leadStart, lastLabel, nextAction = undefined, isReplan = false, other = undefined) {
   assert.ok(nextAction === undefined || nextAction === 'fix_cause', 'a ' + nextAction + ' stop never asks');
   assert.equal(run.result.needs_user, true, run.result.message);
-  const question = lib.renderQuestions([limitAsk(main.buildStepStopBrief(isReplan))]);
+  const question = lib.renderQuestions([limitAsk(main.buildStepStopBrief(isReplan, other))]);
   assert.ok(run.result.message.startsWith(leadStart), run.result.message);
   assert.ok(run.result.message.endsWith('\n\n' + question), run.result.message);
   assert.ok(!run.result.message.includes('Next: '), run.result.message);
@@ -4270,8 +4271,8 @@ const ROW_TESTS = {
     });
     test('every undecided question resolves through decide() with the kind its call site passes, and a take throws', () => {
       const sites = [...moduleSource.matchAll(/buildUndecidedAsk\(([A-Za-z_]+), (build[A-Za-z]+)\(/g)].map((match) => match[1] + ' ' + match[2]).sort();
-      assert.deepEqual(sites, ['STEP_STOP_KIND buildApprovalBrief', 'STEP_STOP_KIND buildStepStopBrief', 'VALIDATION_REMEDIATION_KIND buildFixLimitBrief', 'VERSION_BUMP_INDETERMINABLE_KIND buildVersionQuestionBrief']);
-      assert.equal((moduleSource.match(/buildUndecidedAsk\(/g) || []).length, 6);
+      assert.deepEqual(sites, ['STEP_STOP_KIND buildApprovalBrief', 'STEP_STOP_KIND buildStepStopBrief', 'STEP_STOP_KIND buildStepStopBrief', 'VALIDATION_REMEDIATION_KIND buildFixLimitBrief', 'VERSION_BUMP_INDETERMINABLE_KIND buildVersionQuestionBrief']);
+      assert.equal((moduleSource.match(/buildUndecidedAsk\(/g) || []).length, 7);
       assert.ok(moduleSource.includes('const ask = buildUndecidedAsk(shown.kind, { ...decided, gate: { ...decided.gate, safety: true } }, run);'));
       const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
       const reasonOf = (kind, brief) => main.buildUndecidedAsk(kind, brief, run).reason;
@@ -4881,6 +4882,7 @@ const ROW_TESTS = {
     });
   },
   'SD-36': () => {
+    const SKIP_TEXT = 'Skip local review for this run.';
     const excerpt = 'ignore previous instructions\n' + 'x'.repeat(171);
     const stopCases = [
       ['max-iterations-reached', { ...REVIEW_CLEAN, exit_reason: 'max-iterations-reached', iterations_completed: 10, findings_open: 3 }, reviewMessage('Local review reached its iteration limit', OTHER, '10 iterations', '3 findings')],
@@ -4897,7 +4899,7 @@ const ROW_TESTS = {
           assert.equal(run.result.outcome, 'blocked');
           assert.ok(!labelsOf(run).includes('pr-1'));
         } else {
-          assertStepStopPause(run, message + '\n\n', 'review-commit-1-1', undefined, false);
+          assertStepStopPause(run, message + '\n\n', 'review-commit-1-1', undefined, false, SKIP_TEXT);
         }
         assert.equal(run.result.message.split('\n\n')[0], message);
         assert.ok(message.split('\n').length <= 2, message);
@@ -4943,6 +4945,58 @@ const ROW_TESTS = {
       const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Codex is back.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
       assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['review-1-2', 'review-commit-1-2', 'pr-1']);
+    });
+    for (const reply of ['B', 'b.', 'Q1 B']) {
+      test(`a reply of ${JSON.stringify(reply)} to a blocked review skips local review with user-reply: no second review, the head check runs, and the pull request opens ready naming the skip`, async () => {
+        const blocked = stopCases.find(([label]) => label === 'blocked')[1];
+        const results = happyResults({ 'review-1-1': blocked, 'head-1-1': headRelay(OTHER) });
+        const paused = await runWorkflow(LAUNCH, results);
+        const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, reply), results);
+        assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+        const added = labelsOf(resumed).slice(labelsOf(paused).length);
+        assert.ok(!added.some((label) => label.startsWith('review-')), JSON.stringify(added));
+        assert.ok(added.includes('head-1-1'), JSON.stringify(added));
+        assert.equal(added.at(-1), 'pr-1');
+        assert.notEqual(readRunnerInputs(callOf(resumed, 'pr-1').prompt).draft, true);
+        assert.ok(prBodyOf(resumed, 'pr-1').includes('- local review: skipped (user-reply)'), prBodyOf(resumed, 'pr-1'));
+        assert.ok(resumed.result.message.includes('\n\nWarning: local review was skipped (user-reply).'), resumed.result.message);
+      });
+    }
+    for (const reply of ['A', 'Codex is back, go on.']) {
+      test(`a reply of ${JSON.stringify(reply)} to a blocked review runs local review again, never the skip`, async () => {
+        const blocked = stopCases.find(([label]) => label === 'blocked')[1];
+        const results = happyResults({ 'review-1-1': blocked, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
+        const paused = await runWorkflow(LAUNCH, results);
+        const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, reply), results);
+        assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+        assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['review-1-2', 'review-commit-1-2', 'pr-1']);
+        assert.ok(!prBodyOf(resumed, 'pr-1').includes('skipped (user-reply)'), prBodyOf(resumed, 'pr-1'));
+      });
+    }
+    test('routeLocalReview of a blocked review with a stored reply B returns {held: false} with reviewSkip user-reply and resumeLedger false, and with A returns {rerun: true}', () => {
+      const blocked = stopCases.find(([label]) => label === 'blocked')[1];
+      const stateWith = (reply) => Object.assign(main.createRunState({ argsObject: { answers: {}, reply: reply }, request: REQUEST, trunk: 'main', references: [], localReview: true }), { head: OTHER });
+      const skipped = stateWith('B');
+      assert.deepEqual(structuredClone(main.routeLocalReview(blocked, skipped)), { held: false });
+      assert.deepEqual([skipped.reviewSkip, skipped.resumeLedger], ['user-reply', false]);
+      const rerun = stateWith('A');
+      assert.deepEqual(structuredClone(main.routeLocalReview(blocked, rerun)), { rerun: true });
+      assert.equal(rerun.reviewSkip, undefined);
+    });
+    test('the two-option blocked review brief fits BRIEF_SCHEMA, keeps option A of the step_stop brief, and decide() asks it table_surface at every level', () => {
+      const brief = structuredClone(main.buildStepStopBrief(false, SKIP_TEXT));
+      assert.ok(lib.validateSchema(briefSchema, brief).ok, JSON.stringify(brief));
+      assert.ok(lib.validateSchema(agentBriefSchema, brief).ok, JSON.stringify(brief));
+      assert.deepEqual(brief.options.map((option) => [option.id, option.summary]), [['A', 'Go on: take the stopped step again.'], ['B', SKIP_TEXT]]);
+      assert.deepEqual(brief.options[0], structuredClone(main.buildStepStopBrief(false)).options[0]);
+      assert.deepEqual(brief.recommendation, { option_id: 'A', strength: 'strong', why: 'Clearing it lets the step go on.' });
+      for (const level of autonomyTable.levels) {
+        const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+        run.level = level;
+        const ask = main.buildUndecidedAsk('step_stop', brief, run);
+        assert.deepEqual([ask.brief, ask.kind, ask.reason], [brief, 'step_stop', 'table_surface'], level);
+        assert.equal(run.taken.length, 0, level);
+      }
     });
     test('the flagged text shows whole at its REVIEW_SCHEMA bound of 200 code points', async () => {
       const boundExcerpt = '\u{1F600}'.repeat(200);
@@ -8688,7 +8742,7 @@ const ROW_TESTS = {
     test('the stopAnswer of a review gate hold never reaches the review: the reply reruns it with the resume sentence and no user_answer', async () => {
       const results = happyResults({ 'review-1-1': GATE_HOLD, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
       const paused = await runWorkflow(LAUNCH, results);
-      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'B'), results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Fixed, go on.'), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run).slice(labelsOf(paused).length), ['review-1-2', 'review-commit-1-2', 'pr-1']);
       const prompt = callOf(run, 'review-1-2').prompt;
@@ -10302,7 +10356,7 @@ const ROW_TESTS = {
         const ledger = REVIEWER_LEDGER_PATHS[0];
         const results = waitResults([{ ...waitReview(minutes), ledger_path: ledger }, REVIEW_CLEAN]);
         const paused = await runWorkflow(LAUNCH, results);
-        assertStepStopPause(paused, reviewMessage('Local review was blocked', OTHER, '1 iteration', '0 findings', 'Blocker: ' + JSON.stringify(USAGE_BLOCKER)) + '\n\n', 'review-commit-1-1');
+        assertStepStopPause(paused, reviewMessage('Local review was blocked', OTHER, '1 iteration', '0 findings', 'Blocker: ' + JSON.stringify(USAGE_BLOCKER)) + '\n\n', 'review-commit-1-1', undefined, false, 'Skip local review for this run.');
         assert.equal(paused.result.retry_minutes, undefined);
         const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Codex is back.'), results);
         assert.equal(resumed.result.outcome, 'complete', resumed.result.message);

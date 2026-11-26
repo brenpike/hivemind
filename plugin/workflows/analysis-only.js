@@ -388,7 +388,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = '6f4173c868a092b9';
+const BUILD_ID = 'a7850d6d301e86ac';
 
 function supportedSchemaKeywords(){
 return[
@@ -466,17 +466,10 @@ failSchema(path,'properties must be an object');
 if(schema.additionalProperties!==undefined&&schema.additionalProperties!==false){
 failSchema(path,'additionalProperties must be false');
 }
-if(schema.minItems!==undefined&&!(Number.isInteger(schema.minItems)&&schema.minItems>=0)){
-failSchema(path,'minItems must be a non-negative integer');
+for(const keyword of['minItems','maxItems','minLength','maxLength']){
+if(schema[keyword]!==undefined&&!(Number.isInteger(schema[keyword])&&schema[keyword]>=0)){
+failSchema(path,keyword+' must be a non-negative integer');
 }
-if(schema.maxItems!==undefined&&!(Number.isInteger(schema.maxItems)&&schema.maxItems>=0)){
-failSchema(path,'maxItems must be a non-negative integer');
-}
-if(schema.minLength!==undefined&&!(Number.isInteger(schema.minLength)&&schema.minLength>=0)){
-failSchema(path,'minLength must be a non-negative integer');
-}
-if(schema.maxLength!==undefined&&!(Number.isInteger(schema.maxLength)&&schema.maxLength>=0)){
-failSchema(path,'maxLength must be a non-negative integer');
 }
 if(schema.pattern!==undefined){
 assertSchemaPattern(schema.pattern,path);
@@ -678,14 +671,14 @@ failTaggedSchema('variant '+value+' names field '+name+', which is not in proper
 function listTaggedValues(spec,tagValues,name){
 return tagValues.filter((value)=>listVariantFields(spec.variants[value]).indexOf(name)!==-1);
 }
-function joinTagValues(values){
-if(values.length<3){
-return values.join(' or ');
+function joinNames(names,conjunction){
+if(names.length<3){
+return names.join(' '+conjunction+' ');
 }
-return values.slice(0,-1).join(', ')+' or '+values[values.length-1];
+return names.slice(0,-1).join(', ')+' '+conjunction+' '+names[names.length-1];
 }
 function describeTaggedField(description,tag,values){
-const sentence='Only with '+tag+' '+joinTagValues(values)+'.';
+const sentence='Only with '+tag+' '+joinNames(values,'or')+'.';
 return description===undefined?sentence:description+' '+sentence;
 }
 function buildTaggedBranch(spec,value){
