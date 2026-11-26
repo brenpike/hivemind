@@ -39,7 +39,7 @@
  *   code calls finishDeliveryComplete declares them, and every workflow
  *   whose code calls a function of this file declares the constants it
  *   reads. Every other function it reads is a library's, among them
- *   joinNames (lib/briefs.js) and renderPullRequestGates (lib/pr.js),
+ *   joinNames (lib/schema.js) and renderPullRequestGates (lib/pr.js),
  *   which buildRunRecordParts reads.
  *
  * Outputs

@@ -32,8 +32,9 @@
  *          blocked variant the worker and gate edit schemas share; the
  *          validate schema shares the blocker property too. subject names
  *          what the blocker explains.
- *   describeUnusableEdit(result)  the cause of an unusable worker or gate
- *          edit result, through describeUnusableResult (lib/stop.js).
+ *   readUnusableEdit(result)  the blocked outcome of an unusable worker or
+ *          gate edit result: its status, reason, nextAction and
+ *          agentFailure, through describeUnusableResult (lib/stop.js).
  *   buildWaveSubject(waveSteps, waveNumber)  the commit subject of a wave:
  *          the outcome of its one step, or the ids of its steps then the
  *          first outcome, through toCommitSubject (lib/commit.js), whose
@@ -105,8 +106,9 @@ function describeHeldChanges() {
   return 'With stage destructive-fix-gate: each change held for approval, by gate category and the one item it changes, named exactly.';
 }
 
-function describeUnusableEdit(result) {
-  return describeUnusableResult('it returned no usable result.', result);
+function readUnusableEdit(result) {
+  const unusable = describeUnusableResult('it returned no usable result.', result);
+  return { status: 'blocked', reason: unusable.problem, nextAction: unusable.nextAction, agentFailure: unusable.agentFailure };
 }
 
 function buildWorkerSchema() {
@@ -178,8 +180,7 @@ function createWorkerTask(step, waveSteps, plan, run) {
 
 function readWorkerOutcome(step, result, approvals) {
   if (!validateSchema(WORKER_SCHEMA, result).ok) {
-    const unusable = describeUnusableEdit(result);
-    return { stepId: step.id, status: 'blocked', reason: unusable.problem, nextAction: unusable.nextAction, agentFailure: unusable.agentFailure };
+    return { stepId: step.id, ...readUnusableEdit(result) };
   }
   if (result.outcome === 'complete') {
     return { stepId: step.id, status: 'complete' };

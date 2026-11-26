@@ -84,8 +84,6 @@
  *            standard-delivery review.js.
  *   buildBriefGate(irreversible)  the gate of a code-built brief, never
  *            architectural or safety.
- *   joinNames(names, conjunction)  names joined in prose, also read by
- *            lib/record.js.
  *   buildValidationRemediationBrief, buildFixLimitBrief and
  *   buildGateRerunBrief  the tail briefs standard-delivery gates.js
  *            resolves.
@@ -392,13 +390,6 @@ function buildBriefOption(id, summary, effort = 'small', value = 'high', reversi
  */
 function describeOnlyYou(action) {
   return 'Only you can ' + action + '.';
-}
-
-function joinNames(names, conjunction) {
-  if (names.length < 3) {
-    return names.join(' ' + conjunction + ' ');
-  }
-  return names.slice(0, -1).join(', ') + ' ' + conjunction + ' ' + names[names.length - 1];
 }
 
 function listVersionOptions(values) {

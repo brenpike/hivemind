@@ -257,8 +257,7 @@ function isRunEnd(outcome) {
 
 function readGateEditOutcome(result, schema, approvals) {
   if (!validateSchema(schema, result).ok) {
-    const unusable = describeUnusableEdit(result);
-    return { status: 'blocked', reason: unusable.problem, files: [], nextAction: unusable.nextAction, agentFailure: unusable.agentFailure };
+    return { ...readUnusableEdit(result), files: [] };
   }
   if (result.outcome === 'blocked') {
     return { status: 'blocked', reason: describeReason(result.blocker), files: result.files, ...readGateHold(result, approvals) };
