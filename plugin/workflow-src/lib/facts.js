@@ -38,7 +38,8 @@
  *       of a runner's inputs, --subject-file and --files-file subject_file
  *       and files_file, the raw commit subject and file list (lib/commit.js),
  *       and --body-file and --comment-file body_file and comment_file, the
- *       raw body and pull request reuse comment (lib/pr.js). Their names and
+ *       raw commit or pull request body (lib/commit.js, lib/pr.js) and the
+ *       pull request reuse comment (lib/pr.js). Their names and
  *       the one placeholder a command can hold, {plugin-root}, are the
  *       words of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md. A command holds
  *       the placeholder only when buildRunnerCommand got no root. An inputs

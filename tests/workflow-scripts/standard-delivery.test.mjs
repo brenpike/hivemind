@@ -9169,8 +9169,8 @@ const ROW_TESTS = {
         assert.ok(synapseText.includes(word), word);
       }
       assert.ok(synapseText.includes('Replace `{plugin-root}` with `${CLAUDE_PLUGIN_ROOT}`, only in the `command` string.'));
-      assert.ok(synapseText.includes('- `body_file` and `comment_file`, only for a pull request: `{path, content}`.'));
-      assert.ok(synapseText.includes('- `inputs_file`, only for a commit or pull request, and `subject_file` and `files_file`, only for a commit: `{path, content}`.'));
+      assert.ok(synapseText.includes('- `comment_file`, only for a pull request: `{path, content}`.'));
+      assert.ok(synapseText.includes('- `inputs_file` and `body_file`, only for a commit or pull request, and `subject_file` and `files_file`, only for a commit: `{path, content}`.'));
       assert.ok(synapseText.includes('1. In prompt order, write each `*_file` block\'s decoded `content`, never the whole block, to its `path`.'));
       assert.ok(!synapseText.includes('{token}'));
       assert.ok(!synapseText.includes('wherever they appear'));
@@ -9195,6 +9195,43 @@ const ROW_TESTS = {
       }
       assert.ok(!readDataBlock(callOf(run, 'pr-1').prompt, 'body_file').path.includes('{'));
       assert.ok(!readDataBlock(callOf(run, 'pr-1').prompt, 'comment_file').path.includes('{'));
+    });
+    test('the file blocks of every runner prompt, with and without attribution, are those the synapse.md Input allows its runner', async () => {
+      const synapseText = readText(join(repoRoot, 'plugin/agents/synapse.md'));
+      const inputSection = synapseText.slice(synapseText.indexOf('\n## Input\n')).split('\n## ')[1];
+      const kindsByPhrase = { 'commit or pull request': ['commit', 'pr'], commit: ['commit'], 'pull request': ['pr'] };
+      const allowed = {};
+      for (const match of inputSection.matchAll(/((?:`[a-z]+_file`(?:,? and )?)+), only for a (commit or pull request|commit|pull request)\b/g)) {
+        for (const nameMatch of match[1].matchAll(/`([a-z]+_file)`/g)) {
+          allowed[nameMatch[1]] = (allowed[nameMatch[1]] ?? []).concat(kindsByPhrase[match[2]]);
+        }
+      }
+      assert.deepEqual(allowed, { inputs_file: ['commit', 'pr'], body_file: ['commit', 'pr'], subject_file: ['commit'], files_file: ['commit'], comment_file: ['pr'] });
+      const plain = await runWorkflow(LAUNCH, happyResults());
+      const attributedArgs = { ...LAUNCH, attribution: HARNESS_ATTRIBUTION };
+      const attributed = await runWorkflow(attributedArgs, fixFlowResults());
+      assert.equal(attributed.result.outcome, 'complete', attributed.result.message);
+      const pausedResults = happyResults({ 'pr-1': { outcome: 'blocked', stderr: 'blocker: PR_STOP_ZQ\n' }, 'head-1-1': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
+      const paused = await runWorkflow(attributedArgs, pausedResults);
+      assert.equal(paused.result.needs_user, true, paused.result.message);
+      const resumed = await runWorkflow(resumeWith(attributedArgs, paused.result, 'Fixed.'), pausedResults);
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      const attributedPairs = new Set();
+      for (const run of [plain, attributed, paused, resumed]) {
+        for (const call of run.calls.filter((candidate) => candidate.opts.agentType === 'hivemind:synapse')) {
+          const command = readDataBlock(call.prompt, 'command');
+          const kind = command.includes('/skills/molt/') ? 'commit' : command.includes('/skills/open-plan-pr/') ? 'pr' : 'none';
+          for (const name of listFileBlockNames(call.prompt)) {
+            assert.ok((allowed[name] ?? []).includes(kind), call.opts.label + ' ' + name + ' ' + kind);
+            if (run !== plain) {
+              attributedPairs.add(name + ',' + kind);
+            }
+          }
+        }
+      }
+      for (const pair of ['body_file,commit', 'body_file,pr', 'comment_file,pr']) {
+        assert.ok(attributedPairs.has(pair), pair);
+      }
     });
     test('a facts relay with plugin_root none keeps {plugin-root} in every runner command, the branch, wave, fix, review, head check and pull request ones included', async () => {
       const noRoot = { 'facts-1': factsRelay({ plugin_root: 'none' }) };
