@@ -36,8 +36,10 @@
 #   provided.`, {{REVIEW_COLLECTION_GUIDANCE}} a fixed sentence saying the input is inlined,
 #   {{REVIEW_INPUT}} and {{OUTPUT_SCHEMA}} (the text of references/review-output.schema.json). A
 #   template missing a placeholder is the blocker `cannot build the review prompt`. The review
-#   input is the commit log (<base>..HEAD), the diff stat and `git diff --no-color --no-ext-diff
-#   <base>...HEAD`; every reviewer gets it whole, inline. Its byte count (wc -c) is compared with
+#   input is the commit log (<base>..<head>), the diff stat and `git diff --no-color --no-ext-diff
+#   <base>...<head>`, where <head> is the HEAD commit read once before the changed paths; every
+#   reviewer gets it whole, inline. A before-snapshot whose HEAD is not <head> is the blocker
+#   `cannot compute the branch diff`. Its byte count (wc -c) is compared with
 #   the limit: 65536 bytes when the generic setting has a `{prompt}` element, else 262144 bytes
 #   (stdin and the preset). Input over the limit is `skipped: too-large`, decided after the branch
 #   diff and before the prompt, the before-snapshot and any reviewer run. The script never writes
@@ -95,7 +97,7 @@
 #                     line_end >= line_start and confidence in 0..1); else `output does not
 #                     match schema`.
 #   A finding is kept only when its `file` is a new-side path of `git diff --name-only -z
-#   --no-renames --diff-filter=d <base>...HEAD` (exact string match); the others are dropped and
+#   --no-renames --diff-filter=d <base>...<head>` (exact string match); the others are dropped and
 #   counted. Each kept finding gets `finding_id`: the SHA-256 hex digest (sha256sum, else shasum
 #   -a 256) of the compact UTF-8 JSON text of the array [file, line_start, line_end, title], as
 #   jq's `[.file, .line_start, .line_end, .title] | tojson` prints it, e.g.
@@ -317,7 +319,10 @@ else
   input_limit="$STDIN_INPUT_LIMIT"
 fi
 
-git diff --name-only -z --no-renames --diff-filter=d "$base...HEAD" >"$work_dir/changed.nul" 2>/dev/null || blocker 'cannot compute the branch diff'
+# head_sha: the one HEAD commit every branch-diff read uses; the before-snapshot must still see it.
+head_sha="$(git rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null)" || blocker 'cannot compute the branch diff'
+[ -n "$head_sha" ] || blocker 'cannot compute the branch diff'
+git diff --name-only -z --no-renames --diff-filter=d "$base...$head_sha" >"$work_dir/changed.nul" 2>/dev/null || blocker 'cannot compute the branch diff'
 
 # Fills the template in one pass: the leading HTML comment goes, then every {{NAME}} whose NAME
 # is a key of $vals is replaced; a filled value is never scanned again. Fails when the template
@@ -347,14 +352,12 @@ FILL_PROGRAM='
 # write_review_input: print the review input (commit log, diff stat, full diff) to stdout.
 # Returns non-zero on any failed git read.
 write_review_input() {
-  local head_sha
-  head_sha="$(git rev-parse --verify --quiet HEAD)" || return 1
   printf 'Base: %s\nHead: %s\n\n## Commit log\n\n' "$base" "$head_sha" || return 1
-  git log --no-color --no-decorate --format='%h %s' "$base..HEAD" || return 1
+  git log --no-color --no-decorate --format='%h %s' "$base..$head_sha" || return 1
   printf '\n## Diff stat\n\n' || return 1
-  git diff --no-color --no-ext-diff --stat "$base...HEAD" || return 1
+  git diff --no-color --no-ext-diff --stat "$base...$head_sha" || return 1
   printf '\n## Diff\n\n' || return 1
-  git diff --no-color --no-ext-diff "$base...HEAD" || return 1
+  git diff --no-color --no-ext-diff "$base...$head_sha" || return 1
 }
 
 # build_review_prompt: write the filled prompt to $work_dir/prompt.txt with the review input
@@ -445,6 +448,7 @@ before="$work_dir/before"
 after="$work_dir/after"
 snapshot_started="$SECONDS"
 take_snapshot "$before" || blocker 'cannot snapshot the working tree'
+[ "$(cat -- "$before.head")" = "$head_sha" ] || blocker 'cannot compute the branch diff'
 snapshot_seconds=$((SECONDS - snapshot_started + 1))
 
 # INVARIANT: review_seconds >= MIN_REVIEW_SECONDS > 0 here, so GNU `timeout 0` (no limit) is

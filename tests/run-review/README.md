@@ -74,6 +74,9 @@ Covered behavior:
   texts collide in pairs, such as lines 1-123 and 11-23, get four distinct ids.
 - Work tree: a tracked edit, a new untracked file and a HEAD move are each
   blocked, and the change stays in place.
+- HEAD anchor: a commit made after the script reads HEAD and before its
+  before-snapshot is blocked as `cannot compute the branch diff`, and the
+  reviewer never runs.
 - No repository write: normal, preset and too-large runs leave no `.hivemind`
   folder. An old `.hivemind/review-loop/review-diff.patch` is left unchanged
   and alone.

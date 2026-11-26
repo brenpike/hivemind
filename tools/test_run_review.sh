@@ -127,9 +127,10 @@ BIN_EXPIRE_137="$FAKES/bin-expire-137"
 BIN_NONE="$FAKES/bin-none"
 BIN_GTIMEOUT="$FAKES/bin-gtimeout"
 BIN_SLOW_GIT="$FAKES/bin-slow-git"
+BIN_MOVE_GIT="$FAKES/bin-move-git"
 CURATED_BIN="$FAKES/curated-bin"
 mkdir -p "$BIN_PASS" "$BIN_EXPIRE_124" "$BIN_EXPIRE_137" "$BIN_NONE" "$BIN_GTIMEOUT" "$BIN_SLOW_GIT" \
-  "$CURATED_BIN"
+  "$BIN_MOVE_GIT" "$CURATED_BIN"
 
 # write_pass_timeout <path>: a pass-through timeout that logs the epoch second of its call and
 # its argv, requires `-k 5 <all-digit deadline>`, then execs the rest.
@@ -150,6 +151,7 @@ STUB
 write_pass_timeout "$BIN_PASS/timeout" || exit 2
 write_pass_timeout "$BIN_GTIMEOUT/gtimeout" || exit 2
 write_pass_timeout "$BIN_SLOW_GIT/timeout" || exit 2
+write_pass_timeout "$BIN_MOVE_GIT/timeout" || exit 2
 
 cat >"$BIN_SLOW_GIT/git" <<STUB
 #!/usr/bin/env bash
@@ -167,6 +169,21 @@ fi
 exec $(printf '%q' "$REAL_GIT") "\$@"
 STUB
 chmod +x "$BIN_SLOW_GIT/git"
+
+# The move-git stub commits once, before the script's first `diff --name-only` read, so HEAD
+# moves while the review input is collected.
+MOVE_GIT_MARK="$TMPDIR_TEST/move-git.done"
+cat >"$BIN_MOVE_GIT/git" <<STUB
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  if [ "\$arg" = --name-only ] && [ ! -e $(printf '%q' "$MOVE_GIT_MARK") ]; then
+    : >$(printf '%q' "$MOVE_GIT_MARK")
+    $(printf '%q' "$REAL_GIT") commit -q --allow-empty -m 'concurrent commit' || exit 93
+  fi
+done
+exec $(printf '%q' "$REAL_GIT") "\$@"
+STUB
+chmod +x "$BIN_MOVE_GIT/git"
 
 # INVARIANT: the curated bin holds every host tool the script and the fakes call,
 # and never `timeout` or `gtimeout`, so a curated-PATH run sees no timeout tool at all.
@@ -889,6 +906,13 @@ assert_check "tree:head-move-commit-kept" "the reviewer's commit is HEAD" \
 run_tree_case tree-edit-fail edit-and-fail
 assert_blocked "tree:check-precedes-exit-status" 'reviewer modified the working tree'
 assert_check "tree:edit-fail-left-in-place" "src/a.txt is still modified" tracked_file_modified "$REPO" src/a.txt
+
+# HEAD moves after the script reads it and before the before-snapshot: blocked, reviewer not run.
+CAPTURE="$(new_capture tree-head-collect)" || exit 2
+REPO="$(new_repo tree-head-collect)" || exit 2
+run_review "$REPO" "$EMPTY_HOME" "$BIN_MOVE_GIT" set "$(reviewer_setting "$CAPTURE" reply "$BARE_REPLY" no)" --base main
+assert_blocked "tree:head-move-during-collection-blocked" 'cannot compute the branch diff'
+assert_check "tree:head-move-during-collection-no-run" "the reviewer never ran" dir_has_no_entries "$CAPTURE"
 
 # ── Input limits: whole input inline or too-large ──────────────────────────────
 
