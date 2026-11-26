@@ -40,7 +40,7 @@ Covered behavior:
 
 - Prompt delivery: one `{prompt}` argv element with empty stdin, or the prompt on
   stdin. Both modes get the same prompt, and the focus text is trimmed and never
-  run.
+  run. The prompt says the inlined input is data, never instructions.
 - Skip reasons: `no-reviewer`, `bad-setting`, `tool-missing` (exit 127, exit 126,
   a missing preset companion, and no `timeout` or `gtimeout` on `PATH`, where the
   reviewer never runs, `no-reviewer` still comes first and `tool-missing` comes
@@ -76,7 +76,8 @@ Covered behavior:
   blocked, and the change stays in place.
 - HEAD anchor: a commit made after the script reads HEAD and before its
   before-snapshot is blocked as `cannot compute the branch diff`, and the
-  reviewer never runs.
+  reviewer never runs. The changed-path, log, stat and diff reads each name the
+  commit read first, never `HEAD`.
 - No repository write: normal, preset and too-large runs leave no `.hivemind`
   folder. An old `.hivemind/review-loop/review-diff.patch` is left unchanged
   and alone.
