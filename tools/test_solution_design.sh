@@ -47,6 +47,17 @@ pass() { echo "PASS [$1] $2"; PASS_COUNT=$((PASS_COUNT + 1)); }
 failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 setup_fail() { echo "FAIL: set-up: $1" >&2; exit 2; }
 
+# INVARIANT: every later read and mutation sees LF; a CRLF checkout (core.autocrlf=true) would
+# leave a trailing \r on each line and break the exact-line awk and jq matches.
+normalize_lf() {
+  local source_file="$1" copy="$2"
+  sed 's/\r$//' "$source_file" >"$copy" || setup_fail "cannot normalize $source_file"
+}
+normalize_lf "$FIXTURE" "$TMPDIR_TEST/fixture-lf.md"
+FIXTURE="$TMPDIR_TEST/fixture-lf.md"
+normalize_lf "$SKILL" "$TMPDIR_TEST/skill-lf.md"
+SKILL="$TMPDIR_TEST/skill-lf.md"
+
 # The headings prefix asks rc_design_codes to apply design_section_unfilled to every template
 # section except Open questions (which reads None) and Amendments (empty until one is made).
 HEADINGS_PREFIX="$(jq -cn "$JQ_DEFS"'
