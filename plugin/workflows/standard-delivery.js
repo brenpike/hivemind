@@ -672,7 +672,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '52a331695e43c969';
+const BUILD_ID = '4e599fb08c634861';
 
 function supportedSchemaKeywords(){
 return[
@@ -4773,8 +4773,8 @@ blocked:['blocker','stage'],
 skipped:['skip_reason']
 };
 }
-function fixLedgerPath(){
-return'.hivemind/review-loop/fix-ledger.yaml';
+function fixLedgerPath(branch){
+return'.hivemind/review-loop/'+branch.replace(/\//g,'~')+'.yaml';
 }
 function reviewQuestionKinds(){
 return{'user-input-required':REVIEW_QUESTION_KIND,'high-severity-rejection':HIGH_SEVERITY_REJECTION_KIND};
@@ -4798,7 +4798,7 @@ if(answer!==undefined){
 inputs.user_answer=answer;
 }
 if(run.resumeLedger){
-inputs.resume_from_ledger=fixLedgerPath();
+inputs.resume_from_ledger=fixLedgerPath(plan.branch);
 run.resumeLedger=false;
 }
 return[

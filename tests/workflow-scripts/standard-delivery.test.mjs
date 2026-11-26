@@ -56,7 +56,7 @@ const FACTS_KEYS = ['facts_file', 'facts_lines', 'head_state', 'branch', 'head',
 const CHECKOUT_ROOT = '/work/checkout';
 const WORKER_DONE = { outcome: 'complete', summary: 'Done.' };
 const VALIDATE_PASSED = { outcome: 'passed' };
-const LEDGER_PATH = '.hivemind/review-loop/fix-ledger.yaml';
+const LEDGER_PATH = '.hivemind/review-loop/feature~cache.yaml';
 const REVIEWER_LEDGER_PATHS = ['src/review-ledger.yaml', '/tmp/review-ledger.yaml'];
 const REVIEW_CLEAN = { exit_reason: 'clean', iterations_completed: 1, findings_resolved: 0, findings_open: 0, fix_commits_exist: false, ledger_path: LEDGER_PATH, rejected_findings: [], undone_fixes: [], open_findings: [] };
 const HELD_ALL = 'Validation and local review held on commit ';
@@ -5264,25 +5264,26 @@ const ROW_TESTS = {
       assert.equal(main.maxReviewReplans(), 1);
     });
     for (const ledger of REVIEWER_LEDGER_PATHS) {
-      test(`the review run after a review replan gets fixLedgerPath() as resume_from_ledger, once, never the replanned review's ledger_path ${ledger}`, async () => {
+      test(`the review run after a review replan gets fixLedgerPath(plan.branch) as resume_from_ledger, once, never the replanned review's ledger_path ${ledger}`, async () => {
         const run = await runWorkflow(REMEDIATION_LAUNCH, remediationResults({ ...ESCALATION, ledger_path: ledger }));
         assert.equal(run.result.outcome, 'complete', run.result.message);
-        assert.equal(readDataBlock(callOf(run, 'review-2-1').prompt, 'inputs').resume_from_ledger, main.fixLedgerPath());
+        assert.equal(readDataBlock(callOf(run, 'review-2-1').prompt, 'inputs').resume_from_ledger, LEDGER_PATH);
         assertLedgerResumedOnce(run, 'review-2-1', ledger);
         const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
         state.head = OTHER;
         assert.deepEqual(Object.keys(main.routeLocalReview({ ...CLUSTER, ledger_path: ledger }, state)), ['replan']);
         assert.equal(state.resumeLedger, true);
         const resumedPrompt = main.buildReviewPrompt(makePlan(), state);
-        assert.equal(readDataBlock(resumedPrompt, 'inputs').resume_from_ledger, main.fixLedgerPath());
+        assert.equal(readDataBlock(resumedPrompt, 'inputs').resume_from_ledger, LEDGER_PATH);
         assert.ok(!resumedPrompt.includes(ledger), resumedPrompt);
         assert.equal(state.resumeLedger, false);
         assert.equal(Object.hasOwn(readDataBlock(main.buildReviewPrompt(makePlan(), state), 'inputs'), 'resume_from_ledger'), false);
       });
     }
-    test('fixLedgerPath() is the fix ledger path of local-reviewer.md, and the built script never reads a review\'s ledger_path', () => {
-      assert.equal(main.fixLedgerPath(), LEDGER_PATH);
-      assert.ok(reviewerText.includes('- Fix ledger path `' + main.fixLedgerPath() + '`, schema per'));
+    test('fixLedgerPath(branch) is the per-branch fix ledger path of local-reviewer.md, each / written ~, and the built script never reads a review\'s ledger_path', () => {
+      assert.equal(main.fixLedgerPath(makePlan().branch), LEDGER_PATH);
+      assert.equal(main.fixLedgerPath('a/b/c'), '.hivemind/review-loop/a~b~c.yaml');
+      assert.ok(reviewerText.includes('- Fix ledger path `.hivemind/review-loop/<working_branch>.yaml`, schema per `${CLAUDE_PLUGIN_ROOT}/references/fix-ledger-schema.md`; each `/` in the branch written `~`.'));
       const code = stripCommentsAndStrings(builtSource.replace(/^export const meta\b/, 'const meta'));
       assert.ok(!/\.\s*ledger_path\b/.test(builtSource));
       assert.ok(!/\bledger_path\b/.test(code.replace(/\bledger_path\s*:/g, '')), 'ledger_path appears in code only as a schema key');
@@ -10232,20 +10233,20 @@ const ROW_TESTS = {
       assert.ok(!callOf(run, 'review-1-1').prompt.includes(main.resumedReplySentence()));
     });
     for (const ledger of REVIEWER_LEDGER_PATHS) {
-      test(`an outage after review iterations resumes fixLedgerPath() once, never the blocked review's ledger_path ${ledger}, so the iteration count and break-fix and root-cluster history carry over`, async () => {
+      test(`an outage after review iterations resumes fixLedgerPath(plan.branch) once, never the blocked review's ledger_path ${ledger}, so the iteration count and break-fix and root-cluster history carry over`, async () => {
         const blocked = { ...waitReview(30), iterations_completed: 4, findings_resolved: 3, fix_commits_exist: true, ledger_path: ledger };
         const results = waitResults([blocked, REVIEW_CLEAN]);
         const { run, waits } = await runThroughWaits(results);
         assert.equal(waits.length, 1);
         assert.ok(!JSON.stringify(waits).includes(ledger));
         assert.equal(run.result.outcome, 'complete', run.result.message);
-        assert.equal(readDataBlock(callOf(run, 'review-1-2').prompt, 'inputs').resume_from_ledger, main.fixLedgerPath());
+        assert.equal(readDataBlock(callOf(run, 'review-1-2').prompt, 'inputs').resume_from_ledger, LEDGER_PATH);
         assertLedgerResumedOnce(run, 'review-1-2', ledger);
         const state = newRunState({});
         main.routeLocalReview(blocked, state);
         assert.equal(state.resumeLedger, true);
         const resumedPrompt = main.buildReviewPrompt(makePlan(), state);
-        assert.equal(readDataBlock(resumedPrompt, 'inputs').resume_from_ledger, main.fixLedgerPath());
+        assert.equal(readDataBlock(resumedPrompt, 'inputs').resume_from_ledger, LEDGER_PATH);
         assert.ok(!resumedPrompt.includes(ledger), resumedPrompt);
         assert.equal(state.resumeLedger, false);
         assert.equal(Object.hasOwn(readDataBlock(main.buildReviewPrompt(makePlan(), state), 'inputs'), 'resume_from_ledger'), false);
@@ -10296,7 +10297,7 @@ const ROW_TESTS = {
         const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Codex is back.'), results);
         assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
         assert.deepEqual(labelsOf(resumed).slice(-3), ['review-1-2', 'review-commit-1-2', 'pr-1']);
-        assert.equal(readDataBlock(callOf(resumed, 'review-1-2').prompt, 'inputs').resume_from_ledger, main.fixLedgerPath());
+        assert.equal(readDataBlock(callOf(resumed, 'review-1-2').prompt, 'inputs').resume_from_ledger, LEDGER_PATH);
         assertLedgerResumedOnce(resumed, 'review-1-2', ledger);
         assert.ok(!paused.result.message.includes(ledger), paused.result.message);
       });

@@ -46,8 +46,14 @@ Covered behavior:
   call second, the deadline and the 5-second grace stay within the 570-second
   budget plus one second. A before-snapshot slowed by 3 seconds lowers the
   deadline to 554 or less.
-- Output shape: bare JSON and one `json` fence are accepted. Prose, two fences,
-  two objects, empty output and schema violations are blocked.
+- Output shape: the review is taken by the first rule that yields one JSON
+  object: the whole reply, the inside of its one ```` ```json ```` or plain
+  fence, or the span from the first `{` to the last `}` with no bracket or brace
+  outside it. Bare JSON, one fence, prose before or after an object or a fence,
+  non-ASCII prose and a fence with no line break are accepted. Two fences, two
+  objects, a fenced array, prose holding a bracket or a brace, empty output, an
+  array and schema violations are blocked; `raw_excerpt` is checked on a blocked
+  reply.
 - Findings: a finding on a file the diff does not change is dropped and counted.
   A finding on any line of a changed or added file is kept. Each `finding_id` is
   checked against a precomputed SHA-256 digest of the JSON array text
@@ -58,7 +64,10 @@ Covered behavior:
 - Large diff: the patch file exists while the reviewer runs, the prompt points at
   it, and it is gone after the run.
 - Preset: the companion's argv, focus handling, the newest companion by mtime,
-  and the `.result` object.
+  and the `.result` object, which wins over any `.rawOutput`. With no object
+  `.result`, a string `.rawOutput` is read by the same output shape rules: prose
+  or a fence is accepted, two objects or a non-string `.rawOutput` give the
+  shape blocker, and a review breaking the schema gives the schema blocker.
 - Cleanup: when the work-folder or the large-diff `mktemp` fails but prints an
   existing path, or exits 0 with a non-empty folder or file, the run is blocked
   and the decoy and its sentinel file survive. A normal run and a large-diff run

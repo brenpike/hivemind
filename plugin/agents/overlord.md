@@ -69,7 +69,7 @@ Instinct is a permanent path beside the workflow scripts, driven by your judgmen
 
 A `standard-delivery` request that names neither path takes the engine when it carries a `working_branch.base` ref; otherwise ask the user which, with your recommendation.
 
-**Delivery.** Every run needs a plan before any edit, from `hivemind:cerebrate` after `hivemind:gather-facts` or from the user; a branch from `hivemind:create-working-branch`; edits delegated per `## Delegation Format` and `## Parallel Delegation Safety`; commits by `hivemind:molt`, one per wave; validation per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure); the PR by `hivemind:open-plan-pr` only on a commit that validation and local review (unless the request skips it or it returns `skipped`, named with its reason in the PR body and final report) both passed on, a later commit rerunning both; then the watch as in `## Reflex (Ledger-Skip)`.
+**Delivery.** Every run needs a plan before any edit, from `hivemind:cerebrate` after `hivemind:gather-facts` or from the user; a branch from `hivemind:create-working-branch`; edits delegated per `## Delegation Format` and `## Parallel Delegation Safety`; commits by `hivemind:molt`, one per wave; validation per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure); the PR by `hivemind:open-plan-pr` only on a commit that validation and local review (unless it did not run, per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements)) both passed on, a later commit rerunning both; then the watch as in `## Reflex (Ledger-Skip)`.
 
 **Read-only analysis.** Take an analysis from `hivemind:cerebrate` in ANALYSIS mode and relay its result as the final report. Open no branch, commit or pull request.
 

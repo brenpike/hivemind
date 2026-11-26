@@ -104,15 +104,15 @@
  *           stopDelivery (lib/record.js), and the reply runs local review
  *           again; injection-suspect is terminal. Either rerun of a blocked
  *           review, and the next review run after a review replan, gets
- *           fixLedgerPath() as resume_from_ledger, once, so it keeps its
- *           break-fix and root-cluster history. Local review counts only the
+ *           fixLedgerPath(plan.branch) as resume_from_ledger, once, so it keeps
+ *           its break-fix and root-cluster history. Local review counts only the
  *           iterations after the ledger's last replan exit (planner-escalation
- *           or root-cluster-suspected), so a rerun of a blocked review keeps
- *           its iteration count and the run after a review replan does not.
- *           The engine sets that path in code, never from the reviewer's
- *           ledger_path. A review result that fails REVIEW_SCHEMA, gives
- *           option ids other than A, B, C and D in that order, or recommends
- *           no option has a report lead, so stopDelivery ends the run blocked.
+ *           or root-cluster-suspected), so a rerun of a blocked review keeps its
+ *           iteration count and the run after a review replan does not. The
+ *           engine sets that path in code, never from the reviewer's
+ *           ledger_path. A review result that fails REVIEW_SCHEMA, gives option
+ *           ids other than A, B, C and D in that order, or recommends no option
+ *           has a report lead, so stopDelivery ends the run blocked.
  *           describeReviewProblem reads the result before the commit runner,
  *           which takes that problem as its step cause, so a commit stop never
  *           hides it, and a null result, an agent failure that ends the run,
@@ -155,8 +155,8 @@
  *   once encoded, but decide() reads only the code-built brief of
  *   removeReviewerText, which always fits it, so a valid review never asks as
  *   malformed_brief. It never names a path the engine passes on: the fix
- *   ledger path a review run resumes is fixLedgerPath(), set in code, and the
- *   engine never takes the reviewer's ledger_path.
+ *   ledger path a review run resumes is fixLedgerPath(plan.branch), built in
+ *   code, and the engine never takes the reviewer's ledger_path.
  *
  * Why
  *   The review result is the one step result that carries review-tool
@@ -196,11 +196,11 @@ function reviewExitFields() {
 }
 
 /**
- * Returns the one fix ledger path of plugin/agents/local-reviewer.md
- * (Fix Ledger & Safety).
+ * Returns the per-branch fix ledger path of plugin/agents/local-reviewer.md
+ * (Fix Ledger & Safety): one flat file per branch, each / written ~.
  */
-function fixLedgerPath() {
-  return '.hivemind/review-loop/fix-ledger.yaml';
+function fixLedgerPath(branch) {
+  return '.hivemind/review-loop/' + branch.replace(/\//g, '~') + '.yaml';
 }
 
 function reviewQuestionKinds() {
@@ -229,11 +229,11 @@ function buildReviewPrompt(plan, run, answer) {
   /*
    * A rerun after a blocked review, or the review after a review replan,
    * resumes its fix ledger, so its break-fix and root-cluster history
-   * carry over. The path is fixLedgerPath(), set in code, never the
-   * reviewer's ledger_path.
+   * carry over. The path is fixLedgerPath(plan.branch), built in code from
+   * the checked plan branch, never the reviewer's ledger_path.
    */
   if (run.resumeLedger) {
-    inputs.resume_from_ledger = fixLedgerPath();
+    inputs.resume_from_ledger = fixLedgerPath(plan.branch);
     run.resumeLedger = false;
   }
   return [

@@ -180,7 +180,7 @@ _Alias_: diminishing-returns exit
 _Avoid_: decay (reserved for Mutation Decay), regression loop, flip-flop
 
 **Fix Ledger**:
-The persisted YAML artifact (`.hivemind/review-loop/fix-ledger.yaml`) tracking finding status across adaptation cycle iterations; status transitions: open → fixing → fixed/regressed, fixed → cycling.
+The persisted YAML artifact (`.hivemind/review-loop/<working_branch>.yaml`, one per branch, each `/` in the branch name written `~`) tracking finding status across adaptation cycle iterations; status transitions: open → fixing → fixed/regressed, fixed → cycling.
 _Avoid_: review log, finding tracker
 
 **Fix Mode**:
