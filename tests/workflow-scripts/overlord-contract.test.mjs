@@ -537,7 +537,7 @@ describe('overlord section-scoped Instinct pins', () => {
       'A `standard-delivery` request that names neither path takes the engine when it carries a `working_branch.base` ref',
       'otherwise ask the user which, with your recommendation',
       'Every run needs a plan before any edit',
-      'the PR by `hivemind:open-plan-pr` only on a commit that validation and local review (unless the request skips it or it returns `skipped`, named with its reason in the PR body and final report) both passed on',
+      'the PR by `hivemind:open-plan-pr` only on a commit that validation and local review (unless it did not run, per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements)) both passed on',
       'a later commit rerunning both',
       '**Read-only analysis.**',
       'Open no branch, commit or pull request',

@@ -84,17 +84,16 @@
  *            standard-delivery review.js.
  *   buildBriefGate(irreversible)  the gate of a code-built brief, never
  *            architectural or safety.
- *   joinNames(names, conjunction)  names joined in prose, also read by
- *            lib/record.js.
  *   buildValidationRemediationBrief, buildFixLimitBrief and
  *   buildGateRerunBrief  the tail briefs standard-delivery gates.js
  *            resolves.
- *   buildStepStopBrief(isReplan)  the fix_cause step_stop brief
+ *   buildStepStopBrief(isReplan, other)  the fix_cause step_stop brief
  *            stopDelivery (standard-delivery record.js) asks. Its problem
  *            says to clear the cause named above and commit any change,
- *            then reply; its one option, strength strong, says whether the
+ *            then reply; its option A, strength strong, says whether the
  *            reply takes the stopped step again or plans again from fresh
- *            facts. It is buildTailBrief with option B left out.
+ *            facts. It is buildTailBrief with option B left out, or with
+ *            other as option B when given (standard-delivery review.js).
  *   buildApprovalAsks(holds, isReplan, run)  the asks of an approve stop,
  *            one step_stop ask per held item {stepId, category, item}, in
  *            hold order. Its shown brief names the encoded step in its
@@ -313,16 +312,17 @@ function describeStopThen(isReplan) {
   return isReplan ? 'plan again from fresh facts' : 'take the stopped step again';
 }
 
-function buildStepStopBrief(isReplan) {
+function buildStepStopBrief(isReplan, other) {
   const action = describeStopAction('fix_cause', 'commit any change and reply');
   const brief = buildTailBrief({
     kind: STEP_STOP_KIND,
     problem: action.charAt(0).toUpperCase() + action.slice(1) + '.',
     goOn: 'Go on: ' + describeStopThen(isReplan) + '.',
+    other: other,
     strength: 'strong',
     why: 'Clearing it lets the step go on.'
   });
-  return Object.assign(brief, { options: brief.options.slice(0, 1) });
+  return Object.assign(brief, { options: brief.options.slice(0, other === undefined ? 1 : 2) });
 }
 
 function buildApprovalBrief(stepText, change, isReplan) {
@@ -392,13 +392,6 @@ function buildBriefOption(id, summary, effort = 'small', value = 'high', reversi
  */
 function describeOnlyYou(action) {
   return 'Only you can ' + action + '.';
-}
-
-function joinNames(names, conjunction) {
-  if (names.length < 3) {
-    return names.join(' ' + conjunction + ' ');
-  }
-  return names.slice(0, -1).join(', ') + ' ' + conjunction + ' ' + names[names.length - 1];
 }
 
 function listVersionOptions(values) {

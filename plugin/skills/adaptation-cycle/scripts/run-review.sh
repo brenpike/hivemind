@@ -31,7 +31,9 @@
 #
 # PRESET RUN: node <companion> adversarial-review --base <base> --scope branch --wait --json
 #   [-- <focus>], stdin /dev/null. A focus whose first non-space character is `-` gets the prefix
-#   `focus: `. The review object is `.result` of the one JSON object the companion prints.
+#   `focus: `. The companion must print one JSON object. Its `.result`, when an object, is the
+#   review, even when `.rawOutput` differs. Otherwise its `.rawOutput`, when a string, is read
+#   as a generic reply (RESULT CHECKS). Otherwise the result is the output shape blocker.
 #
 # GENERIC RUN: the prompt is references/adversarial-review.md with its leading HTML comment
 #   removed and its placeholders filled in one jq pass (a filled value is never scanned again):
@@ -75,11 +77,16 @@
 #   other non-zero    `skipped: tool-failed`, then `stderr_excerpt: <JSON string>`: the trimmed
 #                     stderr (stdout when stderr is blank, as the preset reports failures there),
 #                     cut to its last 300 code points with `...` in front when cut.
-#   exit 0            stdout trimmed must be exactly one JSON object, or exactly one ```json
-#                     fence with only white space outside it; else `unexpected output shape`
-#                     with `raw_excerpt: <JSON string>` (its first 200 code points). For the
-#                     preset, `.result` must be an object, else the same blocker. The review
-#                     must then match review-output.schema.json (verdict, summary, findings,
+#   exit 0            the review is taken from the trimmed reply (generic: stdout; preset:
+#                     PRESET RUN) by the first of these rules that yields exactly one JSON
+#                     object (jq -s length 1): (a) the whole reply; (b) the inside of its one
+#                     fenced block, when the reply holds exactly two ``` marks and the first is
+#                     ```json or ``` followed by a line break (spaces or tabs may come first);
+#                     (c) the text from the first `{` to the last `}`, when no `{`, `}`, `[` or
+#                     `]` lies outside it. When no rule yields one, or the preset output has
+#                     neither an object `.result` nor a string `.rawOutput`, the result is
+#                     `unexpected output shape` with `raw_excerpt: <JSON string>` (the first 200
+#                     code points of the trimmed stdout). The review must then match review-output.schema.json (verdict, summary, findings,
 #                     next_steps, no other key; each finding exactly severity, title, body, file,
 #                     line_start, line_end, confidence, recommendation, with integer lines >= 1,
 #                     line_end >= line_start and confidence in 0..1); else `output does not
@@ -136,7 +143,7 @@ patch_path=''
 # folder behind instead of being deleted with it.
 WORK_FILE_NAMES=(
   argv.nul candidate.json changed-paths.txt changed.nul ids.txt kept.json prompt.txt
-  review-input-pointer.txt review-input.txt review.json stderr stdout
+  raw-output.txt review-input-pointer.txt review-input.txt review.json stderr stdout
   before.hashes before.head before.kinds before.list before.regular before.snap before.status
   after.hashes after.head after.kinds after.list after.regular after.snap after.status
 )
@@ -514,27 +521,54 @@ shape_blocker() {
   blocker 'unexpected output shape' "raw_excerpt: $raw_excerpt"
 }
 
-# The JSON text of a reviewer reply: the trimmed reply, or the inside of the one ```json fence
-# that is all of it. A malformed fence is an error.
-UNFENCE_PROGRAM='
+# The JSON text that one acceptance rule ($rule: whole, fence or span) takes from a trimmed
+# reviewer reply; an error when the reply holds no such text.
+# INVARIANT: regex and split only, never a slice at a string index/rindex result (jq 1.6
+# returns byte offsets there), so a non-ASCII reply is cut at the right code point.
+CANDIDATE_PROGRAM='
   (sub("\\A\\s+"; "") | sub("\\s+\\z"; "")) as $t
-  | if ($t | startswith("```")) | not then $t
-    elif ($t | startswith("```json")) and ($t | endswith("```")) and ($t | length) >= 10
-         and ($t[7:-3] | test("\\A[ \\t]*\\n"))
-    then $t[7:-3]
-    else error("not one json fence")
+  | if $rule == "whole" then $t
+    elif $rule == "fence" then
+      ($t | split("```")) as $parts
+      | if ($parts | length) == 3 and ($parts[1] | test("\\A(json)?[ \\t]*\\n"))
+        then $parts[1] | sub("\\A(json)?[ \\t]*\\n"; "")
+        else error("not one fenced block")
+        end
+    else
+      ([$t | capture("\\A(?<before>[^{]*)(?<span>\\{[\\s\\S]*\\})(?<after>[^}]*)\\z")] | .[0]) as $match
+      | if $match == null or ($match.before + $match.after | test("[\\[\\]{}]"))
+        then error("no bracket-free brace span")
+        else $match.span
+        end
     end'
 
 ONE_OBJECT_CHECK='length == 1 and (.[0] | type) == "object"'
 
+# extract_review <reply file>: write the review object that the first matching acceptance rule
+# takes from <reply file> to $work_dir/review.json; returns non-zero when no rule yields exactly
+# one JSON object.
+extract_review() {
+  local reply_path="$1" rule
+  for rule in whole fence span; do
+    jq -R -s -j --arg rule "$rule" "$CANDIDATE_PROGRAM" <"$reply_path" >"$work_dir/candidate.json" 2>/dev/null || continue
+    jq -s -e "$ONE_OBJECT_CHECK" <"$work_dir/candidate.json" >/dev/null 2>&1 || continue
+    jq -c '.' <"$work_dir/candidate.json" >"$work_dir/review.json" 2>/dev/null || return 1
+    return 0
+  done
+  return 1
+}
+
 if [ "$reviewer_mode" = 'preset' ]; then
   jq -s -e "$ONE_OBJECT_CHECK" <"$work_dir/stdout" >/dev/null 2>&1 || shape_blocker
-  jq -e '.result | type == "object"' <"$work_dir/stdout" >/dev/null 2>&1 || shape_blocker
-  jq -c '.result' <"$work_dir/stdout" >"$work_dir/review.json" 2>/dev/null || shape_blocker
+  if jq -e '.result | type == "object"' <"$work_dir/stdout" >/dev/null 2>&1; then
+    jq -c '.result' <"$work_dir/stdout" >"$work_dir/review.json" 2>/dev/null || shape_blocker
+  else
+    jq -e '.rawOutput | type == "string"' <"$work_dir/stdout" >/dev/null 2>&1 || shape_blocker
+    jq -j '.rawOutput' <"$work_dir/stdout" >"$work_dir/raw-output.txt" 2>/dev/null || shape_blocker
+    extract_review "$work_dir/raw-output.txt" || shape_blocker
+  fi
 else
-  jq -R -s -j "$UNFENCE_PROGRAM" <"$work_dir/stdout" >"$work_dir/candidate.json" 2>/dev/null || shape_blocker
-  jq -s -e "$ONE_OBJECT_CHECK" <"$work_dir/candidate.json" >/dev/null 2>&1 || shape_blocker
-  jq -c '.' <"$work_dir/candidate.json" >"$work_dir/review.json" 2>/dev/null || shape_blocker
+  extract_review "$work_dir/stdout" || shape_blocker
 fi
 
 # review-output.schema.json, as one predicate.

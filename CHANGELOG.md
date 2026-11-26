@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [14.7.2] - 2026-11-26
+
+### Fixed
+
+- Local review's `run-review.sh` accepts one JSON object wrapped in prose or in one fenced block, and the preset's `.rawOutput` when `.result` is not an object, instead of ending blocked on `unexpected output shape`. It still does not retry, and the schema check is unchanged.
+- A local review skipped by a user reply to a `blocked` exit counts as not run (`workflow.md` PR Requirements), so the PR no longer must open as a draft. The overlord's Instinct gate points at that clause. The workflow script now offers that skip as option B of its blocked-review question; the reply B drops local review for the run, named `skipped (user-reply)`, and option A or a reply in the user's own words reruns it.
+- The fix ledger is one file per branch at `.hivemind/review-loop/<working_branch>.yaml`, each `/` written `~`. The old `.hivemind/review-loop/fix-ledger.yaml` is no longer read or written.
+- The ADR-0042 amendment, README and CONTEXT match.
+
+No prose budget raised.
+
+Issue: #673.
+
 ## [14.7.1] - 2026-11-25
 
 ### Fixed

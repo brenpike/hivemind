@@ -153,8 +153,8 @@
  *   (review.js waitForService). run.repeatClusterAsked starts false and
  *   becomes true when the repeated root cluster question is asked, once a
  *   run (review.js requestReviewReplan). run.reviewSkip, the skip_reason of a
- *   skipped local review, is unset until routeLocalReview (review.js) sets
- *   it.
+ *   skipped local review or user-reply when the user skips a blocked review,
+ *   is unset until routeLocalReview or askBlockedReview (review.js) sets it.
  *   run.approvals starts [] and changes only through applyApprovalChoices
  *   (lib/approvals.js) at each reply round, so it holds only the destructive
  *   changes the user's own replies approved, never a decision the run took.

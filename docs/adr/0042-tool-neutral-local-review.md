@@ -58,3 +58,21 @@ Skip reasons are exactly `no-reviewer`, `bad-setting`, `tool-missing`, `tool-fai
 - **Out of scope: the post-PR watch.** The GitHub review watch is not changed here. https://github.com/brenpike/hivemind/issues/576 tracks it.
 
 Links: https://github.com/brenpike/hivemind/issues/581, https://github.com/brenpike/hivemind/issues/576, https://github.com/brenpike/hivemind/issues/409, `docs/adr/0022-local-review-parity-with-post-pr-review.md`.
+
+## Amendment 2026-11-25: tolerant output parsing, skip after a blocked exit, per-branch fix ledger (issue 673)
+
+Issue 673 found that real review tools wrap their JSON in prose or fences, and that a skip after a blocked exit still forced a draft PR. Four decisions follow. Decision 5 is amended. Decision 6 stands.
+
+1. **Output parsing is tolerant, still schema-checked.** This amends decision 5. For a generic run, `run-review.sh` accepts a trimmed reply that is any one of:
+   - one JSON object;
+   - exactly one fenced block, opened by ```` ```json ```` or a plain ```` ``` ```` and a line break and closed by ```` ``` ````, with one object inside;
+   - one object from the first `{` to the last `}`, with no `{`, `}`, `[` or `]` outside it.
+
+   For the `codex-plugin` preset, when `.result` is not an object and `.rawOutput` is a string, the same rule applies to `.rawOutput`. Every other reply stays `unexpected output shape`. The schema check stays.
+2. **Retry stays rejected.** A shape failure is not retried. The Considered Options row "Retry once on bad output" stands.
+3. **A skip after a blocked exit is local review that did not run.** When the user replies to a `blocked` exit by skipping local review, `plugin/governance/workflow.md` (PR Requirements) treats it as local review that did not run. It neither holds nor blocks the PR, so it no longer forces a draft. The PR body and the final report name the skip and its reason. The overlord's Instinct delivery gate points at that clause. On the workflow script, the blocked-review question for a blocked exit with no retry time offers the skip as option B ("skip local review for this run"). A reply of the letter B drops local review for the rest of the run, named `skipped (user-reply)` in the PR body and the final report. Option A, or a reply in the user's own words, reruns local review. The skip after a blocked exit so holds on both delivery paths.
+4. **The fix ledger is one flat file per branch.** The path is `.hivemind/review-loop/<working_branch>.yaml`, with each `/` in the branch name written `~`. Git forbids `~` in branch names, so no two branches share a file. One flat folder keeps the existing `Edit(.hivemind/review-loop/*)` and `mkdir -p .hivemind/review-loop` permission rules covering it. A nested path was rejected because `*` matches one path segment only. The engine passes `fixLedgerPath(plan.branch)`. This supersedes the fixed path `.hivemind/review-loop/fix-ledger.yaml` named in ADR-0037 and ADR-0041. Those records are left as they are. The old file is no longer read or written.
+
+User decision, 2026-11-25: decisions 1 to 4.
+
+Links: https://github.com/brenpike/hivemind/issues/673.

@@ -23,9 +23,10 @@
  *          (runReviewGate, review.js) for 'review', else validation
  *          (lib/gates.js).
  *   describeGateSkip(run, gateId)  skipped and run.reviewSkip in
- *          parentheses, the enum code REVIEW_SCHEMA checks, never reviewer
- *          text, for a skipped local review, else undefined: lib/pr.js and
- *          lib/record.js show it in place of not configured.
+ *          parentheses, a skip_reason enum code REVIEW_SCHEMA checks, or the
+ *          code-built user-reply, never reviewer text, for a skipped local
+ *          review, else undefined: lib/pr.js and lib/record.js show it in
+ *          place of not configured.
  *   listGateSkipWarnings(run)  one warning line per gate describeGateSkip
  *          names: Warning:, the gate name, was and that text, which
  *          lib/record.js adds to the complete message.

@@ -28,10 +28,13 @@
 #
 # Covered: argv `{prompt}` and stdin prompt delivery; every skip reason, including no timeout
 # tool; the `gtimeout` fallback; the deadline derived from the call budget and the
-# before-snapshot reserve; bare and fenced JSON, prose, two fences and schema violations;
+# before-snapshot reserve; the output shape rules (bare JSON, one ```json or plain fence, prose
+# around one object or fence, non-ASCII prose) and their blockers (two fences, two objects, a
+# fenced array, a bracket or brace in the prose, empty output, an array) and schema violations;
 # out-of-diff filtering and its count; the finding_id formula against precomputed digests and
 # its field framing; tracked edit, untracked file and HEAD move each blocked with the change left
-# in place; the large-diff patch file; the preset argv and its `.result`; cleanup removes only
+# in place; the large-diff patch file; the preset argv, its object `.result` and its string
+# `.rawOutput` read by the same shape rules; cleanup removes only
 # what the run created (decoy paths from a fake mktemp survive, no work folder or patch file is
 # left) and the script holds no recursive delete and names every work file it writes.
 #
@@ -689,18 +692,19 @@ assert_success "shape:bare-json-with-white-space-accepted" '.base == "main"'
 
 PROSE_REPLY="$(write_reply prose "$(printf 'Here is my review:\n%s\n' "$BASE_REVIEW")")" || exit 2
 run_reply_case shape-prose-before "$PROSE_REPLY"
-assert_blocked "shape:prose-before-json-blocked" 'unexpected output shape'
-RAW_LINE="$(sed -n '2p' "$RR_ERR")"
-assert_check "shape:raw-excerpt-first-200" "raw_excerpt is the JSON string of the first 200 code points" \
-  test "$RAW_LINE" = "raw_excerpt: $(printf 'Here is my review:\n%s' "$BASE_REVIEW" | jq -R -s -c '.[:200]')"
+assert_success "shape:prose-before-json-accepted" '.base == "main" and (.findings | length) == 2'
 
 PROSE_AFTER_REPLY="$(write_reply prose-after "$(printf '%s\nHope this helps.\n' "$BASE_REVIEW")")" || exit 2
 run_reply_case shape-prose-after "$PROSE_AFTER_REPLY"
-assert_blocked "shape:prose-after-json-blocked" 'unexpected output shape'
+assert_success "shape:prose-after-json-accepted" '.base == "main" and (.findings | length) == 2'
 
-PROSE_AROUND_FENCE_REPLY="$(write_reply prose-fence "$(printf 'Review:\n```json\n%s\n```\n' "$BASE_REVIEW")")" || exit 2
+PROSE_AROUND_FENCE_REPLY="$(write_reply prose-fence "$(printf 'Review:\n```json\n%s\n```\nDone.\n' "$BASE_REVIEW")")" || exit 2
 run_reply_case shape-prose-fence "$PROSE_AROUND_FENCE_REPLY"
-assert_blocked "shape:prose-around-fence-blocked" 'unexpected output shape'
+assert_success "shape:prose-around-fence-accepted" '.base == "main" and (.findings | length) == 2'
+
+NON_ASCII_PROSE_REPLY="$(write_reply non-ascii-prose "$(printf 'R\303\251sum\303\251 :\n%s\n' "$BASE_REVIEW")")" || exit 2
+run_reply_case shape-non-ascii-prose "$NON_ASCII_PROSE_REPLY"
+assert_success "shape:non-ascii-prose-before-accepted" '.base == "main" and (.findings | length) == 2'
 
 TWO_FENCES_REPLY="$(write_reply two-fences "$(printf '```json\n%s\n```\n```json\n%s\n```\n' "$BASE_REVIEW" "$BASE_REVIEW")")" || exit 2
 run_reply_case shape-two-fences "$TWO_FENCES_REPLY"
@@ -708,11 +712,26 @@ assert_blocked "shape:two-fences-blocked" 'unexpected output shape'
 
 PLAIN_FENCE_REPLY="$(write_reply plain-fence "$(printf '```\n%s\n```\n' "$BASE_REVIEW")")" || exit 2
 run_reply_case shape-plain-fence "$PLAIN_FENCE_REPLY"
-assert_blocked "shape:non-json-fence-blocked" 'unexpected output shape'
+assert_success "shape:plain-fence-accepted" '.base == "main" and (.findings | length) == 2'
 
 ONE_LINE_FENCE_REPLY="$(write_reply one-line-fence "$(printf '```json %s```\n' "$BASE_REVIEW")")" || exit 2
 run_reply_case shape-one-line-fence "$ONE_LINE_FENCE_REPLY"
-assert_blocked "shape:fence-without-newline-blocked" 'unexpected output shape'
+assert_success "shape:fence-without-newline-accepted" '.base == "main" and (.findings | length) == 2'
+
+ARRAY_FENCE_REPLY="$(write_reply array-fence "$(printf '```json\n[%s]\n```\n' "$BASE_REVIEW")")" || exit 2
+run_reply_case shape-array-fence "$ARRAY_FENCE_REPLY"
+assert_blocked "shape:fence-holding-array-blocked" 'unexpected output shape'
+
+BRACKET_PROSE_REPLY="$(write_reply bracket-prose "$(printf 'See [1] below:\n%s\n' "$BASE_REVIEW")")" || exit 2
+run_reply_case shape-bracket-prose "$BRACKET_PROSE_REPLY"
+assert_blocked "shape:prose-with-bracket-blocked" 'unexpected output shape'
+RAW_LINE="$(sed -n '2p' "$RR_ERR")"
+assert_check "shape:raw-excerpt-first-200" "raw_excerpt is the JSON string of the first 200 code points" \
+  test "$RAW_LINE" = "raw_excerpt: $(printf 'See [1] below:\n%s' "$BASE_REVIEW" | jq -R -s -c '.[:200]')"
+
+BRACE_PROSE_REPLY="$(write_reply brace-prose "$(printf 'Use {file} as the key:\n%s\n' "$BASE_REVIEW")")" || exit 2
+run_reply_case shape-brace-prose "$BRACE_PROSE_REPLY"
+assert_blocked "shape:prose-with-brace-blocked" 'unexpected output shape'
 
 TWO_OBJECTS_REPLY="$(write_reply two-objects "$(printf '%s\n%s\n' "$BASE_REVIEW" "$BASE_REVIEW")")" || exit 2
 run_reply_case shape-two-objects "$TWO_OBJECTS_REPLY"
@@ -966,6 +985,35 @@ run_preset_reply_case preset-prose "$(write_reply preset-prose "$(printf 'Done.\
 assert_blocked "preset:prose-blocked" 'unexpected output shape'
 run_preset_reply_case preset-schema "$(write_reply preset-schema '{"result":{"verdict":"approve"}}')"
 assert_blocked "preset:schema-violation-blocked" 'output does not match schema'
+
+# raw_output_reply <name> <rawOutput JSON value> [result JSON value]: a preset reply in the
+# companion's parse-failure form; prints its path.
+raw_output_reply() {
+  write_reply "$1" "$(jq -nc --argjson raw "$2" --argjson result "${3:-null}" \
+    '{status: 0, result: $result, rawOutput: $raw, parseError: "Unexpected token H in JSON at position 0"}')"
+}
+
+RAW_PROSE_TEXT="$(printf 'Here is my review:\n%s' "$BASE_REVIEW")"
+run_preset_reply_case preset-raw-prose "$(raw_output_reply preset-raw-prose "$(jq -nc --arg t "$RAW_PROSE_TEXT" '$t')")"
+assert_success "preset:prose-raw-output-accepted" \
+  "[.findings[].finding_id] == [\"$ID_A_TXT\", \"$ID_NEW_TXT\"] and .dropped_outside_diff == 3"
+
+RAW_FENCED_TEXT="$(printf '```json\n%s\n```' "$BASE_REVIEW")"
+run_preset_reply_case preset-raw-fenced "$(raw_output_reply preset-raw-fenced "$(jq -nc --arg t "$RAW_FENCED_TEXT" '$t')")"
+assert_success "preset:fenced-raw-output-accepted" '.base == "main" and (.findings | length) == 2'
+
+RAW_TWO_OBJECTS_TEXT="$(printf '%s\n%s' "$BASE_REVIEW" "$BASE_REVIEW")"
+run_preset_reply_case preset-raw-two "$(raw_output_reply preset-raw-two "$(jq -nc --arg t "$RAW_TWO_OBJECTS_TEXT" '$t')")"
+assert_blocked "preset:two-objects-raw-output-blocked" 'unexpected output shape'
+
+run_preset_reply_case preset-raw-object "$(raw_output_reply preset-raw-object "$BASE_REVIEW")"
+assert_blocked "preset:non-string-raw-output-blocked" 'unexpected output shape'
+
+run_preset_reply_case preset-result-wins "$(raw_output_reply preset-result-wins '"garbage {["' "$BASE_REVIEW")"
+assert_success "preset:object-result-wins-over-raw-output" '.base == "main" and (.findings | length) == 2'
+
+run_preset_reply_case preset-raw-schema "$(raw_output_reply preset-raw-schema '"Review: {\"verdict\":\"approve\"}"')"
+assert_blocked "preset:raw-output-schema-violation-blocked" 'output does not match schema'
 
 # ── Cleanup: only what the run created ─────────────────────────────────────────
 

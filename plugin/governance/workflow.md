@@ -32,7 +32,7 @@ git fetch origin <trunk>:refs/remotes/origin/<trunk>
 git rev-list --left-right --count <local-trunk>...origin/<trunk>
 ```
 
-Proceed only when both tab-separated integers it prints are `0`; otherwise the `trunk_stale` row of the decision autonomy table decides.
+Proceed only when both integers it prints are `0`; otherwise the `trunk_stale` row of the decision autonomy table decides.
 
 ## Version Bumps
 
@@ -42,7 +42,7 @@ Judge whether a change needs a version bump, and its type, by `${CLAUDE_PLUGIN_R
 
 Open PR only when: plan complete, validation passed, version bump included if required, branch pushed.
 
-Local review gate: if local review ran on the branch, a ready-for-review PR opens only when its last exit reason holds the gate. Gate-holding exits: `clean`, and `diminishing-returns` once its advisory exit is taken. Any other exit holds nothing and stops that PR on every path: workflow script or Instinct. Local review that did not run (the request skipped it, or a `skipped` exit) neither holds nor blocks the PR; the PR body and final report name a `skipped` exit and its reason.
+Local review gate: if local review ran on the branch, a ready-for-review PR opens only when its last exit reason holds the gate. Gate-holding exits: `clean`, and `diminishing-returns` once its advisory exit is taken. Any other exit holds nothing and stops that PR on every path: workflow script or Instinct. Local review that did not run (the request, or a user reply to a `blocked` exit, skipped it, or a `skipped` exit) neither holds nor blocks the PR; the PR body and final report name the skip and its reason.
 
 Loop-cap draft: at a loop cap, only the workflow script opens the PR as a draft whose body says why and lists open findings; validation still passes. Other paths stop.
 
@@ -59,4 +59,4 @@ PR body must include: what changed and why, at the length the change needs; modi
 
 For independent strains with minimal file-scope overlap, cerebrate may recommend `delivery: brood`. Once the user confirms, the overlord in hatchery mode spawns via `hivemind:spawn-brood`, monitors via `hivemind:brood-status` on demand and reports aggregate status when all strains finish.
 
-Each child, a brood-unaware overlord with one plan, branch and PR, owns its version bumps, merge conflicts and PR ordering.
+Each child, a brood-unaware overlord, owns its version bumps, merge conflicts and PR ordering.

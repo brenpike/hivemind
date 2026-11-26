@@ -60,7 +60,7 @@ Or run the setup skill once to apply the required keys automatically:
 
 - `.hivemind/facts/`: the branch facts files `hivemind:gather-facts` writes, one per facts run
 - `.hivemind/broods/<brood-id>/manifest.json`: one manifest per brood
-- `.hivemind/review-loop/fix-ledger.yaml`: the local reviewer's finding ledger
+- `.hivemind/review-loop/<working_branch>.yaml`: the local reviewer's finding ledger, one per branch, each `/` in the branch name written `~`. Earlier versions kept `.hivemind/review-loop/fix-ledger.yaml`; this version neither reads nor writes it, and it can be deleted by hand
 - `.hivemind/handoffs/` (and `.hivemind/plans/`): session-resumption handoffs and the plans they point at
 - short-lived inputs files that skills pass to their engine scripts, e.g. `.hivemind/seed-inputs-<token>.json` and the molt and PR inputs files `.hivemind/molt-inputs-<token>.json` (the commit type, scope and breaking flag) with its raw subject file `.hivemind/molt-inputs-<token>-subj.json`, its files file `.hivemind/molt-inputs-<token>-files.json` (one path per line) and, for a commit body, its body file `.hivemind/molt-inputs-<token>-body.json`, and `.hivemind/pr-inputs-<token>.json` (the PR title and draft flag) with its body file `.hivemind/pr-inputs-<token>-body.json` (the raw PR body) and, for a reuse comment, its comment file `.hivemind/pr-inputs-<token>-comment.json` (the raw comment)
 
