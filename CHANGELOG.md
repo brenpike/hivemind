@@ -13,6 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [14.8.0] - 2026-11-26
+
+### Added
+
+- An `attribution` launch arg (`{"commit", "pr"}`) for the standard-delivery and pr-feedback-remediation workflows. The overlord passes its own harness attribution, never external content. Engine commits carry the commit text as git trailers through `molt.sh --body-file`; a PR the engine creates ends with the pr text. Absent or empty means no attribution, as before.
+
+### Changed
+
+- The overlord `## Engine launch` prose passes `attribution`, and the pr-feedback-remediation launch keys add `attribution`.
+- The engine's `--body-file` word check accepts the molt inputs form too, matching `synapse-gate.sh`.
+- ADR-0037 and ADR-0040 amended.
+- `synapse.md` lists `body_file` for a commit or pull request, as the engine now sends it with attribution; `comment_file` stays pull request only.
+
+No prose budget raised.
+
+Issue: #676.
+
 ## [14.7.2] - 2026-11-26
 
 ### Fixed

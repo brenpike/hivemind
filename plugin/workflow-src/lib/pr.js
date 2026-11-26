@@ -120,7 +120,8 @@
  *   neutralized texts: neutralizing wraps or escapes no character of those
  *   strings, so each stays detectable. A text over
  *   maxPullRequestTextLength() is a terminal stop naming its size; no
- *   shorter form is tried.
+ *   shorter form is tried. Harness text run.attribution.pr joins the
+ *   body raw, after both checks.
  *   The relay is read through describeUnusableResult (lib/stop.js): a
  *   null result, an agent failure, adds the agent-failure sentence and
  *   next action run_again, and stopDelivery ends the run on it; any other
@@ -252,6 +253,7 @@ function buildPullRequestTexts(run, plan, gates) {
   if (attributedNoun !== undefined) {
     return { problem: describePullRequestCause(attributedNoun + ' would hold an attribution string', describeNoPush()) };
   }
+  texts.body += run.attribution?.pr ? '\n\n' + run.attribution.pr : '';
   return texts;
 }
 
