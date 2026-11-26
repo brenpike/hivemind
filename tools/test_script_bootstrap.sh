@@ -153,7 +153,6 @@ STAGE2_ROWS=(
     "plugin/skills/gather-facts/scripts/gather-facts.sh|shared_dir|../../_shared|cannot resolve skills/_shared from the script directory; refusing to proceed"
     "plugin/skills/create-working-branch/scripts/create-working-branch.sh|shared_dir|../../_shared|cannot resolve skills/_shared from the script directory; refusing to proceed"
     "plugin/skills/molt/scripts/molt.sh|shared_dir|../../_shared|cannot resolve skills/_shared from the script directory; refusing to proceed"
-    "plugin/skills/adaptation-cycle/scripts/run-review.sh|shared_dir|../../_shared|$RUN_REVIEW_SELF_LOCATE_REASON"
     "plugin/skills/open-plan-pr/scripts/open-plan-pr.sh|plugin_root|../../..|$PLUGIN_ROOT_REASON"
     "plugin/skills/brood-status/scripts/brood-status-collect.sh|plugin_root|../../..|$PLUGIN_ROOT_REASON"
     "plugin/skills/brood-status/scripts/brood-status-project.sh|plugin_root|../../..|$PLUGIN_ROOT_REASON"
@@ -209,7 +208,6 @@ SOURCE_ROWS=(
     "$(build_std_source_row plugin/skills/spawn-brood/scripts/spawn-brood.sh '$plugin_root/skills/_shared' brood-state.sh)"
     "$(build_std_source_row plugin/skills/seed-hive/scripts/seed-hive.sh '$shared_dir' containment.sh)"
     "$(build_std_source_row plugin/skills/triage-backlog/scripts/triage-ops.sh '$shared_dir' readiness-check.sh)"
-    'plugin/skills/adaptation-cycle/scripts/run-review.sh|$shared_dir/containment.sh|review references missing|review references missing|containment.sh'
     'plugin/skills/seed-hive/scripts/seed-hive.sh|$shared_dir/$lib|required shared library missing: skills/_shared/$lib; refusing to proceed|failed to source skills/_shared/$lib (unparseable); refusing to proceed|settings-merge.sh claude-mem-path.sh file-guard.sh test-detect.sh'
     'plugin/skills/github-review-loop/scripts/ledger-reconstruct.sh|$plugin_root/skills/_shared/ledger-reconstruct-parse.sh|missing-shared-lib|unparseable-shared-lib|ledger-reconstruct-parse.sh'
     'plugin/skills/github-review-loop/scripts/ledger-reconstruct.sh|$plugin_root/skills/_shared/ledger-reconstruct-fold.sh|missing-shared-lib|unparseable-shared-lib|ledger-reconstruct-fold.sh'
