@@ -60,13 +60,29 @@ One object with three keys.
     section is empty (`docs/alpha-fail`).
   - `beta`: a UI initiative. Commit 1 holds the PRD, the prototype variants
     and notes with no Verdict; 2 folds `index.html`, writes the Verdict and adds
-    the design and an ADR (`docs/beta`).
+    the design and an ADR (`docs/beta`); 3 adds a record reset for a re-review,
+    rounds 0 with its stamps kept (`docs/beta-rereview`).
   - `gamma`: a UI initiative whose `notes.md` is a symlink and whose ADR
     `0101` is a submodule entry, beside a regular ADR `0102`.
   - `omega`: a passing initiative on trunk whose docs branch only marks the
     design delivered (a close-out pull request that does not edit the record).
     Its close-out compose cases cover `--pr none`, refused while a counting
     close-out pull request is open, and `--pr <n>` on that open draft.
+  - `delta`: the review record's history, one branch per state, for the
+    record action of `reviewed`, `compose --kind record` and `comment --kind
+    round`. Commit 1 adds the PRD, the design and an ADR with no record
+    (`docs/delta-new`); 2 a round-1 failing record (`docs/delta-r1`); then,
+    from 2: 3 rounds 2 with an open count (`docs/delta-r2-open`), 4 rounds 3
+    failing (`docs/delta-r3`), 5 a pass at rounds 2 (`docs/delta-pass2`) and 6
+    a pass at rounds 3 (`docs/delta-pass3`). 7 edits the design after 5 (a
+    stale pass, `docs/delta-stale`); 8 is a review-fix wave on 6, the design
+    edited and the record failing at rounds 3 (`docs/delta-rf3`); 9 resets
+    the record on 7 (`docs/delta-reset`) and 10 starts the new epoch's round 1
+    (`docs/delta-epoch`). From 1: 11 a pass whose design stamp matches no
+    commit (`docs/delta-unmatched`), 12 rounds 0 with an open count
+    (`docs/delta-r0-open`) and 13 a malformed record (`docs/delta-malformed`).
+  - `sigma`: an amendment branch: a passing record on trunk, and a docs branch
+    that only edits the design (`docs/sigma`).
 - `cases`: one object per case.
   - `name`, `scenario`, `args` (the script's argv), `routes` (route names from
     `gh-routes.json`).
@@ -83,6 +99,14 @@ One object with three keys.
     one), and
     `request` (assert the guide request layout: line 1 the marker line, line 2
     the one `Docs pull request:` line, no other line holding it).
+  - `compare_round`: `true`. The suite also runs
+    `plugin/skills/design-review/scripts/design-review.sh round` at the
+    `reviewed=` commit in the clone, and its output must agree with the
+    action: `review` with `review_fix=no` prints `next=<round>`; with
+    `review_fix=yes` it prints `stop=passed`, `stop=cap-reached` or
+    `next=<n>`; `stop` `cap-reached` prints `stop=cap-reached`; `stop`
+    `record-malformed` prints `record=malformed`; and `ask` or `stop` with
+    `open-findings` prints `stop=open-findings`.
   - `compare`: `derive` or `handoff`. The suite also runs the libraries'
     `hivemind_stage_evidence_gh` and `hivemind_stage_derive` or
     `hivemind_stage_handoff` directly, in a clone holding every branch, against
@@ -104,7 +128,11 @@ substring, and any other exactly. A reply is `json` (served as one line) or
 reads are named operations (`IdeaToReadyTrunk`, `IdeaToReadyPullRequest`,
 `IdeaToReadyDocsPulls`, `IdeaToReadySeeds`, `IdeaToReadyComments`), matched by
 prefix; the stage derivation and readiness check libraries' anonymous queries
-are matched by their fixed prefix or a distinguishing substring. Comment routes
-hold guide marker comments by writers (`alice`, admin), non-writers (`bob`,
-read) and a Bot, comments of another slug or another pull request's URL, and a
-marker that is not on the first line, so each ignore rule has a case.
+are matched by their fixed prefix or a distinguishing substring.
+`comments-empty` serves no comment for any pull request. Comment routes hold
+guide marker comments by writers (`alice`, admin), non-writers (`bob`, read)
+and a Bot, comments of another slug or another pull request's URL, a marker
+that is not on the first line, a round marker with no `clean=` and a confirm
+marker with a round, so each ignore rule has a case; `comments-28-old` and
+`comments-29-epoch` hold round and confirm markers of the epoch before a
+reset.

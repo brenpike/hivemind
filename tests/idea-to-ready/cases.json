@@ -12,7 +12,17 @@
   "notes-variants": "# UI prototype notes\n\n## Variant A: Sidebar\n\nA sidebar layout.\n",
   "notes-verdict": "# UI prototype notes\n\n## Variant A: Sidebar\n\nA sidebar layout.\n\n## Verdict\n\nVariant B, because it reads clearly.\n",
   "record-pass": "---\nstamps:\n  - path: docs/prds/{{slug}}.md\n    blob: {{blob:prd-no}}\n  - path: docs/initiatives/{{slug}}/solution-design.md\n    blob: {{blob:design}}\n  - path: docs/adr/0099-{{slug}}-choice.md\n    blob: {{blob:adr}}\nverdict: pass\nopen:\n  critical: 0\n  high: 0\n  medium: 0\n  low: 0\nrounds: 2\nclean_round: true\n---\n\n# Design review record\n\n## Reviewed documents\n\n- The PRD and the solution design.\n\n## Rounds\n\n### Round 1\n\nOne pass.\n\n### Round 2\n\nA confirming pass.\n\n## Findings\n\n| ID | Round | Angle | Severity | Disposition | Note |\n|---|---|---|---|---|---|\n| F1 | 1 | A | low | fixed | A typo. |\n\n## Decisions taken, listed for veto\n\n- D1: keep it small. Strong recommendation; touches scope.\n\n## Decisions asked\n\nNone\n",
-  "record-fail": "---\nstamps:\n  - path: docs/prds/{{slug}}.md\n    blob: {{blob:prd-no}}\n  - path: docs/initiatives/{{slug}}/solution-design.md\n    blob: {{blob:design}}\nverdict: fail\nopen:\n  critical: 0\n  high: 0\n  medium: 0\n  low: 0\nrounds: 1\nclean_round: false\n---\n\n# Design review record\n\n## Reviewed documents\n\n- The PRD and the solution design.\n\n## Rounds\n\n### Round 1\n\nOne pass.\n\n### Round 2\n\nA confirming pass.\n\n## Findings\n\n| ID | Round | Angle | Severity | Disposition | Note |\n|---|---|---|---|---|---|\n| F1 | 1 | A | low | fixed | A typo. |\n\n## Decisions taken, listed for veto\n\n## Decisions asked\n\nNone\n"
+  "record-fail": "---\nstamps:\n  - path: docs/prds/{{slug}}.md\n    blob: {{blob:prd-no}}\n  - path: docs/initiatives/{{slug}}/solution-design.md\n    blob: {{blob:design}}\nverdict: fail\nopen:\n  critical: 0\n  high: 0\n  medium: 0\n  low: 0\nrounds: 1\nclean_round: false\n---\n\n# Design review record\n\n## Reviewed documents\n\n- The PRD and the solution design.\n\n## Rounds\n\n### Round 1\n\nOne pass.\n\n### Round 2\n\nA confirming pass.\n\n## Findings\n\n| ID | Round | Angle | Severity | Disposition | Note |\n|---|---|---|---|---|---|\n| F1 | 1 | A | low | fixed | A typo. |\n\n## Decisions taken, listed for veto\n\n## Decisions asked\n\nNone\n",
+  "record-r1": "---\nstamps:\n  - path: docs/prds/{{slug}}.md\n    blob: {{blob:prd-no}}\n  - path: docs/initiatives/{{slug}}/solution-design.md\n    blob: {{blob:design}}\n  - path: docs/adr/0099-{{slug}}-choice.md\n    blob: {{blob:adr}}\nverdict: fail\nopen:\n  critical: 0\n  high: 0\n  medium: 0\n  low: 0\nrounds: 1\nclean_round: false\n---\n\n# Design review record\n\n## Reviewed documents\n\n- The PRD and the solution design.\n\n## Rounds\n\n### Round 1\n\nOne pass.\n\n## Findings\n\n| ID | Round | Angle | Severity | Disposition | Note |\n|---|---|---|---|---|---|\n| F1 | 1 | A | low | fixed | A typo. |\n\n## Decisions taken, listed for veto\n\n- D1: keep it small. Strong recommendation; touches scope.\n\n## Decisions asked\n\nNone\n",
+  "record-r2-open": "---\nstamps:\n  - path: docs/prds/{{slug}}.md\n    blob: {{blob:prd-no}}\n  - path: docs/initiatives/{{slug}}/solution-design.md\n    blob: {{blob:design}}\n  - path: docs/adr/0099-{{slug}}-choice.md\n    blob: {{blob:adr}}\nverdict: fail\nopen:\n  critical: 0\n  high: 0\n  medium: 0\n  low: 1\nrounds: 2\nclean_round: false\n---\n\n# Design review record\n\n## Reviewed documents\n\n- The PRD and the solution design.\n\n## Rounds\n\n### Round 1\n\nOne pass.\n\n## Findings\n\n| ID | Round | Angle | Severity | Disposition | Note |\n|---|---|---|---|---|---|\n| F1 | 1 | A | low | fixed | A typo. |\n| F2 | 2 | A | low | open | An unclear term. |\n\n## Decisions taken, listed for veto\n\n- D1: keep it small. Strong recommendation; touches scope.\n\n## Decisions asked\n\nNone\n",
+  "record-r3": "---\nstamps:\n  - path: docs/prds/{{slug}}.md\n    blob: {{blob:prd-no}}\n  - path: docs/initiatives/{{slug}}/solution-design.md\n    blob: {{blob:design}}\n  - path: docs/adr/0099-{{slug}}-choice.md\n    blob: {{blob:adr}}\nverdict: fail\nopen:\n  critical: 0\n  high: 0\n  medium: 0\n  low: 0\nrounds: 3\nclean_round: false\n---\n\n# Design review record\n\n## Reviewed documents\n\n- The PRD and the solution design.\n\n## Rounds\n\n### Round 1\n\nOne pass.\n\n## Findings\n\n| ID | Round | Angle | Severity | Disposition | Note |\n|---|---|---|---|---|---|\n| F1 | 1 | A | low | fixed | A typo. |\n\n## Decisions taken, listed for veto\n\n- D1: keep it small. Strong recommendation; touches scope.\n\n## Decisions asked\n\nNone\n",
+  "record-pass3": "---\nstamps:\n  - path: docs/prds/{{slug}}.md\n    blob: {{blob:prd-no}}\n  - path: docs/initiatives/{{slug}}/solution-design.md\n    blob: {{blob:design}}\n  - path: docs/adr/0099-{{slug}}-choice.md\n    blob: {{blob:adr}}\nverdict: pass\nopen:\n  critical: 0\n  high: 0\n  medium: 0\n  low: 0\nrounds: 3\nclean_round: true\n---\n\n# Design review record\n\n## Reviewed documents\n\n- The PRD and the solution design.\n\n## Rounds\n\n### Round 1\n\nOne pass.\n\n## Findings\n\n| ID | Round | Angle | Severity | Disposition | Note |\n|---|---|---|---|---|---|\n| F1 | 1 | A | low | fixed | A typo. |\n\n## Decisions taken, listed for veto\n\n- D1: keep it small. Strong recommendation; touches scope.\n\n## Decisions asked\n\nNone\n",
+  "record-rf3": "---\nstamps:\n  - path: docs/prds/{{slug}}.md\n    blob: {{blob:prd-no}}\n  - path: docs/initiatives/{{slug}}/solution-design.md\n    blob: {{blob:design}}\n  - path: docs/adr/0099-{{slug}}-choice.md\n    blob: {{blob:adr}}\nverdict: fail\nopen:\n  critical: 0\n  high: 0\n  medium: 0\n  low: 0\nrounds: 3\nclean_round: false\n---\n\n# Design review record\n\n## Reviewed documents\n\n- The PRD and the solution design.\n\n## Rounds\n\n### Round 1\n\nOne pass.\n\n## Findings\n\n| ID | Round | Angle | Severity | Disposition | Note |\n|---|---|---|---|---|---|\n| F1 | 1 | A | low | fixed | A typo. |\n\n## Decisions taken, listed for veto\n\n- D1: keep it small. Strong recommendation; touches scope.\n\n## Decisions asked\n\nNone\n",
+  "record-reset": "---\nstamps:\n  - path: docs/prds/{{slug}}.md\n    blob: {{blob:prd-no}}\n  - path: docs/initiatives/{{slug}}/solution-design.md\n    blob: {{blob:design}}\n  - path: docs/adr/0099-{{slug}}-choice.md\n    blob: {{blob:adr}}\nverdict: fail\nopen:\n  critical: 0\n  high: 0\n  medium: 0\n  low: 0\nrounds: 0\nclean_round: false\n---\n\n# Design review record\n\n## Reviewed documents\n\n- The PRD and the solution design.\n\n## Rounds\n\n### Round 1\n\nOne pass.\n\n## Findings\n\n| ID | Round | Angle | Severity | Disposition | Note |\n|---|---|---|---|---|---|\n\n## Decisions taken, listed for veto\n\n- D1: keep it small. Strong recommendation; touches scope.\n\n## Decisions asked\n\nNone\n\n## History: 2026-11-20\n\n### Rounds\n\n#### Round 1\n\nOne pass.\n\n### Findings\n\n| ID | Round | Angle | Severity | Disposition | Note |\n|---|---|---|---|---|---|\n| F1 | 1 | A | low | fixed | A typo. |\n",
+  "record-pass-unmatched": "---\nstamps:\n  - path: docs/prds/{{slug}}.md\n    blob: {{blob:prd-no}}\n  - path: docs/initiatives/{{slug}}/solution-design.md\n    blob: {{blob:design-delivered}}\n  - path: docs/adr/0099-{{slug}}-choice.md\n    blob: {{blob:adr}}\nverdict: pass\nopen:\n  critical: 0\n  high: 0\n  medium: 0\n  low: 0\nrounds: 2\nclean_round: true\n---\n\n# Design review record\n\n## Reviewed documents\n\n- The PRD and the solution design.\n\n## Rounds\n\n### Round 1\n\nOne pass.\n\n## Findings\n\n| ID | Round | Angle | Severity | Disposition | Note |\n|---|---|---|---|---|---|\n| F1 | 1 | A | low | fixed | A typo. |\n\n## Decisions taken, listed for veto\n\n- D1: keep it small. Strong recommendation; touches scope.\n\n## Decisions asked\n\nNone\n",
+  "record-r0-open": "---\nstamps:\n  - path: docs/prds/{{slug}}.md\n    blob: {{blob:prd-no}}\n  - path: docs/initiatives/{{slug}}/solution-design.md\n    blob: {{blob:design}}\n  - path: docs/adr/0099-{{slug}}-choice.md\n    blob: {{blob:adr}}\nverdict: fail\nopen:\n  critical: 0\n  high: 0\n  medium: 0\n  low: 1\nrounds: 0\nclean_round: false\n---\n\n# Design review record\n\n## Reviewed documents\n\n- The PRD and the solution design.\n\n## Rounds\n\n### Round 1\n\nOne pass.\n\n## Findings\n\n| ID | Round | Angle | Severity | Disposition | Note |\n|---|---|---|---|---|---|\n| F2 | 2 | A | low | open | An unclear term. |\n\n## Decisions taken, listed for veto\n\n- D1: keep it small. Strong recommendation; touches scope.\n\n## Decisions asked\n\nNone\n",
+  "record-malformed": "---\nverdict: pass\n---\n\n# Design review record\n",
+  "record-reset-ui": "---\nstamps:\n  - path: docs/prds/{{slug}}.md\n    blob: {{blob:prd-yes}}\n  - path: docs/initiatives/{{slug}}/solution-design.md\n    blob: {{blob:design}}\n  - path: docs/initiatives/{{slug}}/prototype/index.html\n    blob: {{blob:index-folded}}\n  - path: docs/initiatives/{{slug}}/prototype/notes.md\n    blob: {{blob:notes-verdict}}\n  - path: docs/adr/0099-{{slug}}-choice.md\n    blob: {{blob:adr}}\nverdict: fail\nopen:\n  critical: 0\n  high: 0\n  medium: 0\n  low: 0\nrounds: 0\nclean_round: false\n---\n\n# Design review record\n\n## Reviewed documents\n\n- The PRD and the solution design.\n\n## Rounds\n\n### Round 1\n\nOne pass.\n\n## Findings\n\n| ID | Round | Angle | Severity | Disposition | Note |\n|---|---|---|---|---|---|\n\n## Decisions taken, listed for veto\n\n- D1: keep it small. Strong recommendation; touches scope.\n\n## Decisions asked\n\nNone\n\n## History: 2026-11-20\n\n### Rounds\n\n#### Round 1\n\nOne pass.\n\n### Findings\n\n| ID | Round | Angle | Severity | Disposition | Note |\n|---|---|---|---|---|---|\n| F1 | 1 | A | low | fixed | A typo. |\n"
  },
  "scenarios": {
   "alpha": {
@@ -76,10 +86,17 @@
       "docs/initiatives/{{slug}}/solution-design.md": "design",
       "docs/adr/0099-{{slug}}-choice.md": "adr"
      }
+    },
+    {
+     "parent": 2,
+     "set": {
+      "docs/initiatives/{{slug}}/review-record.md": "record-reset-ui"
+     }
     }
    ],
    "branches": {
-    "docs/beta": 2
+    "docs/beta": 2,
+    "docs/beta-rereview": 3
    }
   },
   "gamma": {
@@ -127,6 +144,131 @@
    ],
    "branches": {
     "docs/omega": 1
+   }
+  },
+  "delta": {
+   "slug": "delta",
+   "trunk": {
+    "README.md": "readme"
+   },
+   "docs": [
+    {
+     "parent": 0,
+     "set": {
+      "docs/prds/{{slug}}.md": "prd-no",
+      "docs/initiatives/{{slug}}/solution-design.md": "design",
+      "docs/adr/0099-{{slug}}-choice.md": "adr"
+     }
+    },
+    {
+     "parent": 1,
+     "set": {
+      "docs/initiatives/{{slug}}/review-record.md": "record-r1"
+     }
+    },
+    {
+     "parent": 2,
+     "set": {
+      "docs/initiatives/{{slug}}/review-record.md": "record-r2-open"
+     }
+    },
+    {
+     "parent": 2,
+     "set": {
+      "docs/initiatives/{{slug}}/review-record.md": "record-r3"
+     }
+    },
+    {
+     "parent": 2,
+     "set": {
+      "docs/initiatives/{{slug}}/review-record.md": "record-pass"
+     }
+    },
+    {
+     "parent": 2,
+     "set": {
+      "docs/initiatives/{{slug}}/review-record.md": "record-pass3"
+     }
+    },
+    {
+     "parent": 5,
+     "set": {
+      "docs/initiatives/{{slug}}/solution-design.md": "design-edited"
+     }
+    },
+    {
+     "parent": 6,
+     "set": {
+      "docs/initiatives/{{slug}}/solution-design.md": "design-edited",
+      "docs/initiatives/{{slug}}/review-record.md": "record-rf3"
+     }
+    },
+    {
+     "parent": 7,
+     "set": {
+      "docs/initiatives/{{slug}}/review-record.md": "record-reset"
+     }
+    },
+    {
+     "parent": 9,
+     "set": {
+      "docs/initiatives/{{slug}}/review-record.md": "record-r1"
+     }
+    },
+    {
+     "parent": 1,
+     "set": {
+      "docs/initiatives/{{slug}}/review-record.md": "record-pass-unmatched"
+     }
+    },
+    {
+     "parent": 1,
+     "set": {
+      "docs/initiatives/{{slug}}/review-record.md": "record-r0-open"
+     }
+    },
+    {
+     "parent": 1,
+     "set": {
+      "docs/initiatives/{{slug}}/review-record.md": "record-malformed"
+     }
+    }
+   ],
+   "branches": {
+    "docs/delta-new": 1,
+    "docs/delta-r1": 2,
+    "docs/delta-r2-open": 3,
+    "docs/delta-r3": 4,
+    "docs/delta-pass2": 5,
+    "docs/delta-pass3": 6,
+    "docs/delta-stale": 7,
+    "docs/delta-rf3": 8,
+    "docs/delta-reset": 9,
+    "docs/delta-epoch": 10,
+    "docs/delta-unmatched": 11,
+    "docs/delta-r0-open": 12,
+    "docs/delta-malformed": 13
+   }
+  },
+  "sigma": {
+   "slug": "sigma",
+   "trunk": {
+    "README.md": "readme",
+    "docs/prds/{{slug}}.md": "prd-no",
+    "docs/initiatives/{{slug}}/solution-design.md": "design",
+    "docs/initiatives/{{slug}}/review-record.md": "record-pass",
+    "docs/adr/0099-{{slug}}-choice.md": "adr"
+   },
+   "docs": [
+    {
+     "parent": 0,
+     "set": {
+      "docs/initiatives/{{slug}}/solution-design.md": "design-edited"
+     }
+    }
+   ],
+   "branches": {
+    "docs/sigma": 1
    }
   }
  },
@@ -295,8 +437,89 @@
     "alpha",
     "--pr",
     "5",
+    "--clean",
+    "no",
+    "--body-file",
+    ".hivemind/guide-inputs-a.json"
+   ],
+   "routes": [],
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: usage\n"
+   },
+   "no_git": true,
+   "no_gh": true
+  },
+  {
+   "name": "usage-comment-round-takes-no-round",
+   "scenario": "alpha",
+   "args": [
+    "comment",
+    "--kind",
+    "round",
+    "--slug",
+    "alpha",
+    "--pr",
+    "5",
     "--round",
     "1",
+    "--commit",
+    "{{docs2}}",
+    "--clean",
+    "no",
+    "--body-file",
+    ".hivemind/guide-inputs-a.json"
+   ],
+   "routes": [],
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: usage\n"
+   },
+   "no_git": true,
+   "no_gh": true
+  },
+  {
+   "name": "usage-comment-round-clean-value",
+   "scenario": "alpha",
+   "args": [
+    "comment",
+    "--kind",
+    "round",
+    "--slug",
+    "alpha",
+    "--pr",
+    "5",
+    "--commit",
+    "{{docs2}}",
+    "--clean",
+    "maybe",
+    "--body-file",
+    ".hivemind/guide-inputs-a.json"
+   ],
+   "routes": [],
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: usage\n"
+   },
+   "no_git": true,
+   "no_gh": true
+  },
+  {
+   "name": "usage-comment-review-takes-no-clean",
+   "scenario": "alpha",
+   "args": [
+    "comment",
+    "--kind",
+    "review",
+    "--slug",
+    "alpha",
+    "--pr",
+    "5",
+    "--clean",
+    "no",
     "--body-file",
     ".hivemind/guide-inputs-a.json"
    ],
@@ -313,15 +536,19 @@
    "name": "commit-malformed",
    "scenario": "alpha",
    "args": [
-    "compose",
+    "comment",
     "--kind",
-    "record-pass",
+    "round",
     "--slug",
     "alpha",
     "--pr",
     "5",
     "--commit",
-    "abc123"
+    "abc123",
+    "--clean",
+    "no",
+    "--body-file",
+    ".hivemind/guide-inputs-a.json"
    ],
    "routes": [],
    "expect": {
@@ -336,15 +563,19 @@
    "name": "commit-uppercase",
    "scenario": "alpha",
    "args": [
-    "compose",
+    "comment",
     "--kind",
-    "record-pass",
+    "round",
     "--slug",
     "alpha",
     "--pr",
     "5",
     "--commit",
-    "{{upper2}}"
+    "{{upper2}}",
+    "--clean",
+    "no",
+    "--body-file",
+    ".hivemind/guide-inputs-a.json"
    ],
    "routes": [],
    "expect": {
@@ -1082,33 +1313,7 @@
    ]
   },
   {
-   "name": "reviewed-records-head",
-   "scenario": "alpha",
-   "args": [
-    "reviewed",
-    "--slug",
-    "alpha",
-    "--pr",
-    "5"
-   ],
-   "routes": [
-    "repo-view",
-    "trunk",
-    "pr-5",
-    "perm-alice",
-    "perm-bob",
-    "comments-rounds-5",
-    "comments-rounds-5-page2"
-   ],
-   "clone": "docs/alpha",
-   "expect": {
-    "rc": 0,
-    "stdout": "reviewed={{docs2}}\nmerge_base={{trunk}}\nprevious={{docs1}}\n",
-    "stderr": ""
-   }
-  },
-  {
-   "name": "reviewed-no-round-comment",
+   "name": "reviewed-c-passing-record-none",
    "scenario": "alpha",
    "args": [
     "reviewed",
@@ -1127,9 +1332,478 @@
    "clone": "docs/alpha",
    "expect": {
     "rc": 0,
-    "stdout": "reviewed={{docs2}}\nmerge_base={{trunk}}\nprevious=none\n",
+    "stdout": "reviewed={{docs2}}\nmerge_base={{trunk}}\naction=none\n",
     "stderr": ""
    }
+  },
+  {
+   "name": "reviewed-a-missing-record-reviews-round-1",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "20"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-20",
+    "perm-alice",
+    "comments-empty"
+   ],
+   "clone": "docs/delta-new",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs1}}\nmerge_base={{trunk}}\naction=review\nround=1\nreview_fix=no\nprevious=none\n",
+    "stderr": ""
+   },
+   "compare_round": true
+  },
+  {
+   "name": "reviewed-a-missing-record-pending-round-1-launches-fix",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "20"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-20",
+    "perm-alice",
+    "comments-20-r1"
+   ],
+   "clone": "docs/delta-new",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs1}}\nmerge_base={{trunk}}\naction=launch\nrun=fix\nround=1\n",
+    "stderr": ""
+   }
+  },
+  {
+   "name": "reviewed-b-malformed-record-stops",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "32"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-32",
+    "perm-alice",
+    "comments-empty"
+   ],
+   "clone": "docs/delta-malformed",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs13}}\nmerge_base={{trunk}}\naction=stop\nreason=record-malformed\n",
+    "stderr": ""
+   },
+   "compare_round": true
+  },
+  {
+   "name": "reviewed-c-passing-round-3-none",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "25"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-25",
+    "perm-alice",
+    "comments-empty"
+   ],
+   "clone": "docs/delta-pass3",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs6}}\nmerge_base={{trunk}}\naction=none\n",
+    "stderr": ""
+   }
+  },
+  {
+   "name": "reviewed-d-stale-pass-confirms-not-stalls",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "26"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-26",
+    "perm-alice",
+    "comments-empty"
+   ],
+   "clone": "docs/delta-stale",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs7}}\nmerge_base={{trunk}}\naction=review\nround=confirm\nreview_fix=yes\nprevious={{docs5}}\n",
+    "stderr": ""
+   },
+   "compare_round": true
+  },
+  {
+   "name": "reviewed-d-clean-confirm-restamps",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "26"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-26",
+    "perm-alice",
+    "comments-26-confirm-yes"
+   ],
+   "clone": "docs/delta-stale",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs7}}\nmerge_base={{trunk}}\naction=launch\nrun=restamp\n",
+    "stderr": ""
+   }
+  },
+  {
+   "name": "reviewed-d-new-finding-resets",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "26"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-26",
+    "perm-alice",
+    "comments-26-confirm-no"
+   ],
+   "clone": "docs/delta-stale",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs7}}\nmerge_base={{trunk}}\naction=launch\nrun=reset\n",
+    "stderr": ""
+   }
+  },
+  {
+   "name": "reviewed-d-review-fix-at-round-3-confirms-not-cap",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "27"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-27",
+    "perm-alice",
+    "comments-empty"
+   ],
+   "clone": "docs/delta-rf3",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs8}}\nmerge_base={{trunk}}\naction=review\nround=confirm\nreview_fix=yes\nprevious={{docs6}}\n",
+    "stderr": ""
+   },
+   "compare_round": true
+  },
+  {
+   "name": "reviewed-d-stamps-match-no-commit",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "30"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-30",
+    "perm-alice",
+    "comments-empty"
+   ],
+   "clone": "docs/delta-unmatched",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs11}}\nmerge_base={{trunk}}\naction=stop\nreason=stamps-unmatched\n",
+    "stderr": ""
+   }
+  },
+  {
+   "name": "reviewed-d-amendment-record-from-trunk-confirms",
+   "scenario": "sigma",
+   "args": [
+    "reviewed",
+    "--slug",
+    "sigma",
+    "--pr",
+    "33"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-33",
+    "perm-alice",
+    "comments-empty"
+   ],
+   "clone": "docs/sigma",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs1}}\nmerge_base={{trunk}}\naction=review\nround=confirm\nreview_fix=yes\nprevious={{trunk}}\n",
+    "stderr": ""
+   },
+   "compare_round": true
+  },
+  {
+   "name": "reviewed-e-round-3-fail-cap-reached",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "23"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-23",
+    "perm-alice",
+    "comments-empty"
+   ],
+   "clone": "docs/delta-r3",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs4}}\nmerge_base={{trunk}}\naction=stop\nreason=cap-reached\n",
+    "stderr": ""
+   },
+   "compare_round": true
+  },
+  {
+   "name": "reviewed-f-open-findings-asks",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "22"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-22",
+    "perm-alice",
+    "comments-22-r2"
+   ],
+   "clone": "docs/delta-r2-open",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs3}}\nmerge_base={{trunk}}\naction=ask\nreason=open-findings\nround=2\n",
+    "stderr": ""
+   },
+   "compare_round": true
+  },
+  {
+   "name": "reviewed-f-open-findings-at-round-0-stops",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "31"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-31",
+    "perm-alice",
+    "comments-empty"
+   ],
+   "clone": "docs/delta-r0-open",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs12}}\nmerge_base={{trunk}}\naction=stop\nreason=open-findings\n",
+    "stderr": ""
+   },
+   "compare_round": true
+  },
+  {
+   "name": "reviewed-g-reviews-next-round-ignoring-noise",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "21"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-21",
+    "perm-alice",
+    "perm-bob",
+    "comments-21-noise",
+    "comments-21-noise-page2"
+   ],
+   "clone": "docs/delta-r1",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs2}}\nmerge_base={{trunk}}\naction=review\nround=2\nreview_fix=no\nprevious={{docs1}}\n",
+    "stderr": ""
+   },
+   "compare_round": true
+  },
+  {
+   "name": "reviewed-g-round-comment-missing",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "21"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-21",
+    "perm-alice",
+    "comments-empty"
+   ],
+   "clone": "docs/delta-r1",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs2}}\nmerge_base={{trunk}}\naction=stop\nreason=round-comment-missing\n",
+    "stderr": ""
+   }
+  },
+  {
+   "name": "reviewed-g-clean-round-2-launches-pass",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "21"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-21",
+    "perm-alice",
+    "comments-21-r2-clean"
+   ],
+   "clone": "docs/delta-r1",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs2}}\nmerge_base={{trunk}}\naction=launch\nrun=pass\nround=2\n",
+    "stderr": ""
+   }
+  },
+  {
+   "name": "reviewed-g-round-2-findings-launch-fix",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "21"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-21",
+    "perm-alice",
+    "comments-21-r2-dirty"
+   ],
+   "clone": "docs/delta-r1",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs2}}\nmerge_base={{trunk}}\naction=launch\nrun=fix\nround=2\n",
+    "stderr": ""
+   }
+  },
+  {
+   "name": "reviewed-epoch-reset-ignores-old-round-markers",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "28"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-28",
+    "perm-alice",
+    "comments-28-old"
+   ],
+   "clone": "docs/delta-reset",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs9}}\nmerge_base={{trunk}}\naction=review\nround=1\nreview_fix=no\nprevious=none\n",
+    "stderr": ""
+   },
+   "compare_round": true
+  },
+  {
+   "name": "reviewed-epoch-previous-from-new-epoch",
+   "scenario": "delta",
+   "args": [
+    "reviewed",
+    "--slug",
+    "delta",
+    "--pr",
+    "29"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-29",
+    "perm-alice",
+    "comments-29-epoch"
+   ],
+   "clone": "docs/delta-epoch",
+   "expect": {
+    "rc": 0,
+    "stdout": "reviewed={{docs10}}\nmerge_base={{trunk}}\naction=review\nround=2\nreview_fix=no\nprevious={{docs9}}\n",
+    "stderr": ""
+   },
+   "compare_round": true
   },
   {
    "name": "reviewed-dirty",
@@ -1146,9 +1820,7 @@
     "trunk",
     "pr-5",
     "perm-alice",
-    "perm-bob",
-    "comments-rounds-5",
-    "comments-rounds-5-page2"
+    "comments-none-5"
    ],
    "clone": "docs/alpha",
    "dirty": true,
@@ -1173,9 +1845,7 @@
     "trunk",
     "pr-5",
     "perm-alice",
-    "perm-bob",
-    "comments-rounds-5",
-    "comments-rounds-5-page2"
+    "comments-none-5"
    ],
    "clone": "docs/alpha",
    "detach": "{{docs1}}",
@@ -1308,13 +1978,11 @@
    "args": [
     "compose",
     "--kind",
-    "record-pass",
+    "record",
     "--slug",
     "alpha",
     "--pr",
-    "none",
-    "--commit",
-    "{{docs2}}"
+    "none"
    ],
    "routes": [
     "repo-view"
@@ -1323,154 +1991,6 @@
     "rc": 2,
     "stdout": "",
     "stderr": "idea-to-ready-error: pr-required\n"
-   }
-  },
-  {
-   "name": "compose-record-pass-stamps",
-   "scenario": "alpha",
-   "args": [
-    "compose",
-    "--kind",
-    "record-pass",
-    "--slug",
-    "alpha",
-    "--pr",
-    "5",
-    "--commit",
-    "{{docs2}}"
-   ],
-   "routes": [
-    "repo-view",
-    "pr-5",
-    "perm-alice",
-    "trunk"
-   ],
-   "request": true,
-   "expect": {
-    "rc": 0,
-    "stderr": "",
-    "stdout": "hivemind-guide-run: alpha\nDocs pull request: #5\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nLaunch with local_review false.\nRecord pass run: this run carries only the record wave.\nA hivemind:drone step with exact file scope writes docs/initiatives/alpha/review-record.md with verdict pass and clean_round true, reviewed commit {{docs2}}.\nWrite exactly these stamps in the record's front matter, path then blob id, in this order:\ndocs/prds/alpha.md {{blob:prd-no}}\ndocs/initiatives/alpha/solution-design.md {{blob:design}}\ndocs/adr/0099-alpha-choice.md {{blob:adr}}\n"
-   }
-  },
-  {
-   "name": "compose-round-2-keeps-stamps",
-   "scenario": "alpha",
-   "args": [
-    "compose",
-    "--kind",
-    "round",
-    "--slug",
-    "alpha",
-    "--pr",
-    "5",
-    "--round",
-    "2",
-    "--commit",
-    "{{docs2}}"
-   ],
-   "routes": [
-    "repo-view",
-    "pr-5",
-    "perm-alice",
-    "trunk",
-    "comments-round2-5"
-   ],
-   "request": true,
-   "expect": {
-    "rc": 0,
-    "stderr": "",
-    "stdout": "hivemind-guide-run: alpha\nDocs pull request: #5\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nDesign review round 2 fix run. The round's findings and record update are comment https://github.com/acme/widgets/pull/5#issuecomment-111.\nFix each finding of that comment in the solution design, the PRD, an ADR or the UI prototype, or give it the disposition that comment names.\nThe last wave is the record wave: a hivemind:drone step with exact file scope writes docs/initiatives/alpha/review-record.md for round 2, reviewed commit {{docs2}}.\nKeep the record's stamps unchanged.\n"
-   },
-   "stdout_lacks": [
-    "local_review"
-   ]
-  },
-  {
-   "name": "compose-round-commit-mismatch",
-   "scenario": "alpha",
-   "args": [
-    "compose",
-    "--kind",
-    "round",
-    "--slug",
-    "alpha",
-    "--pr",
-    "5",
-    "--round",
-    "2",
-    "--commit",
-    "{{docs1}}"
-   ],
-   "routes": [
-    "repo-view",
-    "pr-5",
-    "perm-alice",
-    "trunk",
-    "comments-round2-5"
-   ],
-   "expect": {
-    "rc": 2,
-    "stdout": "",
-    "stderr": "idea-to-ready-error: round-commit-mismatch\n"
-   }
-  },
-  {
-   "name": "compose-round-comment-missing",
-   "scenario": "alpha",
-   "args": [
-    "compose",
-    "--kind",
-    "round",
-    "--slug",
-    "alpha",
-    "--pr",
-    "5",
-    "--round",
-    "3",
-    "--commit",
-    "{{docs2}}"
-   ],
-   "routes": [
-    "repo-view",
-    "pr-5",
-    "perm-alice",
-    "trunk",
-    "comments-round2-5"
-   ],
-   "expect": {
-    "rc": 2,
-    "stdout": "",
-    "stderr": "idea-to-ready-error: round-comment-missing\n"
-   }
-  },
-  {
-   "name": "compose-round-non-writer-comment-ignored",
-   "scenario": "alpha",
-   "args": [
-    "compose",
-    "--kind",
-    "round",
-    "--slug",
-    "alpha",
-    "--pr",
-    "5",
-    "--round",
-    "2",
-    "--commit",
-    "{{docs2}}"
-   ],
-   "routes": [
-    "repo-view",
-    "pr-5",
-    "perm-alice",
-    "trunk",
-    "comments-round2-bob-5",
-    "perm-bob"
-   ],
-   "expect": {
-    "rc": 2,
-    "stdout": "",
-    "stderr": "idea-to-ready-error: round-comment-missing\n"
    }
   },
   {
@@ -1483,21 +2003,412 @@
     "--slug",
     "alpha",
     "--pr",
-    "5",
-    "--commit",
-    "{{docs2}}"
+    "5"
    ],
    "routes": [
     "repo-view",
     "pr-5",
-    "perm-alice",
-    "trunk"
+    "perm-alice"
    ],
    "request": true,
    "expect": {
     "rc": 0,
     "stderr": "",
-    "stdout": "hivemind-guide-run: alpha\nDocs pull request: #5\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nReview fix run after the design review exited. The fix is named in the docs pull request's review comments.\nThe last wave is the record wave: a hivemind:drone step with exact file scope writes docs/initiatives/alpha/review-record.md with verdict fail and clean_round false, keeping rounds and the open counts, reviewed commit {{docs2}}.\nKeep the record's stamps unchanged.\n"
+    "stdout": "hivemind-guide-run: alpha\nDocs pull request: #5\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nReview fix run after the design review exited. The fix is named in the docs pull request's review comments.\nThe last wave is the record wave: a hivemind:drone step with exact file scope writes docs/initiatives/alpha/review-record.md with verdict fail and clean_round false, keeping rounds and the open counts.\nKeep the record's stamps unchanged.\n"
+   }
+  },
+  {
+   "name": "compose-record-fix-round-1-stamps",
+   "scenario": "delta",
+   "args": [
+    "compose",
+    "--kind",
+    "record",
+    "--slug",
+    "delta",
+    "--pr",
+    "20"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-20",
+    "perm-alice",
+    "trunk",
+    "comments-20-r1"
+   ],
+   "expect": {
+    "rc": 0,
+    "stderr": "",
+    "stdout": "hivemind-guide-run: delta\nDocs pull request: #20\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nDesign review round 1 fix run. The round's findings and record update are comment https://github.com/acme/widgets/pull/20#issuecomment-200.\nFix each finding of that comment in the solution design, the PRD, an ADR or the UI prototype, or give it the disposition that comment names.\nThe last wave is the record wave: a hivemind:drone step with exact file scope writes docs/initiatives/delta/review-record.md for round 1, reviewed commit {{docs1}}.\nWrite exactly these stamps in the record's front matter, path then blob id, in this order:\ndocs/prds/delta.md {{blob:prd-no}}\ndocs/initiatives/delta/solution-design.md {{blob:design}}\ndocs/adr/0099-delta-choice.md {{blob:adr}}\n"
+   },
+   "request": true
+  },
+  {
+   "name": "compose-record-fix-round-2-keeps-stamps",
+   "scenario": "delta",
+   "args": [
+    "compose",
+    "--kind",
+    "record",
+    "--slug",
+    "delta",
+    "--pr",
+    "21"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-21",
+    "perm-alice",
+    "trunk",
+    "comments-21-r2-dirty"
+   ],
+   "expect": {
+    "rc": 0,
+    "stderr": "",
+    "stdout": "hivemind-guide-run: delta\nDocs pull request: #21\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nDesign review round 2 fix run. The round's findings and record update are comment https://github.com/acme/widgets/pull/21#issuecomment-223.\nFix each finding of that comment in the solution design, the PRD, an ADR or the UI prototype, or give it the disposition that comment names.\nThe last wave is the record wave: a hivemind:drone step with exact file scope writes docs/initiatives/delta/review-record.md for round 2, reviewed commit {{docs2}}.\nKeep the record's stamps unchanged.\n"
+   },
+   "request": true
+  },
+  {
+   "name": "compose-record-pass",
+   "scenario": "delta",
+   "args": [
+    "compose",
+    "--kind",
+    "record",
+    "--slug",
+    "delta",
+    "--pr",
+    "21"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-21",
+    "perm-alice",
+    "trunk",
+    "comments-21-r2-clean"
+   ],
+   "expect": {
+    "rc": 0,
+    "stderr": "",
+    "stdout": "hivemind-guide-run: delta\nDocs pull request: #21\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nLaunch with local_review false.\nRecord pass run for design review round 2: this run carries only the record wave.\nA hivemind:drone step with exact file scope writes docs/initiatives/delta/review-record.md with verdict pass, clean_round true and rounds 2, reviewed commit {{docs2}}, adding round 2 from comment https://github.com/acme/widgets/pull/21#issuecomment-221 under ## Rounds.\nWrite exactly these stamps in the record's front matter, path then blob id, in this order:\ndocs/prds/delta.md {{blob:prd-no}}\ndocs/initiatives/delta/solution-design.md {{blob:design}}\ndocs/adr/0099-delta-choice.md {{blob:adr}}\n"
+   },
+   "request": true
+  },
+  {
+   "name": "compose-record-restamp",
+   "scenario": "delta",
+   "args": [
+    "compose",
+    "--kind",
+    "record",
+    "--slug",
+    "delta",
+    "--pr",
+    "26"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-26",
+    "perm-alice",
+    "trunk",
+    "comments-26-confirm-yes"
+   ],
+   "expect": {
+    "rc": 0,
+    "stderr": "",
+    "stdout": "hivemind-guide-run: delta\nDocs pull request: #26\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nLaunch with local_review false.\nRe-stamp run after a clean confirming pass: this run carries only the record wave.\nA hivemind:drone step with exact file scope writes docs/initiatives/delta/review-record.md with verdict pass and clean_round true, rounds unchanged, reviewed commit {{docs7}}, appending the confirming pass of comment https://github.com/acme/widgets/pull/26#issuecomment-260 under ## Rounds.\nWrite exactly these stamps in the record's front matter, path then blob id, in this order:\ndocs/prds/delta.md {{blob:prd-no}}\ndocs/initiatives/delta/solution-design.md {{blob:design-edited}}\ndocs/adr/0099-delta-choice.md {{blob:adr}}\n"
+   },
+   "request": true
+  },
+  {
+   "name": "compose-record-reset",
+   "scenario": "delta",
+   "args": [
+    "compose",
+    "--kind",
+    "record",
+    "--slug",
+    "delta",
+    "--pr",
+    "26"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-26",
+    "perm-alice",
+    "trunk",
+    "comments-26-confirm-no"
+   ],
+   "expect": {
+    "rc": 0,
+    "stderr": "",
+    "stdout": "hivemind-guide-run: delta\nDocs pull request: #26\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nRe-review reset run after the confirming pass of comment https://github.com/acme/widgets/pull/26#issuecomment-261 raised a new finding: this run carries only the record wave.\nA hivemind:drone step with exact file scope writes docs/initiatives/delta/review-record.md with verdict fail, rounds 0, every open count 0 and clean_round false, keeping the stamps.\nIt moves the earlier Rounds and Findings unchanged under one ## History: <date> section dated today, each heading one level down, with a short parenthesized suffix when an earlier History section has that date; Rounds and Findings then start empty, and the decision lists and Residuals stay.\n"
+   },
+   "request": true
+  },
+  {
+   "name": "compose-record-ask-repeats-round-fix",
+   "scenario": "delta",
+   "args": [
+    "compose",
+    "--kind",
+    "record",
+    "--slug",
+    "delta",
+    "--pr",
+    "22"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-22",
+    "perm-alice",
+    "trunk",
+    "comments-22-r2"
+   ],
+   "expect": {
+    "rc": 0,
+    "stderr": "",
+    "stdout": "hivemind-guide-run: delta\nDocs pull request: #22\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nDesign review round 2 fix run. The round's findings and record update are comment https://github.com/acme/widgets/pull/22#issuecomment-225.\nFix each finding of that comment in the solution design, the PRD, an ADR or the UI prototype, or give it the disposition that comment names.\nThe last wave is the record wave: a hivemind:drone step with exact file scope writes docs/initiatives/delta/review-record.md for round 2, reviewed commit {{docs2}}.\nKeep the record's stamps unchanged.\n"
+   },
+   "request": true
+  },
+  {
+   "name": "compose-record-ask-round-comment-missing",
+   "scenario": "delta",
+   "args": [
+    "compose",
+    "--kind",
+    "record",
+    "--slug",
+    "delta",
+    "--pr",
+    "22"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-22",
+    "perm-alice",
+    "trunk",
+    "comments-empty"
+   ],
+   "expect": {
+    "rc": 2,
+    "stderr": "idea-to-ready-error: round-comment-missing\n",
+    "stdout": ""
+   }
+  },
+  {
+   "name": "compose-record-ask-non-writer-comment-ignored",
+   "scenario": "delta",
+   "args": [
+    "compose",
+    "--kind",
+    "record",
+    "--slug",
+    "delta",
+    "--pr",
+    "22"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-22",
+    "perm-alice",
+    "trunk",
+    "comments-22-r2-bob",
+    "perm-bob"
+   ],
+   "expect": {
+    "rc": 2,
+    "stderr": "idea-to-ready-error: round-comment-missing\n",
+    "stdout": ""
+   }
+  },
+  {
+   "name": "compose-record-ui-rereview-round-1-keeps-stamps",
+   "scenario": "beta",
+   "args": [
+    "compose",
+    "--kind",
+    "record",
+    "--slug",
+    "beta",
+    "--pr",
+    "34"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-34",
+    "perm-alice",
+    "trunk",
+    "comments-34-r1"
+   ],
+   "expect": {
+    "rc": 0,
+    "stderr": "",
+    "stdout": "hivemind-guide-run: beta\nDocs pull request: #34\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nDesign review round 1 fix run. The round's findings and record update are comment https://github.com/acme/widgets/pull/34#issuecomment-341.\nFix each finding of that comment in the solution design, the PRD, an ADR or the UI prototype, or give it the disposition that comment names.\nA fix to docs/initiatives/beta/prototype/index.html is a hivemind:changeling step with exact file scope; a fix to docs/initiatives/beta/prototype/notes.md is a hivemind:drone step with exact file scope.\nThe last wave is the record wave: a hivemind:drone step with exact file scope writes docs/initiatives/beta/review-record.md for round 1, reviewed commit {{docs3}}.\nKeep the record's stamps unchanged.\n"
+   },
+   "request": true
+  },
+  {
+   "name": "compose-record-no-run-while-reviewing",
+   "scenario": "delta",
+   "args": [
+    "compose",
+    "--kind",
+    "record",
+    "--slug",
+    "delta",
+    "--pr",
+    "21"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-21",
+    "perm-alice",
+    "trunk",
+    "comments-21-r1"
+   ],
+   "expect": {
+    "rc": 2,
+    "stderr": "idea-to-ready-error: no-record-run\n",
+    "stdout": ""
+   }
+  },
+  {
+   "name": "compose-record-no-run-on-passing-record",
+   "scenario": "delta",
+   "args": [
+    "compose",
+    "--kind",
+    "record",
+    "--slug",
+    "delta",
+    "--pr",
+    "24"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-24",
+    "perm-alice",
+    "trunk",
+    "comments-empty"
+   ],
+   "expect": {
+    "rc": 2,
+    "stderr": "idea-to-ready-error: no-record-run\n",
+    "stdout": ""
+   }
+  },
+  {
+   "name": "compose-removed-kind-round",
+   "scenario": "alpha",
+   "args": [
+    "compose",
+    "--kind",
+    "round",
+    "--slug",
+    "alpha",
+    "--pr",
+    "5"
+   ],
+   "routes": [],
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: usage\n"
+   },
+   "no_git": true,
+   "no_gh": true
+  },
+  {
+   "name": "compose-removed-kind-record-pass",
+   "scenario": "alpha",
+   "args": [
+    "compose",
+    "--kind",
+    "record-pass",
+    "--slug",
+    "alpha",
+    "--pr",
+    "5"
+   ],
+   "routes": [],
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: usage\n"
+   },
+   "no_git": true,
+   "no_gh": true
+  },
+  {
+   "name": "compose-record-takes-no-commit",
+   "scenario": "alpha",
+   "args": [
+    "compose",
+    "--kind",
+    "record",
+    "--slug",
+    "alpha",
+    "--pr",
+    "5",
+    "--commit",
+    "{{docs2}}"
+   ],
+   "routes": [],
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: usage\n"
+   },
+   "no_git": true,
+   "no_gh": true
+  },
+  {
+   "name": "compose-review-fix-takes-no-commit",
+   "scenario": "alpha",
+   "args": [
+    "compose",
+    "--kind",
+    "review-fix",
+    "--slug",
+    "alpha",
+    "--pr",
+    "5",
+    "--commit",
+    "{{docs2}}"
+   ],
+   "routes": [],
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: usage\n"
+   },
+   "no_git": true,
+   "no_gh": true
+  },
+  {
+   "name": "compose-review-fix-needs-passing-record",
+   "scenario": "alpha",
+   "args": [
+    "compose",
+    "--kind",
+    "review-fix",
+    "--slug",
+    "alpha",
+    "--pr",
+    "9"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-9",
+    "perm-alice"
+   ],
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: record-not-passed\n"
    }
   },
   {
@@ -1707,32 +2618,6 @@
     "rc": 2,
     "stdout": "",
     "stderr": "idea-to-ready-error: docs-head-moved\n"
-   }
-  },
-  {
-   "name": "compose-commit-not-in-pull-request",
-   "scenario": "alpha",
-   "args": [
-    "compose",
-    "--kind",
-    "record-pass",
-    "--slug",
-    "alpha",
-    "--pr",
-    "5",
-    "--commit",
-    "{{docs3}}"
-   ],
-   "routes": [
-    "repo-view",
-    "pr-5",
-    "perm-alice",
-    "trunk"
-   ],
-   "expect": {
-    "rc": 2,
-    "stdout": "",
-    "stderr": "idea-to-ready-error: commit-not-in-pr\n"
    }
   },
   {
@@ -1954,20 +2839,16 @@
    }
   },
   {
-   "name": "compose-round-1-ui-stamps-and-approval",
+   "name": "compose-record-ui-round-1-stamps-and-approval",
    "scenario": "beta",
    "args": [
     "compose",
     "--kind",
-    "round",
+    "record",
     "--slug",
     "beta",
     "--pr",
-    "6",
-    "--round",
-    "1",
-    "--commit",
-    "{{docs2}}"
+    "6"
    ],
    "routes": [
     "repo-view",
@@ -1984,47 +2865,16 @@
    }
   },
   {
-   "name": "compose-round-2-needs-record",
-   "scenario": "beta",
-   "args": [
-    "compose",
-    "--kind",
-    "round",
-    "--slug",
-    "beta",
-    "--pr",
-    "6",
-    "--round",
-    "2",
-    "--commit",
-    "{{docs2}}"
-   ],
-   "routes": [
-    "repo-view",
-    "pr-6",
-    "perm-alice"
-   ],
-   "expect": {
-    "rc": 2,
-    "stdout": "",
-    "stderr": "idea-to-ready-error: record-missing\n"
-   }
-  },
-  {
-   "name": "compose-round-1-skips-symlink-and-submodule",
+   "name": "compose-record-round-1-skips-symlink-and-submodule",
    "scenario": "gamma",
    "args": [
     "compose",
     "--kind",
-    "round",
+    "record",
     "--slug",
     "gamma",
     "--pr",
-    "8",
-    "--round",
-    "1",
-    "--commit",
-    "{{docs1}}"
+    "8"
    ],
    "routes": [
     "repo-view",
@@ -2042,27 +2892,29 @@
   },
   {
    "name": "comment-round-posts-marker-and-bytes",
-   "scenario": "alpha",
+   "scenario": "delta",
    "args": [
     "comment",
     "--kind",
     "round",
     "--slug",
-    "alpha",
+    "delta",
     "--pr",
-    "5",
-    "--round",
-    "1",
+    "21",
     "--commit",
-    "{{docs1}}",
+    "{{docs2}}",
+    "--clean",
+    "yes",
     "--body-file",
     ".hivemind/guide-inputs-findings.json"
    ],
    "routes": [
     "repo-view",
-    "pr-5",
+    "trunk",
+    "pr-21",
     "perm-alice",
-    "comment-5"
+    "comments-21-r1",
+    "comment-21"
    ],
    "inputs": {
     ".hivemind/guide-inputs-findings.json": "Finding F1: fix the typo.\n",
@@ -2070,11 +2922,11 @@
    },
    "expect": {
     "rc": 0,
-    "stdout": "comment=https://github.com/acme/widgets/pull/5#issuecomment-900\n",
+    "stdout": "comment=https://github.com/acme/widgets/pull/21#issuecomment-921\n",
     "stderr": ""
    },
    "bodies": [
-    "<!-- hivemind-guide: round slug=alpha round=1 commit={{docs1}} -->\nFinding F1: fix the typo.\n"
+    "<!-- hivemind-guide: round slug=delta round=2 commit={{docs2}} clean=yes -->\nFinding F1: fix the typo.\n"
    ],
    "files_absent": [
     ".hivemind/guide-inputs-findings.json"
@@ -2085,27 +2937,27 @@
   },
   {
    "name": "comment-round-commit-not-in-pull-request",
-   "scenario": "alpha",
+   "scenario": "delta",
    "args": [
     "comment",
     "--kind",
     "round",
     "--slug",
-    "alpha",
+    "delta",
     "--pr",
-    "5",
-    "--round",
-    "1",
+    "21",
     "--commit",
     "{{docs3}}",
+    "--clean",
+    "no",
     "--body-file",
     ".hivemind/guide-inputs-findings.json"
    ],
    "routes": [
     "repo-view",
-    "pr-5",
+    "pr-21",
     "perm-alice",
-    "comment-5"
+    "comment-21"
    ],
    "inputs": {
     ".hivemind/guide-inputs-findings.json": "Finding F1.\n"
@@ -2114,6 +2966,128 @@
     "rc": 2,
     "stdout": "",
     "stderr": "idea-to-ready-error: commit-not-in-pr\n"
+   },
+   "gh_lacks": [
+    "<pr><comment>"
+   ],
+   "files_present": [
+    ".hivemind/guide-inputs-findings.json"
+   ]
+  },
+  {
+   "name": "comment-confirm-posts-marker",
+   "scenario": "delta",
+   "args": [
+    "comment",
+    "--kind",
+    "round",
+    "--slug",
+    "delta",
+    "--pr",
+    "26",
+    "--commit",
+    "{{docs7}}",
+    "--clean",
+    "no",
+    "--body-file",
+    ".hivemind/guide-inputs-confirm.json"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-26",
+    "perm-alice",
+    "comments-empty",
+    "comment-26"
+   ],
+   "inputs": {
+    ".hivemind/guide-inputs-confirm.json": "Finding C1: a new gap.\n"
+   },
+   "expect": {
+    "rc": 0,
+    "stdout": "comment=https://github.com/acme/widgets/pull/26#issuecomment-926\n",
+    "stderr": ""
+   },
+   "bodies": [
+    "<!-- hivemind-guide: confirm slug=delta commit={{docs7}} clean=no -->\nFinding C1: a new gap.\n"
+   ],
+   "files_absent": [
+    ".hivemind/guide-inputs-confirm.json"
+   ]
+  },
+  {
+   "name": "comment-round-no-review-pending",
+   "scenario": "delta",
+   "args": [
+    "comment",
+    "--kind",
+    "round",
+    "--slug",
+    "delta",
+    "--pr",
+    "24",
+    "--commit",
+    "{{docs5}}",
+    "--clean",
+    "yes",
+    "--body-file",
+    ".hivemind/guide-inputs-findings.json"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-24",
+    "perm-alice",
+    "comments-empty"
+   ],
+   "inputs": {
+    ".hivemind/guide-inputs-findings.json": "Finding F1.\n"
+   },
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: no-review-pending\n"
+   },
+   "gh_lacks": [
+    "<pr><comment>"
+   ],
+   "files_present": [
+    ".hivemind/guide-inputs-findings.json"
+   ]
+  },
+  {
+   "name": "comment-round-commit-before-record",
+   "scenario": "delta",
+   "args": [
+    "comment",
+    "--kind",
+    "round",
+    "--slug",
+    "delta",
+    "--pr",
+    "21",
+    "--commit",
+    "{{docs1}}",
+    "--clean",
+    "no",
+    "--body-file",
+    ".hivemind/guide-inputs-findings.json"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "pr-21",
+    "perm-alice",
+    "comments-21-r1",
+    "comment-21"
+   ],
+   "inputs": {
+    ".hivemind/guide-inputs-findings.json": "Finding F1.\n"
+   },
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: commit-before-record\n"
    },
    "gh_lacks": [
     "<pr><comment>"

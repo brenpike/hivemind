@@ -32,10 +32,11 @@ SKILL_FILE="$REPO_ROOT/plugin/skills/idea-to-ready/SKILL.md"
 RC_LIB="$REPO_ROOT/plugin/skills/_shared/readiness-check.sh"
 RV_LIB="$REPO_ROOT/plugin/skills/_shared/record-verify.sh"
 SD_LIB="$REPO_ROOT/plugin/skills/_shared/stage-derivation.sh"
+DR_ENGINE="$REPO_ROOT/plugin/skills/design-review/scripts/design-review.sh"
 CASES="$REPO_ROOT/tests/idea-to-ready/cases.json"
 ROUTES="$REPO_ROOT/tests/idea-to-ready/gh-routes.json"
 
-for required_file in "$ENGINE" "$SKILL_FILE" "$RC_LIB" "$RV_LIB" "$SD_LIB" "$CASES" "$ROUTES"; do
+for required_file in "$ENGINE" "$SKILL_FILE" "$RC_LIB" "$RV_LIB" "$SD_LIB" "$DR_ENGINE" "$CASES" "$ROUTES"; do
   [ -f "$required_file" ] || { echo "FAIL: file under test missing: $required_file" >&2; exit 2; }
 done
 command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite" >&2; exit 2; }
@@ -61,7 +62,7 @@ setup_fail() { echo "FAIL: set-up: $1" >&2; exit 2; }
 jq -e 'type == "object" and (keys == ["cases", "docs", "scenarios"])
   and all(.cases[]; (.name | type) == "string" and (.scenario | type) == "string"
     and (.args | type) == "array" and (.routes | type) == "array" and (.expect | type) == "object"
-    and (keys - ["args", "bodies", "clone", "compare", "compare_tail", "cwd", "detach", "dirty", "expect",
+    and (keys - ["args", "bodies", "clone", "compare", "compare_round", "compare_tail", "cwd", "detach", "dirty", "expect",
                  "files_absent", "files_present", "gh_has", "gh_lacks", "inputs", "name", "no_gh", "no_git",
                  "request", "routes", "scenario", "staged", "stdout_lacks", "symlinks"] == []))' "$CASES" >/dev/null 2>&1 \
   || setup_fail "cases file missing or off its shape: $CASES"
@@ -448,6 +449,46 @@ run_case() {
   fi
   if [ "$(case_field "$index" '.request // false')" = true ]; then
     check_request "$name" "$slug" "$dir/out"
+  fi
+  if [ "$(case_field "$index" '.compare_round // false')" = true ]; then
+    check_round "$name" "$slug" "$dir"
+  fi
+}
+
+# round_wants <action> <reason> <round> <review_fix>: prints the extended regex one line of
+# design-review.sh round's output must match for that record action, or nothing when none maps.
+round_wants() {
+  case "$1:$2:$4" in
+    review::no) printf '^next=%s$\n' "$3" ;;
+    review::yes) printf '%s\n' '^(stop=passed|stop=cap-reached|next=[0-9]+)$' ;;
+    stop:cap-reached:) printf '%s\n' '^stop=cap-reached$' ;;
+    stop:record-malformed:) printf '%s\n' '^record=malformed$' ;;
+    ask:open-findings: | stop:open-findings:) printf '%s\n' '^stop=open-findings$' ;;
+  esac
+}
+
+# check_round <case> <slug> <case-dir>: runs design-review.sh round at the reviewed commit in the
+# case's clone and asserts its line agrees with the engine's record action.
+check_round() {
+  local out="$3/out" reviewed action reason round review_fix want got
+  reviewed="$(sed -n 's/^reviewed=//p' "$out")"
+  action="$(sed -n 's/^action=//p' "$out")"
+  reason="$(sed -n 's/^reason=//p' "$out")"
+  round="$(sed -n 's/^round=//p' "$out")"
+  review_fix="$(sed -n 's/^review_fix=//p' "$out")"
+  want="$(round_wants "$action" "$reason" "$round" "$review_fix")"
+  if [ -z "$want" ]; then
+    failed "$1:round" "no design-review round line maps to action=$action reason=$reason"
+    return 0
+  fi
+  got="$(cd "$3/clone" && bash "$DR_ENGINE" round --commit "$reviewed" --slug "$2" 2>&1)" || {
+    failed "$1:round" "design-review.sh round failed: $got"
+    return 0
+  }
+  if grep -qE -- "$want" <<<"$got"; then
+    pass "$1:round" "design-review.sh round agrees: $(tail -n 1 <<<"$got")"
+  else
+    failed "$1:round" "design-review.sh round: $(tr '\n' ' ' <<<"$got") want $want"
   fi
 }
 

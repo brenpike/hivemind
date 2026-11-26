@@ -16,10 +16,9 @@
 #   idea-to-ready.sh seed --slug <slug> --title-file <inputs> [--body-file <inputs>]
 #   idea-to-ready.sh standalone --title-file <inputs> --body-file <inputs>
 #   idea-to-ready.sh reviewed --slug <slug> --pr <n>
-#   idea-to-ready.sh compose --kind <kind> --slug <slug> --pr <n>|none [--commit <commit>]
-#                            [--round <n>]
+#   idea-to-ready.sh compose --kind <kind> --slug <slug> --pr <n>|none
 #   idea-to-ready.sh comment --kind round|approval|review|veto --slug <slug> --pr <n>
-#                            [--round <n>] [--commit <commit>] [--body-file <inputs>]
+#                            [--commit <commit>] [--clean yes|no] [--body-file <inputs>]
 #   idea-to-ready.sh approval --slug <slug> --pr <n>
 #   idea-to-ready.sh redraft --slug <slug> --pr <n>
 #   idea-to-ready.sh ready --slug <slug> --pr <n>
@@ -61,10 +60,35 @@
 # --arg. Every git call carries --no-replace-objects.
 #
 # COMMENT MARKERS: the first line of each comment the script posts, built by the script:
-#   <!-- hivemind-guide: round slug=<slug> round=<n> commit=<commit> -->
+#   <!-- hivemind-guide: round slug=<slug> round=<n> commit=<commit> clean=yes|no -->
+#   <!-- hivemind-guide: confirm slug=<slug> commit=<commit> clean=yes|no -->
 #   <!-- hivemind-guide: approval slug=<slug> commit=<commit> -->
 #   <!-- hivemind-guide: review slug=<slug> commit=<commit> -->
 #   <!-- hivemind-guide: veto slug=<slug> commit=<commit> -->
+#
+# RECORD ACTION: the one next step of the review record at the head, first match wins. Every walk
+# is first-parent. W is the newest commit after the merge-base whose record entry differs from its
+# first parent's, else the merge-base. A pending marker of a kind (and round) is the latest counting
+# one whose commit is the head or its ancestor and W or its descendant. S is the newest commit from
+# the head down to the merge-base, inclusive, where each stamp's Document existence blob equals it.
+# A record with verdict pass that fails the pass rule fails.
+#   a missing: a pending round-1 marker gives action=launch run=fix round=1, else action=review
+#     round=1 review_fix=no previous=none.
+#   b malformed: action=stop reason=record-malformed.
+#   c passing, and hivemind_record_verify <head> <merge-base> names no failure of it: action=none.
+#   d passing (so stale), or review fix pending (W is not the merge-base, the record at W's first
+#     parent passes and the record fails with its rounds): a pending confirm marker gives
+#     action=launch run=restamp (clean=yes) or run=reset (clean=no); else action=review
+#     round=confirm review_fix=yes previous=<S>, or action=stop reason=stamps-unmatched.
+#   e rounds 3 or more: action=stop reason=cap-reached.
+#   f an open count above 0: action=ask reason=open-findings round=<rounds>, or with rounds 0
+#     action=stop reason=open-findings.
+#   g rounds n: a pending round-(n+1) marker gives action=launch run=pass round=<n+1> when it is
+#     clean=yes and n+1 is 2 or more, else run=fix; else action=review round=<n+1> review_fix=no
+#     previous=none for n 0, else the commit of the latest counting round-n marker that is the head
+#     or its ancestor, or action=stop reason=round-comment-missing.
+# Its lines are key=value, one per set key, in the order action, run, reason, round, review_fix,
+# previous.
 #
 # OUTPUT CONTRACT (stdout is buffered: a failure prints none of it)
 #   list     Searches open issues whose body holds `hivemind-initiative:`. For each distinct slug
@@ -92,8 +116,7 @@
 #   reviewed Reads the trunk and the docs pull request head. Prints head=dirty when
 #            `git status --porcelain`, untracked files included, is not empty, else head=moved
 #            when HEAD is not the head commit, and exits 1. Else prints reviewed=<head commit>,
-#            merge_base=<merge-base of head and trunk> and previous=<commit>, the commit of the
-#            latest round comment of the highest round, or previous=none. Exit 0.
+#            merge_base=<merge-base of head and trunk>, then the RECORD ACTION's lines. Exit 0.
 #   compose  Prints the request of one guide-launched standard-delivery run. Line 1 is exactly
 #            `hivemind-guide-run: <slug>`; line 2 is exactly `Docs pull request: #<n>` or
 #            `Docs pull request: none`, and no other line holds `Docs pull request:`. #<n> must
@@ -101,8 +124,8 @@
 #            refused docs-pr-exists while a counting docs pull request is open, and is taken
 #            only by the prototype-build, design and close-out kinds (pr-required): the run then
 #            opens the docs pull request, the close-out one after the first has merged. Line 3 names
-#            hivemind:standard-delivery on the script engine with draft true. Only record-pass
-#            adds `Launch with local_review false.`. Then the kind's fixed lines:
+#            hivemind:standard-delivery on the script engine with draft true. Only record's pass
+#            and restamp add `Launch with local_review false.`. Then the kind's fixed lines:
 #              prototype-build   a hivemind:changeling step for prototype/index.html, then a
 #                                hivemind:drone step for prototype/notes.md with no Verdict.
 #              prototype-refine  the approval comment URL (kept, else approval-missing or
@@ -112,27 +135,34 @@
 #                                one drone step writing the Verdict.
 #              design            a drone step for the solution design and ADRs; on a UI
 #                                initiative both prototype files and the approval URL.
-#              round             --round and --commit; the URL of the latest round comment of
-#                                that round (round-comment-missing), whose commit must be
-#                                --commit (round-commit-mismatch); on a UI initiative the
-#                                prototype file owners, and for round 1 the approval URL, copied
-#                                under ## Decisions asked; the record wave last, naming the
-#                                reviewed commit.
-#              record-pass       --commit; only the record wave, verdict pass, reviewed commit.
-#              review-fix        --commit; fix waves, then the record wave setting verdict fail
-#                                and keeping stamps, rounds and open counts.
+#              record            the RECORD ACTION's run, else no-record-run. fix and ask: the
+#                                round's comment URL (ask: the latest round-n one that is the
+#                                head or its ancestor, else round-comment-missing), on a UI
+#                                initiative the prototype file owners, the record wave last for
+#                                round n at that comment's commit; with no record at the head
+#                                it stamps and, on a UI initiative, copies the approval URL
+#                                under ## Decisions asked. pass, restamp and reset are only the
+#                                record wave: pass sets verdict pass, clean_round true, rounds
+#                                n and round n under Rounds; restamp sets verdict pass,
+#                                clean_round true and appends the confirming pass; both stamp
+#                                the marker's commit. reset sets verdict fail, rounds 0, open
+#                                counts 0 and clean_round false, keeps the stamps and moves
+#                                Rounds and Findings under ## History: <date>.
+#              review-fix        fix waves, then the record wave setting verdict fail and
+#                                keeping stamps, rounds and open counts; the record at the head
+#                                must meet the pass rule (record-not-passed).
 #              close-out         **Status:** delivered and ## As-built deltas; no record.
-#            The prototype kinds need the PRD's `**UI:** yes` (not-ui). A stamping record wave,
-#            record-pass or a round with no record at the head (round 1 only, else
-#            record-missing), lists `<path> <blob>` per stamp read at --commit by the Document
-#            existence test: the PRD, the solution design, both UI prototype files when the PRD
-#            says yes at --commit, and each ADR added or modified from the merge-base of --commit
-#            and the trunk to --commit; a missing path, a symlink or a submodule included, is not
-#            listed. Any other record wave says to keep the stamps. --commit must be the head or
-#            its ancestor (commit-not-in-pr). The request holds no comment text. Exit 0.
+#            The prototype kinds need the PRD's `**UI:** yes` (not-ui). A stamping record wave
+#            lists `<path> <blob>` per stamp read at its commit by the Document existence test:
+#            the PRD, the solution design, both UI prototype files when the PRD says yes there,
+#            and each ADR added or modified from the merge-base of that commit and the trunk to
+#            it; a missing path, a symlink or a submodule included, is not listed. Any other
+#            record wave says to keep the stamps. The request holds no comment text. Exit 0.
 #   comment  Posts one comment with `gh pr comment <n> --body-file`: the marker line, then the
-#            inputs file's bytes. round needs --round, --commit (the head or its ancestor) and
-#            --body-file; approval and review need --body-file and mark the head commit; veto
+#            inputs file's bytes. round needs --commit (the head or its ancestor, commit-not-in-pr;
+#            W or its descendant, commit-before-record), --clean and --body-file, and marks the
+#            RECORD ACTION's review: confirm, or round with its round; any other action is
+#            no-review-pending. approval and review need --body-file and mark the head commit; veto
 #            takes no flag but the pull request and posts the record's `## Decisions taken,
 #            listed for veto` section at the head, its heading line then its body, or `None` when
 #            empty (record-missing when there is no record). Prints comment=<url>, or
@@ -159,7 +189,7 @@
 #   unparseable-record-verify, missing-stage-derivation, unparseable-stage-derivation,
 #   missing-containment, unparseable-containment      a shared library is missing or unparseable
 #   usage            unknown subcommand or flag, a repeated flag, a missing value, a malformed slug,
-#                    number or kind, or a flag the subcommand or kind does not take
+#                    number, kind or --clean value, or a flag the subcommand or kind does not take
 #   jq-missing, git-missing, gh-missing               a tool is not on PATH
 #   not-a-checkout   not inside a git work tree
 #   commit-malformed a <commit> is not 40 or 64 lowercase hex (no git call)
@@ -173,7 +203,8 @@
 #   git-failed       a git call or a document read failed
 #   not-docs-pr, not-draft, docs-pr-exists, docs-head-moved, pr-required
 #   seed-exists, prd-missing, prd-ui-invalid, not-ui, approval-missing, approval-stale,
-#   not-folded, round-comment-missing, round-commit-mismatch, commit-not-in-pr, record-missing
+#   not-folded, round-comment-missing, commit-not-in-pr, commit-before-record, record-missing,
+#   record-not-passed, no-record-run, no-review-pending
 #   inputs-path      an inputs path fails hivemind_inputs_path_problem
 #   inputs-missing   an inputs file does not exist
 #   inputs-outside   an inputs file resolves outside the checkout
@@ -230,7 +261,23 @@ FETCHED=""
 COMMENT_ITEMS=""
 MARKER_COMMIT=""
 MARKER_URL=""
-MARKER_ROUND=""
+MARKER_CLEAN=""
+MARKER_LINES=""
+CHAIN_LINES=""
+RECORD_LINE=""
+RECORD_HEAD=""
+RECORD_STAMPS=""
+RECORD_WRITE=""
+RECORD_WRITE_PARENT=""
+STAMP_MATCH=""
+ACTION=""
+ACTION_RUN=""
+ACTION_REASON=""
+ACTION_ROUND=""
+ACTION_REVIEW_FIX=""
+ACTION_PREVIOUS=""
+ACTION_MARKER_COMMIT=""
+ACTION_MARKER_URL=""
 APPROVAL_STATE=""
 APPROVAL_FOLDED=""
 OUT=""
@@ -296,8 +343,11 @@ def ir_permission:
     (if .permission == "admin" or .permission == "write" then "true" else "false" end)
   else "gh-failed" end;
 def ir_marker:
-  capture("\\A<!-- hivemind-guide: (?<kind>round|approval|review|veto) slug=(?<slug>"
-    + rc_slug + ")( round=(?<round>[1-9][0-9]{0,8}))? commit=(?<commit>[0-9a-f]{40}|[0-9a-f]{64}) -->\\z");
+  capture("\\A<!-- hivemind-guide: (?<kind>round|confirm|approval|review|veto) slug=(?<slug>"
+    + rc_slug + ")( round=(?<round>[1-9][0-9]{0,8}))? commit=(?<commit>[0-9a-f]{40}|[0-9a-f]{64})"
+    + "( clean=(?<clean>yes|no))? -->\\z")
+  | select((.kind == "round") == (.round != null)
+           and ((.kind == "round" or .kind == "confirm") == (.clean != null)));
 def ir_comment_url:
   ir_text and startswith("https://github.com/" + $repo + "/pull/" + $number + "#issuecomment-")
   and test("#issuecomment-[1-9][0-9]*\\z");
@@ -314,16 +364,25 @@ def ir_comments:
                              and (.createdAt | ir_time) and (.author | ir_user))
                     | . as $c
                     | [.body | rc_lines | .[0] // "" | ir_marker] | .[0] // empty
-                    | select(.slug == $slug and ((.kind == "round") == (.round != null)))
+                    | select(.slug == $slug)
                     | {kind, round: (if .round == null then null else (.round | tonumber) end),
-                       commit, url: $c.url, created: $c.createdAt, login: $c.author.login}]}
+                       commit, clean, url: $c.url, created: $c.createdAt, login: $c.author.login}]}
         | tojson end);
+def ir_pass_rule:
+  .verdict == "pass" and all(.open[]; . == 0) and .clean_round == true and .rounds >= 2 and .rounds <= 3;
 def ir_record:
   [.texts | rc_front_matter]
   | if length == 0 then "malformed"
-    elif (.[0] | .verdict == "pass" and all(.open[]; . == 0) and .clean_round == true
-          and .rounds >= 2 and .rounds <= 3) then "pass"
+    elif (.[0] | ir_pass_rule) then "pass"
     else "fail" end;
+def ir_record_state:
+  [.texts | rc_front_matter]
+  | if length == 0 then "malformed"
+    else .[0]
+    | ([(if ir_pass_rule then "pass" else "fail" end), .verdict, ([.rounds, 99] | min | tostring),
+        ([([.open[]] | add), 999999] | min | tostring), (.clean_round | tostring)] | join(" ")),
+      (.stamps[] | .path + " " + .blob)
+    end;
 def ir_veto:
   [(.texts | rc_parse | rc_section(2; "Decisions taken, listed for veto")) // [] | .[] | .text] as $lines
   | [range(0; $lines | length) | select($lines[.] | rc_blank | not)] as $filled
@@ -554,15 +613,12 @@ read_comments() {
   done
 }
 
-# latest_marker <kind> [<round>|highest]: picks, from COMMENT_ITEMS, the latest comment of <kind>
-# (of round <round>, or of the highest round) whose author is a writer, and sets MARKER_COMMIT,
-# MARKER_URL and MARKER_ROUND, each empty when there is none.
-latest_marker() {
-  local kind="$1" round="${2-}" logins="" login="" writers="" picked=""
+# marker_lines <kind> [<round>]: sets MARKER_LINES to one `<commit>\t<url>\t<clean>` line per
+# comment of COMMENT_ITEMS of <kind> (of round <round> when given) whose author is a writer,
+# latest createdAt first.
+marker_lines() {
+  local kind="$1" round="${2-}" logins="" login="" writers=""
   local -a login_list=()
-  MARKER_COMMIT=""
-  MARKER_URL=""
-  MARKER_ROUND=""
   logins="$(printf '%s' "$COMMENT_ITEMS" | jq -r --arg kind "$kind" 'select(.kind == $kind) | .login' \
     2>/dev/null | LC_ALL=C sort -u)" || idea_to_ready_fail gh-failed
   mapfile -t login_list <<<"$logins"
@@ -574,17 +630,48 @@ latest_marker() {
       fi
     fi
   done
-  picked="$(printf '%s' "$COMMENT_ITEMS" | jq -rs --arg kind "$kind" --arg round "$round" \
+  MARKER_LINES="$(printf '%s' "$COMMENT_ITEMS" | jq -rs --arg kind "$kind" --arg round "$round" \
     --arg writers "$writers" '
     ($writers | split("\n")) as $names
     | [.[] | select(.kind == $kind and (.login as $l | $names | index([$l]) != null))
-       | select($round == "" or $round == "highest" or (.round | tostring) == $round)]
-    | if $round == "highest" then sort_by(.round, .created) else sort_by(.created) end
-    | last // empty | "\(.commit)\t\(.url)\t\(.round // "")"' 2>/dev/null)" \
+       | select($round == "" or (.round | tostring) == $round)]
+    | sort_by(.created) | reverse | .[] | "\(.commit)\t\(.url)\t\(.clean // "-")"' 2>/dev/null)" \
     || idea_to_ready_fail gh-failed
-  if [ -n "$picked" ]; then
-    IFS=$'\t' read -r MARKER_COMMIT MARKER_URL MARKER_ROUND <<<"$picked"
+}
+
+# latest_marker <kind>: sets MARKER_COMMIT and MARKER_URL from the latest counting comment of
+# <kind>, each empty when there is none.
+latest_marker() {
+  MARKER_COMMIT=""
+  MARKER_URL=""
+  marker_lines "$1"
+  if [ -n "$MARKER_LINES" ]; then
+    IFS=$'\t' read -r MARKER_COMMIT MARKER_URL _ <<<"${MARKER_LINES%%$'\n'*}"
   fi
+}
+
+# pick_marker <kind> <round>|'' <after>|'': sets MARKER_COMMIT, MARKER_URL and MARKER_CLEAN from the
+# latest counting comment of <kind> (and round) whose commit is HEAD_COMMIT or its ancestor and,
+# when <after> is given, <after> or its descendant; each empty when there is none.
+pick_marker() {
+  local line="" commit="" url="" clean=""
+  local -a marker_list=()
+  MARKER_COMMIT=""
+  MARKER_URL=""
+  MARKER_CLEAN=""
+  marker_lines "$1" "$2"
+  mapfile -t marker_list <<<"$MARKER_LINES"
+  for line in "${marker_list[@]}"; do
+    if [ -n "$line" ]; then
+      IFS=$'\t' read -r commit url clean <<<"$line"
+      if is_ancestor "$commit" "$HEAD_COMMIT" && { [ -z "$3" ] || is_ancestor "$3" "$commit"; }; then
+        MARKER_COMMIT="$commit"
+        MARKER_URL="$url"
+        MARKER_CLEAN="$clean"
+        return 0
+      fi
+    fi
+  done
 }
 
 # read_doc_filter <commit> <path> <filter>: streams the line <path>, the document's bytes and its
@@ -630,6 +717,264 @@ read_record() {
 merge_base_of() {
   MERGE_BASE="$(git_run merge-base "$1" "$2")" || idea_to_ready_fail git-failed
   hivemind_readiness_commit_ok "$MERGE_BASE" 2>/dev/null || idea_to_ready_fail git-failed
+}
+
+# record_state <commit>: sets RECORD_LINE to missing, malformed or `<pass|fail> <verdict> <rounds>
+# <open> <clean_round>` for the review record at <commit>, the first word its pass rule result, and
+# RECORD_STAMPS to its `<path> <blob>` stamp lines.
+record_state() {
+  local output="" pattern='^(pass|fail) (pass|fail) (0|[123456789][0123456789]*) (0|[123456789][0123456789]*) (true|false)$'
+  output="$(read_doc_filter "$1" "docs/initiatives/$SLUG/review-record.md" ir_record_state)" \
+    || idea_to_ready_fail git-failed
+  RECORD_LINE="${output%%$'\n'*}"
+  RECORD_STAMPS=""
+  if [ "$RECORD_LINE" != "$output" ]; then
+    RECORD_STAMPS="${output#*$'\n'}"
+  fi
+  case "$RECORD_LINE" in
+    missing | malformed) ;;
+    *) [[ "$RECORD_LINE" =~ $pattern ]] || idea_to_ready_fail git-failed ;;
+  esac
+}
+
+# first_parent_chain: sets CHAIN_LINES to one `<commit> <first parent>` line per commit of the
+# first-parent chain from HEAD_COMMIT back to MERGE_BASE, MERGE_BASE excluded, newest first; a root
+# commit's line has no parent.
+first_parent_chain() {
+  local output="" line="" lines=""
+  local -a output_lines=() fields=()
+  output="$(git_run rev-list --first-parent --parents "$HEAD_COMMIT" "^$MERGE_BASE")" \
+    || idea_to_ready_fail git-failed
+  mapfile -t output_lines <<<"$output"
+  for line in "${output_lines[@]}"; do
+    if [ -n "$line" ]; then
+      read -r -a fields <<<"$line"
+      lines+="${fields[0]}${fields[1]:+ ${fields[1]}}"$'\n'
+    fi
+  done
+  CHAIN_LINES="$lines"
+}
+
+# record_write_commit: sets RECORD_WRITE to the newest commit of CHAIN_LINES whose review record
+# tree entry differs from its first parent's, else MERGE_BASE, and RECORD_WRITE_PARENT to that
+# commit's first parent (empty for MERGE_BASE).
+record_write_commit() {
+  local path="docs/initiatives/$SLUG/review-record.md" line="" commit="" parent="" entry="" parent_entry=""
+  local -a chain=()
+  RECORD_WRITE="$MERGE_BASE"
+  RECORD_WRITE_PARENT=""
+  mapfile -t chain <<<"$CHAIN_LINES"
+  for line in "${chain[@]}"; do
+    if [ -n "$line" ]; then
+      read -r commit parent <<<"$line"
+      entry="$(git_run ls-tree --full-tree "$commit" -- "$path")" || idea_to_ready_fail git-failed
+      parent_entry=""
+      if [ -n "$parent" ]; then
+        parent_entry="$(git_run ls-tree --full-tree "$parent" -- "$path")" || idea_to_ready_fail git-failed
+      fi
+      if [ "$entry" != "$parent_entry" ]; then
+        RECORD_WRITE="$commit"
+        RECORD_WRITE_PARENT="$parent"
+        return 0
+      fi
+    fi
+  done
+}
+
+# stamp_match_commit: sets STAMP_MATCH to the newest commit of CHAIN_LINES, then MERGE_BASE, at
+# which each RECORD_STAMPS path passes the Document existence test with its stamped blob, else
+# empty.
+stamp_match_commit() {
+  local line="" commit="" path="" blob="" found="" entry_rc=0 matched=1
+  local -a commits=() stamp_list=() chain=()
+  mapfile -t chain <<<"$CHAIN_LINES"
+  for line in "${chain[@]}"; do
+    if [ -n "$line" ]; then
+      commits+=("${line%% *}")
+    fi
+  done
+  commits+=("$MERGE_BASE")
+  mapfile -t stamp_list <<<"$RECORD_STAMPS"
+  STAMP_MATCH=""
+  for commit in "${commits[@]}"; do
+    matched=1
+    for line in "${stamp_list[@]}"; do
+      if [ -n "$line" ]; then
+        path="${line% *}"
+        blob="${line##* }"
+        entry_rc=0
+        found="$(hivemind_doc_entry "$commit" "$path" 2>/dev/null)" || entry_rc=$?
+        [ "$entry_rc" -le 1 ] || idea_to_ready_fail git-failed
+        if [ "$entry_rc" -ne 0 ] || [ "$found" != "$blob" ]; then
+          matched=0
+          break
+        fi
+      fi
+    done
+    if [ "$matched" -eq 1 ]; then
+      STAMP_MATCH="$commit"
+      return 0
+    fi
+  done
+}
+
+# set_launch <run> <round>|'': sets the launch action of the picked marker.
+set_launch() {
+  ACTION=launch
+  ACTION_RUN="$1"
+  ACTION_ROUND="$2"
+  ACTION_MARKER_COMMIT="$MARKER_COMMIT"
+  ACTION_MARKER_URL="$MARKER_URL"
+}
+
+# set_review <round> <review_fix> <previous>: sets the review action.
+set_review() {
+  ACTION=review
+  ACTION_ROUND="$1"
+  ACTION_REVIEW_FIX="$2"
+  ACTION_PREVIOUS="$3"
+}
+
+# set_stop <reason>: sets the stop action.
+set_stop() {
+  ACTION=stop
+  ACTION_REASON="$1"
+}
+
+# stale_record: returns 0 when hivemind_record_verify <head> <merge-base> names SLUG's record.
+stale_record() {
+  local verify="" verify_rc=0 record_path="docs/initiatives/$SLUG/review-record.md"
+  verify="$(hivemind_record_verify "$HEAD_COMMIT" "$MERGE_BASE" 2>/dev/null)" || verify_rc=$?
+  case "$verify_rc" in
+    0) return 1 ;;
+    1) ;;
+    *) idea_to_ready_fail git-failed ;;
+  esac
+  case $'\n'"$verify"$'\n' in
+    *$'\n'"record-verify-failed: $record_path"$'\n'*) return 0 ;;
+  esac
+  return 1
+}
+
+# review_fix_pending <rounds>: returns 0 when RECORD_WRITE is not MERGE_BASE and the record at its
+# first parent meets the pass rule with <rounds> rounds.
+review_fix_pending() {
+  local passes="" verdict="" rounds=""
+  if [ "$RECORD_WRITE" = "$MERGE_BASE" ] || [ -z "$RECORD_WRITE_PARENT" ]; then
+    return 1
+  fi
+  record_state "$RECORD_WRITE_PARENT"
+  case "$RECORD_LINE" in
+    missing | malformed) return 1 ;;
+  esac
+  read -r passes verdict rounds _ <<<"$RECORD_LINE"
+  [ "$passes" = pass ] && [ "$rounds" = "$1" ]
+}
+
+# record_action: sets ACTION and its fields by the RECORD ACTION rules of the header, first match
+# wins. Needs HEAD_COMMIT, MERGE_BASE and COMMENT_ITEMS.
+record_action() {
+  local passes="" verdict="" rounds="" open="" clean="" head_stamps="" next=0
+  ACTION=""
+  ACTION_RUN=""
+  ACTION_REASON=""
+  ACTION_ROUND=""
+  ACTION_REVIEW_FIX=""
+  ACTION_PREVIOUS=""
+  ACTION_MARKER_COMMIT=""
+  ACTION_MARKER_URL=""
+  first_parent_chain
+  record_write_commit
+  record_state "$HEAD_COMMIT"
+  RECORD_HEAD="$RECORD_LINE"
+  case "$RECORD_LINE" in
+    missing)
+      pick_marker round 1 "$RECORD_WRITE"
+      if [ -n "$MARKER_COMMIT" ]; then
+        set_launch fix 1
+      else
+        set_review 1 no none
+      fi
+      return 0
+      ;;
+    malformed)
+      set_stop record-malformed
+      return 0
+      ;;
+  esac
+  read -r passes verdict rounds open clean <<<"$RECORD_LINE"
+  head_stamps="$RECORD_STAMPS"
+  if [ "$passes" = pass ] && ! stale_record; then
+    ACTION=none
+    return 0
+  fi
+  if [ "$passes" = pass ] || review_fix_pending "$rounds"; then
+    pick_marker confirm '' "$RECORD_WRITE"
+    if [ "$MARKER_CLEAN" = yes ]; then
+      set_launch restamp ''
+    elif [ "$MARKER_CLEAN" = no ]; then
+      set_launch reset ''
+    else
+      RECORD_STAMPS="$head_stamps"
+      stamp_match_commit
+      if [ -n "$STAMP_MATCH" ]; then
+        set_review confirm yes "$STAMP_MATCH"
+      else
+        set_stop stamps-unmatched
+      fi
+    fi
+    return 0
+  fi
+  if [ "$rounds" -ge 3 ]; then
+    set_stop cap-reached
+    return 0
+  fi
+  if [ "$open" -gt 0 ]; then
+    if [ "$rounds" -ge 1 ]; then
+      ACTION=ask
+      ACTION_REASON=open-findings
+      ACTION_ROUND="$rounds"
+    else
+      set_stop open-findings
+    fi
+    return 0
+  fi
+  next=$((rounds + 1))
+  pick_marker round "$next" "$RECORD_WRITE"
+  if [ -n "$MARKER_COMMIT" ]; then
+    if [ "$MARKER_CLEAN" = yes ] && [ "$next" -ge 2 ]; then
+      set_launch pass "$next"
+    else
+      set_launch fix "$next"
+    fi
+    return 0
+  fi
+  if [ "$rounds" -eq 0 ]; then
+    set_review "$next" no none
+    return 0
+  fi
+  pick_marker round "$rounds" ''
+  if [ -z "$MARKER_COMMIT" ]; then
+    set_stop round-comment-missing
+    return 0
+  fi
+  set_review "$next" no "$MARKER_COMMIT"
+}
+
+# action_lines: appends one key=value line per set ACTION field to OUT, in the order action, run,
+# reason, round, review_fix, previous.
+action_lines() {
+  local key="" value=""
+  local -a pairs=(action "$ACTION" run "$ACTION_RUN" reason "$ACTION_REASON" round "$ACTION_ROUND"
+    review_fix "$ACTION_REVIEW_FIX" previous "$ACTION_PREVIOUS")
+  while [ "${#pairs[@]}" -gt 0 ]; do
+    key="${pairs[0]}"
+    value="${pairs[1]}"
+    pairs=("${pairs[@]:2}")
+    if [ -n "$value" ]; then
+      OUT+="$key=$value"$'\n'
+    fi
+  done
 }
 
 # approval_state: sets APPROVAL_STATE (none, stale or kept), APPROVAL_FOLDED (yes or no when kept)
@@ -996,8 +1341,10 @@ run_reviewed() {
   fi
   merge_base_of "$HEAD_COMMIT" "$TRUNK_COMMIT"
   read_comments
-  latest_marker round highest
-  printf 'reviewed=%s\nmerge_base=%s\nprevious=%s\n' "$HEAD_COMMIT" "$MERGE_BASE" "${MARKER_COMMIT:-none}"
+  record_action
+  OUT="reviewed=$HEAD_COMMIT"$'\n'"merge_base=$MERGE_BASE"$'\n'
+  action_lines
+  printf '%s' "$OUT"
 }
 
 # adr_paths <base> <commit>: prints each ADR path added or modified from <base> to <commit>,
@@ -1060,21 +1407,6 @@ stamp_lines() {
   done
 }
 
-# compose_flags_ok <kind> <have-commit> <have-round>: fails usage when the kind does not take, or
-# lacks, --commit or --round.
-compose_flags_ok() {
-  local need_commit=0 need_round=0
-  case "$1" in
-    round) need_commit=1; need_round=1 ;;
-    record-pass | review-fix) need_commit=1 ;;
-    prototype-build | prototype-refine | prototype-verdict | design | close-out) ;;
-    *) idea_to_ready_fail usage ;;
-  esac
-  if [ "$2" -ne "$need_commit" ] || [ "$3" -ne "$need_round" ]; then
-    idea_to_ready_fail usage
-  fi
-}
-
 # compose_ui_owner_line: appends the UI prototype file owner rule of a fix run to OUT.
 compose_ui_owner_line() {
   OUT+="A fix to docs/initiatives/$SLUG/prototype/index.html is a hivemind:changeling step with exact file scope; a fix to docs/initiatives/$SLUG/prototype/notes.md is a hivemind:drone step with exact file scope."$'\n'
@@ -1087,9 +1419,68 @@ compose_stamp_lines() {
   OUT+="$STAMPS"
 }
 
-# compose_kind_lines <kind> <commit> <round>: appends the kind's fixed lines to OUT.
+# compose_fix_lines <round> <url> <commit>: appends the lines of the fix run of design review round
+# <round>, whose comment is <url> and reviewed commit <commit>, to OUT. With no record at the head,
+# the record wave stamps <commit> and, on a UI initiative, copies the approval.
+compose_fix_lines() {
+  local folder="docs/initiatives/$SLUG" head_ui="$UI" approval_url=""
+  if [ "$RECORD_HEAD" = missing ] && [ "$head_ui" = yes ]; then
+    approval_state
+    [ "$APPROVAL_STATE" != none ] || idea_to_ready_fail approval-missing
+    [ "$APPROVAL_STATE" = kept ] || idea_to_ready_fail approval-stale
+    approval_url="$MARKER_URL"
+  fi
+  OUT+="Design review round $1 fix run. The round's findings and record update are comment $2."$'\n'
+  OUT+="Fix each finding of that comment in the solution design, the PRD, an ADR or the UI prototype, or give it the disposition that comment names."$'\n'
+  if [ "$head_ui" = yes ]; then
+    compose_ui_owner_line
+  fi
+  OUT+="The last wave is the record wave: a hivemind:drone step with exact file scope writes $folder/review-record.md for round $1, reviewed commit $3."$'\n'
+  if [ "$RECORD_HEAD" = missing ]; then
+    compose_stamp_lines "$3"
+  else
+    OUT+="Keep the record's stamps unchanged."$'\n'
+  fi
+  if [ -n "$approval_url" ]; then
+    OUT+="Copy the maintainer's approval in comment $approval_url, its text after its first line, word for word under ## Decisions asked."$'\n'
+  fi
+}
+
+# compose_record_lines: appends the lines of the record run that the RECORD ACTION names to OUT;
+# fails no-record-run when it names none.
+compose_record_lines() {
+  local folder="docs/initiatives/$SLUG"
+  case "$ACTION:$ACTION_RUN" in
+    launch:fix)
+      compose_fix_lines "$ACTION_ROUND" "$ACTION_MARKER_URL" "$ACTION_MARKER_COMMIT"
+      ;;
+    ask:)
+      pick_marker round "$ACTION_ROUND" ''
+      [ -n "$MARKER_URL" ] || idea_to_ready_fail round-comment-missing
+      compose_fix_lines "$ACTION_ROUND" "$MARKER_URL" "$MARKER_COMMIT"
+      ;;
+    launch:pass)
+      OUT+="Record pass run for design review round $ACTION_ROUND: this run carries only the record wave."$'\n'
+      OUT+="A hivemind:drone step with exact file scope writes $folder/review-record.md with verdict pass, clean_round true and rounds $ACTION_ROUND, reviewed commit $ACTION_MARKER_COMMIT, adding round $ACTION_ROUND from comment $ACTION_MARKER_URL under ## Rounds."$'\n'
+      compose_stamp_lines "$ACTION_MARKER_COMMIT"
+      ;;
+    launch:restamp)
+      OUT+="Re-stamp run after a clean confirming pass: this run carries only the record wave."$'\n'
+      OUT+="A hivemind:drone step with exact file scope writes $folder/review-record.md with verdict pass and clean_round true, rounds unchanged, reviewed commit $ACTION_MARKER_COMMIT, appending the confirming pass of comment $ACTION_MARKER_URL under ## Rounds."$'\n'
+      compose_stamp_lines "$ACTION_MARKER_COMMIT"
+      ;;
+    launch:reset)
+      OUT+="Re-review reset run after the confirming pass of comment $ACTION_MARKER_URL raised a new finding: this run carries only the record wave."$'\n'
+      OUT+="A hivemind:drone step with exact file scope writes $folder/review-record.md with verdict fail, rounds 0, every open count 0 and clean_round false, keeping the stamps."$'\n'
+      OUT+="It moves the earlier Rounds and Findings unchanged under one ## History: <date> section dated today, each heading one level down, with a short parenthesized suffix when an earlier History section has that date; Rounds and Findings then start empty, and the decision lists and Residuals stay."$'\n'
+      ;;
+    *) idea_to_ready_fail no-record-run ;;
+  esac
+}
+
+# compose_kind_lines <kind>: appends the kind's fixed lines to OUT.
 compose_kind_lines() {
-  local kind="$1" commit="$2" round="$3" folder="docs/initiatives/$SLUG" approval_url=""
+  local kind="$1" folder="docs/initiatives/$SLUG"
   case "$kind" in
     prototype-build)
       OUT+="UI prototype build run for docs/prds/$SLUG.md."$'\n'
@@ -1127,42 +1518,13 @@ compose_kind_lines() {
       fi
       OUT+="This run writes no review record."$'\n'
       ;;
-    round)
-      if [ "$UI" = yes ] && [ "$round" = 1 ]; then
-        approval_state
-        [ "$APPROVAL_STATE" != none ] || idea_to_ready_fail approval-missing
-        [ "$APPROVAL_STATE" = kept ] || idea_to_ready_fail approval-stale
-        approval_url="$MARKER_URL"
-      fi
-      latest_marker round "$round"
-      [ -n "$MARKER_URL" ] || idea_to_ready_fail round-comment-missing
-      [ "$MARKER_COMMIT" = "$commit" ] || idea_to_ready_fail round-commit-mismatch
-      OUT+="Design review round $round fix run. The round's findings and record update are comment $MARKER_URL."$'\n'
-      OUT+="Fix each finding of that comment in the solution design, the PRD, an ADR or the UI prototype, or give it the disposition that comment names."$'\n'
-      if [ "$UI" = yes ]; then
-        compose_ui_owner_line
-      fi
-      OUT+="The last wave is the record wave: a hivemind:drone step with exact file scope writes $folder/review-record.md for round $round, reviewed commit $commit."$'\n'
-      if [ "$RECORD" = missing ]; then
-        compose_stamp_lines "$commit"
-      else
-        OUT+="Keep the record's stamps unchanged."$'\n'
-      fi
-      if [ -n "$approval_url" ]; then
-        OUT+="Copy the maintainer's approval in comment $approval_url, its text after its first line, word for word under ## Decisions asked."$'\n'
-      fi
-      ;;
-    record-pass)
-      OUT+="Record pass run: this run carries only the record wave."$'\n'
-      OUT+="A hivemind:drone step with exact file scope writes $folder/review-record.md with verdict pass and clean_round true, reviewed commit $commit."$'\n'
-      compose_stamp_lines "$commit"
-      ;;
+    record) compose_record_lines ;;
     review-fix)
       OUT+="Review fix run after the design review exited. The fix is named in the docs pull request's review comments."$'\n'
       if [ "$UI" = yes ]; then
         compose_ui_owner_line
       fi
-      OUT+="The last wave is the record wave: a hivemind:drone step with exact file scope writes $folder/review-record.md with verdict fail and clean_round false, keeping rounds and the open counts, reviewed commit $commit."$'\n'
+      OUT+="The last wave is the record wave: a hivemind:drone step with exact file scope writes $folder/review-record.md with verdict fail and clean_round false, keeping rounds and the open counts."$'\n'
       OUT+="Keep the record's stamps unchanged."$'\n'
       ;;
     close-out)
@@ -1174,14 +1536,12 @@ compose_kind_lines() {
 
 # run_compose <arg>...: the compose subcommand.
 run_compose() {
-  local kind="" pr_arg="" commit="" round="" have_kind=0 have_slug=0 have_pr=0 have_commit=0 have_round=0
+  local kind="" pr_arg="" have_kind=0 have_slug=0 have_pr=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --kind) require_flag_value "$have_kind" "$#"; kind="$2"; have_kind=1; shift 2 ;;
       --slug) require_flag_value "$have_slug" "$#"; SLUG="$2"; have_slug=1; shift 2 ;;
       --pr) require_flag_value "$have_pr" "$#"; pr_arg="$2"; have_pr=1; shift 2 ;;
-      --commit) require_flag_value "$have_commit" "$#"; commit="$2"; have_commit=1; shift 2 ;;
-      --round) require_flag_value "$have_round" "$#"; round="$2"; have_round=1; shift 2 ;;
       *) idea_to_ready_fail usage ;;
     esac
   done
@@ -1191,13 +1551,10 @@ run_compose() {
   if [ "$pr_arg" != none ] && ! number_ok "$pr_arg"; then
     idea_to_ready_fail usage
   fi
-  if [ "$have_round" -eq 1 ] && ! number_ok "$round"; then
-    idea_to_ready_fail usage
-  fi
-  compose_flags_ok "$kind" "$have_commit" "$have_round"
-  if [ "$have_commit" -eq 1 ]; then
-    require_commit "$commit"
-  fi
+  case "$kind" in
+    prototype-build | prototype-refine | prototype-verdict | design | record | review-fix | close-out) ;;
+    *) idea_to_ready_fail usage ;;
+  esac
   require_tools
   require_checkout
   resolve_repo
@@ -1217,43 +1574,42 @@ run_compose() {
     read_ui "$HEAD_COMMIT"
     case "$kind" in
       prototype-*) [ "$UI" = yes ] || idea_to_ready_fail not-ui ;;
-    esac
-    if [ "$have_commit" -eq 1 ]; then
-      is_ancestor "$commit" "$HEAD_COMMIT" || idea_to_ready_fail commit-not-in-pr
-    fi
-    case "$kind" in
-      round | record-pass | review-fix)
+      review-fix)
         read_record "$HEAD_COMMIT"
-        if [ "$RECORD" = missing ] && { [ "$kind" != round ] || [ "$round" != 1 ]; }; then
-          idea_to_ready_fail record-missing
-        fi
+        [ "$RECORD" = pass ] || idea_to_ready_fail record-not-passed
+        ;;
+      record)
         read_trunk yes
+        merge_base_of "$HEAD_COMMIT" "$TRUNK_COMMIT"
         ;;
     esac
     case "$kind" in
-      prototype-refine | prototype-verdict | design | round) read_comments ;;
+      prototype-refine | prototype-verdict | design | record) read_comments ;;
     esac
+    if [ "$kind" = record ]; then
+      record_action
+    fi
     OUT+="Docs pull request: #$PR_NUMBER"$'\n'
   fi
   OUT+="Deliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files."$'\n'
-  if [ "$kind" = record-pass ]; then
+  if [ "$kind:$ACTION_RUN" = record:pass ] || [ "$kind:$ACTION_RUN" = record:restamp ]; then
     OUT+="Launch with local_review false."$'\n'
   fi
-  compose_kind_lines "$kind" "$commit" "$round"
+  compose_kind_lines "$kind"
   printf '%s' "$OUT"
 }
 
 # run_comment <arg>...: the comment subcommand.
 run_comment() {
-  local kind="" commit="" round="" body_arg="" have_kind=0 have_slug=0 have_pr=0 have_commit=0
-  local have_round=0 have_body=0 marker="" section="" body_file=""
+  local kind="" commit="" clean="" body_arg="" have_kind=0 have_slug=0 have_pr=0 have_commit=0
+  local have_clean=0 have_body=0 marker="" section="" body_file=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --kind) require_flag_value "$have_kind" "$#"; kind="$2"; have_kind=1; shift 2 ;;
       --slug) require_flag_value "$have_slug" "$#"; SLUG="$2"; have_slug=1; shift 2 ;;
       --pr) require_flag_value "$have_pr" "$#"; PR_NUMBER="$2"; have_pr=1; shift 2 ;;
       --commit) require_flag_value "$have_commit" "$#"; commit="$2"; have_commit=1; shift 2 ;;
-      --round) require_flag_value "$have_round" "$#"; round="$2"; have_round=1; shift 2 ;;
+      --clean) require_flag_value "$have_clean" "$#"; clean="$2"; have_clean=1; shift 2 ;;
       --body-file) require_flag_value "$have_body" "$#"; body_arg="$2"; have_body=1; shift 2 ;;
       *) idea_to_ready_fail usage ;;
     esac
@@ -1262,11 +1618,11 @@ run_comment() {
     || ! number_ok "$PR_NUMBER"; then
     idea_to_ready_fail usage
   fi
-  case "$kind:$have_round$have_commit$have_body" in
+  case "$kind:$have_commit$have_clean$have_body" in
     round:111 | approval:001 | review:001 | veto:000) ;;
     *) idea_to_ready_fail usage ;;
   esac
-  if [ "$have_round" -eq 1 ] && ! number_ok "$round"; then
+  if [ "$have_clean" -eq 1 ] && [ "$clean" != yes ] && [ "$clean" != no ]; then
     idea_to_ready_fail usage
   fi
   if [ "$have_commit" -eq 1 ]; then
@@ -1283,7 +1639,17 @@ run_comment() {
   case "$kind" in
     round)
       is_ancestor "$commit" "$HEAD_COMMIT" || idea_to_ready_fail commit-not-in-pr
-      marker="<!-- hivemind-guide: round slug=$SLUG round=$round commit=$commit -->"
+      read_trunk yes
+      merge_base_of "$HEAD_COMMIT" "$TRUNK_COMMIT"
+      read_comments
+      record_action
+      [ "$ACTION" = review ] || idea_to_ready_fail no-review-pending
+      is_ancestor "$RECORD_WRITE" "$commit" || idea_to_ready_fail commit-before-record
+      if [ "$ACTION_ROUND" = confirm ]; then
+        marker="<!-- hivemind-guide: confirm slug=$SLUG commit=$commit clean=$clean -->"
+      else
+        marker="<!-- hivemind-guide: round slug=$SLUG round=$ACTION_ROUND commit=$commit clean=$clean -->"
+      fi
       ;;
     *) marker="<!-- hivemind-guide: $kind slug=$SLUG commit=$HEAD_COMMIT -->" ;;
   esac
