@@ -65,6 +65,8 @@ One object with three keys.
     `0101` is a submodule entry, beside a regular ADR `0102`.
   - `omega`: a passing initiative on trunk whose docs branch only marks the
     design delivered (a close-out pull request that does not edit the record).
+    Its close-out compose cases cover `--pr none`, refused while a counting
+    close-out pull request is open, and `--pr <n>` on that open draft.
 - `cases`: one object per case.
   - `name`, `scenario`, `args` (the script's argv), `routes` (route names from
     `gh-routes.json`).
@@ -75,8 +77,10 @@ One object with three keys.
     posted body, in order, exact), `gh_has` and `gh_lacks` (substrings of the gh
     log), `stdout_lacks`, `no_gh`, `no_git`, `staged` (clone paths added to the
     index before the run), `files_absent` and `files_present` (clone paths that
-    must be gone, or still regular files, after the run: `comment` deletes its
-    inputs file only after a post succeeds and keeps a staged one), and
+    must be gone, or still regular files, after the run: `seed`, `standalone`
+    and `comment` delete each inputs file they read only after their issue or
+    post succeeds, keep every one on a failure or a refusal and keep a staged
+    one), and
     `request` (assert the guide request layout: line 1 the marker line, line 2
     the one `Docs pull request:` line, no other line holding it).
   - `compare`: `derive` or `handoff`. The suite also runs the libraries'

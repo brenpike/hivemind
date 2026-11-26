@@ -560,6 +560,10 @@
    ],
    "gh_has": [
     "<--title=New idea>"
+   ],
+   "files_absent": [
+    ".hivemind/guide-inputs-title.json",
+    ".hivemind/guide-inputs-body.json"
    ]
   },
   {
@@ -592,6 +596,10 @@
    },
    "gh_lacks": [
     "<issue><create>"
+   ],
+   "files_present": [
+    ".hivemind/guide-inputs-title.json",
+    ".hivemind/guide-inputs-body.json"
    ]
   },
   {
@@ -650,6 +658,83 @@
    },
    "bodies": [
     "<!-- hivemind-initiative: newidea -->\nPRD: [docs/prds/newidea.md](https://github.com/acme/widgets/blob/main/docs/prds/newidea.md)\n"
+   ],
+   "files_absent": [
+    ".hivemind/guide-inputs-title.json"
+   ],
+   "files_present": [
+    ".hivemind/guide-inputs-body.json"
+   ]
+  },
+  {
+   "name": "seed-create-failure-keeps-inputs",
+   "scenario": "alpha",
+   "args": [
+    "seed",
+    "--slug",
+    "newidea",
+    "--title-file",
+    ".hivemind/guide-inputs-title.json",
+    "--body-file",
+    ".hivemind/guide-inputs-body.json"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "seeds-newidea-none"
+   ],
+   "inputs": {
+    ".hivemind/guide-inputs-title.json": "New idea\n",
+    ".hivemind/guide-inputs-body.json": "Some context.\n"
+   },
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: gh-failed\n"
+   },
+   "gh_has": [
+    "<issue><create>"
+   ],
+   "files_present": [
+    ".hivemind/guide-inputs-title.json",
+    ".hivemind/guide-inputs-body.json"
+   ]
+  },
+  {
+   "name": "seed-staged-inputs-kept",
+   "scenario": "alpha",
+   "args": [
+    "seed",
+    "--slug",
+    "newidea",
+    "--title-file",
+    ".hivemind/guide-inputs-title.json",
+    "--body-file",
+    ".hivemind/guide-inputs-body.json"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk",
+    "seeds-newidea-none",
+    "issue-create"
+   ],
+   "inputs": {
+    ".hivemind/guide-inputs-title.json": "New idea\n",
+    ".hivemind/guide-inputs-body.json": "Some context.\n"
+   },
+   "staged": [
+    ".hivemind/guide-inputs-title.json"
+   ],
+   "expect": {
+    "rc": 0,
+    "stdout": "issue=42\ninputs=kept\n",
+    "stderr": ""
+   },
+   "files_present": [
+    ".hivemind/guide-inputs-title.json"
+   ],
+   "files_absent": [
+    ".hivemind/guide-inputs-body.json"
    ]
   },
   {
@@ -818,6 +903,10 @@
    ],
    "gh_has": [
     "<--title=Show the export button>"
+   ],
+   "files_absent": [
+    ".hivemind/guide-inputs-title.json",
+    ".hivemind/guide-inputs-body.json"
    ]
   },
   {
@@ -846,6 +935,37 @@
    }
   },
   {
+   "name": "standalone-create-failure-keeps-inputs",
+   "scenario": "alpha",
+   "args": [
+    "standalone",
+    "--title-file",
+    ".hivemind/guide-inputs-title.json",
+    "--body-file",
+    ".hivemind/guide-inputs-body.json"
+   ],
+   "routes": [
+    "repo-view",
+    "trunk"
+   ],
+   "inputs": {
+    ".hivemind/guide-inputs-title.json": "Show the export button\n",
+    ".hivemind/guide-inputs-body.json": "## Problem\n\nThe export button is hidden.\n\n## Evidence\n\nThree support tickets.\n\n## Acceptance Criteria\n\n- [ ] The button shows on the toolbar.\n\n## Scope boundary\n\nOnly the toolbar.\n\n## Open questions\n\nNone\n"
+   },
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: gh-failed\n"
+   },
+   "gh_has": [
+    "<issue><create>"
+   ],
+   "files_present": [
+    ".hivemind/guide-inputs-title.json",
+    ".hivemind/guide-inputs-body.json"
+   ]
+  },
+  {
    "name": "standalone-refuses-problem",
    "scenario": "alpha",
    "args": [
@@ -871,6 +991,10 @@
    },
    "gh_lacks": [
     "<issue><create>"
+   ],
+   "files_present": [
+    ".hivemind/guide-inputs-title.json",
+    ".hivemind/guide-inputs-body.json"
    ]
   },
   {
@@ -1398,6 +1522,76 @@
     "rc": 0,
     "stderr": "",
     "stdout": "hivemind-guide-run: alpha\nDocs pull request: #5\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nClose-out run: a hivemind:drone step with exact file scope adds **Status:** delivered as the first line after the title of docs/initiatives/alpha/solution-design.md and an ## As-built deltas section.\nThis run writes no review record.\n"
+   }
+  },
+  {
+   "name": "compose-close-out-no-pull-request",
+   "scenario": "omega",
+   "args": [
+    "compose",
+    "--kind",
+    "close-out",
+    "--slug",
+    "omega",
+    "--pr",
+    "none"
+   ],
+   "routes": [
+    "repo-view",
+    "docs-pulls-omega-none"
+   ],
+   "request": true,
+   "expect": {
+    "rc": 0,
+    "stderr": "",
+    "stdout": "hivemind-guide-run: omega\nDocs pull request: none\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nClose-out run: a hivemind:drone step with exact file scope adds **Status:** delivered as the first line after the title of docs/initiatives/omega/solution-design.md and an ## As-built deltas section.\nThis run writes no review record.\n"
+   }
+  },
+  {
+   "name": "compose-close-out-none-refused-while-open",
+   "scenario": "omega",
+   "args": [
+    "compose",
+    "--kind",
+    "close-out",
+    "--slug",
+    "omega",
+    "--pr",
+    "none"
+   ],
+   "routes": [
+    "repo-view",
+    "docs-pulls-omega-open",
+    "perm-alice"
+   ],
+   "expect": {
+    "rc": 2,
+    "stdout": "",
+    "stderr": "idea-to-ready-error: docs-pr-exists\n"
+   }
+  },
+  {
+   "name": "compose-close-out-fix-on-open-draft",
+   "scenario": "omega",
+   "args": [
+    "compose",
+    "--kind",
+    "close-out",
+    "--slug",
+    "omega",
+    "--pr",
+    "10"
+   ],
+   "routes": [
+    "repo-view",
+    "pr-10",
+    "perm-alice"
+   ],
+   "request": true,
+   "expect": {
+    "rc": 0,
+    "stderr": "",
+    "stdout": "hivemind-guide-run: omega\nDocs pull request: #10\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nClose-out run: a hivemind:drone step with exact file scope adds **Status:** delivered as the first line after the title of docs/initiatives/omega/solution-design.md and an ## As-built deltas section.\nThis run writes no review record.\n"
    }
   },
   {

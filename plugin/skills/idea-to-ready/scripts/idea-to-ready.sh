@@ -30,11 +30,17 @@
 # file, `.hivemind/guide-inputs-<token>.json` (<token> 1 to 64 of [A-Za-z0-9-]), relative to the
 # folder the script runs in or absolute. Each inputs file passes hivemind_inputs_path_problem
 # (kind guide) and the containment guard before its one read, hivemind_read_input_file, into a
-# private copy; a file that is not valid UTF-8 is refused. Only comment deletes an inputs file,
-# its --body-file, and only once the post has succeeded (see comment); seed and standalone never
-# delete one, and a failure of any subcommand keeps every inputs file. A title is one line, the
-# ending newline dropped, with a non-space character and no control character; a body has a
-# non-space character and no control character but newline, tab and carriage return.
+# private copy; a file that is not valid UTF-8 is refused. Once the GitHub write an inputs file
+# fed has succeeded (seed's and standalone's issue, comment's post), every inputs file the
+# subcommand read is deleted, so no untracked inputs file is left to make a later reviewed print
+# head=dirty: only when it still passes hivemind_inputs_path_problem (kind guide), its leaf under
+# the canonical start folder's .hivemind is a regular file and not a symlink, and git lists no
+# index entry for it; the rm runs from inside that .hivemind after cd -P and a pwd -P re-check,
+# so it never follows a symlink. When any such file is not deleted, the subcommand prints
+# inputs=kept after its result line. A failure, a refusal or a write that did not succeed exits
+# before the delete and keeps every inputs file for a retry. A title is one line, the ending
+# newline dropped, with a non-space character and no control character; a body has a non-space
+# character and no control character but newline, tab and carriage return.
 #
 # READS. The repository is `gh repo view`'s nameWithOwner. The trunk is one GraphQL read of
 # defaultBranchRef {name target{oid}}, then `git fetch --refmap= origin refs/heads/<trunk>`,
@@ -75,12 +81,14 @@
 #            --title=<title> --body-file`, the body being that marker line, then
 #            `PRD: [docs/prds/<slug>.md](https://github.com/<owner/repo>/blob/<trunk>/docs/prds/<slug>.md)`,
 #            then, with --body-file, a blank line and the body. Prints issue=<n>, or
-#            issue=created when gh's URL is off its shape. Exit 0.
+#            issue=created when gh's URL is off its shape, then deletes the inputs files it read
+#            by the inputs file rule above. Exit 0.
 #   standalone  Evaluates the body with hivemind_readiness_check_snapshot as an open issue with
 #            no parent, at the trunk commit. When its reasons hold spec_problem_missing,
 #            spec_evidence_missing, spec_scope_missing, open_questions_not_none or
 #            no_acceptance_criteria, prints refused=<code> per such code, in that order, creates
-#            no issue and exits 1. Else creates the issue as seed does and prints issue=<n>.
+#            no issue, keeps both inputs files and exits 1. Else creates the issue, prints and
+#            deletes as seed does.
 #   reviewed Reads the trunk and the docs pull request head. Prints head=dirty when
 #            `git status --porcelain`, untracked files included, is not empty, else head=moved
 #            when HEAD is not the head commit, and exits 1. Else prints reviewed=<head commit>,
@@ -91,7 +99,8 @@
 #            `Docs pull request: none`, and no other line holds `Docs pull request:`. #<n> must
 #            be a counting docs pull request that is a draft (not-docs-pr, not-draft). none is
 #            refused docs-pr-exists while a counting docs pull request is open, and is taken
-#            only by the prototype-build and design kinds (pr-required). Line 3 names
+#            only by the prototype-build, design and close-out kinds (pr-required): the run then
+#            opens the docs pull request, the close-out one after the first has merged. Line 3 names
 #            hivemind:standard-delivery on the script engine with draft true. Only record-pass
 #            adds `Launch with local_review false.`. Then the kind's fixed lines:
 #              prototype-build   a hivemind:changeling step for prototype/index.html, then a
@@ -128,13 +137,7 @@
 #            listed for veto` section at the head, its heading line then its body, or `None` when
 #            empty (record-missing when there is no record). Prints comment=<url>, or
 #            comment=posted when gh's URL is off its shape. After the post succeeds, the
-#            --body-file is deleted, so no untracked inputs file is left to make a later reviewed
-#            print head=dirty: only when it still passes hivemind_inputs_path_problem (kind
-#            guide), its leaf under the canonical start folder's .hivemind is a regular file and
-#            not a symlink, and git lists no index entry for it; the rm runs from inside that
-#            .hivemind after cd -P and a pwd -P re-check, so it never follows a symlink. When the
-#            file is not deleted, prints inputs=kept after the comment line. A failed post exits
-#            before the delete, so the file is kept for a retry. Exit 0.
+#            --body-file is deleted by the inputs file rule above. Exit 0.
 #   approval Prints approval=none with no counting approval comment. Else, for the latest one,
 #            approval=stale when its commit is not the head or its ancestor or index.html is
 #            missing at either commit, else approval=kept then folded=yes when index.html's blob
@@ -232,6 +235,7 @@ APPROVAL_STATE=""
 APPROVAL_FOLDED=""
 OUT=""
 declare -A WRITERS=()
+declare -a READ_INPUTS=()
 
 # idea_to_ready_jq_defs: prints the constant jq definitions of the script; they need
 # hivemind_readiness_jq_defs before them. Each gh filter runs on one parsed reply and gives one
@@ -661,7 +665,7 @@ approval_state() {
 }
 
 # read_guide_input <path-arg> <copy> <title|body>: checks the inputs path, guards it, reads it
-# once into <copy> and checks its text.
+# once into <copy>, checks its text and adds <path-arg> to READ_INPUTS.
 read_guide_input() {
   local INPUTS_FILE="" read_rc=0 verdict=""
   hivemind_inputs_path_problem "$START_DIR" "$1" guide >/dev/null 2>&1 || idea_to_ready_fail inputs-path
@@ -682,6 +686,7 @@ read_guide_input() {
     "$(hivemind_readiness_jq_defs)$(idea_to_ready_jq_defs)ir_text_ok(\$title)" <"$2" 2>/dev/null)" \
     || idea_to_ready_fail inputs-unreadable
   [ "$verdict" = ok ] || idea_to_ready_fail inputs-invalid
+  READ_INPUTS+=("$1")
 }
 
 # create_issue <title-copy> <body-file>: creates the issue and appends issue=<n> to OUT.
@@ -701,7 +706,7 @@ create_issue() {
 }
 
 # remove_guide_input <path-arg>: deletes the inputs file the caller read from <path-arg>, by the
-# rule in the comment contract. Returns 0 when it deleted the file and 1 when the file is kept.
+# inputs file rule of the header. Returns 0 when it deleted the file and 1 when the file is kept.
 remove_guide_input() {
   local canon_start="" canon_hivemind="" leaf="${1##*/}" tracked=""
   hivemind_inputs_path_problem "$START_DIR" "$1" guide >/dev/null 2>&1 || return 1
@@ -718,6 +723,24 @@ remove_guide_input() {
     if [ -L "./$leaf" ] || [ ! -f "./$leaf" ]; then exit 1; fi
     rm -f -- "./$leaf" 2>/dev/null
   )
+}
+
+# remove_read_inputs: runs once the GitHub write the inputs files fed has succeeded. Deletes each
+# file of READ_INPUTS once per leaf with remove_guide_input and appends inputs=kept to OUT when
+# any is kept.
+remove_read_inputs() {
+  local path_arg="" leaf="" kept=0
+  local -A seen_leaves=()
+  for path_arg in "${READ_INPUTS[@]}"; do
+    leaf="${path_arg##*/}"
+    if [ -z "${seen_leaves[$leaf]-}" ]; then
+      seen_leaves[$leaf]=1
+      remove_guide_input "$path_arg" || kept=1
+    fi
+  done
+  if [ "$kept" -eq 1 ]; then
+    OUT+="inputs=kept"$'\n'
+  fi
 }
 
 # post_comment <body-file>: posts the comment and appends comment=<url> to OUT.
@@ -914,6 +937,7 @@ run_seed() {
     fi
   } >"$body_file" || idea_to_ready_fail workdir-failed
   create_issue "$WORK_DIR/title.txt" "$body_file"
+  remove_read_inputs
   printf '%s' "$OUT"
 }
 
@@ -946,6 +970,7 @@ run_standalone() {
     exit 1
   fi
   create_issue "$WORK_DIR/title.txt" "$WORK_DIR/body.txt"
+  remove_read_inputs
   printf '%s' "$OUT"
 }
 
@@ -1179,7 +1204,7 @@ run_compose() {
   OUT="hivemind-guide-run: $SLUG"$'\n'
   if [ "$pr_arg" = none ]; then
     case "$kind" in
-      prototype-build | design) ;;
+      prototype-build | design | close-out) ;;
       *) idea_to_ready_fail pr-required ;;
     esac
     require_no_docs_pr
@@ -1278,9 +1303,7 @@ run_comment() {
       || idea_to_ready_fail workdir-failed
   fi
   post_comment "$body_file"
-  if [ "$have_body" -eq 1 ] && ! remove_guide_input "$body_arg"; then
-    OUT+="inputs=kept"$'\n'
-  fi
+  remove_read_inputs
   printf '%s' "$OUT"
 }
 

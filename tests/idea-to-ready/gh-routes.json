@@ -74,6 +74,10 @@
       "json": {"data": {"search": {"pageInfo": {"hasNextPage": true}, "nodes": []}}}},
     "docs-pulls-beta-none": {"args": ["api", "graphql", "-f", "^query=query IdeaToReadyDocsPulls(", "-f", "q=repo:acme/widgets is:pr is:open head:docs/beta"],
       "json": {"data": {"search": {"pageInfo": {"hasNextPage": false}, "nodes": []}}}},
+    "docs-pulls-omega-none": {"args": ["api", "graphql", "-f", "^query=query IdeaToReadyDocsPulls(", "-f", "q=repo:acme/widgets is:pr is:open head:docs/omega"],
+      "json": {"data": {"search": {"pageInfo": {"hasNextPage": false}, "nodes": []}}}},
+    "docs-pulls-omega-open": {"args": ["api", "graphql", "-f", "^query=query IdeaToReadyDocsPulls(", "-f", "q=repo:acme/widgets is:pr is:open head:docs/omega"],
+      "json": {"data": {"search": {"pageInfo": {"hasNextPage": false}, "nodes": [{"number": 14, "state": "OPEN", "headRefName": "docs/omega-close-out", "headRepository": {"nameWithOwner": "acme/widgets"}, "author": {"login": "alice", "__typename": "User"}}]}}}},
 
     "seeds-newidea-none": {"args": ["api", "graphql", "-f", "^query=query IdeaToReadySeeds(", "-f", "q=repo:acme/widgets is:issue is:open in:body \"hivemind-initiative: newidea\""],
       "json": {"data": {"search": {"pageInfo": {"hasNextPage": false}, "nodes": [
