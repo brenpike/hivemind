@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-## [14.7.1] - 2026-11-25
+## [14.7.2] - 2026-11-26
 
 ### Fixed
 
@@ -25,6 +25,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 No prose budget raised.
 
 Issue: #673.
+
+## [14.7.1] - 2026-11-25
+
+### Fixed
+
+- `open-plan-pr.sh` refuses a body or comment file holding a whole `{path, content}` data block, any JSON object holding both keys, whatever their values (`body file holds a whole data block, not its content`, `comment file holds a whole data block, not its content`), before any change or push.
+- `molt.sh` makes the same refusal for its subject, files and body files, ahead of the subject and path rules.
+- `synapse.md` step 1 says only each block's decoded `content` is written to its `path`, never the whole block.
+- The PR text neutralizer keeps a simple single-backtick planner code span as written; a reference touching it joins it in one code span (SD-45).
+- ADR-0037 amendment for issue 683.
+
+No prose budget raised.
+
+Issue: #683.
 
 ## [14.7.0] - 2026-11-25
 

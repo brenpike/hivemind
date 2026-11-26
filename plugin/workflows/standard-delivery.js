@@ -672,7 +672,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '4e599fb08c634861';
+const BUILD_ID = '61b950d5a519ff14';
 
 function supportedSchemaKeywords(){
 return[
@@ -4385,8 +4385,8 @@ gates.answer=ended.answer;
 }
 
 function neutralizePullRequestText(text){
-return text.split(/((?:https?:\/\/|www\.)[^\s`]+|(?<![\w.-])[\w.-]+\/[\w.-]+#\d+|#\d+|GH-\d+|@[\w-]+(?:\/[\w-]+)?)/i)
-.map((piece,index)=>(index%2===1?'`'+piece+'`':piece.replace(/[\\`[\]<>&]/g,'\\$&')))
+return text.split(/((?<!`)`[^`\r\n]+`(?!`)|(?:https?:\/\/|www\.)[^\s`]+|(?<![\w.-])[\w.-]+\/[\w.-]+#\d+|#\d+|GH-\d+|@[\w-]+(?:\/[\w-]+)?)/i)
+.map((piece,index)=>(index%2===0?piece.replace(/[\\`[\]<>&]/g,'\\$&'):piece[0]==='`'?piece:'`'+piece+'`'))
 .join('');
 }
 function buildPullRequestTitle(plan){
@@ -4773,8 +4773,8 @@ blocked:['blocker','stage'],
 skipped:['skip_reason']
 };
 }
-function fixLedgerPath(branch){
-return'.hivemind/review-loop/'+branch.replace(/\//g,'~')+'.yaml';
+function fixLedgerPath(){
+return'.hivemind/review-loop/fix-ledger.yaml';
 }
 function reviewQuestionKinds(){
 return{'user-input-required':REVIEW_QUESTION_KIND,'high-severity-rejection':HIGH_SEVERITY_REJECTION_KIND};
@@ -4798,7 +4798,7 @@ if(answer!==undefined){
 inputs.user_answer=answer;
 }
 if(run.resumeLedger){
-inputs.resume_from_ledger=fixLedgerPath(plan.branch);
+inputs.resume_from_ledger=fixLedgerPath();
 run.resumeLedger=false;
 }
 return[

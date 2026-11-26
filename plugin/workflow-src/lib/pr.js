@@ -31,8 +31,9 @@
  *          naming the pull request, a pause, or a blocked finish, or
  *          {rerun: true} when the user replied to its stop.
  *   neutralizePullRequestText(text)  text in which nothing mentions, closes
- *          or links an issue; other Markdown still renders: the one renderer
- *          of every external part of the pull request texts.
+ *          or links an issue; other Markdown still renders, a planner code
+ *          span among it when kept as written: the one renderer of every
+ *          external part of the pull request texts.
  *   renderPullRequestGates(run, gates)  the Gates: part of the run record
  *          (buildRunRecordParts, lib/record.js).
  *   renderPullRequestRecord(run, gates)  the run record parts, each
@@ -96,7 +97,10 @@
  *   buildRunRecordParts() returns. The digest, the step lines and the
  *   external parts of that record reach the pull request texts only
  *   through neutralizePullRequestText(), so an at-mention, issue
- *   reference, URL or HTML in them links, closes or notifies nothing. The
+ *   reference, URL or HTML in them links, closes or notifies nothing. A
+ *   planner code span stays as written, alone or joined in one code span
+ *   with a wrapped reference beside it, so it holds no live markup
+ *   (issue 683). The
  *   gates and the labels are code-built and stay plain. So are the closing
  *   lines, which open the body, so GitHub links each issue they name as
  *   closed by the pull request (issue 491): each is the fixed text and an
@@ -146,16 +150,20 @@
  */
 
 /**
- * Returns text with each URL, owner/repo reference, issue reference, GH-N
- * reference and at-mention in a single-backtick code span, and every
- * backslash, backtick, [, ], <, > and & outside them backslash-escaped, so
- * nothing in it mentions, closes or links an issue, or forms a link or
- * image. Headings and emphasis still render.
- * No span holds a backtick or a blank, so each is literal whole.
+ * Returns text with each kept code span as written, each URL, owner/repo
+ * reference, issue reference, GH-N reference and at-mention outside them in
+ * a single-backtick code span, and every backslash, backtick, [, ], <, >
+ * and & elsewhere backslash-escaped, so nothing in it mentions, closes or
+ * links an issue, or forms a link or image. Headings and emphasis still
+ * render. A kept span is one backtick, non-empty content with no backtick
+ * or line break, and one backtick, with no backtick touching either end.
+ * A kept span next to a wrapped reference joins it in one code span, so
+ * every mention, reference, URL and kept span sits in a code span, and
+ * text with no kept span is escaped as before (issue 683).
  */
 function neutralizePullRequestText(text) {
-  return text.split(/((?:https?:\/\/|www\.)[^\s`]+|(?<![\w.-])[\w.-]+\/[\w.-]+#\d+|#\d+|GH-\d+|@[\w-]+(?:\/[\w-]+)?)/i)
-    .map((piece, index) => (index % 2 === 1 ? '`' + piece + '`' : piece.replace(/[\\`[\]<>&]/g, '\\$&')))
+  return text.split(/((?<!`)`[^`\r\n]+`(?!`)|(?:https?:\/\/|www\.)[^\s`]+|(?<![\w.-])[\w.-]+\/[\w.-]+#\d+|#\d+|GH-\d+|@[\w-]+(?:\/[\w-]+)?)/i)
+    .map((piece, index) => (index % 2 === 0 ? piece.replace(/[\\`[\]<>&]/g, '\\$&') : piece[0] === '`' ? piece : '`' + piece + '`'))
     .join('');
 }
 
