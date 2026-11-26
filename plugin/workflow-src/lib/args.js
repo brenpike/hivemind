@@ -51,6 +51,11 @@
  *     plain object, since answers marks a pending pause. Else undefined.
  *   buildResumeArgs(replies, buildId)
  *     {answers, build}: each reply under its roundKey, and buildId.
+ *   readAttribution(argsObject)
+ *     {attribution}: {} when absent, else the arg as given, an object of
+ *     optional commit and pr strings of at most 1000 characters, no lone
+ *     surrogate, no control character but tab and LF. A missing or empty
+ *     key is no attribution. Otherwise describeLaunchProblem(reason).
  *
  * Invariants
  *   Pure: no clock, no randomness, no I/O. Inputs are never changed.
@@ -74,7 +79,8 @@
  *   <runNoun> did not start.". No problem echoes an arg value. With runNoun 'analysis' the text is the
  *   analysis-only text, byte for byte.
  *   Uses replyField(), isPlainObject() and isNonEmptyString() from
- *   result.js.
+ *   result.js, and describeLaunchProblem() from the workflow's main.js.
+ *   attribution comes from the launch args only, never from resume_args.
  *
  * Why
  *   analysis-only and standard-delivery take the same launch args and pause
@@ -192,4 +198,9 @@ function readPendingReply(argsObject) {
 function buildResumeArgs(replies, buildId) {
   const answers = Object.fromEntries(replies.map((reply, index) => [roundKey(index + 1), reply]));
   return { answers: answers, build: requireBuildId(buildId) };
+}
+
+function readAttribution(argsObject) {
+  const { attribution: value = {} } = argsObject;
+  return isPlainObject(value) && Object.entries(value).every(([key, text]) => /^(commit|pr)$/.test(key) && typeof text === 'string' && text.length <= 1000 && !/[^\P{Cc}\t\n]|\p{Cs}/u.test(text)) ? { attribution: value } : describeLaunchProblem('The attribution launch arg must be commit and pr text up to 1000 characters');
 }

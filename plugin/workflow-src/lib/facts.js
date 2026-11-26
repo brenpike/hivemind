@@ -38,7 +38,8 @@
  *       of a runner's inputs, --subject-file and --files-file subject_file
  *       and files_file, the raw commit subject and file list (lib/commit.js),
  *       and --body-file and --comment-file body_file and comment_file, the
- *       raw pull request body and reuse comment (lib/pr.js). Their names and
+ *       raw commit or pull request body (lib/commit.js, lib/pr.js) and the
+ *       pull request reuse comment (lib/pr.js). Their names and
  *       the one placeholder a command can hold, {plugin-root}, are the
  *       words of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md. A command holds
  *       the placeholder only when buildRunnerCommand got no root. An inputs
@@ -49,11 +50,11 @@
  *       (${CLAUDE_PLUGIN_ROOT}/hooks/synapse-gate.sh): --trunk, --base,
  *       --branch and --head gitIdentifierPattern() (identifier.js), --ref
  *       digits, --expect-commit 40 or 64 lowercase hex digits,
- *       --classification and --trunk-freshness their enums, and --inputs
- *       .hivemind/molt-inputs-<token>.json or .hivemind/pr-inputs-<token>.json,
- *       <token> 1 to 64 characters of A-Z, a-z, 0-9 and dash,
- *       --subject-file and --files-file the molt form alone, and
- *       --body-file and --comment-file the pr form alone.
+ *       --classification and --trunk-freshness their enums, --inputs and
+ *       --body-file .hivemind/molt-inputs-<token>.json or
+ *       .hivemind/pr-inputs-<token>.json, <token> 1 to 64 characters of
+ *       A-Z, a-z, 0-9 and dash, --subject-file and --files-file the molt
+ *       form alone, and --comment-file the pr form alone.
  *   describeRunnerWordProblem(words)
  *       undefined when words is flag and value pairs, each flag a
  *       runnerValuePatterns() key and each value a string its pattern
@@ -292,6 +293,7 @@ function runnerValuePatterns() {
   const name = gitIdentifierPattern();
   const prFile = /^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/;
   const moltFile = /^\.hivemind\/molt-inputs-[A-Za-z0-9-]{1,64}\.json$/;
+  const inputsFile = /^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/;
   return {
     '--trunk': name,
     '--base': name,
@@ -301,10 +303,10 @@ function runnerValuePatterns() {
     '--expect-commit': /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/,
     '--classification': /^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
     '--trunk-freshness': /^(?:fresh|stale|skipped)$/,
-    '--inputs': /^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/,
+    '--inputs': inputsFile,
     '--subject-file': moltFile,
     '--files-file': moltFile,
-    '--body-file': prFile,
+    '--body-file': inputsFile,
     '--comment-file': prFile
   };
 }

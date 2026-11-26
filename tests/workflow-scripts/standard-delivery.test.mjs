@@ -1406,6 +1406,16 @@ function readDroneClause(startText, endText) {
   return droneText.slice(start, end + endText.length);
 }
 
+/**
+ * The attribution launch arg the overlord harness passes: commit trailers
+ * and the pull request ending, robot emoji and forbiddenSubjectTexts()
+ * strings included.
+ */
+const HARNESS_ATTRIBUTION = {
+  commit: 'Co-Authored-By: Claude Test <noreply@example.invalid>\nClaude-Session: https://claude.ai/code/session_TEST_ATTRIBUTION',
+  pr: '\u{1F916} Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_TEST_ATTRIBUTION'
+};
+
 const ROW_TESTS = {
   'SD-01': () => {
     test('args undefined finishes blocked with no agent call', async () => {
@@ -1437,6 +1447,12 @@ const ROW_TESTS = {
       assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: withNextStep('The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so the delivery did not start.') });
       assert.deepEqual(run.calls, []);
       assert.ok(contract.contractRows().find((row) => row.id === 'SD-01').rule.includes('resume_args guard'));
+    });
+    test('attribution is read through args.js readAttribution, after the decisions check', () => {
+      const launchSource = String(main.readDeliveryLaunch);
+      assert.ok(launchSource.includes('readAttribution(argsObject)'), launchSource);
+      assert.ok(launchSource.indexOf('readAttribution(argsObject)') > launchSource.indexOf('readDecisions(argsObject)'), launchSource);
+      assert.ok(readText(join(repoRoot, 'plugin/workflow-src/lib/args.js')).includes('\nfunction readAttribution(argsObject) {'));
     });
     test('a string launch takes the default trunk and no references', async () => {
       const run = await runWorkflow(REQUEST, happyResults());
@@ -5644,6 +5660,13 @@ const ROW_TESTS = {
       assert.deepEqual(call.prompt.split('\n').filter((line) => /^<[a-z_]+>$/.test(line)), ['<command>', '<inputs_file>', '<body_file>', '<comment_file>']);
       assert.ok(!outside.includes('feature/cache') && !outside.includes(OTHER), outside);
     });
+    test('with a PR attribution the body_file content is the SD-45 body, a blank line and the attribution, and every other block of the PR prompt is unchanged', async () => {
+      const attribution = { pr: 'PR_ATTRIBUTION_ZQ line one\nline two' };
+      const plain = callOf(await runWorkflow(LAUNCH, happyResults()), 'pr-1').prompt;
+      const attributed = callOf(await runWorkflow({ ...LAUNCH, attribution: attribution }, happyResults()), 'pr-1').prompt;
+      assert.equal(readDataBlock(attributed, 'body_file').content, readDataBlock(plain, 'body_file').content + '\n\n' + attribution.pr);
+      assert.equal(withoutDataBlock(attributed, 'body_file'), withoutDataBlock(plain, 'body_file'));
+    });
     for (const [label, results, head, args = LAUNCH] of [
       ['a run with no fix', happyResults(), OTHER],
       ['a run with a fix round', fixFlowResults(), THIRD],
@@ -5777,6 +5800,14 @@ const ROW_TESTS = {
       const plan = makePlan({ classification: 'refactor', breaking: true, summary: 'Move the cache reads.\nKeep the API.', title: 'Split the cache' });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan) }));
       assert.equal(readRunnerInputs(callOf(run, 'pr-1').prompt).title, 'refactor!: Split the cache');
+    });
+    test('the title never carries the attribution launch arg', async () => {
+      const attribution = { commit: 'COMMIT_ATTRIBUTION_ZQ', pr: 'PR_ATTRIBUTION_ZQ' };
+      const plain = await runWorkflow(LAUNCH, happyResults());
+      const attributed = await runWorkflow({ ...LAUNCH, attribution: attribution }, happyResults());
+      const title = readRunnerInputs(callOf(attributed, 'pr-1').prompt).title;
+      assert.equal(title, readRunnerInputs(callOf(plain, 'pr-1').prompt).title);
+      assert.ok(!title.includes('ATTRIBUTION_ZQ'), title);
     });
   },
   'SD-45': () => {
@@ -6006,6 +6037,19 @@ const ROW_TESTS = {
       assert.equal(main.buildPullRequestTexts(runWith('P'.repeat(60000 - commentOverhead)), plan, gates).problem, undefined);
       const texts = main.buildPullRequestTexts(runWith('P'.repeat(60000 - commentOverhead + 1)), plan, gates);
       assert.equal(texts.problem, 'The pull request comment would be 60001 characters, over the limit of 60000, so the delivery stopped. This step pushed nothing.');
+    });
+    test('the PR attribution joins the body after the size check, so a body at the limit carries 1000 more characters and 2 for the blank line', () => {
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, slow: [] };
+      const runWith = (attribution) => ({ localReview: false, head: OTHER, waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], approvals: [], rejected: [], undone: [], taken: [], attribution: attribution });
+      const planWith = (length) => makePlan({ digest: { problem: '', change: '' }, steps: [makeStep('S', ['a'], { outcome: 'x'.repeat(length) })] });
+      const overhead = main.buildPullRequestTexts(runWith({}), planWith(1), gates).body.length - 1;
+      const pr = 'A'.repeat(1000);
+      const atLimit = main.buildPullRequestTexts(runWith({ pr: pr }), planWith(60000 - overhead), gates);
+      assert.equal(atLimit.problem, undefined);
+      assert.equal(atLimit.body.length, 60000 + 2 + 1000);
+      assert.equal(atLimit.body, main.buildPullRequestTexts(runWith({}), planWith(60000 - overhead), gates).body + '\n\n' + pr);
+      const overLimit = main.buildPullRequestTexts(runWith({ pr: pr }), planWith(60000 - overhead + 1), gates);
+      assert.equal(overLimit.problem, 'The pull request body would be 60001 characters, over the limit of 60000, so the delivery stopped. This step pushed nothing.');
     });
     const attributionProblem = (noun) => 'The pull request ' + noun + ' would hold an attribution string, so the delivery stopped. This step pushed nothing.';
     test('a title, body or comment that holds a forbiddenSubjectTexts() string in any case names that text, neutralized text included', () => {
@@ -8152,6 +8196,19 @@ const ROW_TESTS = {
       assert.equal(moltSubjectLine(scratch, 'Add the feat!: thing', false, 'marker'), 'blocker: the subject or body has a breaking change marker but breaking is not true');
       assert.equal(moltSubjectLine(scratch, 'x'.repeat(73), false, 'long'), 'blocker: subject must be 72 characters or fewer');
     });
+    test('a commit attribution leaves every subject_file block as it is and goes only into the body_file block', async () => {
+      const commit = 'Co-Authored-By: A <a@example.invalid>';
+      const plain = await runWorkflow(LAUNCH, fixFlowResults());
+      const attributed = await runWorkflow({ ...LAUNCH, attribution: { commit: commit } }, fixFlowResults());
+      const commitLabels = labelsOf(attributed).filter((label) => hasDataBlock(callOf(attributed, label).prompt, 'subject_file'));
+      assert.deepEqual(commitLabels, ['commit-1-1', 'fix-commit-1-1', 'review-commit-1-1']);
+      for (const label of commitLabels) {
+        const subject = readDataBlock(callOf(attributed, label).prompt, 'subject_file').content;
+        assert.equal(subject, readDataBlock(callOf(plain, label).prompt, 'subject_file').content, label);
+        assert.ok(!subject.includes(commit), label);
+        assert.equal(readDataBlock(callOf(attributed, label).prompt, 'body_file').content, commit, label);
+      }
+    });
   },
   'SD-67': () => {
     const firstReply = 'Take option A.';
@@ -9112,8 +9169,8 @@ const ROW_TESTS = {
         assert.ok(synapseText.includes(word), word);
       }
       assert.ok(synapseText.includes('Replace `{plugin-root}` with `${CLAUDE_PLUGIN_ROOT}`, only in the `command` string.'));
-      assert.ok(synapseText.includes('- `body_file` and `comment_file`, only for a pull request: `{path, content}`.'));
-      assert.ok(synapseText.includes('- `inputs_file`, only for a commit or pull request, and `subject_file` and `files_file`, only for a commit: `{path, content}`.'));
+      assert.ok(synapseText.includes('- `comment_file`, only for a pull request: `{path, content}`.'));
+      assert.ok(synapseText.includes('- `inputs_file` and `body_file`, only for a commit or pull request, and `subject_file` and `files_file`, only for a commit: `{path, content}`.'));
       assert.ok(synapseText.includes('1. In prompt order, write each `*_file` block\'s decoded `content`, never the whole block, to its `path`.'));
       assert.ok(!synapseText.includes('{token}'));
       assert.ok(!synapseText.includes('wherever they appear'));
@@ -9138,6 +9195,43 @@ const ROW_TESTS = {
       }
       assert.ok(!readDataBlock(callOf(run, 'pr-1').prompt, 'body_file').path.includes('{'));
       assert.ok(!readDataBlock(callOf(run, 'pr-1').prompt, 'comment_file').path.includes('{'));
+    });
+    test('the file blocks of every runner prompt, with and without attribution, are those the synapse.md Input allows its runner', async () => {
+      const synapseText = readText(join(repoRoot, 'plugin/agents/synapse.md'));
+      const inputSection = synapseText.slice(synapseText.indexOf('\n## Input\n')).split('\n## ')[1];
+      const kindsByPhrase = { 'commit or pull request': ['commit', 'pr'], commit: ['commit'], 'pull request': ['pr'] };
+      const allowed = {};
+      for (const match of inputSection.matchAll(/((?:`[a-z]+_file`(?:,? and )?)+), only for a (commit or pull request|commit|pull request)\b/g)) {
+        for (const nameMatch of match[1].matchAll(/`([a-z]+_file)`/g)) {
+          allowed[nameMatch[1]] = (allowed[nameMatch[1]] ?? []).concat(kindsByPhrase[match[2]]);
+        }
+      }
+      assert.deepEqual(allowed, { inputs_file: ['commit', 'pr'], body_file: ['commit', 'pr'], subject_file: ['commit'], files_file: ['commit'], comment_file: ['pr'] });
+      const plain = await runWorkflow(LAUNCH, happyResults());
+      const attributedArgs = { ...LAUNCH, attribution: HARNESS_ATTRIBUTION };
+      const attributed = await runWorkflow(attributedArgs, fixFlowResults());
+      assert.equal(attributed.result.outcome, 'complete', attributed.result.message);
+      const pausedResults = happyResults({ 'pr-1': { outcome: 'blocked', stderr: 'blocker: PR_STOP_ZQ\n' }, 'head-1-1': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
+      const paused = await runWorkflow(attributedArgs, pausedResults);
+      assert.equal(paused.result.needs_user, true, paused.result.message);
+      const resumed = await runWorkflow(resumeWith(attributedArgs, paused.result, 'Fixed.'), pausedResults);
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      const attributedPairs = new Set();
+      for (const run of [plain, attributed, paused, resumed]) {
+        for (const call of run.calls.filter((candidate) => candidate.opts.agentType === 'hivemind:synapse')) {
+          const command = readDataBlock(call.prompt, 'command');
+          const kind = command.includes('/skills/molt/') ? 'commit' : command.includes('/skills/open-plan-pr/') ? 'pr' : 'none';
+          for (const name of listFileBlockNames(call.prompt)) {
+            assert.ok((allowed[name] ?? []).includes(kind), call.opts.label + ' ' + name + ' ' + kind);
+            if (run !== plain) {
+              attributedPairs.add(name + ',' + kind);
+            }
+          }
+        }
+      }
+      for (const pair of ['body_file,commit', 'body_file,pr', 'comment_file,pr']) {
+        assert.ok(attributedPairs.has(pair), pair);
+      }
     });
     test('a facts relay with plugin_root none keeps {plugin-root} in every runner command, the branch, wave, fix, review, head check and pull request ones included', async () => {
       const noRoot = { 'facts-1': factsRelay({ plugin_root: 'none' }) };
@@ -9246,7 +9340,13 @@ const ROW_TESTS = {
       const commitWords = main.listCommitWords({ trunk: 'main', factsStem: FACTS_STEM }, 'review-commit-999-999-retry', ['src/a.js']);
       assert.deepEqual([...commitWords.slice(4)], ['--subject-file', '.hivemind/molt-inputs-' + FACTS_STEM + '-review-commit-999-999-retry-subj.json', '--files-file', '.hivemind/molt-inputs-' + FACTS_STEM + '-review-commit-999-999-retry-files.json']);
       assert.equal(lib.describeRunnerWordProblem(commitWords), undefined, commitWords.join(' '));
-      assert.equal(lib.describeRunnerWordProblem(['--body-file', '.hivemind/molt-inputs-' + FACTS_STEM + '-pr-1-body.json']), 'its --body-file value is not one the script takes');
+      const attributedWords = main.listCommitWords({ trunk: 'main', factsStem: FACTS_STEM, attribution: { commit: 'Co-Authored-By: A <a@example.invalid>' } }, 'review-commit-999-999-retry', ['src/a.js']);
+      assert.deepEqual([...attributedWords.slice(-2)], ['--body-file', '.hivemind/molt-inputs-' + FACTS_STEM + '-review-commit-999-999-retry-body.json']);
+      assert.equal(lib.describeRunnerWordProblem(attributedWords), undefined, attributedWords.join(' '));
+      assert.equal(lib.describeRunnerWordProblem(['--body-file', '.hivemind/molt-inputs-' + FACTS_STEM + '-pr-1-body.json']), undefined);
+      for (const outsidePath of ['.hivemind/body-' + FACTS_STEM + '.json', 'molt-inputs-' + FACTS_STEM + '-body.json', '.hivemind/molt-inputs-' + FACTS_STEM + '-body.txt']) {
+        assert.equal(lib.describeRunnerWordProblem(['--body-file', outsidePath]), 'its --body-file value is not one the script takes', outsidePath);
+      }
       assert.equal(main.buildInputsPath({ factsStem: undefined }, 'molt', 'commit-1-1'), undefined);
     });
     test('a call label whose retry label would leave the --inputs class, or whose own files path would leave its class, is a terminal stop before any runner call', async () => {
@@ -10856,6 +10956,187 @@ const ROW_TESTS = {
         assert.equal(readDataBlock(callOf(run, 'fix-commit-1-1').prompt, 'files_file').content, 'src/cache.js\n' + spelling, spelling);
         assert.equal(labelsOf(run).at(-1), 'fix-commit-1-1', spelling);
       }
+    });
+  },
+  'SD-90': () => {
+    const ATTRIBUTION_PROBLEM = withNextStep('The attribution launch arg must be commit and pr text up to 1000 characters, so the delivery did not start.');
+    for (const [label, value] of [
+      ['null', null],
+      ['a string', 'Co-Authored-By: A'],
+      ['a list', [HARNESS_ATTRIBUTION.commit]],
+      ['an unknown key', { commit: 'a', body: 'b' }],
+      ['a number commit', { commit: 1 }],
+      ['a null pr', { pr: null }],
+      ['a commit of 1001 characters', { commit: 'a'.repeat(1001) }],
+      ['a pr of 501 robot emoji, 1002 UTF-16 code units', { pr: '\u{1F916}'.repeat(501) }],
+      ['a carriage return', { commit: 'a\r\nb' }],
+      ['a NUL', { pr: 'a\u0000b' }],
+      ['an escape', { pr: '\u001b[31mred' }],
+      ['a C1 control', { commit: 'a\u0085b' }],
+      ['a lone high surrogate', { commit: 'a\uD800b' }],
+      ['a lone low surrogate', { pr: '\uDC00' }]
+    ]) {
+      test(`an attribution of ${label} blocks with no agent call and never echoes the value`, async () => {
+        const run = await runWorkflow({ ...LAUNCH, attribution: value }, happyResults());
+        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: ATTRIBUTION_PROBLEM });
+        assert.deepEqual(run.calls, []);
+      });
+    }
+    for (const [label, value, kept] of [
+      ['an absent attribution', undefined, {}],
+      ['an empty object', {}, {}],
+      ['empty commit and pr', { commit: '', pr: '' }, { commit: '', pr: '' }],
+      ['a commit only', { commit: HARNESS_ATTRIBUTION.commit }, { commit: HARNESS_ATTRIBUTION.commit }],
+      ['a pr only, with an emoji, a tab and line feeds', { pr: HARNESS_ATTRIBUTION.pr + '\tend' }, { pr: HARNESS_ATTRIBUTION.pr + '\tend' }],
+      ['1000 UTF-16 code units each', { commit: 'c'.repeat(1000), pr: '\u{1F916}'.repeat(500) }, { commit: 'c'.repeat(1000), pr: '\u{1F916}'.repeat(500) }]
+    ]) {
+      test(`${label} is read into run.attribution and the run completes`, async () => {
+        const args = value === undefined ? LAUNCH : { ...LAUNCH, attribution: value };
+        assert.deepEqual(structuredClone(main.createRunState(main.readDeliveryLaunch(args)).attribution), kept);
+        const run = await runWorkflow(args, happyResults());
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+      });
+    }
+    test('the run stops on the first launch problem in the order local_review, draft, decisions, attribution', async () => {
+      const badArgs = { ...LAUNCH, local_review: 'yes', draft: 'yes', decisions: [], attribution: null };
+      for (const name of ['local_review', 'draft', 'decisions', 'attribution']) {
+        const run = await runWorkflow(badArgs, happyResults());
+        assert.ok(run.result.message.startsWith('The ' + name + ' launch arg must '), name + ': ' + run.result.message);
+        assert.deepEqual(run.calls, [], name);
+        delete badArgs[name];
+      }
+      const run = await runWorkflow(badArgs, happyResults());
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+    });
+    test('a paused run keeps attribution out of resume_args, and its resumed run reads it from the launch args again', async () => {
+      const args = { ...LAUNCH, attribution: HARNESS_ATTRIBUTION };
+      const results = happyResults({ 'pr-1': { outcome: 'blocked', stderr: 'blocker: PR_STOP_ZQ\n' }, 'head-1-1': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
+      const paused = await runWorkflow(args, results);
+      assert.equal(paused.result.needs_user, true, paused.result.message);
+      assert.deepEqual(Object.keys(paused.result.resume_args), ['answers', 'build']);
+      assert.ok(!JSON.stringify(paused.result).includes('ATTRIBUTION'), paused.result.message);
+      const resumed = await runWorkflow(resumeWith(args, paused.result, 'Fixed.'), results);
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      assert.ok(prBodyOf(resumed, 'pr-1-2').endsWith('\n\n' + HARNESS_ATTRIBUTION.pr));
+      assert.equal(readDataBlock(callOf(resumed, 'head-1-1').prompt, 'body_file').content, HARNESS_ATTRIBUTION.commit);
+    });
+  },
+  'SD-91': () => {
+    test('real molt.sh behind the real synapse gate hook: the commit message is the subject, one blank line and the attribution, which git reads as trailers', async () => {
+      const scratch = makeScratchRepo();
+      const gated = makeGatedSynapseRunner(scratch, scratch.repo);
+      const run = await runWorkflow({ ...LAUNCH, attribution: HARNESS_ATTRIBUTION }, realResults(scratch, { 'facts-1': gated, 'branch-1': gated, 'commit-1-1': gated, 'review-commit-1-1': gated }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const message = runGitIn(scratch, ['log', '-1', '--format=%B', 'feature/cache']);
+      assert.equal(message, 'feat: Step STEP-001 is done.\n\n' + HARNESS_ATTRIBUTION.commit);
+      const parsed = spawnSync('git', ['interpret-trailers', '--parse'], { cwd: scratch.repo, env: scratch.env, input: message + '\n', encoding: 'utf8' });
+      assert.equal(parsed.status, 0, parsed.stderr);
+      assert.equal(parsed.stdout, HARNESS_ATTRIBUTION.commit + '\n');
+      for (const label of ['commit-1-1', 'review-commit-1-1']) {
+        const words = readDataBlock(callOf(run, label).prompt, 'command').split(' ');
+        assert.equal(words.at(-2), '--body-file', label);
+        assert.match(words.at(-1), new RegExp('^\\.hivemind/molt-inputs-[0-9TZ]+-[0-9a-f]+-' + label + '-body\\.json$'), label);
+      }
+    });
+    test('every commit call, wave, fix round, review commit, head check and retry, carries its own -body path and a last body_file block of the raw text', async () => {
+      const transientBlock = { outcome: 'blocked', stderr: 'fatal: unable to access the remote: Could not resolve host: github.com\n' };
+      const pausedResults = happyResults({ 'pr-1': { outcome: 'blocked', stderr: 'blocker: PR_STOP_ZQ\n' }, 'head-1-1': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
+      const args = { ...LAUNCH, attribution: { commit: HARNESS_ATTRIBUTION.commit } };
+      const paused = await runWorkflow(args, pausedResults);
+      const cases = [
+        ['fix flow', args, fixFlowResults(), ['commit-1-1', 'fix-commit-1-1', 'review-commit-1-1']],
+        ['paused then resumed', resumeWith(args, paused.result, 'Fixed.'), pausedResults, ['commit-1-1', 'review-commit-1-1', 'head-1-1']],
+        ['transient retry', args, happyResults({ 'commit-1-1': transientBlock, 'commit-1-1-retry': commitRelay() }), ['commit-1-1', 'commit-1-1-retry', 'review-commit-1-1']]
+      ];
+      for (const [name, launch, results, commitLabels] of cases) {
+        const run = await runWorkflow(launch, results);
+        assert.equal(run.result.outcome, 'complete', name + ': ' + run.result.message);
+        const moltCalls = run.calls.filter((call) => hasDataBlock(call.prompt, 'subject_file'));
+        assert.deepEqual(moltCalls.map((call) => call.opts.label), commitLabels, name);
+        const bodyPairs = pairInputsPaths(run, results).filter((pair) => pair.label.endsWith(' body_file') && !pair.label.startsWith('pr-'));
+        assert.deepEqual(bodyPairs.map((pair) => pair.label), commitLabels.map((label) => label + ' body_file'), name);
+        bodyPairs.forEach((pair) => assert.deepEqual([pair.path, pair.word], [pair.expected, pair.expected], name + ' ' + pair.label));
+        for (const call of moltCalls) {
+          assert.equal(listFileBlockNames(call.prompt).at(-1), 'body_file', name + ' ' + call.opts.label);
+          assert.equal(readDataBlock(call.prompt, 'body_file').content, HARNESS_ATTRIBUTION.commit, name + ' ' + call.opts.label);
+          assert.equal(readDataBlock(call.prompt, 'command').split(' ').at(-2), '--body-file', name + ' ' + call.opts.label);
+          assert.equal(lib.describeRunnerWordProblem(readDataBlock(call.prompt, 'command').replace(/^bash "[^"]*" /, '').split(' ')), undefined, name + ' ' + call.opts.label);
+        }
+      }
+    });
+    test('with no commit attribution, absent, {}, empty or pr only, every commit prompt is byte for byte the prompt of a run with no attribution arg', async () => {
+      const plain = await runWorkflow(LAUNCH, fixFlowResults());
+      for (const attribution of [{}, { commit: '' }, { commit: '', pr: '' }, { pr: HARNESS_ATTRIBUTION.pr }]) {
+        const run = await runWorkflow({ ...LAUNCH, attribution: attribution }, fixFlowResults());
+        assert.deepEqual(labelsOf(run), labelsOf(plain), JSON.stringify(attribution));
+        for (const call of plain.calls.filter((candidate) => !candidate.opts.label.startsWith('pr-'))) {
+          assert.equal(callOf(run, call.opts.label).prompt, call.prompt, JSON.stringify(attribution) + ' ' + call.opts.label);
+          assert.ok(!hasDataBlock(call.prompt, 'body_file') && !call.prompt.includes('--body-file'), call.opts.label);
+        }
+      }
+    });
+    test('buildCommitPrompt adds the body_file block only for a body, after every other block', () => {
+      const plan = makePlan();
+      const plainWords = main.listCommitWords({ trunk: 'main', factsStem: FACTS_STEM }, 'commit-1-1', ['src/a.js']);
+      const bodyWords = main.listCommitWords({ trunk: 'main', factsStem: FACTS_STEM, attribution: { commit: 'x' } }, 'commit-1-1', ['src/a.js']);
+      assert.deepEqual([...bodyWords], [...plainWords, '--body-file', '.hivemind/molt-inputs-' + FACTS_STEM + '-commit-1-1-body.json']);
+      assert.equal(main.buildCommitPrompt(plainWords, ['src/a.js'], plan, 'the wave', 'S', pluginRoot, undefined), main.buildCommitPrompt(plainWords, ['src/a.js'], plan, 'the wave', 'S', pluginRoot));
+      const prompt = main.buildCommitPrompt(bodyWords, ['src/a.js'], plan, 'the wave', 'S', pluginRoot, HARNESS_ATTRIBUTION.commit);
+      assert.deepEqual(listFileBlockNames(prompt), ['inputs_file', 'subject_file', 'files_file', 'body_file']);
+      assert.equal(withoutDataBlock(prompt, 'body_file').replace(' --body-file .hivemind/molt-inputs-' + FACTS_STEM + '-commit-1-1-body.json', ''), main.buildCommitPrompt(plainWords, ['src/a.js'], plan, 'the wave', 'S', pluginRoot));
+      const noFiles = main.buildCommitPrompt(main.listCommitWords({ trunk: 'main', factsStem: FACTS_STEM, attribution: { commit: 'x' } }, 'head-1-1', []), [], plan, 'the head', 'S', pluginRoot, 'x');
+      assert.deepEqual(listFileBlockNames(noFiles), ['inputs_file', 'subject_file', 'body_file']);
+    });
+  },
+  'SD-92': () => {
+    const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, slow: [] };
+    const runWith = (attribution) => ({ localReview: false, head: OTHER, waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], approvals: [], rejected: [], undone: [], taken: [], attribution: attribution });
+    test('the harness PR attribution, forbidden strings, a mention and a link included, ends the body raw after a blank line and does not stop the run; the title and the comment stay as without it', async () => {
+      assert.ok(main.forbiddenSubjectTexts().some((text) => HARNESS_ATTRIBUTION.pr.toLowerCase().includes(text)));
+      const pr = HARNESS_ATTRIBUTION.pr + '\ncc @octocat <b>';
+      const plain = readRunnerInputs(callOf(await runWorkflow(LAUNCH, happyResults()), 'pr-1').prompt);
+      const run = await runWorkflow({ ...LAUNCH, attribution: { pr: pr } }, happyResults());
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
+      assert.equal(inputs.body, plain.body + '\n\n' + pr);
+      assert.deepEqual([inputs.title, inputs.comment], [plain.title, plain.comment]);
+      assert.ok(!run.result.message.includes('ATTRIBUTION') && !run.result.message.includes('claude.ai'), run.result.message);
+    });
+    test('buildPullRequestTexts appends the text to the body only, and an empty or absent pr changes no text', () => {
+      const plainTexts = main.buildPullRequestTexts(runWith({}), makePlan(), gates);
+      const texts = main.buildPullRequestTexts(runWith({ commit: 'COMMIT_ONLY', pr: HARNESS_ATTRIBUTION.pr }), makePlan(), gates);
+      assert.deepEqual({ ...texts }, { title: plainTexts.title, body: plainTexts.body + '\n\n' + HARNESS_ATTRIBUTION.pr, comment: plainTexts.comment });
+      for (const attribution of [undefined, { pr: '' }, { commit: 'COMMIT_ONLY' }]) {
+        assert.deepEqual({ ...main.buildPullRequestTexts(runWith(attribution), makePlan(), gates) }, { ...plainTexts }, JSON.stringify(attribution));
+      }
+    });
+    test('a planner text that holds a forbidden string still stops the run before any PR call, attribution or not', async () => {
+      const plan = makePlan({ digest: { problem: 'Add the cache layer.', change: 'Generated with a tool.' } });
+      const run = await runWorkflow({ ...LAUNCH, attribution: HARNESS_ATTRIBUTION }, happyResults({ 'plan-1': planResult(plan) }));
+      assert.equal(run.result.outcome, 'blocked');
+      assert.ok(run.result.message.startsWith('The pull request body would hold an attribution string, so the delivery stopped. This step pushed nothing.\n\n'), run.result.message.slice(0, 300));
+      assert.ok(!labelsOf(run).some((label) => label.startsWith('pr-')));
+    });
+    test('a body over the limit still stops the run, naming the size without the attribution', async () => {
+      const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js'], { outcome: 'P'.repeat(61000) })] });
+      const plain = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan) }));
+      const run = await runWorkflow({ ...LAUNCH, attribution: HARNESS_ATTRIBUTION }, happyResults({ 'plan-1': planResult(plan) }));
+      assert.equal(run.result.outcome, 'blocked');
+      assert.ok(run.result.message.startsWith('The pull request body would be '), run.result.message.slice(0, 300));
+      assert.equal(run.result.message, plain.result.message);
+      assert.ok(!labelsOf(run).some((label) => label.startsWith('pr-')));
+    });
+    test('real open-plan-pr.sh behind the real synapse gate hook opens the PR with the body ending in the attribution', async () => {
+      const scratch = makeScratchRepo();
+      const origin = addBareOrigin(scratch);
+      const logDir = writeCreatePathGh(scratch, origin);
+      const gated = makeGatedSynapseRunner(scratch, scratch.repo);
+      const run = await runWorkflow({ ...LAUNCH, attribution: HARNESS_ATTRIBUTION }, realResults(scratch, { 'plan-1': planResult(makePlan()), 'commit-1-1': gated, 'review-commit-1-1': gated, 'pr-1': gated }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const body = readFileSync(join(logDir, 'body.md'), 'utf8');
+      assert.ok(body.replace(/\n+$/, '').endsWith('\n\n' + HARNESS_ATTRIBUTION.pr), JSON.stringify(body.slice(-300)));
+      const createArgs = readFileSync(join(logDir, 'create.args'), 'utf8');
+      assert.ok(!createArgs.includes('claude.ai') && !createArgs.includes('Generated'), createArgs);
     });
   }
 };

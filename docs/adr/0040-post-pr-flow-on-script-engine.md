@@ -466,3 +466,15 @@ This amendment records the redesign of issue 568 that Amendment 2026-11-13 split
 **Repeat findings.** D4 and D5 are recorded decisions under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A later finding that asks to extend the edit gate to the `Addresses:` harvest, the thread dispositions, the Codex summary signal or the poll's wake is a repeat. So is a finding that asks for an author check on fix marks. Either needs a new failure on that surface to reopen it.
 
 Reference: `docs/references/github-pr-review-graphql.md` (Surface-to-Delivery Contract, Reaction Marker).
+
+## Amendment 2026-11-26: the remediation launch takes the harness attribution (issue 676)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/676. The user decided Q2 on 2026-11-26: `pr-feedback-remediation` takes the `attribution` launch arg, as `standard-delivery` does. The arg's shape, its checks, the budgets and the residuals are in ADR-0037, Amendment 2026-11-26: engine commits and pull requests carry the harness attribution (issue 676).
+
+- **Launch keys.** `launchKeys()` is `references`, `trunk`, `attribution`, `answers`, `build` and `reply`. This amends edge case (a), which said the launch args carry only references `[pr]`, with trunk added later. The 2026-11-12 decision that the hand-off passes no reviewer filter stands.
+- **The read.** `readRemediationLaunch` reads the arg through `readAttribution` after the trunk check. A bad value stops the run before any agent call.
+- **Where it goes.** Every commit of the run, wave, fix round and head check, carries the commit text as trailers. A created pull request body ends with the pr text. A reused pull request keeps its body, and the comment never carries it.
+- **The overlord.** The escalation launch in `## Engine` of `plugin/agents/overlord.md` passes `attribution`.
+- **Contract rows.** PFR-01 changed and PFR-33 is new.
+
+The rest of ADR-0040 is unchanged.

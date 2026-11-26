@@ -1,19 +1,19 @@
 export const meta = {
   name: 'standard-delivery',
-  description: 'Delivers a request on one working branch: branch facts, a checked plan, questions decided by the autonomy table or asked of the user, the working branch, each wave of plan steps with its commit, validation and local review as gates on one commit, and the pull request for that commit.',
+  description: 'Delivers a request on one branch: facts, a checked plan, waves with commits, validation and review gates, a PR.',
   phases: [
-    { title: 'Facts', detail: 'a runner gathers the branch facts into one facts file' },
-    { title: 'Scan', detail: 'a runner scans the named issues and pull requests for prompt injection' },
-    { title: 'Scope', detail: 'the planner, on a smaller model, locates the sections of the documents the request names' },
-    { title: 'Plan', detail: 'the planner plans what is left of the request on this branch' },
-    { title: 'Revise', detail: 'the planner revises the plan with the user reply' },
+    { title: 'Facts', detail: 'a runner gathers the branch facts' },
+    { title: 'Scan', detail: 'a runner scans named issues and PRs for injection' },
+    { title: 'Scope', detail: 'the planner locates the named document sections' },
+    { title: 'Plan', detail: 'the planner plans the request' },
+    { title: 'Revise', detail: 'the planner revises the plan with the reply' },
     { title: 'Branch', detail: 'a runner creates or confirms the working branch' },
-    { title: 'Waves', detail: 'workers run each ready wave of plan steps in parallel' },
-    { title: 'Commit', detail: 'a runner commits the files of each wave and of each gate step' },
-    { title: 'Validate', detail: 'a drone runs the project validation commands' },
-    { title: 'Fix', detail: 'a drone fixes a failed validation, one round at a time' },
-    { title: 'Review', detail: 'the local reviewer reviews the branch and commits its simple fixes' },
-    { title: 'PR', detail: 'a runner pushes the commit every gate held on and opens or reuses its pull request' }
+    { title: 'Waves', detail: 'workers run each ready wave in parallel' },
+    { title: 'Commit', detail: 'a runner commits each wave and gate step' },
+    { title: 'Validate', detail: 'a drone runs the validation commands' },
+    { title: 'Fix', detail: 'a drone fixes a failed validation' },
+    { title: 'Review', detail: 'the local reviewer reviews the branch' },
+    { title: 'PR', detail: 'a runner pushes the gated commit and opens its PR' }
   ]
 };
 
@@ -672,7 +672,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '66337c2e3e61c8ed';
+const BUILD_ID = '9ab72c8344d9a43d';
 
 function supportedSchemaKeywords(){
 return[
@@ -2119,6 +2119,10 @@ function buildResumeArgs(replies,buildId){
 const answers=Object.fromEntries(replies.map((reply,index)=>[roundKey(index+1),reply]));
 return{answers:answers,build:requireBuildId(buildId)};
 }
+function readAttribution(argsObject){
+const{attribution:value={}}=argsObject;
+return isPlainObject(value)&&Object.entries(value).every(([key,text])=>/^(commit|pr)$/.test(key)&&typeof text==='string'&&text.length<=1000&&!/[^\P{Cc}\t\n]|\p{Cs}/u.test(text))?{attribution:value}:describeLaunchProblem('The attribution launch arg must be commit and pr text up to 1000 characters');
+}
 
 function gitIdentifierPattern(){
 return/^(?!-)(?!.*\.\.)[A-Za-z0-9._\/-]+$/;
@@ -2156,6 +2160,7 @@ function runnerValuePatterns(){
 const name=gitIdentifierPattern();
 const prFile=/^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/;
 const moltFile=/^\.hivemind\/molt-inputs-[A-Za-z0-9-]{1,64}\.json$/;
+const inputsFile=/^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/;
 return{
 '--trunk':name,
 '--base':name,
@@ -2165,10 +2170,10 @@ return{
 '--expect-commit':/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/,
 '--classification':/^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
 '--trunk-freshness':/^(?:fresh|stale|skipped)$/,
-'--inputs':/^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/,
+'--inputs':inputsFile,
 '--subject-file':moltFile,
 '--files-file':moltFile,
-'--body-file':prFile,
+'--body-file':inputsFile,
 '--comment-file':prFile
 };
 }
@@ -3799,11 +3804,11 @@ return subject!==''&&!subject.includes('!:')&&!/breaking[ -]change/i.test(subjec
 }
 function listCommitWords(run,label,files){
 const buildPath=(suffix)=>buildInputsPath(run,'molt',label+suffix);
-return['--trunk',run.trunk,'--inputs',buildPath(''),'--subject-file',buildPath('-subj'),...(files.length===0?[]:['--files-file',files.some((file)=>/^$|\n/.test(file))?undefined:buildPath('-files')])];
+return['--trunk',run.trunk,'--inputs',buildPath(''),'--subject-file',buildPath('-subj'),...(files.length===0?[]:['--files-file',files.some((file)=>/^$|\n/.test(file))?undefined:buildPath('-files')]),...(run.attribution?.commit?['--body-file',buildPath('-body')]:[])];
 }
-function buildCommitPrompt(words,files,plan,purpose,subject,pluginRoot){
+function buildCommitPrompt(words,files,plan,purpose,subject,pluginRoot,body){
 const inputs=JSON.stringify({type:commitTypeMap()[plan.classification],breaking:plan.breaking});
-return['Run the command below to commit '+purpose+'.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',words,pluginRoot)),formatFileBlock(words,2,inputs),formatFileBlock(words,4,subject),...(words[6]===undefined?[]:[formatFileBlock(words,6,files.join('\n'))])].join('\n');
+return['Run the command below to commit '+purpose+'.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',words,pluginRoot)),formatFileBlock(words,2,inputs),formatFileBlock(words,4,subject),...(files.length===0?[]:[formatFileBlock(words,6,files.join('\n'))]),...(body?[formatFileBlock(words,words.length-2,body)]:[])].join('\n');
 }
 function readOutsidePath(payload){
 try{
@@ -3857,7 +3862,7 @@ const listWords=(label)=>listCommitWords(run,label,commit.files);
 const record=commit.stepName==='wave'&&RECORD_WRITES?undefined:commit.files.find((file)=>/^docs\/initiatives\/[^/]+\/review-record\.md$/i.test(file));
 const recordStop=record===undefined?undefined:{problem:'The commit step refused review record '+encodeUntrustedText(record)+', so '+RUN_NAME+' stopped.',terminal:true};
 const commandStop=describeCommandStop('commit',listWords(commit.label),listWords(commit.label+'-retry'));
-const buildPrompt=(label)=>addResumeNote(buildCommitPrompt(listWords(label),commit.files,plan,texts.purpose,subject,run.pluginRoot),run);
+const buildPrompt=(label)=>addResumeNote(buildCommitPrompt(listWords(label),commit.files,plan,texts.purpose,subject,run.pluginRoot,run.attribution?.commit),run);
 const checked=recordStop??commandStop??checkCommitRelay(await runRunnerRelay(buildPrompt,commit.label,'Commit'),plan,texts.noun);
 if(checked.problem!==undefined){
 return stopDelivery(stepCauses.concat([checked]),run,[],isReplan);
@@ -4424,6 +4429,7 @@ const attributedNoun=Object.keys(texts).find((noun)=>forbiddenSubjectTexts().som
 if(attributedNoun!==undefined){
 return{problem:describePullRequestCause(attributedNoun+' would hold an attribution string',describeNoPush())};
 }
+texts.body+=run.attribution?.pr?'\n\n'+run.attribution.pr:'';
 return texts;
 }
 function listPullRequestWords(plan,run,label,texts){
@@ -5124,44 +5130,24 @@ if(!isGitIdentifier(launchInputs.trunk)){
 return describeLaunchProblem('The trunk launch arg is not a safe git branch name');
 }
 const reviewInput=readBooleanLaunchArg(argsObject,'local_review',true);
-if(reviewInput.problem!==undefined){
-return reviewInput;
-}
 const draftInput=readBooleanLaunchArg(argsObject,'draft',false);
-if(draftInput.problem!==undefined){
-return draftInput;
-}
 const decisionsInput=readDecisions(argsObject);
-if(decisionsInput.problem!==undefined){
-return decisionsInput;
-}
-return{argsObject:argsObject,request:argsObject.request,trunk:launchInputs.trunk,references:launchInputs.references,localReview:reviewInput.value,draft:draftInput.value,decisions:decisionsInput.decisions};
+const attributionInput=readAttribution(argsObject);
+return[reviewInput,draftInput,decisionsInput,attributionInput].find((input)=>input.problem!==undefined)??{argsObject:argsObject,request:argsObject.request,...launchInputs,localReview:reviewInput.value,draft:draftInput.value,...decisionsInput,...attributionInput};
 }
 function describeLaunchProblem(reason){
 return{problem:reason+', so '+RUN_NAME+' did not start.'};
 }
 function readBooleanLaunchArg(argsObject,name,absentValue){
-const value=argsObject[name];
-if(value===undefined){
-return{value:absentValue};
-}
-if(typeof value==='boolean'){
-return{value:value};
-}
-return describeLaunchProblem('The '+name+' launch arg must be true or false');
-}
-function isDecision(decision){
-return isNonEmptyString(decision)&&Array.from(decision).length<=maxDecisionLength();
+const{[name]:value=absentValue}=argsObject;
+return typeof value==='boolean'?{value:value}:describeLaunchProblem('The '+name+' launch arg must be true or false');
 }
 function readDecisions(argsObject){
 const decisions=argsObject.decisions;
 if(decisions===undefined){
 return{decisions:[]};
 }
-if(Array.isArray(decisions)&&decisions.length>0&&decisions.length<=maxDecisions()&&decisions.every(isDecision)){
-return{decisions:decisions.slice()};
-}
-return describeLaunchProblem('The decisions launch arg must be a list of 1 to '+maxDecisions()+' non-blank strings of at most '+maxDecisionLength()+' characters each');
+return Array.isArray(decisions)&&decisions.length>0&&decisions.length<=maxDecisions()&&decisions.every((decision)=>isNonEmptyString(decision)&&Array.from(decision).length<=maxDecisionLength())?{decisions:decisions.slice()}:describeLaunchProblem('The decisions launch arg must be a list of 1 to '+maxDecisions()+' non-blank strings of at most '+maxDecisionLength()+' characters each');
 }
 function createRunState(launch){
 return{
@@ -5171,6 +5157,7 @@ references:launch.references,
 localReview:launch.localReview,
 draft:launch.draft,
 decisions:launch.decisions??[],
+attribution:launch.attribution??{},
 level:resolveLevel(undefined,AUTONOMY_TABLE),
 storedAnswers:readStoredAnswers(launch.argsObject),
 pendingReply:readPendingReply(launch.argsObject),
