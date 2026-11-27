@@ -1568,6 +1568,24 @@ const ROW_TESTS = {
       assert.equal(comment, readPrInputs(callOf(plain, 'pr-2').prompt).comment);
       assert.ok(!comment.includes(ATTRIBUTION.pr) && !comment.includes(ATTRIBUTION.commit), comment);
     });
+    test('every commit and pull request runner file block path, with and without attribution, is relative under .hivemind/ (issue 692)', async () => {
+      const seenKinds = new Set();
+      for (const run of [await runWorkflow(LAUNCH, fixRoundResults()), await runWorkflow(ATTRIBUTED, fixRoundResults())]) {
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        for (const call of run.calls.filter((candidate) => candidate.opts.agentType === 'hivemind:synapse')) {
+          const command = readDataBlock(call.prompt, 'command');
+          const kind = command.includes('/skills/molt/') ? 'molt' : command.includes('/skills/open-plan-pr/') ? 'pr' : 'none';
+          const names = call.prompt.split('\n').filter((line) => /^<[a-z]+_file>$/.test(line)).map((line) => line.slice(1, -1));
+          for (const name of names) {
+            const path = readDataBlock(call.prompt, name).path;
+            assert.ok(path.startsWith('.hivemind/' + kind + '-inputs-'), call.opts.label + ' ' + name + ' ' + path);
+            assert.ok(!path.startsWith('/') && !path.includes('{') && !path.slice('.hivemind/'.length).includes('/'), call.opts.label + ' ' + name + ' ' + path);
+            seenKinds.add(kind);
+          }
+        }
+      }
+      assert.deepEqual([...seenKinds].sort(), ['molt', 'pr']);
+    });
     test('the real commit script writes the commit attribution as trailers, and the real reuse path keeps the pull request body and comments without it', async () => {
       const scratch = makeReuseScratch();
       const prRelays = [];
