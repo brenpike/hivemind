@@ -15,7 +15,8 @@
 # decomposes into slices, or which slice blocks which is holistic LLM work (P11)
 # and stays in the SKILL prose. The script is the reproducible hands:
 #   - idempotently ensure (create-or-find) the PRD-level epic PARENT issue,
-#     returning its issue number + GraphQL NODE ID,
+#     returning its issue number + GraphQL NODE ID, and add the `type:epic` label to the
+#     returned epic (live only) so the readiness check reads every slice's parent as an epic,
 #   - attach a sliced (child) issue to the parent as a NATIVE sub-issue via the
 #     GraphQL `addSubIssue` mutation,
 #   - read the parent's `subIssues` connection (paginated to completeness),
@@ -66,8 +67,21 @@
 #              it to be a string, else FAILS CLOSED. The body reaches the library's
 #              hivemind_seed_marker_slug ONLY on stdin; `seed` is true only when that function
 #              prints exactly <slug> (a CRLF marker line counts; another slug or no marker gives
-#              false). The resolve path creates and edits no issue, so the seed's marker line
-#              stays. Without --slug every output is byte-identical to the contract before it.
+#              false). The resolve path creates no issue and only adds the epic label (below),
+#              never touching the body, so the seed's marker line stays. Without --slug every
+#              output is byte-identical to the contract before it.
+#     online (epic label, every live path): after the record is read and before it is printed,
+#              ensure_epic_label adds `type:epic` to the returned epic: the resolved path (number
+#              from the record), the --slug path ONLY when `seed` is true, resolved-by-title
+#              (number from the discovery decision) and the created path (after the node-id read).
+#              It reads the repository's label by name (GraphQL repository.label, owner/name/label
+#              via -f, through the SHARED kernel); a missing label is created with
+#              `gh label create type:epic --color 3e4b9e --description "triage type rating" -R
+#              <owner/repo>` (the triage palette's values, never --force); a label found whose name
+#              is not exactly `type:epic` (e.g. `Type:Epic`) FAILS CLOSED; then `gh issue edit
+#              <number> -R <owner/repo> --add-label type:epic`. It never edits an existing label,
+#              never removes a label and never touches an issue's title or body. Any read, create
+#              or edit failure exits nonzero with nothing on stdout. Offline paths never label.
 #     offline: with --response-file -> normalizes the injected raw GraphQL
 #              repository.issue response (number+id) through the shared kernel and
 #              emits the parent record (status resolved when --existing-number was given,
@@ -201,6 +215,8 @@
 #     exact-title epic and resolved it instead of creating a duplicate (orphan-safety).
 #   ensure-parent --existing-number <int> --slug <slug>:
 #     { "number": <int>, "id": <node-id>, "status": "resolved", "seed": true|false }
+#   Live, every ensure-parent record above is printed only after its epic is labeled `type:epic`
+#   (with --slug, only a seed epic is labeled); the record itself is unchanged by the label step.
 #
 #   attach-subissue payload (offline, --emit-payload):
 #     { "issueId": <parent-node-id>, "subIssueId": <child-node-id> }
@@ -245,7 +261,7 @@
 #     or a null/wrong-typed field on any element — FAILS CLOSED (nonzero, structured
 #     kind record to stderr) before any decision or emission. Covered reads:
 #     ensure-parent's repository.issue resolve/normalize (with --slug, its body too),
-#     list-children's per-page subIssues response (before accumulation), design-gate's
+#     ensure-parent's repository.label read of the epic label, list-children's per-page subIssues response (before accumulation), design-gate's
 #     defaultBranchRef trunk read. No subcommand bypasses this kernel.
 #   - SHARED READINESS CHECK LIBRARY. The script sources
 #     ${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-check.sh with the canonical ADR-0020
@@ -255,8 +271,10 @@
 #     the library's; this script never re-implements them and never reads a document by branch
 #     name, local ref or working-tree path.
 #   - NATIVE SUB-ISSUES, NOT LABELS. This script wires the first-class GitHub
-#     parent/child hierarchy; it NEVER reads, writes, or grooms any `initiative:*`
-#     (or any other) label. Grouping is the native relationship, full stop.
+#     parent/child hierarchy; it NEVER reads, writes, or grooms any `initiative:*` label.
+#     Grouping is the native relationship, full stop. The ONLY label it touches is
+#     `type:epic` on the epic ensure-parent returns, and only by adding it: it may create the
+#     missing repository label, but never edits an existing label and never removes one.
 #   - addSubIssue FIELD MAPPING IS LOAD-BEARING: input `issueId` = the PARENT node,
 #     `subIssueId` = the CHILD node. This is NOT the dependency API's
 #     `blockingIssueId`. build_attach_payload and the mutation source are the SINGLE
@@ -821,6 +839,25 @@ query($owner: String!, $repo: String!, $number: Int!) {
   }
 }'
 
+# INVARIANT: the epic label's name, color and description equal the `type:epic` entry of
+# triage_palette and the description cmd_ensure_labels gives a `type` family label, both in
+# ${CLAUDE_PLUGIN_ROOT}/skills/triage-backlog/scripts/triage-ops.sh. tools/test_subissue_ops.sh
+# (case ensure-parent:label-matches-triage-palette) runs both scripts and pins the agreement.
+EPIC_LABEL="type:epic"
+EPIC_LABEL_COLOR="3e4b9e"
+EPIC_LABEL_DESCRIPTION="triage type rating"
+
+# ensure_epic_label's label read: the repository's label named $label, or null when it has none
+# (owner/name/label via gh -f as DATA).
+EPIC_LABEL_QUERY='
+query($owner: String!, $name: String!, $label: String!) {
+  repository(owner: $owner, name: $name) {
+    label(name: $label) {
+      name
+    }
+  }
+}'
+
 # design-gate's trunk read: the default branch name and its commit id (owner/name via gh -f as DATA).
 TRUNK_REF_QUERY='
 query($owner: String!, $name: String!) {
@@ -942,6 +979,52 @@ paginate_to_completeness() {
   printf '%s' "$accumulated"
 }
 
+# ensure_epic_label <owner_repo> <number>: give the epic issue <number> the `type:epic` label
+# (live path only; the caller has validated owner_repo and ensured `gh` is on PATH). Reads the
+# repository's label by name through the shared kernel (root `.data.repository`; label null, or an
+# object with a non-empty string name). A missing label is created with the triage palette's color
+# and description, never with --force; a label found under a name that is not exactly
+# `type:epic` (e.g. `Type:Epic`) fails closed. Then adds the label to the issue. It never edits an
+# existing label, never removes a label and never touches an issue's title or body. Any read,
+# create or edit failure exits nonzero with nothing on stdout.
+ensure_epic_label() {
+  local owner_repo="$1" number="$2" owner repo_name resp label_read label_name
+  owner="${owner_repo%%/*}"; repo_name="${owner_repo#*/}"
+  resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$EPIC_LABEL_QUERY" \
+            -f owner="$owner" -f name="$repo_name" -f label="$EPIC_LABEL" 2>/dev/null)" \
+    || die "ensure-parent: GraphQL read of label '$EPIC_LABEL' failed" 1
+  label_read="$(validate_response_shape "$resp" \
+    '.data.repository' \
+    '(.label == null)
+     or ((.label | type) == "object" and (.label.name | type == "string" and length > 0))' \
+    '[]' \
+    'true' \
+    '.data.repository.label')" \
+    || die "ensure-parent: malformed read of label '$EPIC_LABEL'" 1
+  label_name="$(printf '%s' "$label_read" | jq -r 'if . == null then "" else .name end')" \
+    || die "ensure-parent: could not read the name of label '$EPIC_LABEL'" 1
+  if [ -z "$label_name" ]; then
+    gh label create "$EPIC_LABEL" --color "$EPIC_LABEL_COLOR" \
+        --description "$EPIC_LABEL_DESCRIPTION" -R "$owner_repo" >/dev/null \
+      || die "ensure-parent: gh label create '$EPIC_LABEL' failed" 1
+  elif [ "$label_name" != "$EPIC_LABEL" ]; then
+    die "ensure-parent: the repository's label '$label_name' is not exactly '$EPIC_LABEL'; refusing to label the epic" 1
+  fi
+  gh issue edit "$number" -R "$owner_repo" --add-label "$EPIC_LABEL" >/dev/null \
+    || die "ensure-parent: gh issue edit failed to add label '$EPIC_LABEL' to issue #$number" 1
+}
+
+# emit_labeled_record <owner_repo> <record>: label the epic the ensure-parent <record> names
+# `type:epic` (ensure_epic_label), then print the record unchanged. A labeling failure exits
+# nonzero before anything reaches stdout.
+emit_labeled_record() {
+  local owner_repo="$1" record="$2" record_number
+  record_number="$(printf '%s' "$record" | jq -r '.number')" \
+    || die "ensure-parent: could not read the epic number from its record" 1
+  ensure_epic_label "$owner_repo" "$record_number"
+  printf '%s\n' "$record"
+}
+
 # --- Subcommand implementations ----------------------------------------------
 
 cmd_ensure_parent() {
@@ -1035,7 +1118,9 @@ cmd_ensure_parent() {
   assert_owner_repo "ensure-parent" "$owner_repo"
   owner="${owner_repo%%/*}"; repo_name="${owner_repo#*/}"
 
-  local number resp
+  # Every live path captures its record, labels the returned epic `type:epic` (ensure_epic_label),
+  # then prints the record unchanged: a labeling failure leaves stdout empty.
+  local number resp record
   if [ -n "$existing_number" ]; then
     # RESOLVE path (idempotency key supplied): read the known epic's node id. Routed
     # through the shared kernel — a missing/malformed read FAILS CLOSED.
@@ -1044,13 +1129,20 @@ cmd_ensure_parent() {
       resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$PARENT_SEED_QUERY" \
                 -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
         || die "ensure-parent: GraphQL resolve failed for issue #$number" 1
-      normalize_parent_seed "$resp" "$slug"
+      record="$(normalize_parent_seed "$resp" "$slug")" || exit "$?"
+      # Only a seed epic is labeled: an issue that is not the initiative's seed is left as it is.
+      if [ "$(printf '%s' "$record" | jq -r '.seed')" = "true" ]; then
+        emit_labeled_record "$owner_repo" "$record"
+      else
+        printf '%s\n' "$record"
+      fi
       return
     fi
     resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$PARENT_RESOLVE_QUERY" \
               -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
       || die "ensure-parent: GraphQL resolve failed for issue #$number" 1
-    normalize_parent_resolve "$resp" "resolved"
+    record="$(normalize_parent_resolve "$resp" "resolved")" || exit "$?"
+    emit_labeled_record "$owner_repo" "$record"
     return
   fi
 
@@ -1066,7 +1158,7 @@ cmd_ensure_parent() {
     || die "ensure-parent: discovery search failed" 1
   decision="$(resolve_discovery "$discovery")" || exit 1
   if [ "$(printf '%s' "$decision" | jq -r '.action // "resolved"')" != "create" ]; then
-    printf '%s\n' "$decision"
+    emit_labeled_record "$owner_repo" "$decision"
     return 0
   fi
 
@@ -1107,7 +1199,8 @@ cmd_ensure_parent() {
   resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$PARENT_RESOLVE_QUERY" \
             -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
     || die "ensure-parent: GraphQL node-id resolve failed for created issue #$number" 1
-  normalize_parent_resolve "$resp" "created"
+  record="$(normalize_parent_resolve "$resp" "created")" || exit "$?"
+  emit_labeled_record "$owner_repo" "$record"
 }
 
 cmd_attach_subissue() {
@@ -1507,7 +1600,8 @@ subcommands:
   find-by-title   --title <str> [--repo <owner/repo>] [--response-file <path|->]
   design-gate     --slug <slug> [--repo <owner/repo>] [--remote <name>] [--trunk-response-file <path|->]
 --slug (ensure-parent, valid only with --existing-number) adds "seed": true only when the epic body's
-first line is the seed issue marker naming <slug>. design-gate reads the trunk commit (fetched into
+first line is the seed issue marker naming <slug>. Live, ensure-parent adds the type:epic label to the
+epic it returns (with --slug, only a seed epic), creating the repository label when missing. design-gate reads the trunk commit (fetched into
 FETCH_HEAD only) and, when docs/prds/<slug>.md says UI yes, refuses on a prototype file failing the
 Document existence test or a review record that is missing, malformed, not passed, stale or unstamped.
 Set SUBISSUE_OPS_OFFLINE to drive the pure transforms over injected input (no gh).

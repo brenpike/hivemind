@@ -130,7 +130,7 @@ Blocking issue refs, one per line as `#123`. Or, when there are none:
 - Prototype: [docs/initiatives/<slug>/prototype/index.html](<link>)
 ```
 
-`## Design` holds exactly one Solution design line, at least one Heading line, one per solution-design heading the slice is bound by, one ADR line per ADR and exactly one Review record line. It has the Prototype line only when `design-gate` reports `"ui": "yes"`. A `<link>` is a bare path or `https://github.com/<owner>/<repo>/blob/<trunk>/<path>`, with `<trunk>` from `design-gate`.
+`## Design` holds exactly one Solution design line, at least one Heading line, one per solution-design heading the slice is bound by, one ADR line per ADR and exactly one Review record line. It has the Prototype line only when `design-gate` reports `"ui": "yes"`. Each `<link>` is `design-gate`'s `link_prefix` plus the path.
 
 ### Hard rules for the issue body
 
@@ -166,13 +166,15 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/prd-to-issues/scripts/subissue-ops.sh" \
 
 Output: `{ "number": <int>, "id": "<NODE_ID>", "status": "created"|"resolved"|"resolved-by-title" }`. Capture the `id` (NODE ID) for `attach-subissue`.
 
-With `--existing-number`, the known epic is resolved directly (status `resolved`). Without it, `ensure-parent` matches the repository's issues by exact title before creating:
+Every epic `ensure-parent` returns carries `type:epic` (with `--slug`, only when `seed` is true); the script creates the label when the repository lacks it.
+
+With `--existing-number`, the known epic is resolved (status `resolved`). Without it, `ensure-parent` matches the repository's issues by exact title before creating:
 
 - one OPEN exact-title match → `resolved-by-title` (reused, no duplicate epic);
 - zero matches → `created`;
 - multiple exact matches, a CLOSED exact match, or a divergent set → fail closed and surface to the user.
 
-If the call fails for any reason, surface a blocker and stop.
+If the call fails, surface a blocker and stop.
 
 ### attach-subissue
 
@@ -193,7 +195,7 @@ Blocked-by is only the `## Dependencies` body refs (`#123`), with no other linki
 
 Run after the slicing quiz is approved (its slices are the planned titles) and before any publish, so a rerun after a mid-publish failure creates no duplicates and wires no dependent to one. It only reads and matches existing issues.
 
-Each slice publishes in two steps: `gh issue create`, then `attach-subissue`. A halt between them leaves a child with no parent (`parent: null`): the **partial-failure window**. `list-children` misses such an orphan; `find-by-title` finds it.
+Each slice publishes in two steps: `gh issue create`, then `attach-subissue`. A halt between them leaves a child with no parent (`parent: null`): the **partial-failure window**.
 
 ### Steps
 

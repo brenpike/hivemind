@@ -948,6 +948,78 @@ test_snapshot_large_design() {
   SNAP_COMMIT="$BASE_COMMIT"
 }
 
+# relink_case_file <name> <source-case-file> <link-base>: writes the case with every Markdown link
+# target in its issue body rebuilt as <link-base> followed by the link text, and prints its path.
+relink_case_file() {
+  local case_file="$TMPDIR_TEST/case.$1"
+  jq -c --arg base "$3" \
+    '.snapshot.body |= gsub("\\[(?<text>[^\\]\\[]*)\\]\\([^()]*\\)"; "[\(.text)](\($base)\(.text))")' \
+    "$2" >"$case_file" || setup_fail "relinked case file $1"
+  printf '%s' "$case_file"
+}
+
+test_link_prefix() {
+  local prefix="" entry defs path got source_file case_file input
+  local want='https://github.com/brenpike/hivemind/blob/main/'
+  lib_call "link-prefix" "$REPO" "$NO_INPUT" hivemind_readiness_link_prefix "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG"
+  expect_call "link-prefix" 0 "$want"$'\n' ""
+  expect_no_git "link-prefix"
+  prefix="$(cat "$CALL_OUT")"
+  lib_call "link-prefix:no-args" "$REPO" "$NO_INPUT" hivemind_readiness_link_prefix
+  expect_call "link-prefix:no-args" 2 "" $'readiness-check-error: usage\n'
+  expect_no_git "link-prefix:no-args"
+  lib_call "link-prefix:one-arg" "$REPO" "$NO_INPUT" hivemind_readiness_link_prefix "$SNAP_REPO_ARG"
+  expect_call "link-prefix:one-arg" 2 "" $'readiness-check-error: usage\n'
+  expect_no_git "link-prefix:one-arg"
+  lib_call "link-prefix:three-args" "$REPO" "$NO_INPUT" hivemind_readiness_link_prefix \
+    "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG" extra
+  expect_call "link-prefix:three-args" 2 "" $'readiness-check-error: usage\n'
+  expect_no_git "link-prefix:three-args"
+  for entry in a/b/c -x/y; do
+    lib_call "link-prefix:bad-owner-repo:$entry" "$REPO" "$NO_INPUT" hivemind_readiness_link_prefix \
+      "$entry" "$SNAP_TRUNK_ARG"
+    expect_call "link-prefix:bad-owner-repo:$entry" 2 "" $'readiness-check-error: usage\n'
+    expect_no_git "link-prefix:bad-owner-repo:$entry"
+  done
+  for entry in -main 'a..b'; do
+    lib_call "link-prefix:bad-trunk:$entry" "$REPO" "$NO_INPUT" hivemind_readiness_link_prefix \
+      "$SNAP_REPO_ARG" "$entry"
+    expect_call "link-prefix:bad-trunk:$entry" 2 "" $'readiness-check-error: usage\n'
+    expect_no_git "link-prefix:bad-trunk:$entry"
+  done
+
+  defs="$(bash -c '. "$1"; _hivemind_rc_jq_defs; _hivemind_rc_issue_jq_defs' link-prefix "$LIB")" \
+    || setup_fail "cannot print the issue-layer jq definitions"
+  for path in docs/prds/demo.md docs/initiatives/demo/solution-design.md \
+    docs/initiatives/demo/review-record.md docs/initiatives/demo/prototype/index.html \
+    docs/initiatives/demo/prototype/notes.md docs/adr/0046-idea-to-ready.md; do
+    got="$(jq -nr --arg target "$prefix$path" --arg repo "$SNAP_REPO_ARG" --arg trunk "$SNAP_TRUNK_ARG" \
+      "$defs"'
+$target | rc_target_path($repo; $trunk) // "null"' 2>&1)" || got="jq failed: $got"
+    if [ "$got" = "$path" ]; then
+      pass "link-prefix:round-trip:$path" "rc_target_path reads the path back"
+    else
+      failed "link-prefix:round-trip:$path" "got $got"
+    fi
+  done
+
+  source_file="$(write_case_file link-prefix-source '.')"
+  case_file="$(relink_case_file link-prefix-trunk "$source_file" "$prefix")"
+  build_case_commit SNAP_COMMIT "$case_file"
+  input="$TMPDIR_TEST/input.link-prefix-trunk"
+  jq -c '[.snapshot]' "$case_file" >"$input" || setup_fail "link-prefix-trunk input"
+  snapshot_call "link-prefix:slice-pass" "$input"
+  expect_snapshot_lines "link-prefix:slice-pass" "$input" '[{"track":"slice","result":"pass","reasons":[]}]'
+  case_file="$(relink_case_file link-prefix-commit "$source_file" \
+    "https://github.com/$SNAP_REPO_ARG/blob/$SNAP_COMMIT/")"
+  input="$TMPDIR_TEST/input.link-prefix-commit"
+  jq -c '[.snapshot]' "$case_file" >"$input" || setup_fail "link-prefix-commit input"
+  snapshot_call "link-prefix:commit-link" "$input"
+  expect_snapshot_lines "link-prefix:commit-link" "$input" \
+    '[{"track":"slice","result":"fail","reasons":["design_link_invalid"]}]'
+  SNAP_COMMIT="$BASE_COMMIT"
+}
+
 # ── gh mode ────────────────────────────────────────────────────────────────────────
 #
 # gh-cases.json holds gh mode cases. Each names its issue numbers, the canned response per number
@@ -1254,6 +1326,7 @@ test_snapshot_failures
 test_snapshot_subdirectory
 test_snapshot_git_failure
 test_snapshot_large_design
+test_link_prefix
 test_snapshot_no_gh
 test_snapshot_code_bases
 test_gh_query_constant

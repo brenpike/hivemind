@@ -446,8 +446,14 @@ run_exit1_case "ensure-parent:slug-body-less-resolve-exit1" -- \
 
 # ── Scratch git environment and the recording gh stub ──────────────────────────────
 # Git runs with a scratch HOME and no system config, so no user hook, template or signing setting
-# reaches the scratch repositories. The gh stub records the first two argv words of every call and
-# answers `api graphql` with the file named by SUBISSUE_TEST_GH_RESPONSE; any other call exits 1.
+# reaches the scratch repositories. The gh stub records the first two argv words of every call in
+# GH_LOG, and every argument of each call other than `api graphql`, tab-joined, in GH_FULL_LOG.
+# It answers `api graphql` by GraphQL variable: a `label=` variable reads
+# SUBISSUE_TEST_GH_LABEL_RESPONSE, a `number=` variable reads SUBISSUE_TEST_GH_RESPONSE, and any
+# other read SUBISSUE_TEST_GH_LIST_RESPONSE when set, else SUBISSUE_TEST_GH_RESPONSE. `label create`
+# and `issue edit` exit with SUBISSUE_TEST_GH_LABEL_CREATE_STATUS and
+# SUBISSUE_TEST_GH_ISSUE_EDIT_STATUS (default 0); `issue create` prints the URL of issue 7. Any
+# other call exits 1.
 export HOME="$TMPDIR_TEST/home"
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=subissue-test GIT_AUTHOR_EMAIL=subissue-test@example.invalid
@@ -456,11 +462,27 @@ mkdir -p "$HOME" || { echo "FAIL: cannot create scratch HOME" >&2; exit 2; }
 
 GH_STUB_DIR="$TMPDIR_TEST/gh-bin"
 GH_LOG="$TMPDIR_TEST/gh-calls.log"
+GH_FULL_LOG="$TMPDIR_TEST/gh-calls-full.log"
 mkdir -p "$GH_STUB_DIR" || { echo "FAIL: cannot create the gh stub dir" >&2; exit 2; }
 # shellcheck disable=SC2016 # the stub's own $-expansions are written literally
 printf '%s\n' '#!/bin/sh' \
   'printf "%s %s\n" "$1" "$2" >>"$SUBISSUE_TEST_GH_LOG"' \
-  'if [ "$1 $2" = "api graphql" ]; then cat "$SUBISSUE_TEST_GH_RESPONSE"; exit 0; fi' \
+  'if [ "$1 $2" = "api graphql" ]; then' \
+  '  for gh_arg in "$@"; do' \
+  '    case "$gh_arg" in' \
+  '      label=*) exec cat "$SUBISSUE_TEST_GH_LABEL_RESPONSE" ;;' \
+  '      number=*) exec cat "$SUBISSUE_TEST_GH_RESPONSE" ;;' \
+  '    esac' \
+  '  done' \
+  '  exec cat "${SUBISSUE_TEST_GH_LIST_RESPONSE:-$SUBISSUE_TEST_GH_RESPONSE}"' \
+  'fi' \
+  'IFS="$(printf "\t")"' \
+  'printf "%s\n" "$*" >>"$SUBISSUE_TEST_GH_FULL_LOG"' \
+  'case "$1 $2" in' \
+  '  "label create") exit "${SUBISSUE_TEST_GH_LABEL_CREATE_STATUS:-0}" ;;' \
+  '  "issue edit") exit "${SUBISSUE_TEST_GH_ISSUE_EDIT_STATUS:-0}" ;;' \
+  '  "issue create") printf "%s\n" "https://github.com/demo-owner/demo-repo/issues/7"; exit 0 ;;' \
+  'esac' \
   'exit 1' >"$GH_STUB_DIR/gh" \
   && chmod +x "$GH_STUB_DIR/gh" \
   || { echo "FAIL: cannot write the recording gh stub" >&2; exit 2; }
@@ -468,40 +490,118 @@ printf '%s\n' '#!/bin/sh' \
 # setup_fail <message>: a scratch setup step failed; the suite cannot run.
 setup_fail() { echo "FAIL: setup: $1" >&2; exit 2; }
 
+# reset_gh_stub_state: the stub answers every label read with a present `type:epic` label, routes
+# no read to a list response, and lets `label create` and `issue edit` succeed.
+reset_gh_stub_state() {
+  GH_LABEL_RESPONSE="$PI_DIR/ensure-parent-label-present-response.json"
+  GH_LIST_RESPONSE=""
+  GH_LABEL_CREATE_STATUS=0
+  GH_ISSUE_EDIT_STATUS=0
+}
+reset_gh_stub_state
+
 # run_live_ops <dir> <gh-response> -- <ops-arg...>
 # Runs subissue-ops.sh LIVE (SUBISSUE_OPS_OFFLINE unset) in <dir> with the recording gh stub first
-# on PATH, after emptying the gh call log. Sets LIVE_OUT (stdout) and LIVE_STATUS.
+# on PATH, after emptying both gh call logs. The stub also reads the GH_LABEL_RESPONSE,
+# GH_LIST_RESPONSE, GH_LABEL_CREATE_STATUS and GH_ISSUE_EDIT_STATUS state. Sets LIVE_OUT (stdout)
+# and LIVE_STATUS.
 run_live_ops() {
   local dir="$1" gh_response="$2"; shift 2
   [ "$1" = "--" ] && shift
   : >"$GH_LOG" || setup_fail "cannot empty the gh call log"
+  : >"$GH_FULL_LOG" || setup_fail "cannot empty the full gh call log"
   LIVE_STATUS=0
   LIVE_OUT="$(cd "$dir" && env -u SUBISSUE_OPS_OFFLINE PATH="$GH_STUB_DIR:$PATH" \
-    SUBISSUE_TEST_GH_LOG="$GH_LOG" SUBISSUE_TEST_GH_RESPONSE="$gh_response" \
+    SUBISSUE_TEST_GH_LOG="$GH_LOG" SUBISSUE_TEST_GH_FULL_LOG="$GH_FULL_LOG" \
+    SUBISSUE_TEST_GH_RESPONSE="$gh_response" \
+    SUBISSUE_TEST_GH_LABEL_RESPONSE="$GH_LABEL_RESPONSE" \
+    SUBISSUE_TEST_GH_LIST_RESPONSE="$GH_LIST_RESPONSE" \
+    SUBISSUE_TEST_GH_LABEL_CREATE_STATUS="$GH_LABEL_CREATE_STATUS" \
+    SUBISSUE_TEST_GH_ISSUE_EDIT_STATUS="$GH_ISSUE_EDIT_STATUS" \
     bash "$OPS" "$@" 2>/dev/null)" || LIVE_STATUS=$?
 }
 
 # count_gh_calls <first-two-words>: prints how many logged gh calls began with those words.
 count_gh_calls() { grep -c -x -F -- "$1" "$GH_LOG"; }
 
+# join_args <arg...>: prints the arguments tab-joined, the form of one GH_FULL_LOG line.
+join_args() { local IFS=$'\t'; printf '%s' "$*"; }
+
+# flag_value <tab-joined-call> <flag>: prints the argument that follows <flag> in a logged call.
+flag_value() {
+  printf '%s\n' "$1" | awk -F'\t' -v flag="$2" '{ for (i = 1; i < NF; i++) if ($i == flag) { print $(i + 1); exit } }'
+}
+
+# shown_full_log: the full gh call log on one line, for a failure message.
+shown_full_log() { tr '\t\n' ' ;' <"$GH_FULL_LOG"; }
+
+# assert_live_labeled <case> <golden> <graphql-calls> [<expected-full-log-line>...]
+# Asserts the last run_live_ops exited 0, printed <golden>, made exactly <graphql-calls> `api
+# graphql` calls, and logged exactly the given non-graphql calls in order (none when no line is
+# given).
+assert_live_labeled() {
+  local case_name="$1" golden="$2" graphql_expected="$3"; shift 3
+  local expected_full="" actual_full actual graphql_calls
+  [ "$#" -gt 0 ] && expected_full="$(printf '%s\n' "$@")"
+  actual_full="$(cat "$GH_FULL_LOG")"
+  actual="$(printf '%s' "$LIVE_OUT" | canon 2>/dev/null)"
+  graphql_calls="$(count_gh_calls "api graphql")"
+  if [ "$LIVE_STATUS" -eq 0 ] && [ "$actual" = "$(canon <"$golden")" ] \
+    && [ "$graphql_calls" = "$graphql_expected" ] && [ "$actual_full" = "$expected_full" ]; then
+    pass "$case_name" "$graphql_calls api graphql call(s), $# other call(s) as expected"
+  else
+    failed "$case_name" "status=$LIVE_STATUS graphql=$graphql_calls
+    gh calls: $(tr '\n' ';' <"$GH_LOG")
+    full calls: $(shown_full_log)
+    expected: $(canon <"$golden")
+    actual:   $actual"
+  fi
+}
+
+# assert_live_label_failure <case> <issue-edit-calls>
+# Asserts the last run_live_ops exited nonzero with nothing on stdout, and made exactly
+# <issue-edit-calls> `issue edit` calls.
+assert_live_label_failure() {
+  local case_name="$1" edit_expected="$2" edit_calls
+  edit_calls="$(count_gh_calls "issue edit")"
+  if [ "$LIVE_STATUS" -ne 0 ] && [ -z "$LIVE_OUT" ] && [ "$edit_calls" = "$edit_expected" ]; then
+    pass "$case_name" "exit=$LIVE_STATUS, no output, $edit_calls issue edit call(s)"
+  else
+    failed "$case_name" "status=$LIVE_STATUS edits=$edit_calls output: $LIVE_OUT
+    gh calls: $(tr '\n' ';' <"$GH_LOG")"
+  fi
+}
+
+DEMO_REPO="demo-owner/demo-repo"
+EDIT_EPIC7_CALL="$(join_args issue edit 7 -R "$DEMO_REPO" --add-label type:epic)"
+LABEL_CREATE_CALL="$(join_args label create type:epic --color 3e4b9e --description "triage type rating" -R "$DEMO_REPO")"
+
 # ── ensure-parent --slug: live seed resolve ────────────────────────────────────────
-# Live with --repo, the seed resolve makes exactly ONE `api graphql` call and never creates or
-# edits an issue, so the seed's marker line stays first. A second run gives the same output: no
-# duplicate epic.
+# Live with --repo, the seed resolve makes two `api graphql` calls (the seed read, then the label
+# read) and one `issue edit` that only adds `type:epic` to #7. It never creates an issue or a
+# label and never passes --body or --title, so the seed's marker line stays first. A second run
+# gives the same output: no duplicate epic.
 SEED_GOLDEN="$(canon <"$EXPECTED_DIR/ensure-parent-seed.json")"
 SEED_FIRST_OUT=""
 for seed_run in 1 2; do
   run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
-    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo demo-owner/demo-repo
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
   seed_actual="$(printf '%s' "$LIVE_OUT" | canon 2>/dev/null)"
   graphql_calls="$(count_gh_calls "api graphql")"
+  edit_calls="$(count_gh_calls "issue edit")"
+  issue_create_calls="$(count_gh_calls "issue create")"
+  label_create_calls="$(count_gh_calls "label create")"
   total_calls="$(wc -l <"$GH_LOG" | tr -d ' ')"
+  full_calls="$(cat "$GH_FULL_LOG")"
   if [ "$LIVE_STATUS" -eq 0 ] && [ "$seed_actual" = "$SEED_GOLDEN" ] \
-    && [ "$graphql_calls" = 1 ] && [ "$total_calls" = 1 ]; then
-    pass "ensure-parent:live-seed-resolve-run$seed_run" "one api graphql call, no issue create or edit"
+    && [ "$graphql_calls" = 2 ] && [ "$edit_calls" = 1 ] && [ "$issue_create_calls" = 0 ] \
+    && [ "$label_create_calls" = 0 ] && [ "$total_calls" = 3 ] \
+    && [ "$full_calls" = "$EDIT_EPIC7_CALL" ]; then
+    pass "ensure-parent:live-seed-resolve-run$seed_run" "two api graphql calls, one label-only issue edit, no issue create"
   else
-    failed "ensure-parent:live-seed-resolve-run$seed_run" "status=$LIVE_STATUS graphql=$graphql_calls total=$total_calls
+    failed "ensure-parent:live-seed-resolve-run$seed_run" "status=$LIVE_STATUS graphql=$graphql_calls edits=$edit_calls total=$total_calls
     gh calls: $(tr '\n' ';' <"$GH_LOG")
+    full calls: $(shown_full_log)
     expected: $SEED_GOLDEN
     actual:   $seed_actual"
   fi
@@ -511,6 +611,105 @@ if [ -n "$LIVE_OUT" ] && [ "$LIVE_OUT" = "$SEED_FIRST_OUT" ]; then
   pass "ensure-parent:live-seed-rerun-identical" "second run output equals the first"
 else
   failed "ensure-parent:live-seed-rerun-identical" "first: $SEED_FIRST_OUT second: $LIVE_OUT"
+fi
+
+# ── ensure-parent: live epic label ─────────────────────────────────────────────────
+# A repository with no `type:epic` label gets it created once, with the triage palette's color and
+# description and no --force, before the edit that adds it to the epic.
+reset_gh_stub_state
+GH_LABEL_RESPONSE="$PI_DIR/ensure-parent-label-missing-response.json"
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+assert_live_labeled "ensure-parent:live-label-missing-created" \
+  "$EXPECTED_DIR/ensure-parent-seed.json" 2 "$LABEL_CREATE_CALL" "$EDIT_EPIC7_CALL"
+SUBISSUE_LABEL_CREATE="$(grep -m1 -F -- "$(join_args label create type:epic)"$'\t' "$GH_FULL_LOG")"
+if [ -n "$SUBISSUE_LABEL_CREATE" ] && ! printf '%s\n' "$SUBISSUE_LABEL_CREATE" | grep -q -F -- '--force'; then
+  pass "ensure-parent:live-label-create-no-force" "label create passes no --force"
+else
+  failed "ensure-parent:live-label-create-no-force" "label create call: $SUBISSUE_LABEL_CREATE"
+fi
+
+# An epic that is not the initiative's seed is left as it is: one api graphql call (the seed read),
+# no label read, no label create and no issue edit.
+reset_gh_stub_state
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-no-marker-response.json" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+assert_live_labeled "ensure-parent:live-not-seed-unlabeled" \
+  "$EXPECTED_DIR/ensure-parent-not-seed.json" 1
+
+# Resolved without --slug: the resolve read, the label read, then the edit of #7.
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+  ensure-parent --existing-number 7 --repo "$DEMO_REPO"
+assert_live_labeled "ensure-parent:live-resolved-labeled" \
+  "$EXPECTED_DIR/ensure-parent-resolved.json" 2 "$EDIT_EPIC7_CALL"
+
+# Resolved by title: the discovery read finds open #90, then the label read and the edit of #90.
+GH_LIST_RESPONSE="$PI_DIR/ensure-parent-discovery-one-open-response.json"
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+  ensure-parent --title "tracer epic" --body anchor --repo "$DEMO_REPO"
+assert_live_labeled "ensure-parent:live-resolved-by-title-labeled" \
+  "$EXPECTED_DIR/ensure-parent-resolved-by-title.json" 2 \
+  "$(join_args issue edit 90 -R "$DEMO_REPO" --add-label type:epic)"
+
+# Created: discovery finds nothing, the issue is created, its node id read, then #7 is labeled.
+GH_LIST_RESPONSE="$PI_DIR/ensure-parent-discovery-empty-response.json"
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+  ensure-parent --title "tracer epic" --body anchor --repo "$DEMO_REPO"
+assert_live_labeled "ensure-parent:live-created-labeled" \
+  "$EXPECTED_DIR/ensure-parent-created.json" 3 \
+  "$(join_args issue create -R "$DEMO_REPO" --title "tracer epic" --body anchor)" "$EDIT_EPIC7_CALL"
+
+# A label read or write that fails leaves stdout empty and exits nonzero; a failure before the
+# edit never runs it. A label found as `Type:Epic` is not `type:epic`, so it is never applied.
+for label_failure in \
+  "case-variant:ensure-parent-label-case-variant-response.json" \
+  "malformed-read:ensure-parent-label-malformed-response.json" \
+  "graphql-error:ensure-parent-label-graphql-error-response.json" ; do
+  reset_gh_stub_state
+  GH_LABEL_RESPONSE="$PI_DIR/${label_failure#*:}"
+  run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-label-${label_failure%%:*}-fails-closed" 0
+done
+reset_gh_stub_state
+GH_LABEL_RESPONSE="$PI_DIR/ensure-parent-label-missing-response.json"
+GH_LABEL_CREATE_STATUS=1
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+assert_live_label_failure "ensure-parent:live-label-create-failure" 0
+if [ "$(count_gh_calls "label create")" = 1 ]; then
+  pass "ensure-parent:live-label-create-failure-attempted" "one label create call"
+else
+  failed "ensure-parent:live-label-create-failure-attempted" "gh calls: $(tr '\n' ';' <"$GH_LOG")"
+fi
+reset_gh_stub_state
+GH_ISSUE_EDIT_STATUS=1
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+assert_live_label_failure "ensure-parent:live-issue-edit-failure" 1
+reset_gh_stub_state
+
+# The label subissue-ops creates matches the triage palette: triage-ops ensure-labels, run live
+# under the same stub, creates `type:epic` with the same --color and --description.
+TRIAGE_OPS="$REPO_ROOT/plugin/skills/triage-backlog/scripts/triage-ops.sh"
+: >"$GH_LOG" || setup_fail "cannot empty the gh call log"
+: >"$GH_FULL_LOG" || setup_fail "cannot empty the full gh call log"
+TRIAGE_STATUS=0
+(cd "$TMPDIR_TEST" && env -u TRIAGE_OPS_OFFLINE PATH="$GH_STUB_DIR:$PATH" \
+  SUBISSUE_TEST_GH_LOG="$GH_LOG" SUBISSUE_TEST_GH_FULL_LOG="$GH_FULL_LOG" \
+  bash "$TRIAGE_OPS" ensure-labels >/dev/null 2>&1) || TRIAGE_STATUS=$?
+TRIAGE_LABEL_CREATE="$(grep -m1 -F -- "$(join_args label create type:epic)"$'\t' "$GH_FULL_LOG")"
+SUBISSUE_COLOR="$(flag_value "$SUBISSUE_LABEL_CREATE" --color)"
+SUBISSUE_DESCRIPTION="$(flag_value "$SUBISSUE_LABEL_CREATE" --description)"
+TRIAGE_COLOR="$(flag_value "$TRIAGE_LABEL_CREATE" --color)"
+TRIAGE_DESCRIPTION="$(flag_value "$TRIAGE_LABEL_CREATE" --description)"
+if [ "$TRIAGE_STATUS" -eq 0 ] && [ -n "$SUBISSUE_COLOR" ] && [ -n "$SUBISSUE_DESCRIPTION" ] \
+  && [ "$SUBISSUE_COLOR" = "$TRIAGE_COLOR" ] && [ "$SUBISSUE_DESCRIPTION" = "$TRIAGE_DESCRIPTION" ]; then
+  pass "ensure-parent:label-matches-triage-palette" "color $TRIAGE_COLOR, description '$TRIAGE_DESCRIPTION'"
+else
+  failed "ensure-parent:label-matches-triage-palette" "triage status=$TRIAGE_STATUS
+    subissue-ops: color '$SUBISSUE_COLOR' description '$SUBISSUE_DESCRIPTION'
+    triage-ops:   color '$TRIAGE_COLOR' description '$TRIAGE_DESCRIPTION'"
 fi
 
 # A malformed slug, and --slug without --existing-number, exit 2 live BEFORE any gh call.
