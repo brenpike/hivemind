@@ -9257,6 +9257,27 @@ const ROW_TESTS = {
       assert.ok(!readDataBlock(callOf(run, 'pr-1').prompt, 'body_file').path.includes('{'));
       assert.ok(!readDataBlock(callOf(run, 'pr-1').prompt, 'comment_file').path.includes('{'));
     });
+    test('synapse.md resolves a relative file block path against the working directory, and every commit and pull request file block path is relative under .hivemind/ (issue 692)', async () => {
+      const synapseText = readText(join(repoRoot, 'plugin/agents/synapse.md'));
+      assert.ok(synapseText.includes('Resolve a relative `path` against your working directory, never another folder.'));
+      const plain = await runWorkflow(LAUNCH, happyResults());
+      const fixFlow = await runWorkflow(LAUNCH, fixFlowResults());
+      const attributed = await runWorkflow({ ...LAUNCH, attribution: HARNESS_ATTRIBUTION }, fixFlowResults());
+      const seenKinds = new Set();
+      for (const run of [plain, fixFlow, attributed]) {
+        for (const call of run.calls.filter((candidate) => candidate.opts.agentType === 'hivemind:synapse')) {
+          const command = readDataBlock(call.prompt, 'command');
+          const kind = command.includes('/skills/molt/') ? 'molt' : command.includes('/skills/open-plan-pr/') ? 'pr' : 'none';
+          for (const name of listFileBlockNames(call.prompt)) {
+            const path = readDataBlock(call.prompt, name).path;
+            assert.ok(path.startsWith('.hivemind/' + kind + '-inputs-'), call.opts.label + ' ' + name + ' ' + path);
+            assert.ok(!path.startsWith('/') && !path.includes('{') && !path.slice('.hivemind/'.length).includes('/'), call.opts.label + ' ' + name + ' ' + path);
+            seenKinds.add(kind);
+          }
+        }
+      }
+      assert.deepEqual([...seenKinds].sort(), ['molt', 'pr']);
+    });
     test('the file blocks of every runner prompt, with and without attribution, are those the synapse.md Input allows its runner', async () => {
       const synapseText = readText(join(repoRoot, 'plugin/agents/synapse.md'));
       const inputSection = synapseText.slice(synapseText.indexOf('\n## Input\n')).split('\n## ')[1];
