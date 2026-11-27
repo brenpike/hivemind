@@ -724,6 +724,43 @@ test_remote_default_unreadable_record() {
     assert_remote_refs remote-default-detached-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
 
+# install_ls_remote_stand_in -> writes $WORLD_ROOT/ls-remote-stand-in/git, a `git` that runs the
+# real git for every call except `git ls-remote`, which prints two `ref: refs/heads/<name><TAB>HEAD`
+# lines, `other` first and `main` second, and exits 0. Sets STAND_IN_DIR to the folder to put
+# first on PATH.
+install_ls_remote_stand_in() {
+    local real_git stand_in_path
+    real_git="$(command -v git)"
+    STAND_IN_DIR="$WORLD_ROOT/ls-remote-stand-in"
+    stand_in_path="$STAND_IN_DIR/git"
+    mkdir -p "$STAND_IN_DIR"
+    printf '#!/bin/sh\nif [ "$1" = ls-remote ]; then\n  printf '"'"'ref: refs/heads/other\\tHEAD\\nref: refs/heads/main\\tHEAD\\n'"'"'\n  exit 0\nfi\nexec '"'"'%s'"'"' "$@"\n' \
+        "$real_git" >"$stand_in_path"
+    chmod +x "$stand_in_path"
+}
+
+# A remote read that prints more than one `ref: refs/heads/<name><TAB>HEAD` line is ambiguous, so
+# the branch cannot be cleared against that remote: main stops with the record reason, nothing
+# pushed and no ref or config written, even though the first line names another branch. A parser
+# that takes the first line pushes main here.
+test_remote_default_ambiguous_reply() {
+    local saved_path="$PATH" state_before
+    create_on_main_world remote-default-ambiguous
+    install_pre_push_hook
+    delete_remote_head origin
+    assert_remote_head_absent remote-default-ambiguous-precondition origin
+    install_ls_remote_stand_in
+    state_before="$(list_local_state)"
+    PATH="$STAND_IN_DIR:$PATH"
+    assert_blocker remote-default-ambiguous "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
+        --head main --base develop --remote origin --expect-commit "$(head_sha)"
+    PATH="$saved_path"
+    assert_equal remote-default-ambiguous-no-local-write "$state_before" "$(list_local_state)" \
+        "local refs and config"
+    assert_equal remote-default-ambiguous-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs remote-default-ambiguous-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
 # A clone of a repository that was empty when cloned has no refs/remotes/origin/HEAD, and gets
 # none when another clone later pushes main (no fetch runs here, so no git version writes it). The
 # engine reads origin's default from the remote: main stops with nothing pushed and no ref or
@@ -1247,6 +1284,7 @@ test_remote_default_refused
 test_remote_default_any_end
 test_remote_default_passes
 test_remote_default_unreadable_record
+test_remote_default_ambiguous_reply
 test_remote_default_empty_clone
 test_remote_listing_unreadable
 test_expect_commit

@@ -88,8 +88,8 @@
 #     which writes no ref and no config. The <name> of its `ref: refs/heads/<name><TAB>HEAD`
 #     line gives the end refs/remotes/<remote>/<name>, compared the same way. The remote's
 #     output is untrusted: it is held in a variable and only compared, never printed and never
-#     passed to a git command. A failed read, no such line or an empty <name> leaves the branch
-#     uncleared against that remote: that gives 4. `git remote set-head <remote> --auto` writes
+#     passed to a git command. A failed read, no such line, more than one such line or an empty
+#     <name> leaves the branch uncleared against that remote: that gives 4. `git remote set-head <remote> --auto` writes
 #     the local record. No remote is assumed: with no listed remote, no branch is a default.
 #     Returns 0 no listed remote's default branch is <branch>, 1 <branch> is a listed remote's
 #     default branch, 2 cannot read a remote HEAD (a git error other than not symbolic or
@@ -298,15 +298,15 @@ hivemind_resolve_name_refs() {
 
 # hivemind__read_remote_default_end <remote>
 #   Reads <remote>'s default branch once with a read-only `git ls-remote --symref -- <remote>
-#   HEAD`. Sets HIVEMIND__REMOTE_DEFAULT_END to refs/remotes/<remote>/<name> from the first
+#   HEAD`. Sets HIVEMIND__REMOTE_DEFAULT_END to refs/remotes/<remote>/<name> from its one
 #   `ref: refs/heads/<name><TAB>HEAD` line and returns 0. Returns 4, with it empty, when the read
-#   fails, no such line is printed or <name> is empty. The output is untrusted: held in a
-#   variable, never printed, never passed to a git command. INTERNAL (double underscore): not a
+#   fails, no such line or more than one is printed, or <name> is empty. The output is untrusted:
+#   held in a variable, never printed, never passed to a git command. INTERNAL (double underscore): not a
 #   caller entry point.
 hivemind__read_remote_default_end() {
   local remote_name="$1"
   local tab_char=$'\t'
-  local symref_listing symref_line default_name
+  local symref_listing symref_line default_name=''
   HIVEMIND__REMOTE_DEFAULT_END=''
   symref_listing="$(GIT_TERMINAL_PROMPT=0 git ls-remote --symref -- "$remote_name" HEAD 2>/dev/null)" \
     || return 4
@@ -315,15 +315,16 @@ hivemind__read_remote_default_end() {
       "ref: refs/heads/"*"${tab_char}HEAD") ;;
       *) continue ;;
     esac
+    [ -z "$default_name" ] || return 4
     default_name="${symref_line#ref: refs/heads/}"
     default_name="${default_name%"${tab_char}HEAD"}"
     [ -n "$default_name" ] || return 4
-    HIVEMIND__REMOTE_DEFAULT_END="refs/remotes/$remote_name/$default_name"
-    return 0
   done <<EOF
 $symref_listing
 EOF
-  return 4
+  [ -n "$default_name" ] || return 4
+  HIVEMIND__REMOTE_DEFAULT_END="refs/remotes/$remote_name/$default_name"
+  return 0
 }
 
 # hivemind_branch_is_remote_default <branch>
