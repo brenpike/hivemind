@@ -72,8 +72,9 @@
 #              never touching the body, so the seed's marker line stays. Without --slug every
 #              output is byte-identical to the contract before it.
 #     online (epic label, every live path): after the record is read and before it is printed,
-#              ensure_epic_label adds `type:epic` to the returned epic: the resolved path (number
-#              from the record), the --slug path ONLY when `seed` is true, resolved-by-title
+#              emit_parent_record checks the record's number and then ensure_epic_label adds
+#              `type:epic` to the issue that number names, for every record whose `seed` is not
+#              false: the resolved path, the --slug path ONLY when `seed` is true, resolved-by-title
 #              (number from the discovery decision) and the created path (after the node-id read).
 #              It reads the repository's label by name (GraphQL repository.label, owner/name/label
 #              via -f, through the SHARED kernel); a missing label is created with
@@ -96,6 +97,11 @@
 #              the injected repository.issues ENUMERATION response: one OPEN match emits status
 #              resolved-by-title; a multiple/CLOSED/divergent set FAILS CLOSED; ZERO matches
 #              falls through to the --response-file `created` simulation.
+#              Offline runs the SAME control flow as live, minus the live-only setup, the create
+#              and the label, and every record passes the same number checks before it is printed:
+#              with --existing-number the injected read must name that issue (a read naming another
+#              issue exits 1 with nothing on stdout, with or without --slug); the `created`
+#              simulation and a resolved-by-title record need only a positive-integer number.
 #     --response-file / --discovery-response-file are TEST SEAMS honored ONLY when
 #     SUBISSUE_OPS_OFFLINE is set; a live invocation supplying either is REJECTED fail-closed
 #     via the shared guard (see §5) BEFORE any gh call.
@@ -223,6 +229,9 @@
 #     { "number": <int>, "id": <node-id>, "status": "resolved", "seed": true|false }
 #   Live, every ensure-parent record above is printed only after its epic is labeled `type:epic`
 #   (with --slug, only a seed epic is labeled); the record itself is unchanged by the label step.
+#   Every record, offline and live, reaches stdout only through emit_parent_record, after its
+#   number checks (a positive integer, equal to the number a read was addressed by), and live
+#   only after the labeling.
 #
 #   attach-subissue payload (offline, --emit-payload):
 #     { "issueId": <parent-node-id>, "subIssueId": <child-node-id> }
@@ -343,6 +352,13 @@
 #     of search-as-existence-oracle defects (DSL quote-breakout, qualifier injection,
 #     is:issue/PR leak, 1000-result truncation) — there is no query string for the title to
 #     break, and the connection has a real terminal page (no relevance cap to guard).
+#   - ENSURE-PARENT SINGLE READ AND SINGLE EXIT. cmd_ensure_parent is ONE control flow for offline
+#     and live, never a parallel offline copy: one resolve_discovery call whose decision is read
+#     once, one by-number read site (offline --response-file, live GraphQL), and one stdout write,
+#     emit_parent_record, as the function's last command. Its body holds no `return`; every failure
+#     exits nonzero through die or `|| exit "$?"`. So every record, on every path, passes the same
+#     number checks before it is labeled or printed. tools/test_subissue_ops.sh (case
+#     ensure-parent:single-exit-structure) pins this shape.
 #
 # 5. OFFLINE TEST SEAM (STEP-002 depends on this)
 # -----------------------------------------------
@@ -1082,19 +1098,36 @@ record_issue_number() {
   printf '%s' "$record_number"
 }
 
-# emit_labeled_record <owner_repo> <record> [<expected-number>]: label the epic the ensure-parent
-# <record> names `type:epic` (ensure_epic_label), then print the record unchanged. The number is
-# checked first (record_issue_number), so a wrong issue is never labeled. A labeling failure
-# exits nonzero before anything reaches stdout.
-emit_labeled_record() {
-  local owner_repo="$1" record="$2" record_number
-  record_number="$(record_issue_number "$record" "${@:3}")" || exit "$?"
-  ensure_epic_label "$owner_repo" "$record_number"
+# emit_parent_record <owner_repo> <record> <number>: the ONLY stdout write of ensure-parent. Checks
+# the <record>'s number (record_issue_number, compared with <number> when <number> is non-empty: a
+# read addressed by number must return that issue), then, live only and only when the record's
+# `seed` is not false, labels that issue `type:epic` (ensure_epic_label), then prints the record
+# unchanged. So a wrong issue is never labeled or printed. Any failure exits nonzero with nothing
+# on stdout. <owner_repo> is unused offline.
+emit_parent_record() {
+  local owner_repo="$1" record="$2" number="$3" record_number seed
+  record_number="$(record_issue_number "$record" ${number:+"$number"})" || exit "$?"
+  if ! is_offline; then
+    seed="$(printf '%s' "$record" | jq -r '.seed')" \
+      || die "ensure-parent: could not read the seed flag from the epic record" 1
+    if [ "$seed" != "false" ]; then
+      ensure_epic_label "$owner_repo" "$record_number"
+    fi
+  fi
   printf '%s\n' "$record"
 }
 
 # --- Subcommand implementations ----------------------------------------------
 
+# cmd_ensure_parent: ONE control flow for offline and live (§2 ensure-parent, §4 SINGLE READ AND
+# SINGLE EXIT). Live-only setup (fixture-flag rejection, gh, owner/repo) runs first. Without
+# --existing-number: discovery (live run_title_search; offline the --discovery-response-file
+# enumeration, when given) feeds ONE resolve_discovery call, whose decision is read once for both
+# modes: resolved-by-title is the record, `create` falls through; live then creates the issue.
+# Then, when no record is held yet, ONE by-number read (offline --response-file; live GraphQL at
+# `number`) gives the record. `number` is that read's address: the canonical --existing-number or
+# the created issue's number, empty only for a title-resolved record and the offline create
+# simulation. The last command, emit_parent_record, is the only stdout write.
 cmd_ensure_parent() {
   local title="" body="" body_file="" repo="" existing_number="" response_file="" discovery_response_file=""
   local slug="" slug_given=""
@@ -1138,141 +1171,100 @@ cmd_ensure_parent() {
     assert_slug "ensure-parent" "$slug"
   fi
 
-  if is_offline; then
-    # Offline DISCOVERY seam (create path): with --discovery-response-file the injected SEARCH
-    # response is run through the shared kernel + exact-title filter + resolve_discovery. A lone
-    # OPEN exact match emits { number, id, status:"resolved-by-title" }; a multiple/CLOSED/
-    # divergent set FAILS CLOSED (exit 1); ZERO matches falls through to the --response-file
-    # `created` simulation below (mirroring the live discover-then-create flow).
-    if [ -n "$discovery_response_file" ]; then
-      local matches decision
-      matches="$(normalize_find_by_title "$(read_injected "$discovery_response_file")" "$title")" \
-        || die "ensure-parent: malformed discovery search response" 1
-      decision="$(resolve_discovery "$matches")" || return 1
-      if [ "$(printf '%s' "$decision" | jq -r '.action // "resolved"')" != "create" ]; then
-        printf '%s\n' "$decision"
-        return 0
-      fi
-      # ZERO matches: fall through to the create simulation (requires --response-file).
-    fi
-    # Offline exercises ONLY the resolve/normalize transform (creation is a pure live
-    # side effect with no deterministic transform). The injected response is treated
-    # as a repository.issue read; status tag is resolved when --existing-number was
-    # given, else created (the create path's post-create node-id read).
-    [ -n "$response_file" ] || die "offline ensure-parent requires --response-file" 2
-    if [ -n "$slug_given" ]; then
-      normalize_parent_seed "$(read_injected "$response_file")" "$slug"
-      return
-    fi
-    local status="created"
-    [ -n "$existing_number" ] && status="resolved"
-    normalize_parent_resolve "$(read_injected "$response_file")" "$status"
-    return
-  fi
-
-  reject_fixture_flags_in_live_mode "ensure-parent" \
-    "--response-file=$response_file" "--discovery-response-file=$discovery_response_file"
-  require_gh "ensure-parent"
-
-  # Resolve owner/repo: explicit --repo wins, else the current checkout.
-  local owner_repo owner repo_name
-  if [ -n "$repo" ]; then
-    owner_repo="$repo"
-  else
-    owner_repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
-      || die "ensure-parent: failed to resolve owner/repo (pass --repo)" 1
-  fi
-  # Apply the SAME owner/repo charset guard find-by-title uses (the SHARED guard) — tightening
-  # the former weak `*/*` glob now that the discovery search flows owner_repo into the search DSL.
-  assert_owner_repo "ensure-parent" "$owner_repo"
-  owner="${owner_repo%%/*}"; repo_name="${owner_repo#*/}"
-
-  # Every live path captures its record, labels the returned epic `type:epic` (ensure_epic_label),
-  # then prints the record unchanged: a labeling failure leaves stdout empty.
-  local number resp record
-  if [ -n "$existing_number" ]; then
-    # RESOLVE path (idempotency key supplied): read the known epic's node id. Routed
-    # through the shared kernel — a missing/malformed read FAILS CLOSED.
-    number="$existing_number"
-    if [ -n "$slug_given" ]; then
-      resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$PARENT_SEED_QUERY" \
-                -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
-        || die "ensure-parent: GraphQL resolve failed for issue #$number" 1
-      record="$(normalize_parent_seed "$resp" "$slug")" || exit "$?"
-      # Only a seed epic is labeled: an issue that is not the initiative's seed is left as it is.
-      if [ "$(printf '%s' "$record" | jq -r '.seed')" = "true" ]; then
-        emit_labeled_record "$owner_repo" "$record" "$number"
-      else
-        record_issue_number "$record" "$number" >/dev/null || exit "$?"
-        printf '%s\n' "$record"
-      fi
-      return
-    fi
-    resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$PARENT_RESOLVE_QUERY" \
-              -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
-      || die "ensure-parent: GraphQL resolve failed for issue #$number" 1
-    record="$(normalize_parent_resolve "$resp" "resolved")" || exit "$?"
-    emit_labeled_record "$owner_repo" "$record" "$number"
-    return
-  fi
-
-  # ORPHAN-SAFE DISCOVER-THEN-CREATE (no idempotency key): before creating, DISCOVER the epic
-  # by EXACT title via the SHARED enumeration machinery (run_title_search → repository.issues
-  # enumeration + paginate_to_completeness + filter_exact_title — the SAME path find-by-title
-  # uses, never a divergent second lookup) and apply the resolution rules (resolve_discovery): a
-  # lone OPEN exact match RESOLVES (status resolved-by-title, skip create); a multiple/CLOSED/
-  # divergent set FAILS CLOSED; ZERO matches falls through to create. A title is REQUIRED to discover.
-  # Concurrent runs for one initiative: see the THREAT MODEL under PARENT ORPHAN-SAFETY in §4.
-  [ -n "$title" ] || die "ensure-parent: --title is required to create a parent (or pass --existing-number)" 2
-  local discovery decision
-  discovery="$(run_title_search "ensure-parent" "$owner_repo" "$title")" \
-    || die "ensure-parent: discovery search failed" 1
-  decision="$(resolve_discovery "$discovery")" || exit 1
-  if [ "$(printf '%s' "$decision" | jq -r '.action // "resolved"')" != "create" ]; then
-    emit_labeled_record "$owner_repo" "$decision"
-    return 0
-  fi
-
-  # CREATE path (discovery found ZERO existing epics): untrusted title/body flow ONLY through
-  # gh flags (never shell/GraphQL source). Prefer --body-file when given (large/multiline
-  # PRD epic bodies).
-  local -a create_args=(issue create --title "$title")
-  [ -n "$repo" ] && create_args=(issue create -R "$owner_repo" --title "$title")
-  if [ -n "$body_file" ]; then
-    [ -z "$body" ] || die "ensure-parent: pass --body OR --body-file, not both" 2
-    if [ "$body_file" = "-" ]; then
-      # Materialize stdin to a temp file so gh reads the untrusted body as DATA.
-      local tmp_body; tmp_body="$(mktemp)"
-      cat > "$tmp_body"
-      create_args+=(--body-file "$tmp_body")
-      local created_url
-      created_url="$(gh "${create_args[@]}")" || { rm -f "$tmp_body"; die "ensure-parent: gh issue create failed" 1; }
-      rm -f "$tmp_body"
-      number="${created_url##*/}"
+  local owner_repo="" owner="" repo_name=""
+  if ! is_offline; then
+    reject_fixture_flags_in_live_mode "ensure-parent" \
+      "--response-file=$response_file" "--discovery-response-file=$discovery_response_file"
+    require_gh "ensure-parent"
+    # Resolve owner/repo: explicit --repo wins, else the current checkout.
+    if [ -n "$repo" ]; then
+      owner_repo="$repo"
     else
-      create_args+=(--body-file "$body_file")
-      local created_url
-      created_url="$(gh "${create_args[@]}")" || die "ensure-parent: gh issue create failed" 1
-      number="${created_url##*/}"
+      owner_repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
+        || die "ensure-parent: failed to resolve owner/repo (pass --repo)" 1
     fi
-  else
-    [ -n "$body" ] || die "ensure-parent: --body or --body-file is required to create a parent" 2
-    create_args+=(--body "$body")
-    local created_url
-    created_url="$(gh "${create_args[@]}")" || die "ensure-parent: gh issue create failed" 1
-    # `gh issue create` prints the new issue URL; the trailing path segment is the number.
-    number="${created_url##*/}"
+    assert_owner_repo "ensure-parent" "$owner_repo"
+    owner="${owner_repo%%/*}"; repo_name="${owner_repo#*/}"
   fi
-  number="$(canonical_issue_number "$number")" \
-    || die "ensure-parent: could not parse new issue number from gh output" 1
 
-  # Resolve the just-created issue's node id (the skill needs the id to attach
-  # children). Routed through the shared kernel — a malformed read FAILS CLOSED.
-  resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$PARENT_RESOLVE_QUERY" \
-            -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
-    || die "ensure-parent: GraphQL node-id resolve failed for created issue #$number" 1
-  record="$(normalize_parent_resolve "$resp" "created")" || exit "$?"
-  emit_labeled_record "$owner_repo" "$record" "$number"
+  local number="$existing_number" record="" status="resolved"
+  if [ -z "$existing_number" ]; then
+    status="created"
+    local discovery_raw="" discovery="" decision="" action="create"
+    if is_offline; then
+      if [ -n "$discovery_response_file" ]; then
+        discovery_raw="$(read_injected "$discovery_response_file")" || exit "$?"
+        discovery="$(normalize_find_by_title "$discovery_raw" "$title")" \
+          || die "ensure-parent: malformed discovery search response" 1
+      fi
+    else
+      # Concurrent runs for one initiative: see the THREAT MODEL under PARENT ORPHAN-SAFETY in §4.
+      [ -n "$title" ] || die "ensure-parent: --title is required to create a parent (or pass --existing-number)" 2
+      discovery="$(run_title_search "ensure-parent" "$owner_repo" "$title")" \
+        || die "ensure-parent: discovery search failed" 1
+    fi
+    if [ -n "$discovery" ]; then
+      decision="$(resolve_discovery "$discovery")" || exit 1
+      action="$(printf '%s' "$decision" | jq -r '.action // "resolved"')" \
+        || die "ensure-parent: could not read the discovery decision" 1
+    fi
+    if [ "$action" != "create" ]; then
+      record="$decision"
+    elif ! is_offline; then
+      # CREATE path (discovery found ZERO existing epics): untrusted title/body flow ONLY through
+      # gh flags (never shell/GraphQL source). Prefer --body-file when given (large/multiline
+      # PRD epic bodies).
+      local -a create_args=(issue create --title "$title")
+      [ -n "$repo" ] && create_args=(issue create -R "$owner_repo" --title "$title")
+      local created_url
+      if [ -n "$body_file" ]; then
+        [ -z "$body" ] || die "ensure-parent: pass --body OR --body-file, not both" 2
+        if [ "$body_file" = "-" ]; then
+          # Materialize stdin to a temp file so gh reads the untrusted body as DATA.
+          local tmp_body; tmp_body="$(mktemp)"
+          cat > "$tmp_body"
+          create_args+=(--body-file "$tmp_body")
+          created_url="$(gh "${create_args[@]}")" || { rm -f "$tmp_body"; die "ensure-parent: gh issue create failed" 1; }
+          rm -f "$tmp_body"
+        else
+          create_args+=(--body-file "$body_file")
+          created_url="$(gh "${create_args[@]}")" || die "ensure-parent: gh issue create failed" 1
+        fi
+      else
+        [ -n "$body" ] || die "ensure-parent: --body or --body-file is required to create a parent" 2
+        create_args+=(--body "$body")
+        created_url="$(gh "${create_args[@]}")" || die "ensure-parent: gh issue create failed" 1
+      fi
+      # `gh issue create` prints the new issue URL; the trailing path segment is the number.
+      number="$(canonical_issue_number "${created_url##*/}")" \
+        || die "ensure-parent: could not parse new issue number from gh output" 1
+    fi
+  fi
+
+  if [ -z "$record" ]; then
+    local resp="" query="$PARENT_RESOLVE_QUERY" read_failure="ensure-parent: GraphQL resolve failed for issue #$number"
+    if [ -n "$slug_given" ]; then
+      query="$PARENT_SEED_QUERY"
+    fi
+    if [ "$status" = "created" ]; then
+      read_failure="ensure-parent: GraphQL node-id resolve failed for created issue #$number"
+    fi
+    if is_offline; then
+      [ -n "$response_file" ] || die "offline ensure-parent requires --response-file" 2
+      resp="$(read_injected "$response_file")" || exit "$?"
+    else
+      resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$query" \
+                -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
+        || die "$read_failure" 1
+    fi
+    if [ -n "$slug_given" ]; then
+      record="$(normalize_parent_seed "$resp" "$slug")" || exit "$?"
+    else
+      record="$(normalize_parent_resolve "$resp" "$status")" || exit "$?"
+    fi
+  fi
+
+  emit_parent_record "$owner_repo" "$record" "$number"
 }
 
 cmd_attach_subissue() {

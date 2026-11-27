@@ -136,6 +136,22 @@ run_exit2_case() {
   fi
 }
 
+# run_offline_fail_closed_case <case> -- <ops-arg...>
+# Asserts the OFFLINE script exited NONZERO with nothing on stdout: a record that fails its checks
+# is never printed. Captures status WITHOUT a pipe.
+run_offline_fail_closed_case() {
+  local case_name="$1"; shift
+  [ "$1" = "--" ] && shift
+  local out status
+  out="$(SUBISSUE_OPS_OFFLINE=1 bash "$OPS" "$@" 2>/dev/null)"
+  status=$?
+  if [ "$status" -ne 0 ] && [ -z "$out" ]; then
+    pass "$case_name" "exit=$status, no output (args: $*)"
+  else
+    failed "$case_name" "expected nonzero exit and no output, got $status (args: $*; stdout: $out)"
+  fi
+}
+
 # ── attach-subissue: GraphQL variables payload shape ───────────────────────────────
 # Offline attach-subissue with the EXPLICIT --emit-payload opt-in builds the addSubIssue
 # variables payload. CRITICAL FIELD MAPPING: issueId = the PARENT, subIssueId = the CHILD
@@ -723,7 +739,7 @@ run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
   ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
 assert_live_label_failure "ensure-parent:live-issue-edit-failure" 1
 
-# ── ensure-parent: live issue-number checks ────────────────────────────────────────
+# ── ensure-parent: offline and live issue-number checks ────────────────────────────
 # A read addressed by number must return that issue, and every issue number must be a positive
 # integer: a response naming another issue, or a number that is zero, negative or fractional,
 # fails closed with no output and no issue edit, so a wrong issue is never labeled or returned.
@@ -755,6 +771,80 @@ for bad_number in mismatch:8 zero:0 negative:-7 fractional:7.5; do
     ensure-parent --title "tracer epic" --body anchor --repo "$DEMO_REPO"
   assert_live_label_failure "ensure-parent:live-created-number-${bad_number%%:*}-fails-closed" 0
 done
+# Offline runs the same checks: a read addressed by --existing-number that names another issue, or
+# a number that is not a positive integer, exits nonzero with nothing on stdout, with or without
+# --slug. The offline create simulation has no requested number, so only the positive-integer
+# check applies to it.
+for bad_number in mismatch:8 zero:0 negative:-7 fractional:7.5; do
+  bad_response="$(number_response "offline-resolve-${bad_number%%:*}" "$PI_DIR/ensure-parent-resolve-response.json" "${bad_number#*:}")" || exit 2
+  run_offline_fail_closed_case "ensure-parent:offline-resolved-number-${bad_number%%:*}-fails-closed" -- \
+    ensure-parent --existing-number 7 --response-file "$bad_response"
+  bad_response="$(number_response "offline-seed-${bad_number%%:*}" "$PI_DIR/ensure-parent-seed-response.json" "${bad_number#*:}")" || exit 2
+  run_offline_fail_closed_case "ensure-parent:offline-seed-number-${bad_number%%:*}-fails-closed" -- \
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --response-file "$bad_response"
+  bad_response="$(number_response "offline-not-seed-${bad_number%%:*}" "$PI_DIR/ensure-parent-no-marker-response.json" "${bad_number#*:}")" || exit 2
+  run_offline_fail_closed_case "ensure-parent:offline-not-seed-number-${bad_number%%:*}-fails-closed" -- \
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --response-file "$bad_response"
+done
+for bad_number in zero:0 negative:-7 fractional:7.5; do
+  bad_response="$(number_response "offline-created-${bad_number%%:*}" "$PI_DIR/ensure-parent-resolve-response.json" "${bad_number#*:}")" || exit 2
+  run_offline_fail_closed_case "ensure-parent:offline-created-number-${bad_number%%:*}-fails-closed" -- \
+    ensure-parent --title epic --body anchor --response-file "$bad_response"
+done
+# discovery_number_response <name> <number>: writes the one-open discovery response with its lone
+# match's number set to <number> and prints its path.
+discovery_number_response() {
+  local out="$TMPDIR_TEST/discovery-number-response.$1.json"
+  jq -c --argjson n "$2" '.data.repository.issues.nodes[0].number = $n' \
+    "$PI_DIR/ensure-parent-discovery-one-open-response.json" >"$out" \
+    || setup_fail "discovery number response $1"
+  printf '%s' "$out"
+}
+# A title-resolved record whose number is zero, negative or fractional fails closed offline and
+# live: nothing on stdout, no issue edit.
+for bad_number in zero:0 negative:-7 fractional:7.5; do
+  bad_response="$(discovery_number_response "${bad_number%%:*}" "${bad_number#*:}")" || exit 2
+  run_offline_fail_closed_case "ensure-parent:offline-resolved-by-title-number-${bad_number%%:*}-fails-closed" -- \
+    ensure-parent --title "tracer epic" --body anchor --discovery-response-file "$bad_response"
+  reset_gh_stub_state
+  GH_LIST_RESPONSE="$bad_response"
+  run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+    ensure-parent --title "tracer epic" --body anchor --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-resolved-by-title-number-${bad_number%%:*}-fails-closed" 0
+done
+reset_gh_stub_state
+# Offline, a zero-padded --existing-number names the same issue: #007 resolves to #7.
+run_case "ensure-parent:offline-resolved-zero-padded" "$EXPECTED_DIR/ensure-parent-resolved.json" -- \
+  ensure-parent --existing-number 007 \
+  --response-file "$PI_DIR/ensure-parent-resolve-response.json"
+# Offline, an all-zero --existing-number exits 2, with or without --slug.
+for zero_number in 0 000; do
+  run_exit2_case "ensure-parent:offline-existing-number-$zero_number-exit2" -- \
+    ensure-parent --existing-number "$zero_number" \
+    --response-file "$PI_DIR/ensure-parent-resolve-response.json"
+  run_exit2_case "ensure-parent:offline-seed-existing-number-$zero_number-exit2" -- \
+    ensure-parent --existing-number "$zero_number" --slug "$SEED_SLUG" \
+    --response-file "$PI_DIR/ensure-parent-seed-response.json"
+done
+# Single read and single exit: cmd_ensure_parent writes stdout ONLY through its last command,
+# emit_parent_record, so every record on every path passes the same number checks. Its body holds
+# exactly one emit_parent_record line, that line is the last command before the closing brace, and
+# no line returns or exits 0 early.
+EP_BODY="$(awk '/^cmd_ensure_parent\(\) \{$/ { in_body = 1; next } in_body && /^}$/ { exit } in_body' "$OPS")"
+EP_CODE="$(printf '%s\n' "$EP_BODY" | grep -v -E '^[[:space:]]*(#|$)')"
+EP_EMIT_LINES="$(printf '%s\n' "$EP_BODY" | grep -c -F 'emit_parent_record')"
+EP_LAST_LINE="$(printf '%s\n' "$EP_CODE" | tail -n 1)"
+EP_RETURN_LINES="$(printf '%s\n' "$EP_CODE" | grep -c -E '(^|[^[:alnum:]_])return([^[:alnum:]_]|$)')"
+EP_EXIT0_LINES="$(printf '%s\n' "$EP_CODE" | grep -c -E '(^|[^[:alnum:]_])exit 0([^[:alnum:]_]|$)')"
+if [ -n "$EP_BODY" ] && [ "$EP_EMIT_LINES" = 1 ] \
+  && printf '%s\n' "$EP_LAST_LINE" | grep -q -E '^[[:space:]]*emit_parent_record[[:space:]]' \
+  && [ "$EP_RETURN_LINES" = 0 ] && [ "$EP_EXIT0_LINES" = 0 ]; then
+  pass "ensure-parent:single-exit-structure" "one emit_parent_record line, last command, no return or exit 0"
+else
+  failed "ensure-parent:single-exit-structure" "the single-exit invariant (subissue-ops.sh §4, ENSURE-PARENT SINGLE READ AND SINGLE EXIT) is broken: cmd_ensure_parent must print only through one emit_parent_record line as its last command, with no return and no exit 0
+    emit_parent_record lines: $EP_EMIT_LINES, return lines: $EP_RETURN_LINES, exit 0 lines: $EP_EXIT0_LINES
+    last command: $EP_LAST_LINE"
+fi
 # A zero-padded --existing-number names the same issue: #007 resolves and labels #7.
 reset_gh_stub_state
 run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
