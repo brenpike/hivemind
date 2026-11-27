@@ -2847,6 +2847,7 @@ This amendment covers goals 1 and 2 of https://github.com/brenpike/hivemind/issu
 **Decisions.**
 
 1. **A plan that repeats a surface asks.** `buildRemediationPlanBrief` (`plugin/workflow-src/lib/briefs.js`) folds `remediation_gate.repeats_surface` into `gate.architectural` again, so `decide()` asks with `gate_architectural`. The Ask Set is unchanged: six reasons, no new code. `listReasons()` is now `beyond_request` and `outside_limits`, and `resolvePlanAcceptance` (`plugin/workflow-src/lib/plan.js`) passes only `outside_limits`. When `repeats_surface` holds, the options and recommendation come from `buildApproachChoice()`: A "Keep patching this class.", B "Change approach." and C "Stop and ship what closes.". Each is reversible and in the request, and B is recommended strong. A reply whose revise settles the question runs the shown plan. This holds in standard-delivery and in pr-feedback-remediation, which share the brief.
+   Amended 2026-11-27 by issue 696: after the user picks B, a plan whose `repeats_surface` holds asks "Accept this plan" or "Stop" instead of the approach options. The run records that answer in `run.approachChanged`. No trigger changes: such a plan is still asked whenever `repeats_surface` holds, and decision 2 still keys on a cluster file of the last plan (see Amendment 2026-11-27: a plan that carries out a change of approach can be accepted (issue 696)).
 2. **A repeated root cluster asks (standard-delivery).** After the run took a review replan, `requestReviewReplan` (`plugin/workflow-src/standard-delivery/review.js`) checks a `root-cluster-suspected` review against the plan the run just ran. When an entry of `cluster_files` equals a file of one of its steps, as exact text, the review is a repeated root cluster. It resolves through `decide()`, kind `root_cluster_routing`, on a brief with the same approach question and `gate.architectural` true, so it asks at every level and is never taken. It takes the place of the draft at `maxReviewReplans()`. `maxReplans()` is still checked first, so at that cap the run still opens a draft. A root cluster that names no file of that plan still opens the draft at `maxReviewReplans()`. The run keeps no new state.
 3. **A reply to a review-routing ask replans with the review.** A reply to any `planner_escalation_routing` or `root_cluster_routing` ask the run surfaced starts a new pass whose replan data carries the projected review, with the reply in the answers block. It counts in `run.replans` and `run.reviewReplans`, against `maxReplans()` and `maxReviewReplans()`, as a take does. Before, such a reply started a new pass like any other tail reply, which did not count against `maxReplans()`.
 
@@ -3244,3 +3245,53 @@ The findings: `readAttribution` takes any printable text, so a bad or compromise
 **Decision.** Keep the code. Add no trailer allowlist, no pr template and no check of the pr text against the forbidden strings or the body cap. Both findings are rejected, and a later finding that contests this threat model is a repeat.
 
 **Decided by.** The run, 2026-11-26, per `plugin/governance/decision-autonomy.md` (Review Calls), taking option A of the call on finding 7c55c376 (A: record this threat model and keep the code; B: check the trailer format and count the pr text in the size check; C: build the text from typed fields). The overlord agreed with the strong recommendation, and the pick is reversible and not architectural.
+
+## Amendment 2026-11-27: a plan that carries out a change of approach can be accepted (issue 696)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/696. After the user picked B, "Change approach.", the plan that carried out that change was asked the same approach question, with no way to accept it.
+
+**Evidence.** Found in the acceptance smoke run of https://github.com/brenpike/hivemind/issues/622.
+
+**Root cause.** `buildRemediationPlanBrief` (`plugin/workflow-src/lib/briefs.js`) chose the approach options from `plan.remediation_gate.repeats_surface` alone. Nothing recorded that the user had already answered B, so the plan carrying out B got A, B and C again.
+
+**The change.**
+
+- **The run state.** `run.approachChanged` is unset at `createRunState`.
+- **Where it is set.** `requestReviewReplan` (`plugin/workflow-src/standard-delivery/review.js`) sets it on a reply to a repeated root cluster: true when the reply picks B, false otherwise. The latest answer wins. `runPlanningPass` (`plugin/workflow-src/lib/plan.js`) sets it true only when the revise does not settle a shown remediation plan acceptance whose reply picked B. It is never set in the settled branch: that would rebuild a different brief and key for the restored plan and fire the issue 434 defect stop.
+- **The carried brief.** When `repeats_surface` holds and `run.approachChanged` is true, the lead reads "Run the remediation plan that carries out your change of approach on the working branch, then every gate again.". Option A is "Accept this plan and run its steps." and option B is "Stop before any step runs.", with A recommended strong. The gate is still architectural, so the plan is still asked. The Promotion Gate is unchanged, and no governance text changed.
+- **`describeApproachChange`.** It now matches option B by its summary, so it returns an empty string for every brief that is not the approach question.
+- **Accept.** The revise planner's settled labels settle it, as the answer log of Amendment 2026-10-28: answers kept across replans, and a build check on resume (issue 472) already holds. No code reads the reply's letter. A settled reply runs the plan with no further pause.
+- **Both workflows.** standard-delivery and pr-feedback-remediation share the brief and the planning pass.
+
+**What it amends.** Decision 1 of Amendment 2026-11-18: a repeated non-closing fix asks the user (issue 587), with a dated note.
+
+**Options ruled out.**
+
+- **Skipping the question.** The Promotion Gate asks whenever `repeats_surface` holds.
+- **A code parse of an Accept letter.** Settled stays the revise planner's call, through its settled labels.
+- **A sticky flag.** The latest answer wins, so the lead never claims a change the user withdrew.
+- **A new Ask Set reason.** The Ask Set stays closed.
+- **Not the run-wide trigger key ADR-0038 ruled out.** The flag changes only the options of a question that is still asked. It decides no ask.
+
+**Enforcement.** Contract rows SD-40 and SD-87 in `plugin/workflow-src/standard-delivery/contract.js` and PFR-16 in `plugin/workflow-src/pr-feedback-remediation/contract.js`, each tested by execution in `tests/workflow-scripts/standard-delivery.test.mjs` or `tests/workflow-scripts/pr-feedback-remediation.test.mjs`.
+
+**Budget.** No prose budget raise and no length cap raise. Measured after the change:
+
+- `plugin/workflows/standard-delivery.js`: length 192,873 of 193,000, from 192,800; prose 41,633 of 42,084, from 41,604.
+- `plugin/workflows/pr-feedback-remediation.js`: length 177,979, from 177,634; prose 37,903 of 38,065, from 37,807.
+- `plugin/workflows/analysis-only.js`: unchanged.
+
+The room came from trims inside `briefs.js`, `plan.js` and `review.js` with no change of behavior.
+
+**Recorded residuals.**
+
+- **A B in the user's own words is not read.** The same rule as `describeApproachChange`: only option B by its summary counts.
+- **A B whose revise settles the shown plan sets no flag.** The settled branch never sets it.
+- **Launch decisions are not read.**
+- **Recurrence across runs.** Tracked in https://github.com/brenpike/hivemind/issues/593.
+
+**Version.** Patch, 14.9.2. It is a fix: the plan that carries out the user's change of approach can now be accepted.
+
+It updates decision 1 of Amendment 2026-11-18: a repeated non-closing fix asks the user (issue 587) in place. The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/696, https://github.com/brenpike/hivemind/issues/622, https://github.com/brenpike/hivemind/issues/593, `docs/adr/0038-root-cause-at-the-first-finding.md`.
