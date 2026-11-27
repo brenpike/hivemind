@@ -15,7 +15,8 @@
 # decomposes into slices, or which slice blocks which is holistic LLM work (P11)
 # and stays in the SKILL prose. The script is the reproducible hands:
 #   - idempotently ensure (create-or-find) the PRD-level epic PARENT issue,
-#     returning its issue number + GraphQL NODE ID,
+#     returning its issue number + GraphQL NODE ID, and add the `type:epic` label to the
+#     returned epic (live only) so the readiness check reads every slice's parent as an epic,
 #   - attach a sliced (child) issue to the parent as a NATIVE sub-issue via the
 #     GraphQL `addSubIssue` mutation,
 #   - read the parent's `subIssues` connection (paginated to completeness),
@@ -38,8 +39,9 @@
 #                 [--discovery-response-file <path|->]
 #     Idempotently CREATE-OR-FIND the PRD-level epic (parent) issue — ORPHAN-SAFE
 #     (closed-by-construction): when no --existing-number is supplied, ensure-parent first
-#     DISCOVERS-BY-TITLE before creating, so a create-before-record partial failure never
-#     spawns a SECOND duplicate epic.
+#     DISCOVERS-BY-TITLE before creating, so a rerun after a create-before-record partial
+#     failure never spawns a SECOND duplicate epic. Concurrent runs: see the THREAT MODEL
+#     under PARENT ORPHAN-SAFETY in §4.
 #     Idempotency key: if --existing-number is supplied the parent is RESOLVED (its
 #     node id read by number) instead of created — the skill anchors the epic to a
 #     known issue across re-runs. Otherwise: discover the EXACT epic title via the SHARED
@@ -66,8 +68,24 @@
 #              it to be a string, else FAILS CLOSED. The body reaches the library's
 #              hivemind_seed_marker_slug ONLY on stdin; `seed` is true only when that function
 #              prints exactly <slug> (a CRLF marker line counts; another slug or no marker gives
-#              false). The resolve path creates and edits no issue, so the seed's marker line
-#              stays. Without --slug every output is byte-identical to the contract before it.
+#              false). The resolve path creates no issue and only adds the epic label (below),
+#              never touching the body, so the seed's marker line stays. Without --slug every
+#              output is byte-identical to the contract before it.
+#     online (epic label, every live path): after the record is read and before it is printed,
+#              emit_parent_record checks the record's number and then ensure_epic_label adds
+#              `type:epic` to the issue that number names, for every record whose `seed` is not
+#              false: the resolved path, the --slug path ONLY when `seed` is true, resolved-by-title
+#              (number from the discovery decision) and the created path (after the node-id read).
+#              It reads the repository's label by name (GraphQL repository.label, owner/name/label
+#              via -f, through the SHARED kernel); a missing label is created with
+#              `gh label create type:epic --color 3e4b9e --description "triage type rating" -R
+#              <owner/repo>` (the triage palette's values, never --force); when that create
+#              fails, the label is read again the same way and the run goes on only if it now
+#              reads exactly `type:epic` (another run created it); a label found whose name
+#              is not exactly `type:epic` (e.g. `Type:Epic`) FAILS CLOSED; then `gh issue edit
+#              <number> -R <owner/repo> --add-label type:epic`. It never edits an existing label,
+#              never removes a label and never touches an issue's title or body. Any read, create
+#              or edit failure exits nonzero with nothing on stdout. Offline paths never label.
 #     offline: with --response-file -> normalizes the injected raw GraphQL
 #              repository.issue response (number+id) through the shared kernel and
 #              emits the parent record (status resolved when --existing-number was given,
@@ -79,6 +97,11 @@
 #              the injected repository.issues ENUMERATION response: one OPEN match emits status
 #              resolved-by-title; a multiple/CLOSED/divergent set FAILS CLOSED; ZERO matches
 #              falls through to the --response-file `created` simulation.
+#              Offline runs the SAME control flow as live, minus the live-only setup, the create
+#              and the label, and every record passes the same number checks before it is printed:
+#              with --existing-number the injected read must name that issue (a read naming another
+#              issue exits 1 with nothing on stdout, with or without --slug); the `created`
+#              simulation and a resolved-by-title record need only a positive-integer number.
 #     --response-file / --discovery-response-file are TEST SEAMS honored ONLY when
 #     SUBISSUE_OPS_OFFLINE is set; a live invocation supplying either is REJECTED fail-closed
 #     via the shared guard (see §5) BEFORE any gh call.
@@ -157,6 +180,9 @@
 #              routed through the SHARED kernel (see §4). The trunk name passes the identifier
 #              gate and `git check-ref-format --branch`; the commit id must pass the library's
 #              hivemind_readiness_commit_ok (40 or 64 lowercase hex).
+#     link prefix: after those checks, `link_prefix` is hivemind_readiness_link_prefix of
+#              owner/repo and the trunk NAME (never the commit id): the one Design blob link prefix
+#              the readiness check reads back. A failure there FAILS CLOSED.
 #     online (fetch): `GIT_TERMINAL_PROMPT=0 git --no-replace-objects fetch --quiet --no-tags
 #              --no-recurse-submodules --no-prune --refmap= -- <remote> refs/heads/<trunk>`, which
 #              writes FETCH_HEAD only. The commit id must then name a local commit object that
@@ -187,8 +213,8 @@
 #       slice at triage.
 #     offline: --trunk-response-file replaces the GraphQL read (same kernel) and the fetch is
 #              skipped, so the commit must already be in the local object store. REQUIRES
-#              --trunk-response-file offline (exit 2 otherwise); --repo, when given, is still
-#              checked.
+#              --trunk-response-file and --repo offline (exit 2 with no stdout otherwise); --repo
+#              is checked with assert_owner_repo and is the owner/repo of `link_prefix`.
 #     failure: a gh, git or fetch failure, a malformed read, or an unresolvable commit leaves
 #              stdout empty, prints ONE `subissue-ops:` stderr line and exits nonzero.
 #
@@ -201,6 +227,11 @@
 #     exact-title epic and resolved it instead of creating a duplicate (orphan-safety).
 #   ensure-parent --existing-number <int> --slug <slug>:
 #     { "number": <int>, "id": <node-id>, "status": "resolved", "seed": true|false }
+#   Live, every ensure-parent record above is printed only after its epic is labeled `type:epic`
+#   (with --slug, only a seed epic is labeled); the record itself is unchanged by the label step.
+#   Every record, offline and live, reaches stdout only through emit_parent_record, after its
+#   number checks (a positive integer, equal to the number a read was addressed by), and live
+#   only after the labeling.
 #
 #   attach-subissue payload (offline, --emit-payload):
 #     { "issueId": <parent-node-id>, "subIssueId": <child-node-id> }
@@ -228,12 +259,14 @@
 #     (already attached to the intended epic).
 #
 #   design-gate (one compact line, exit 0):
-#     { "commit": <object-id>, "trunk": <str>, "slug": <str>,
+#     { "commit": <object-id>, "trunk": <str>,
+#       "link_prefix": "https://github.com/<owner/repo>/blob/<trunk>/", "slug": <str>,
 #       "ui": "yes"|"no"|"invalid"|"missing",
 #       "result": "pass"|"refuse",
 #       "reasons": [ <readiness reason code>, ... ] }
 #     `reasons` is sorted and unique, and empty unless ui is yes. `result` is refuse ONLY when
-#     ui is yes and reasons is non-empty; otherwise pass.
+#     ui is yes and reasons is non-empty; otherwise pass. Each Design link the skill writes is
+#     `link_prefix` plus the path.
 #
 # 4. INVARIANTS
 # -------------
@@ -245,7 +278,7 @@
 #     or a null/wrong-typed field on any element — FAILS CLOSED (nonzero, structured
 #     kind record to stderr) before any decision or emission. Covered reads:
 #     ensure-parent's repository.issue resolve/normalize (with --slug, its body too),
-#     list-children's per-page subIssues response (before accumulation), design-gate's
+#     ensure-parent's repository.label read of the epic label, list-children's per-page subIssues response (before accumulation), design-gate's
 #     defaultBranchRef trunk read. No subcommand bypasses this kernel.
 #   - SHARED READINESS CHECK LIBRARY. The script sources
 #     ${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-check.sh with the canonical ADR-0020
@@ -255,8 +288,10 @@
 #     the library's; this script never re-implements them and never reads a document by branch
 #     name, local ref or working-tree path.
 #   - NATIVE SUB-ISSUES, NOT LABELS. This script wires the first-class GitHub
-#     parent/child hierarchy; it NEVER reads, writes, or grooms any `initiative:*`
-#     (or any other) label. Grouping is the native relationship, full stop.
+#     parent/child hierarchy; it NEVER reads, writes, or grooms any `initiative:*` label.
+#     Grouping is the native relationship, full stop. The ONLY label it touches is
+#     `type:epic` on the epic ensure-parent returns, and only by adding it: it may create the
+#     missing repository label, but never edits an existing label and never removes one.
 #   - addSubIssue FIELD MAPPING IS LOAD-BEARING: input `issueId` = the PARENT node,
 #     `subIssueId` = the CHILD node. This is NOT the dependency API's
 #     `blockingIssueId`. build_attach_payload and the mutation source are the SINGLE
@@ -285,14 +320,31 @@
 #   - FAIL-CLOSED on malformed injected input to a pure transform (bad --response-file,
 #     unreadable injection file, a continued offline page) — a malformed fixture is a
 #     usage bug, not noise.
-#   - PARENT ORPHAN-SAFETY IS CLOSED-BY-CONSTRUCTION. ensure-parent never blind-creates a
-#     second epic: with no --existing-number it DISCOVERS-BY-TITLE first (reusing the SINGLE
+#   - PARENT ORPHAN-SAFETY IS CLOSED-BY-CONSTRUCTION. Across sequential runs and reruns,
+#     ensure-parent never blind-creates a second epic: with no --existing-number it
+#     DISCOVERS-BY-TITLE first (reusing the SINGLE
 #     SHARED ENUMERATION machinery find-by-title uses — repository.issues enumeration +
 #     paginate_to_completeness + filter_exact_title, never a divergent second lookup), resolves
 #     a lone OPEN exact match (status resolved-by-title), creates ONLY on zero matches, and
 #     FAILS CLOSED on a multiple/CLOSED/divergent set rather than duplicating or reusing a
 #     closed epic. The same owner/repo charset guard find-by-title enforces is applied to the
 #     discovery enumeration path.
+#     THREAT MODEL: discovery and `gh issue create` are two GitHub calls, and GitHub issues
+#     have no create-if-absent. Two runs publishing the same initiative at once that both
+#     find zero exact-title matches each create an epic and return different epics, in all
+#     three create branches (--body-file -, --body-file <path>, --body). The skill's
+#     per-slice find-by-title-then-create has the same window. That race is outside the
+#     threat model: one run publishes an initiative at a time, and concurrent publishes of
+#     the same initiative are unsupported. Recorded per
+#     ${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (Recorded Residual), on the
+#     user's decision of 2026-11-27, local review finding 5f28677a. The impact is bounded:
+#     duplicate open issues, visible and reversible by closing them; no data loss, no body
+#     or title edit, no trust boundary crossed. A later run fails closed on the duplicates
+#     (resolve_discovery, kind ambiguous-epic), and the seed and --existing-number paths
+#     create no epic. Still in scope: concurrent runs for different initiatives, and the
+#     `type:epic` label create race, which ensure_epic_label closes by rereading the label
+#     after a failed create, because label names are unique per repository. A need to
+#     support concurrent publishes of one initiative reopens this as a filed issue.
 #   - TITLE-EXISTENCE IS A DETERMINISTIC ENUMERATION, NOT A FUZZY SEARCH. The title-lookup
 #     enumerates `repository.issues` (a terminally-paginated connection) and matches the title
 #     LOCALLY as jq --arg DATA. It NEVER feeds the untrusted title into GitHub's ranked
@@ -300,6 +352,13 @@
 #     of search-as-existence-oracle defects (DSL quote-breakout, qualifier injection,
 #     is:issue/PR leak, 1000-result truncation) — there is no query string for the title to
 #     break, and the connection has a real terminal page (no relevance cap to guard).
+#   - ENSURE-PARENT SINGLE READ AND SINGLE EXIT. cmd_ensure_parent is ONE control flow for offline
+#     and live, never a parallel offline copy: one resolve_discovery call whose decision is read
+#     once, one by-number read site (offline --response-file, live GraphQL), and one stdout write,
+#     emit_parent_record, as the function's last command. Its body holds no `return`; every failure
+#     exits nonzero through die or `|| exit "$?"`. So every record, on every path, passes the same
+#     number checks before it is labeled or printed. tools/test_subissue_ops.sh (case
+#     ensure-parent:single-exit-structure) pins this shape.
 #
 # 5. OFFLINE TEST SEAM (STEP-002 depends on this)
 # -----------------------------------------------
@@ -396,19 +455,17 @@ read_injected() {
   fi
 }
 
-# assert_owner_repo <subcmd> <owner/repo>: the SINGLE SOURCE owner/repo charset guard,
-# shared by find-by-title AND ensure-parent's pre-create discovery search so the two cannot
-# diverge (ensure-parent's create path previously did only the weak `*/*` glob; the discovery
-# path now applies this stronger guard). Split on the single `/`, gate each half against the
-# GitHub name charset BEFORE any gh/GraphQL call. owner_repo flows into the search DSL via -f
-# as DATA, but a malformed value is a usage bug, not a broadened query — fail CLOSED (exit 2).
-# Replaces the weak `*/*` glob, which admitted e.g. `a/b/c` or shell metacharacters.
+# assert_owner_repo <subcmd> <owner/repo>: the owner/repo guard shared by find-by-title,
+# ensure-parent and design-gate, run BEFORE any gh/GraphQL call. Validity is decided ONLY by the
+# shared readiness check library's hivemind_readiness_owner_repo_ok (the one owner/repo rule:
+# `<owner>/<repo>`, charset A-Za-z0-9_.-, owner with no leading `-` or `.` and no `..`, repo not
+# exactly `.` or `..`), so this script holds no owner/repo logic of its own. owner_repo flows into
+# GraphQL and the search DSL via -f as DATA, but a malformed value is a usage bug, not a broadened
+# query — fail CLOSED (exit 2) with one diagnostic line naming the subcommand.
 assert_owner_repo() {
-  local subcmd="$1" owner_repo="$2" owner_part repo_part
-  case "$owner_repo" in */*) ;; *) die "$subcmd: --repo must be owner/repo (got '$owner_repo')" 2 ;; esac
-  owner_part="${owner_repo%%/*}"; repo_part="${owner_repo#*/}"
-  case "$owner_part" in ''|*[!A-Za-z0-9._-]*) die "$subcmd: invalid repo owner (got '$owner_part')" 2 ;; esac
-  case "$repo_part" in ''|*/*|*[!A-Za-z0-9._-]*) die "$subcmd: invalid repo name (got '$repo_part')" 2 ;; esac
+  local subcmd="$1" owner_repo="$2"
+  hivemind_readiness_owner_repo_ok "$owner_repo" \
+    || die "$subcmd: --repo must be <owner>/<repo> (got '$owner_repo')" 2
 }
 
 # assert_node_id <flag-name> <value>: DEFENSE-IN-DEPTH node-id allowlist (ADR-0020 trust
@@ -516,7 +573,7 @@ validate_response_shape() {
 # response (used by ensure-parent's resolve path and its post-create node-id read)
 # into the parent identity { number, id }. FAIL-CLOSED via the shared kernel: a
 # transport error, `.errors` envelope, null/missing issue node, or a null/wrong-typed
-# number/id field exits nonzero — never emit a parent record built from an
+# number/id field, or a number that is not a positive integer, exits nonzero — never emit a parent record built from an
 # unverifiable read. The issue node carries no collection of interest, so the kernel's
 # collection slot is `[]` (a trivially-valid empty array) and there is no element
 # predicate. <status> is spliced as DATA via --arg to tag the record created/resolved.
@@ -525,7 +582,7 @@ normalize_parent_resolve() {
   local resp="$1" status="$2"
   validate_response_shape "$resp" \
     '.data.repository.issue' \
-    '(.number | type == "number")
+    '(.number | type == "number" and . >= 1 and . == floor)
      and (.id | type == "string" and length > 0)' \
     '[]' \
     'true' \
@@ -545,7 +602,7 @@ normalize_parent_seed() {
   local resp="$1" slug="$2" validated marker="" marker_rc=0 seed=false
   validated="$(validate_response_shape "$resp" \
     '.data.repository.issue' \
-    '(.number | type == "number")
+    '(.number | type == "number" and . >= 1 and . == floor)
      and (.id | type == "string" and length > 0)
      and (.body | type == "string")' \
     '[]' \
@@ -602,7 +659,7 @@ normalize_children() {
      and (.subIssues.pageInfo.hasNextPage | type == "boolean")
      and (.subIssues.pageInfo.hasNextPage == false)' \
     '.subIssues.nodes' \
-    '(.number | type == "number")
+    '(.number | type == "number" and . >= 1 and . == floor)
      and (.id | type == "string" and length > 0)
      and (.title | type == "string" and length > 0)' \
     '.data.node as $n
@@ -639,7 +696,7 @@ normalize_find_by_title() {
     '(.pageInfo.hasNextPage | type == "boolean")
      and (.pageInfo.hasNextPage == false)' \
     '.nodes' \
-    '(.number | type == "number")
+    '(.number | type == "number" and . >= 1 and . == floor)
      and (.id | type == "string" and length > 0)
      and (.title | type == "string" and length > 0)
      and (.state | type == "string" and length > 0)' \
@@ -821,6 +878,25 @@ query($owner: String!, $repo: String!, $number: Int!) {
   }
 }'
 
+# INVARIANT: the epic label's name, color and description equal the `type:epic` entry of
+# triage_palette and the description cmd_ensure_labels gives a `type` family label, both in
+# ${CLAUDE_PLUGIN_ROOT}/skills/triage-backlog/scripts/triage-ops.sh. tools/test_subissue_ops.sh
+# (case ensure-parent:label-matches-triage-palette) runs both scripts and pins the agreement.
+EPIC_LABEL="type:epic"
+EPIC_LABEL_COLOR="3e4b9e"
+EPIC_LABEL_DESCRIPTION="triage type rating"
+
+# ensure_epic_label's label read: the repository's label named $label, or null when it has none
+# (owner/name/label via gh -f as DATA).
+EPIC_LABEL_QUERY='
+query($owner: String!, $name: String!, $label: String!) {
+  repository(owner: $owner, name: $name) {
+    label(name: $label) {
+      name
+    }
+  }
+}'
+
 # design-gate's trunk read: the default branch name and its commit id (owner/name via gh -f as DATA).
 TRUNK_REF_QUERY='
 query($owner: String!, $name: String!) {
@@ -942,8 +1018,116 @@ paginate_to_completeness() {
   printf '%s' "$accumulated"
 }
 
+# read_epic_label_name <owner_repo>: prints the name of the repository's label named `type:epic`
+# as GitHub returns it, or nothing when the repository has none. Reads it through the shared
+# kernel (root `.data.repository`; label null, or an object with a non-empty string name). A read
+# failure or a malformed read exits nonzero with nothing on stdout.
+read_epic_label_name() {
+  local owner_repo="$1" owner repo_name resp label_read
+  owner="${owner_repo%%/*}"; repo_name="${owner_repo#*/}"
+  resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$EPIC_LABEL_QUERY" \
+            -f owner="$owner" -f name="$repo_name" -f label="$EPIC_LABEL" 2>/dev/null)" \
+    || die "ensure-parent: GraphQL read of label '$EPIC_LABEL' failed" 1
+  label_read="$(validate_response_shape "$resp" \
+    '.data.repository' \
+    '(.label == null)
+     or ((.label | type) == "object" and (.label.name | type == "string" and length > 0))' \
+    '[]' \
+    'true' \
+    '.data.repository.label')" \
+    || die "ensure-parent: malformed read of label '$EPIC_LABEL'" 1
+  printf '%s' "$label_read" | jq -r 'if . == null then "" else .name end' \
+    || die "ensure-parent: could not read the name of label '$EPIC_LABEL'" 1
+}
+
+# ensure_epic_label <owner_repo> <number>: give the epic issue <number> the `type:epic` label
+# (live path only; the caller has validated owner_repo and ensured `gh` is on PATH). Reads the
+# repository's label (read_epic_label_name). A missing label is created with the triage palette's
+# color and description, never with --force; when that create fails, the label is read again and
+# the run goes on only if it now reads exactly `type:epic` (a concurrent run created it). A label
+# found under a name that is not exactly `type:epic` (e.g. `Type:Epic`) fails closed. Then adds
+# the label to the issue. It never edits an existing label, never removes a label and never
+# touches an issue's title or body. Any read, create or edit failure exits nonzero with nothing
+# on stdout.
+ensure_epic_label() {
+  local owner_repo="$1" number="$2" label_name
+  label_name="$(read_epic_label_name "$owner_repo")" || exit "$?"
+  if [ -z "$label_name" ]; then
+    if ! gh label create "$EPIC_LABEL" --color "$EPIC_LABEL_COLOR" \
+        --description "$EPIC_LABEL_DESCRIPTION" -R "$owner_repo" >/dev/null; then
+      label_name="$(read_epic_label_name "$owner_repo")" || exit "$?"
+      [ "$label_name" = "$EPIC_LABEL" ] \
+        || die "ensure-parent: gh label create '$EPIC_LABEL' failed" 1
+    fi
+  elif [ "$label_name" != "$EPIC_LABEL" ]; then
+    die "ensure-parent: the repository's label '$label_name' is not exactly '$EPIC_LABEL'; refusing to label the epic" 1
+  fi
+  gh issue edit "$number" -R "$owner_repo" --add-label "$EPIC_LABEL" >/dev/null \
+    || die "ensure-parent: gh issue edit failed to add label '$EPIC_LABEL' to issue #$number" 1
+}
+
+# canonical_issue_number <value>: prints <value> as a canonical positive integer, leading zeros
+# dropped. An empty, non-digit or all-zero value fails with nothing on stdout. Every issue number
+# the shell reads (--existing-number, the created issue's URL, the record, the expected number)
+# passes this one check, so a zero or non-canonical number never reaches a read, a comparison or
+# a label edit.
+canonical_issue_number() {
+  local n="$1"
+  case "$n" in '' | *[!0-9]*) return 1 ;; esac
+  n="${n#"${n%%[!0]*}"}"
+  [ -n "$n" ] || return 1
+  printf '%s' "$n"
+}
+
+# record_issue_number <record> [<expected-number>]: prints the ensure-parent <record>'s number.
+# It must be a canonical positive integer and, when <expected-number> is given (a read addressed
+# by number), equal to it; else it fails closed with nothing on stdout. A given expected number
+# that is not a positive integer fails closed too, so the equality check is never skipped.
+record_issue_number() {
+  local record="$1" record_number canonical expected
+  record_number="$(printf '%s' "$record" | jq -r '.number')" \
+    || die "ensure-parent: could not read the epic number from its record" 1
+  canonical="$(canonical_issue_number "$record_number")" && [ "$canonical" = "$record_number" ] \
+    || die "ensure-parent: the epic record's number is not a positive integer" 1
+  if [ "$#" -ge 2 ]; then
+    expected="$(canonical_issue_number "$2")" \
+      || die "ensure-parent: the expected issue number is not a positive integer" 1
+    [ "$record_number" = "$expected" ] \
+      || die "ensure-parent: the read of issue #$expected returned issue #$record_number" 1
+  fi
+  printf '%s' "$record_number"
+}
+
+# emit_parent_record <owner_repo> <record> <number>: the ONLY stdout write of ensure-parent. Checks
+# the <record>'s number (record_issue_number, compared with <number> when <number> is non-empty: a
+# read addressed by number must return that issue), then, live only and only when the record's
+# `seed` is not false, labels that issue `type:epic` (ensure_epic_label), then prints the record
+# unchanged. So a wrong issue is never labeled or printed. Any failure exits nonzero with nothing
+# on stdout. <owner_repo> is unused offline.
+emit_parent_record() {
+  local owner_repo="$1" record="$2" number="$3" record_number seed
+  record_number="$(record_issue_number "$record" ${number:+"$number"})" || exit "$?"
+  if ! is_offline; then
+    seed="$(printf '%s' "$record" | jq -r '.seed')" \
+      || die "ensure-parent: could not read the seed flag from the epic record" 1
+    if [ "$seed" != "false" ]; then
+      ensure_epic_label "$owner_repo" "$record_number"
+    fi
+  fi
+  printf '%s\n' "$record"
+}
+
 # --- Subcommand implementations ----------------------------------------------
 
+# cmd_ensure_parent: ONE control flow for offline and live (§2 ensure-parent, §4 SINGLE READ AND
+# SINGLE EXIT). Live-only setup (fixture-flag rejection, gh, owner/repo) runs first. Without
+# --existing-number: discovery (live run_title_search; offline the --discovery-response-file
+# enumeration, when given) feeds ONE resolve_discovery call, whose decision is read once for both
+# modes: resolved-by-title is the record, `create` falls through; live then creates the issue.
+# Then, when no record is held yet, ONE by-number read (offline --response-file; live GraphQL at
+# `number`) gives the record. `number` is that read's address: the canonical --existing-number or
+# the created issue's number, empty only for a title-resolved record and the offline create
+# simulation. The last command, emit_parent_record, is the only stdout write.
 cmd_ensure_parent() {
   local title="" body="" body_file="" repo="" existing_number="" response_file="" discovery_response_file=""
   local slug="" slug_given=""
@@ -969,7 +1153,8 @@ cmd_ensure_parent() {
     esac
   done
   if [ -n "$existing_number" ]; then
-    case "$existing_number" in ''|*[!0-9]*) die "ensure-parent: --existing-number must be an integer (got '$existing_number')" 2 ;; esac
+    existing_number="$(canonical_issue_number "$existing_number")" \
+      || die "ensure-parent: --existing-number must be a positive integer" 2
   fi
 
   # --discovery-response-file is meaningful ONLY on the create path (no --existing-number) —
@@ -986,128 +1171,100 @@ cmd_ensure_parent() {
     assert_slug "ensure-parent" "$slug"
   fi
 
-  if is_offline; then
-    # Offline DISCOVERY seam (create path): with --discovery-response-file the injected SEARCH
-    # response is run through the shared kernel + exact-title filter + resolve_discovery. A lone
-    # OPEN exact match emits { number, id, status:"resolved-by-title" }; a multiple/CLOSED/
-    # divergent set FAILS CLOSED (exit 1); ZERO matches falls through to the --response-file
-    # `created` simulation below (mirroring the live discover-then-create flow).
-    if [ -n "$discovery_response_file" ]; then
-      local matches decision
-      matches="$(normalize_find_by_title "$(read_injected "$discovery_response_file")" "$title")" \
-        || die "ensure-parent: malformed discovery search response" 1
-      decision="$(resolve_discovery "$matches")" || return 1
-      if [ "$(printf '%s' "$decision" | jq -r '.action // "resolved"')" != "create" ]; then
-        printf '%s\n' "$decision"
-        return 0
-      fi
-      # ZERO matches: fall through to the create simulation (requires --response-file).
-    fi
-    # Offline exercises ONLY the resolve/normalize transform (creation is a pure live
-    # side effect with no deterministic transform). The injected response is treated
-    # as a repository.issue read; status tag is resolved when --existing-number was
-    # given, else created (the create path's post-create node-id read).
-    [ -n "$response_file" ] || die "offline ensure-parent requires --response-file" 2
-    if [ -n "$slug_given" ]; then
-      normalize_parent_seed "$(read_injected "$response_file")" "$slug"
-      return
-    fi
-    local status="created"
-    [ -n "$existing_number" ] && status="resolved"
-    normalize_parent_resolve "$(read_injected "$response_file")" "$status"
-    return
-  fi
-
-  reject_fixture_flags_in_live_mode "ensure-parent" \
-    "--response-file=$response_file" "--discovery-response-file=$discovery_response_file"
-  require_gh "ensure-parent"
-
-  # Resolve owner/repo: explicit --repo wins, else the current checkout.
-  local owner_repo owner repo_name
-  if [ -n "$repo" ]; then
-    owner_repo="$repo"
-  else
-    owner_repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
-      || die "ensure-parent: failed to resolve owner/repo (pass --repo)" 1
-  fi
-  # Apply the SAME owner/repo charset guard find-by-title uses (the SHARED guard) — tightening
-  # the former weak `*/*` glob now that the discovery search flows owner_repo into the search DSL.
-  assert_owner_repo "ensure-parent" "$owner_repo"
-  owner="${owner_repo%%/*}"; repo_name="${owner_repo#*/}"
-
-  local number resp
-  if [ -n "$existing_number" ]; then
-    # RESOLVE path (idempotency key supplied): read the known epic's node id. Routed
-    # through the shared kernel — a missing/malformed read FAILS CLOSED.
-    number="$existing_number"
-    if [ -n "$slug_given" ]; then
-      resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$PARENT_SEED_QUERY" \
-                -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
-        || die "ensure-parent: GraphQL resolve failed for issue #$number" 1
-      normalize_parent_seed "$resp" "$slug"
-      return
-    fi
-    resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$PARENT_RESOLVE_QUERY" \
-              -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
-      || die "ensure-parent: GraphQL resolve failed for issue #$number" 1
-    normalize_parent_resolve "$resp" "resolved"
-    return
-  fi
-
-  # ORPHAN-SAFE DISCOVER-THEN-CREATE (no idempotency key): before creating, DISCOVER the epic
-  # by EXACT title via the SHARED enumeration machinery (run_title_search → repository.issues
-  # enumeration + paginate_to_completeness + filter_exact_title — the SAME path find-by-title
-  # uses, never a divergent second lookup) and apply the resolution rules (resolve_discovery): a
-  # lone OPEN exact match RESOLVES (status resolved-by-title, skip create); a multiple/CLOSED/
-  # divergent set FAILS CLOSED; ZERO matches falls through to create. A title is REQUIRED to discover.
-  [ -n "$title" ] || die "ensure-parent: --title is required to create a parent (or pass --existing-number)" 2
-  local discovery decision
-  discovery="$(run_title_search "ensure-parent" "$owner_repo" "$title")" \
-    || die "ensure-parent: discovery search failed" 1
-  decision="$(resolve_discovery "$discovery")" || exit 1
-  if [ "$(printf '%s' "$decision" | jq -r '.action // "resolved"')" != "create" ]; then
-    printf '%s\n' "$decision"
-    return 0
-  fi
-
-  # CREATE path (discovery found ZERO existing epics): untrusted title/body flow ONLY through
-  # gh flags (never shell/GraphQL source). Prefer --body-file when given (large/multiline
-  # PRD epic bodies).
-  local -a create_args=(issue create --title "$title")
-  [ -n "$repo" ] && create_args=(issue create -R "$owner_repo" --title "$title")
-  if [ -n "$body_file" ]; then
-    [ -z "$body" ] || die "ensure-parent: pass --body OR --body-file, not both" 2
-    if [ "$body_file" = "-" ]; then
-      # Materialize stdin to a temp file so gh reads the untrusted body as DATA.
-      local tmp_body; tmp_body="$(mktemp)"
-      cat > "$tmp_body"
-      create_args+=(--body-file "$tmp_body")
-      local created_url
-      created_url="$(gh "${create_args[@]}")" || { rm -f "$tmp_body"; die "ensure-parent: gh issue create failed" 1; }
-      rm -f "$tmp_body"
-      number="${created_url##*/}"
+  local owner_repo="" owner="" repo_name=""
+  if ! is_offline; then
+    reject_fixture_flags_in_live_mode "ensure-parent" \
+      "--response-file=$response_file" "--discovery-response-file=$discovery_response_file"
+    require_gh "ensure-parent"
+    # Resolve owner/repo: explicit --repo wins, else the current checkout.
+    if [ -n "$repo" ]; then
+      owner_repo="$repo"
     else
-      create_args+=(--body-file "$body_file")
-      local created_url
-      created_url="$(gh "${create_args[@]}")" || die "ensure-parent: gh issue create failed" 1
-      number="${created_url##*/}"
+      owner_repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
+        || die "ensure-parent: failed to resolve owner/repo (pass --repo)" 1
     fi
-  else
-    [ -n "$body" ] || die "ensure-parent: --body or --body-file is required to create a parent" 2
-    create_args+=(--body "$body")
-    local created_url
-    created_url="$(gh "${create_args[@]}")" || die "ensure-parent: gh issue create failed" 1
-    # `gh issue create` prints the new issue URL; the trailing path segment is the number.
-    number="${created_url##*/}"
+    assert_owner_repo "ensure-parent" "$owner_repo"
+    owner="${owner_repo%%/*}"; repo_name="${owner_repo#*/}"
   fi
-  case "$number" in ''|*[!0-9]*) die "ensure-parent: could not parse new issue number from gh output" 1 ;; esac
 
-  # Resolve the just-created issue's node id (the skill needs the id to attach
-  # children). Routed through the shared kernel — a malformed read FAILS CLOSED.
-  resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$PARENT_RESOLVE_QUERY" \
-            -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
-    || die "ensure-parent: GraphQL node-id resolve failed for created issue #$number" 1
-  normalize_parent_resolve "$resp" "created"
+  local number="$existing_number" record="" status="resolved"
+  if [ -z "$existing_number" ]; then
+    status="created"
+    local discovery_raw="" discovery="" decision="" action="create"
+    if is_offline; then
+      if [ -n "$discovery_response_file" ]; then
+        discovery_raw="$(read_injected "$discovery_response_file")" || exit "$?"
+        discovery="$(normalize_find_by_title "$discovery_raw" "$title")" \
+          || die "ensure-parent: malformed discovery search response" 1
+      fi
+    else
+      # Concurrent runs for one initiative: see the THREAT MODEL under PARENT ORPHAN-SAFETY in §4.
+      [ -n "$title" ] || die "ensure-parent: --title is required to create a parent (or pass --existing-number)" 2
+      discovery="$(run_title_search "ensure-parent" "$owner_repo" "$title")" \
+        || die "ensure-parent: discovery search failed" 1
+    fi
+    if [ -n "$discovery" ]; then
+      decision="$(resolve_discovery "$discovery")" || exit 1
+      action="$(printf '%s' "$decision" | jq -r '.action // "resolved"')" \
+        || die "ensure-parent: could not read the discovery decision" 1
+    fi
+    if [ "$action" != "create" ]; then
+      record="$decision"
+    elif ! is_offline; then
+      # CREATE path (discovery found ZERO existing epics): untrusted title/body flow ONLY through
+      # gh flags (never shell/GraphQL source). Prefer --body-file when given (large/multiline
+      # PRD epic bodies).
+      local -a create_args=(issue create --title "$title")
+      [ -n "$repo" ] && create_args=(issue create -R "$owner_repo" --title "$title")
+      local created_url
+      if [ -n "$body_file" ]; then
+        [ -z "$body" ] || die "ensure-parent: pass --body OR --body-file, not both" 2
+        if [ "$body_file" = "-" ]; then
+          # Materialize stdin to a temp file so gh reads the untrusted body as DATA.
+          local tmp_body; tmp_body="$(mktemp)"
+          cat > "$tmp_body"
+          create_args+=(--body-file "$tmp_body")
+          created_url="$(gh "${create_args[@]}")" || { rm -f "$tmp_body"; die "ensure-parent: gh issue create failed" 1; }
+          rm -f "$tmp_body"
+        else
+          create_args+=(--body-file "$body_file")
+          created_url="$(gh "${create_args[@]}")" || die "ensure-parent: gh issue create failed" 1
+        fi
+      else
+        [ -n "$body" ] || die "ensure-parent: --body or --body-file is required to create a parent" 2
+        create_args+=(--body "$body")
+        created_url="$(gh "${create_args[@]}")" || die "ensure-parent: gh issue create failed" 1
+      fi
+      # `gh issue create` prints the new issue URL; the trailing path segment is the number.
+      number="$(canonical_issue_number "${created_url##*/}")" \
+        || die "ensure-parent: could not parse new issue number from gh output" 1
+    fi
+  fi
+
+  if [ -z "$record" ]; then
+    local resp="" query="$PARENT_RESOLVE_QUERY" read_failure="ensure-parent: GraphQL resolve failed for issue #$number"
+    if [ -n "$slug_given" ]; then
+      query="$PARENT_SEED_QUERY"
+    fi
+    if [ "$status" = "created" ]; then
+      read_failure="ensure-parent: GraphQL node-id resolve failed for created issue #$number"
+    fi
+    if is_offline; then
+      [ -n "$response_file" ] || die "offline ensure-parent requires --response-file" 2
+      resp="$(read_injected "$response_file")" || exit "$?"
+    else
+      resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$query" \
+                -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
+        || die "$read_failure" 1
+    fi
+    if [ -n "$slug_given" ]; then
+      record="$(normalize_parent_seed "$resp" "$slug")" || exit "$?"
+    else
+      record="$(normalize_parent_resolve "$resp" "$status")" || exit "$?"
+    fi
+  fi
+
+  emit_parent_record "$owner_repo" "$record" "$number"
 }
 
 cmd_attach_subissue() {
@@ -1203,7 +1360,7 @@ cmd_list_children() {
     '(.id | type == "string" and length > 0)
      and (.subIssues.pageInfo.hasNextPage | type == "boolean")' \
     '.subIssues.nodes' \
-    '(.number | type == "number")
+    '(.number | type == "number" and . >= 1 and . == floor)
      and (.id | type == "string" and length > 0)
      and (.title | type == "string" and length > 0)' \
     '.subIssues.pageInfo' \
@@ -1231,7 +1388,7 @@ run_title_search() {
     '.data.repository.issues' \
     '(.pageInfo.hasNextPage | type == "boolean")' \
     '.nodes' \
-    '(.number | type == "number")
+    '(.number | type == "number" and . >= 1 and . == floor)
      and (.id | type == "string" and length > 0)
      and (.title | type == "string" and length > 0)
      and (.state | type == "string" and length > 0)' \
@@ -1424,9 +1581,12 @@ cmd_design_gate() {
   assert_git_identifier "design-gate" "remote name" "$remote"
 
   local resp="" owner_repo="" trunk_ref="" trunk="" commit="" object_type="" ui="" reasons="[]"
+  local link_prefix=""
   if is_offline; then
     [ -n "$trunk_response_file" ] || die "offline design-gate requires --trunk-response-file" 2
-    [ -z "$repo" ] || assert_owner_repo "design-gate" "$repo"
+    [ -n "$repo" ] || die "offline design-gate requires --repo" 2
+    assert_owner_repo "design-gate" "$repo"
+    owner_repo="$repo"
     resp="$(read_injected "$trunk_response_file")"
   else
     if [ -n "$repo" ]; then
@@ -1457,6 +1617,8 @@ cmd_design_gate() {
     || die "design-gate: trunk name fails git check-ref-format --branch" 1
   hivemind_readiness_commit_ok "$commit" \
     || die "design-gate: trunk commit id is not a full lowercase object id" 1
+  link_prefix="$(hivemind_readiness_link_prefix "$owner_repo" "$trunk" 2>/dev/null)" \
+    || die "design-gate: Design link prefix build failed for '$owner_repo' at trunk '$trunk'" 1
 
   # INVARIANT: the fetch writes FETCH_HEAD only (empty refmap: no remote-tracking ref moves), and
   # only the checked commit id, never a branch name or local ref, reaches the shared library.
@@ -1487,9 +1649,9 @@ cmd_design_gate() {
   if [ "$ui" = yes ]; then
     reasons="$(design_reasons "$commit" "$slug")" || exit "$?"
   fi
-  jq -c -n --arg commit "$commit" --arg trunk "$trunk" --arg slug "$slug" --arg ui "$ui" \
-    --argjson reasons "$reasons" \
-    '{ commit: $commit, trunk: $trunk, slug: $slug, ui: $ui,
+  jq -c -n --arg commit "$commit" --arg trunk "$trunk" --arg link_prefix "$link_prefix" \
+    --arg slug "$slug" --arg ui "$ui" --argjson reasons "$reasons" \
+    '{ commit: $commit, trunk: $trunk, link_prefix: $link_prefix, slug: $slug, ui: $ui,
        result: (if $ui == "yes" and ($reasons | length) > 0 then "refuse" else "pass" end),
        reasons: $reasons }'
 }
@@ -1507,9 +1669,12 @@ subcommands:
   find-by-title   --title <str> [--repo <owner/repo>] [--response-file <path|->]
   design-gate     --slug <slug> [--repo <owner/repo>] [--remote <name>] [--trunk-response-file <path|->]
 --slug (ensure-parent, valid only with --existing-number) adds "seed": true only when the epic body's
-first line is the seed issue marker naming <slug>. design-gate reads the trunk commit (fetched into
+first line is the seed issue marker naming <slug>. Live, ensure-parent adds the type:epic label to the
+epic it returns (with --slug, only a seed epic), creating the repository label when missing. design-gate reads the trunk commit (fetched into
 FETCH_HEAD only) and, when docs/prds/<slug>.md says UI yes, refuses on a prototype file failing the
 Document existence test or a review record that is missing, malformed, not passed, stale or unstamped.
+Its output's link_prefix (https://github.com/<owner/repo>/blob/<trunk>/) starts every Design link;
+offline design-gate requires --repo.
 Set SUBISSUE_OPS_OFFLINE to drive the pure transforms over injected input (no gh).
 EOF
 }

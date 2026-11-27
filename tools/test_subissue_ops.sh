@@ -136,6 +136,22 @@ run_exit2_case() {
   fi
 }
 
+# run_offline_fail_closed_case <case> -- <ops-arg...>
+# Asserts the OFFLINE script exited NONZERO with nothing on stdout: a record that fails its checks
+# is never printed. Captures status WITHOUT a pipe.
+run_offline_fail_closed_case() {
+  local case_name="$1"; shift
+  [ "$1" = "--" ] && shift
+  local out status
+  out="$(SUBISSUE_OPS_OFFLINE=1 bash "$OPS" "$@" 2>/dev/null)"
+  status=$?
+  if [ "$status" -ne 0 ] && [ -z "$out" ]; then
+    pass "$case_name" "exit=$status, no output (args: $*)"
+  else
+    failed "$case_name" "expected nonzero exit and no output, got $status (args: $*; stdout: $out)"
+  fi
+}
+
 # ── attach-subissue: GraphQL variables payload shape ───────────────────────────────
 # Offline attach-subissue with the EXPLICIT --emit-payload opt-in builds the addSubIssue
 # variables payload. CRITICAL FIELD MAPPING: issueId = the PARENT, subIssueId = the CHILD
@@ -446,8 +462,16 @@ run_exit1_case "ensure-parent:slug-body-less-resolve-exit1" -- \
 
 # ── Scratch git environment and the recording gh stub ──────────────────────────────
 # Git runs with a scratch HOME and no system config, so no user hook, template or signing setting
-# reaches the scratch repositories. The gh stub records the first two argv words of every call and
-# answers `api graphql` with the file named by SUBISSUE_TEST_GH_RESPONSE; any other call exits 1.
+# reaches the scratch repositories. The gh stub records the first two argv words of every call in
+# GH_LOG, and every argument of each call other than `api graphql`, tab-joined, in GH_FULL_LOG.
+# It answers `api graphql` by GraphQL variable: a `label=` variable reads
+# SUBISSUE_TEST_GH_LABEL_RESPONSE (SUBISSUE_TEST_GH_LABEL_REREAD_RESPONSE instead, when set, once a
+# `label create` call is logged), a `number=` variable reads SUBISSUE_TEST_GH_RESPONSE, and any
+# other read SUBISSUE_TEST_GH_LIST_RESPONSE when set, else SUBISSUE_TEST_GH_RESPONSE. `label create`
+# and `issue edit` exit with SUBISSUE_TEST_GH_LABEL_CREATE_STATUS and
+# SUBISSUE_TEST_GH_ISSUE_EDIT_STATUS (default 0); `issue create` prints SUBISSUE_TEST_GH_CREATED_URL
+# (default the URL of issue 7). Any
+# other call exits 1.
 export HOME="$TMPDIR_TEST/home"
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=subissue-test GIT_AUTHOR_EMAIL=subissue-test@example.invalid
@@ -456,11 +480,32 @@ mkdir -p "$HOME" || { echo "FAIL: cannot create scratch HOME" >&2; exit 2; }
 
 GH_STUB_DIR="$TMPDIR_TEST/gh-bin"
 GH_LOG="$TMPDIR_TEST/gh-calls.log"
+GH_FULL_LOG="$TMPDIR_TEST/gh-calls-full.log"
 mkdir -p "$GH_STUB_DIR" || { echo "FAIL: cannot create the gh stub dir" >&2; exit 2; }
 # shellcheck disable=SC2016 # the stub's own $-expansions are written literally
 printf '%s\n' '#!/bin/sh' \
   'printf "%s %s\n" "$1" "$2" >>"$SUBISSUE_TEST_GH_LOG"' \
-  'if [ "$1 $2" = "api graphql" ]; then cat "$SUBISSUE_TEST_GH_RESPONSE"; exit 0; fi' \
+  'if [ "$1 $2" = "api graphql" ]; then' \
+  '  for gh_arg in "$@"; do' \
+  '    case "$gh_arg" in' \
+  '      label=*)' \
+  '        if [ -n "${SUBISSUE_TEST_GH_LABEL_REREAD_RESPONSE:-}" ] \' \
+  '           && grep -q -x -F "label create" "$SUBISSUE_TEST_GH_LOG"; then' \
+  '          exec cat "$SUBISSUE_TEST_GH_LABEL_REREAD_RESPONSE"' \
+  '        fi' \
+  '        exec cat "$SUBISSUE_TEST_GH_LABEL_RESPONSE" ;;' \
+  '      number=*) exec cat "$SUBISSUE_TEST_GH_RESPONSE" ;;' \
+  '    esac' \
+  '  done' \
+  '  exec cat "${SUBISSUE_TEST_GH_LIST_RESPONSE:-$SUBISSUE_TEST_GH_RESPONSE}"' \
+  'fi' \
+  'IFS="$(printf "\t")"' \
+  'printf "%s\n" "$*" >>"$SUBISSUE_TEST_GH_FULL_LOG"' \
+  'case "$1 $2" in' \
+  '  "label create") exit "${SUBISSUE_TEST_GH_LABEL_CREATE_STATUS:-0}" ;;' \
+  '  "issue edit") exit "${SUBISSUE_TEST_GH_ISSUE_EDIT_STATUS:-0}" ;;' \
+  '  "issue create") printf "%s\n" "${SUBISSUE_TEST_GH_CREATED_URL:-https://github.com/demo-owner/demo-repo/issues/7}"; exit 0 ;;' \
+  'esac' \
   'exit 1' >"$GH_STUB_DIR/gh" \
   && chmod +x "$GH_STUB_DIR/gh" \
   || { echo "FAIL: cannot write the recording gh stub" >&2; exit 2; }
@@ -468,40 +513,124 @@ printf '%s\n' '#!/bin/sh' \
 # setup_fail <message>: a scratch setup step failed; the suite cannot run.
 setup_fail() { echo "FAIL: setup: $1" >&2; exit 2; }
 
+# reset_gh_stub_state: the stub answers every label read with a present `type:epic` label (no
+# separate reread answer), routes no read to a list response, lets `label create` and
+# `issue edit` succeed, and has `issue create` print the URL of issue 7.
+reset_gh_stub_state() {
+  GH_LABEL_RESPONSE="$PI_DIR/ensure-parent-label-present-response.json"
+  GH_LABEL_REREAD_RESPONSE=""
+  GH_LIST_RESPONSE=""
+  GH_LABEL_CREATE_STATUS=0
+  GH_ISSUE_EDIT_STATUS=0
+  GH_CREATED_URL=""
+}
+reset_gh_stub_state
+
 # run_live_ops <dir> <gh-response> -- <ops-arg...>
 # Runs subissue-ops.sh LIVE (SUBISSUE_OPS_OFFLINE unset) in <dir> with the recording gh stub first
-# on PATH, after emptying the gh call log. Sets LIVE_OUT (stdout) and LIVE_STATUS.
+# on PATH, after emptying both gh call logs. The stub also reads the GH_LABEL_RESPONSE,
+# GH_LABEL_REREAD_RESPONSE, GH_LIST_RESPONSE, GH_LABEL_CREATE_STATUS, GH_ISSUE_EDIT_STATUS and
+# GH_CREATED_URL state. Sets LIVE_OUT (stdout)
+# and LIVE_STATUS.
 run_live_ops() {
   local dir="$1" gh_response="$2"; shift 2
   [ "$1" = "--" ] && shift
   : >"$GH_LOG" || setup_fail "cannot empty the gh call log"
+  : >"$GH_FULL_LOG" || setup_fail "cannot empty the full gh call log"
   LIVE_STATUS=0
   LIVE_OUT="$(cd "$dir" && env -u SUBISSUE_OPS_OFFLINE PATH="$GH_STUB_DIR:$PATH" \
-    SUBISSUE_TEST_GH_LOG="$GH_LOG" SUBISSUE_TEST_GH_RESPONSE="$gh_response" \
+    SUBISSUE_TEST_GH_LOG="$GH_LOG" SUBISSUE_TEST_GH_FULL_LOG="$GH_FULL_LOG" \
+    SUBISSUE_TEST_GH_RESPONSE="$gh_response" \
+    SUBISSUE_TEST_GH_LABEL_RESPONSE="$GH_LABEL_RESPONSE" \
+    SUBISSUE_TEST_GH_LABEL_REREAD_RESPONSE="$GH_LABEL_REREAD_RESPONSE" \
+    SUBISSUE_TEST_GH_LIST_RESPONSE="$GH_LIST_RESPONSE" \
+    SUBISSUE_TEST_GH_LABEL_CREATE_STATUS="$GH_LABEL_CREATE_STATUS" \
+    SUBISSUE_TEST_GH_ISSUE_EDIT_STATUS="$GH_ISSUE_EDIT_STATUS" \
+    SUBISSUE_TEST_GH_CREATED_URL="$GH_CREATED_URL" \
     bash "$OPS" "$@" 2>/dev/null)" || LIVE_STATUS=$?
 }
 
 # count_gh_calls <first-two-words>: prints how many logged gh calls began with those words.
 count_gh_calls() { grep -c -x -F -- "$1" "$GH_LOG"; }
 
+# join_args <arg...>: prints the arguments tab-joined, the form of one GH_FULL_LOG line.
+join_args() { local IFS=$'\t'; printf '%s' "$*"; }
+
+# flag_value <tab-joined-call> <flag>: prints the argument that follows <flag> in a logged call.
+flag_value() {
+  printf '%s\n' "$1" | awk -F'\t' -v flag="$2" '{ for (i = 1; i < NF; i++) if ($i == flag) { print $(i + 1); exit } }'
+}
+
+# shown_full_log: the full gh call log on one line, for a failure message.
+shown_full_log() { tr '\t\n' ' ;' <"$GH_FULL_LOG"; }
+
+# assert_live_labeled <case> <golden> <graphql-calls> [<expected-full-log-line>...]
+# Asserts the last run_live_ops exited 0, printed <golden>, made exactly <graphql-calls> `api
+# graphql` calls, and logged exactly the given non-graphql calls in order (none when no line is
+# given).
+assert_live_labeled() {
+  local case_name="$1" golden="$2" graphql_expected="$3"; shift 3
+  local expected_full="" actual_full actual graphql_calls
+  [ "$#" -gt 0 ] && expected_full="$(printf '%s\n' "$@")"
+  actual_full="$(cat "$GH_FULL_LOG")"
+  actual="$(printf '%s' "$LIVE_OUT" | canon 2>/dev/null)"
+  graphql_calls="$(count_gh_calls "api graphql")"
+  if [ "$LIVE_STATUS" -eq 0 ] && [ "$actual" = "$(canon <"$golden")" ] \
+    && [ "$graphql_calls" = "$graphql_expected" ] && [ "$actual_full" = "$expected_full" ]; then
+    pass "$case_name" "$graphql_calls api graphql call(s), $# other call(s) as expected"
+  else
+    failed "$case_name" "status=$LIVE_STATUS graphql=$graphql_calls
+    gh calls: $(tr '\n' ';' <"$GH_LOG")
+    full calls: $(shown_full_log)
+    expected: $(canon <"$golden")
+    actual:   $actual"
+  fi
+}
+
+# assert_live_label_failure <case> <issue-edit-calls>
+# Asserts the last run_live_ops exited nonzero with nothing on stdout, and made exactly
+# <issue-edit-calls> `issue edit` calls.
+assert_live_label_failure() {
+  local case_name="$1" edit_expected="$2" edit_calls
+  edit_calls="$(count_gh_calls "issue edit")"
+  if [ "$LIVE_STATUS" -ne 0 ] && [ -z "$LIVE_OUT" ] && [ "$edit_calls" = "$edit_expected" ]; then
+    pass "$case_name" "exit=$LIVE_STATUS, no output, $edit_calls issue edit call(s)"
+  else
+    failed "$case_name" "status=$LIVE_STATUS edits=$edit_calls output: $LIVE_OUT
+    gh calls: $(tr '\n' ';' <"$GH_LOG")"
+  fi
+}
+
+DEMO_REPO="demo-owner/demo-repo"
+EDIT_EPIC7_CALL="$(join_args issue edit 7 -R "$DEMO_REPO" --add-label type:epic)"
+LABEL_CREATE_CALL="$(join_args label create type:epic --color 3e4b9e --description "triage type rating" -R "$DEMO_REPO")"
+
 # ── ensure-parent --slug: live seed resolve ────────────────────────────────────────
-# Live with --repo, the seed resolve makes exactly ONE `api graphql` call and never creates or
-# edits an issue, so the seed's marker line stays first. A second run gives the same output: no
-# duplicate epic.
+# Live with --repo, the seed resolve makes two `api graphql` calls (the seed read, then the label
+# read) and one `issue edit` that only adds `type:epic` to #7. It never creates an issue or a
+# label and never passes --body or --title, so the seed's marker line stays first. A second run
+# gives the same output: no duplicate epic.
 SEED_GOLDEN="$(canon <"$EXPECTED_DIR/ensure-parent-seed.json")"
 SEED_FIRST_OUT=""
 for seed_run in 1 2; do
   run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
-    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo demo-owner/demo-repo
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
   seed_actual="$(printf '%s' "$LIVE_OUT" | canon 2>/dev/null)"
   graphql_calls="$(count_gh_calls "api graphql")"
+  edit_calls="$(count_gh_calls "issue edit")"
+  issue_create_calls="$(count_gh_calls "issue create")"
+  label_create_calls="$(count_gh_calls "label create")"
   total_calls="$(wc -l <"$GH_LOG" | tr -d ' ')"
+  full_calls="$(cat "$GH_FULL_LOG")"
   if [ "$LIVE_STATUS" -eq 0 ] && [ "$seed_actual" = "$SEED_GOLDEN" ] \
-    && [ "$graphql_calls" = 1 ] && [ "$total_calls" = 1 ]; then
-    pass "ensure-parent:live-seed-resolve-run$seed_run" "one api graphql call, no issue create or edit"
+    && [ "$graphql_calls" = 2 ] && [ "$edit_calls" = 1 ] && [ "$issue_create_calls" = 0 ] \
+    && [ "$label_create_calls" = 0 ] && [ "$total_calls" = 3 ] \
+    && [ "$full_calls" = "$EDIT_EPIC7_CALL" ]; then
+    pass "ensure-parent:live-seed-resolve-run$seed_run" "two api graphql calls, one label-only issue edit, no issue create"
   else
-    failed "ensure-parent:live-seed-resolve-run$seed_run" "status=$LIVE_STATUS graphql=$graphql_calls total=$total_calls
+    failed "ensure-parent:live-seed-resolve-run$seed_run" "status=$LIVE_STATUS graphql=$graphql_calls edits=$edit_calls total=$total_calls
     gh calls: $(tr '\n' ';' <"$GH_LOG")
+    full calls: $(shown_full_log)
     expected: $SEED_GOLDEN
     actual:   $seed_actual"
   fi
@@ -511,6 +640,267 @@ if [ -n "$LIVE_OUT" ] && [ "$LIVE_OUT" = "$SEED_FIRST_OUT" ]; then
   pass "ensure-parent:live-seed-rerun-identical" "second run output equals the first"
 else
   failed "ensure-parent:live-seed-rerun-identical" "first: $SEED_FIRST_OUT second: $LIVE_OUT"
+fi
+
+# ── ensure-parent: live epic label ─────────────────────────────────────────────────
+# A repository with no `type:epic` label gets it created once, with the triage palette's color and
+# description and no --force, before the edit that adds it to the epic.
+reset_gh_stub_state
+GH_LABEL_RESPONSE="$PI_DIR/ensure-parent-label-missing-response.json"
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+assert_live_labeled "ensure-parent:live-label-missing-created" \
+  "$EXPECTED_DIR/ensure-parent-seed.json" 2 "$LABEL_CREATE_CALL" "$EDIT_EPIC7_CALL"
+SUBISSUE_LABEL_CREATE="$(grep -m1 -F -- "$(join_args label create type:epic)"$'\t' "$GH_FULL_LOG")"
+if [ -n "$SUBISSUE_LABEL_CREATE" ] && ! printf '%s\n' "$SUBISSUE_LABEL_CREATE" | grep -q -F -- '--force'; then
+  pass "ensure-parent:live-label-create-no-force" "label create passes no --force"
+else
+  failed "ensure-parent:live-label-create-no-force" "label create call: $SUBISSUE_LABEL_CREATE"
+fi
+
+# An epic that is not the initiative's seed is left as it is: one api graphql call (the seed read),
+# no label read, no label create and no issue edit.
+reset_gh_stub_state
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-no-marker-response.json" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+assert_live_labeled "ensure-parent:live-not-seed-unlabeled" \
+  "$EXPECTED_DIR/ensure-parent-not-seed.json" 1
+
+# Resolved without --slug: the resolve read, the label read, then the edit of #7.
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+  ensure-parent --existing-number 7 --repo "$DEMO_REPO"
+assert_live_labeled "ensure-parent:live-resolved-labeled" \
+  "$EXPECTED_DIR/ensure-parent-resolved.json" 2 "$EDIT_EPIC7_CALL"
+
+# Resolved by title: the discovery read finds open #90, then the label read and the edit of #90.
+GH_LIST_RESPONSE="$PI_DIR/ensure-parent-discovery-one-open-response.json"
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+  ensure-parent --title "tracer epic" --body anchor --repo "$DEMO_REPO"
+assert_live_labeled "ensure-parent:live-resolved-by-title-labeled" \
+  "$EXPECTED_DIR/ensure-parent-resolved-by-title.json" 2 \
+  "$(join_args issue edit 90 -R "$DEMO_REPO" --add-label type:epic)"
+
+# Created: discovery finds nothing, the issue is created, its node id read, then #7 is labeled.
+GH_LIST_RESPONSE="$PI_DIR/ensure-parent-discovery-empty-response.json"
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+  ensure-parent --title "tracer epic" --body anchor --repo "$DEMO_REPO"
+assert_live_labeled "ensure-parent:live-created-labeled" \
+  "$EXPECTED_DIR/ensure-parent-created.json" 3 \
+  "$(join_args issue create -R "$DEMO_REPO" --title "tracer epic" --body anchor)" "$EDIT_EPIC7_CALL"
+
+# A label read or write that fails leaves stdout empty and exits nonzero; a failure before the
+# edit never runs it. A label found as `Type:Epic` is not `type:epic`, so it is never applied.
+for label_failure in \
+  "case-variant:ensure-parent-label-case-variant-response.json" \
+  "malformed-read:ensure-parent-label-malformed-response.json" \
+  "graphql-error:ensure-parent-label-graphql-error-response.json" ; do
+  reset_gh_stub_state
+  GH_LABEL_RESPONSE="$PI_DIR/${label_failure#*:}"
+  run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-label-${label_failure%%:*}-fails-closed" 0
+done
+reset_gh_stub_state
+GH_LABEL_RESPONSE="$PI_DIR/ensure-parent-label-missing-response.json"
+GH_LABEL_CREATE_STATUS=1
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+assert_live_label_failure "ensure-parent:live-label-create-failure" 0
+if [ "$(count_gh_calls "label create")" = 1 ]; then
+  pass "ensure-parent:live-label-create-failure-attempted" "one label create call"
+else
+  failed "ensure-parent:live-label-create-failure-attempted" "gh calls: $(tr '\n' ';' <"$GH_LOG")"
+fi
+# A label create that fails because a concurrent run created the label first: the label is read
+# again, and only an exact `type:epic` reread lets the run label the epic and print its record.
+reset_gh_stub_state
+GH_LABEL_RESPONSE="$PI_DIR/ensure-parent-label-missing-response.json"
+GH_LABEL_REREAD_RESPONSE="$PI_DIR/ensure-parent-label-present-response.json"
+GH_LABEL_CREATE_STATUS=1
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+assert_live_labeled "ensure-parent:live-label-create-conflict-reread-labeled" \
+  "$EXPECTED_DIR/ensure-parent-seed.json" 3 "$LABEL_CREATE_CALL" "$EDIT_EPIC7_CALL"
+for label_reread in \
+  "missing:ensure-parent-label-missing-response.json" \
+  "case-variant:ensure-parent-label-case-variant-response.json" \
+  "malformed:ensure-parent-label-malformed-response.json" ; do
+  reset_gh_stub_state
+  GH_LABEL_RESPONSE="$PI_DIR/ensure-parent-label-missing-response.json"
+  GH_LABEL_REREAD_RESPONSE="$PI_DIR/${label_reread#*:}"
+  GH_LABEL_CREATE_STATUS=1
+  run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-label-create-conflict-reread-${label_reread%%:*}-fails-closed" 0
+done
+reset_gh_stub_state
+GH_ISSUE_EDIT_STATUS=1
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+assert_live_label_failure "ensure-parent:live-issue-edit-failure" 1
+
+# ── ensure-parent: offline and live issue-number checks ────────────────────────────
+# A read addressed by number must return that issue, and every issue number must be a positive
+# integer: a response naming another issue, or a number that is zero, negative or fractional,
+# fails closed with no output and no issue edit, so a wrong issue is never labeled or returned.
+# number_response <name> <source-response> <number>: writes <source-response> with its issue
+# number set to <number> and prints its path.
+number_response() {
+  local out="$TMPDIR_TEST/number-response.$1.json"
+  jq -c --argjson n "$3" '.data.repository.issue.number = $n' "$2" >"$out" \
+    || setup_fail "number response $1"
+  printf '%s' "$out"
+}
+for bad_number in mismatch:8 zero:0 negative:-7 fractional:7.5; do
+  reset_gh_stub_state
+  run_live_ops "$TMPDIR_TEST" \
+    "$(number_response "resolve-${bad_number%%:*}" "$PI_DIR/ensure-parent-resolve-response.json" "${bad_number#*:}")" -- \
+    ensure-parent --existing-number 7 --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-resolved-number-${bad_number%%:*}-fails-closed" 0
+  run_live_ops "$TMPDIR_TEST" \
+    "$(number_response "seed-${bad_number%%:*}" "$PI_DIR/ensure-parent-seed-response.json" "${bad_number#*:}")" -- \
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-seed-number-${bad_number%%:*}-fails-closed" 0
+  run_live_ops "$TMPDIR_TEST" \
+    "$(number_response "not-seed-${bad_number%%:*}" "$PI_DIR/ensure-parent-no-marker-response.json" "${bad_number#*:}")" -- \
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-not-seed-number-${bad_number%%:*}-fails-closed" 0
+  GH_LIST_RESPONSE="$PI_DIR/ensure-parent-discovery-empty-response.json"
+  run_live_ops "$TMPDIR_TEST" \
+    "$(number_response "created-${bad_number%%:*}" "$PI_DIR/ensure-parent-resolve-response.json" "${bad_number#*:}")" -- \
+    ensure-parent --title "tracer epic" --body anchor --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-created-number-${bad_number%%:*}-fails-closed" 0
+done
+# Offline runs the same checks: a read addressed by --existing-number that names another issue, or
+# a number that is not a positive integer, exits nonzero with nothing on stdout, with or without
+# --slug. The offline create simulation has no requested number, so only the positive-integer
+# check applies to it.
+for bad_number in mismatch:8 zero:0 negative:-7 fractional:7.5; do
+  bad_response="$(number_response "offline-resolve-${bad_number%%:*}" "$PI_DIR/ensure-parent-resolve-response.json" "${bad_number#*:}")" || exit 2
+  run_offline_fail_closed_case "ensure-parent:offline-resolved-number-${bad_number%%:*}-fails-closed" -- \
+    ensure-parent --existing-number 7 --response-file "$bad_response"
+  bad_response="$(number_response "offline-seed-${bad_number%%:*}" "$PI_DIR/ensure-parent-seed-response.json" "${bad_number#*:}")" || exit 2
+  run_offline_fail_closed_case "ensure-parent:offline-seed-number-${bad_number%%:*}-fails-closed" -- \
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --response-file "$bad_response"
+  bad_response="$(number_response "offline-not-seed-${bad_number%%:*}" "$PI_DIR/ensure-parent-no-marker-response.json" "${bad_number#*:}")" || exit 2
+  run_offline_fail_closed_case "ensure-parent:offline-not-seed-number-${bad_number%%:*}-fails-closed" -- \
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --response-file "$bad_response"
+done
+for bad_number in zero:0 negative:-7 fractional:7.5; do
+  bad_response="$(number_response "offline-created-${bad_number%%:*}" "$PI_DIR/ensure-parent-resolve-response.json" "${bad_number#*:}")" || exit 2
+  run_offline_fail_closed_case "ensure-parent:offline-created-number-${bad_number%%:*}-fails-closed" -- \
+    ensure-parent --title epic --body anchor --response-file "$bad_response"
+done
+# discovery_number_response <name> <number>: writes the one-open discovery response with its lone
+# match's number set to <number> and prints its path.
+discovery_number_response() {
+  local out="$TMPDIR_TEST/discovery-number-response.$1.json"
+  jq -c --argjson n "$2" '.data.repository.issues.nodes[0].number = $n' \
+    "$PI_DIR/ensure-parent-discovery-one-open-response.json" >"$out" \
+    || setup_fail "discovery number response $1"
+  printf '%s' "$out"
+}
+# A title-resolved record whose number is zero, negative or fractional fails closed offline and
+# live: nothing on stdout, no issue edit.
+for bad_number in zero:0 negative:-7 fractional:7.5; do
+  bad_response="$(discovery_number_response "${bad_number%%:*}" "${bad_number#*:}")" || exit 2
+  run_offline_fail_closed_case "ensure-parent:offline-resolved-by-title-number-${bad_number%%:*}-fails-closed" -- \
+    ensure-parent --title "tracer epic" --body anchor --discovery-response-file "$bad_response"
+  reset_gh_stub_state
+  GH_LIST_RESPONSE="$bad_response"
+  run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+    ensure-parent --title "tracer epic" --body anchor --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-resolved-by-title-number-${bad_number%%:*}-fails-closed" 0
+done
+reset_gh_stub_state
+# Offline, a zero-padded --existing-number names the same issue: #007 resolves to #7.
+run_case "ensure-parent:offline-resolved-zero-padded" "$EXPECTED_DIR/ensure-parent-resolved.json" -- \
+  ensure-parent --existing-number 007 \
+  --response-file "$PI_DIR/ensure-parent-resolve-response.json"
+# Offline, an all-zero --existing-number exits 2, with or without --slug.
+for zero_number in 0 000; do
+  run_exit2_case "ensure-parent:offline-existing-number-$zero_number-exit2" -- \
+    ensure-parent --existing-number "$zero_number" \
+    --response-file "$PI_DIR/ensure-parent-resolve-response.json"
+  run_exit2_case "ensure-parent:offline-seed-existing-number-$zero_number-exit2" -- \
+    ensure-parent --existing-number "$zero_number" --slug "$SEED_SLUG" \
+    --response-file "$PI_DIR/ensure-parent-seed-response.json"
+done
+# Single read and single exit: cmd_ensure_parent writes stdout ONLY through its last command,
+# emit_parent_record, so every record on every path passes the same number checks. Its body holds
+# exactly one emit_parent_record line, that line is the last command before the closing brace, and
+# no line returns or exits 0 early.
+EP_BODY="$(awk '/^cmd_ensure_parent\(\) \{$/ { in_body = 1; next } in_body && /^}$/ { exit } in_body' "$OPS")"
+EP_CODE="$(printf '%s\n' "$EP_BODY" | grep -v -E '^[[:space:]]*(#|$)')"
+EP_EMIT_LINES="$(printf '%s\n' "$EP_BODY" | grep -c -F 'emit_parent_record')"
+EP_LAST_LINE="$(printf '%s\n' "$EP_CODE" | tail -n 1)"
+EP_RETURN_LINES="$(printf '%s\n' "$EP_CODE" | grep -c -E '(^|[^[:alnum:]_])return([^[:alnum:]_]|$)')"
+EP_EXIT0_LINES="$(printf '%s\n' "$EP_CODE" | grep -c -E '(^|[^[:alnum:]_])exit 0([^[:alnum:]_]|$)')"
+if [ -n "$EP_BODY" ] && [ "$EP_EMIT_LINES" = 1 ] \
+  && printf '%s\n' "$EP_LAST_LINE" | grep -q -E '^[[:space:]]*emit_parent_record[[:space:]]' \
+  && [ "$EP_RETURN_LINES" = 0 ] && [ "$EP_EXIT0_LINES" = 0 ]; then
+  pass "ensure-parent:single-exit-structure" "one emit_parent_record line, last command, no return or exit 0"
+else
+  failed "ensure-parent:single-exit-structure" "the single-exit invariant (subissue-ops.sh §4, ENSURE-PARENT SINGLE READ AND SINGLE EXIT) is broken: cmd_ensure_parent must print only through one emit_parent_record line as its last command, with no return and no exit 0
+    emit_parent_record lines: $EP_EMIT_LINES, return lines: $EP_RETURN_LINES, exit 0 lines: $EP_EXIT0_LINES
+    last command: $EP_LAST_LINE"
+fi
+# A zero-padded --existing-number names the same issue: #007 resolves and labels #7.
+reset_gh_stub_state
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+  ensure-parent --existing-number 007 --repo "$DEMO_REPO"
+assert_live_labeled "ensure-parent:live-resolved-zero-padded-labeled" \
+  "$EXPECTED_DIR/ensure-parent-resolved.json" 2 "$EDIT_EPIC7_CALL"
+reset_gh_stub_state
+# An all-zero issue number is never a positive integer. --existing-number 0 or 000 exits 2 before
+# any gh call, with or without --slug. A created issue URL ending in /0 or /000 fails closed with
+# no issue edit, even when the node-id read answers a valid issue.
+for zero_number in 0 000; do
+  run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+    ensure-parent --existing-number "$zero_number" --repo "$DEMO_REPO"
+  if [ "$LIVE_STATUS" -eq 2 ] && [ -z "$LIVE_OUT" ] && [ ! -s "$GH_LOG" ]; then
+    pass "ensure-parent:live-existing-number-$zero_number-exit2" "exit=2, no output, no gh call"
+  else
+    failed "ensure-parent:live-existing-number-$zero_number-exit2" "status=$LIVE_STATUS output: $LIVE_OUT
+    gh calls: $(tr '\n' ';' <"$GH_LOG")"
+  fi
+  run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+    ensure-parent --existing-number "$zero_number" --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+  if [ "$LIVE_STATUS" -eq 2 ] && [ -z "$LIVE_OUT" ] && [ ! -s "$GH_LOG" ]; then
+    pass "ensure-parent:live-seed-existing-number-$zero_number-exit2" "exit=2, no output, no gh call"
+  else
+    failed "ensure-parent:live-seed-existing-number-$zero_number-exit2" "status=$LIVE_STATUS output: $LIVE_OUT
+    gh calls: $(tr '\n' ';' <"$GH_LOG")"
+  fi
+  GH_LIST_RESPONSE="$PI_DIR/ensure-parent-discovery-empty-response.json"
+  GH_CREATED_URL="https://github.com/demo-owner/demo-repo/issues/$zero_number"
+  run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+    ensure-parent --title "tracer epic" --body anchor --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-created-url-$zero_number-fails-closed" 0
+  reset_gh_stub_state
+done
+
+# The label subissue-ops creates matches the triage palette: triage-ops ensure-labels, run live
+# under the same stub, creates `type:epic` with the same --color and --description.
+TRIAGE_OPS="$REPO_ROOT/plugin/skills/triage-backlog/scripts/triage-ops.sh"
+: >"$GH_LOG" || setup_fail "cannot empty the gh call log"
+: >"$GH_FULL_LOG" || setup_fail "cannot empty the full gh call log"
+TRIAGE_STATUS=0
+(cd "$TMPDIR_TEST" && env -u TRIAGE_OPS_OFFLINE PATH="$GH_STUB_DIR:$PATH" \
+  SUBISSUE_TEST_GH_LOG="$GH_LOG" SUBISSUE_TEST_GH_FULL_LOG="$GH_FULL_LOG" \
+  bash "$TRIAGE_OPS" ensure-labels >/dev/null 2>&1) || TRIAGE_STATUS=$?
+TRIAGE_LABEL_CREATE="$(grep -m1 -F -- "$(join_args label create type:epic)"$'\t' "$GH_FULL_LOG")"
+SUBISSUE_COLOR="$(flag_value "$SUBISSUE_LABEL_CREATE" --color)"
+SUBISSUE_DESCRIPTION="$(flag_value "$SUBISSUE_LABEL_CREATE" --description)"
+TRIAGE_COLOR="$(flag_value "$TRIAGE_LABEL_CREATE" --color)"
+TRIAGE_DESCRIPTION="$(flag_value "$TRIAGE_LABEL_CREATE" --description)"
+if [ "$TRIAGE_STATUS" -eq 0 ] && [ -n "$SUBISSUE_COLOR" ] && [ -n "$SUBISSUE_DESCRIPTION" ] \
+  && [ "$SUBISSUE_COLOR" = "$TRIAGE_COLOR" ] && [ "$SUBISSUE_DESCRIPTION" = "$TRIAGE_DESCRIPTION" ]; then
+  pass "ensure-parent:label-matches-triage-palette" "color $TRIAGE_COLOR, description '$TRIAGE_DESCRIPTION'"
+else
+  failed "ensure-parent:label-matches-triage-palette" "triage status=$TRIAGE_STATUS
+    subissue-ops: color '$SUBISSUE_COLOR' description '$SUBISSUE_DESCRIPTION'
+    triage-ops:   color '$TRIAGE_COLOR' description '$TRIAGE_DESCRIPTION'"
 fi
 
 # A malformed slug, and --slug without --existing-number, exit 2 live BEFORE any gh call.
@@ -538,6 +928,8 @@ DG_INDEX="docs/initiatives/$DG_SLUG/prototype/index.html"
 DG_NOTES="docs/initiatives/$DG_SLUG/prototype/notes.md"
 DG_RECORD="docs/initiatives/$DG_SLUG/review-record.md"
 DG_REPO_SEQ=0
+DG_OWNER_REPO="demo-owner/demo-repo"
+DG_LINK_PREFIX="https://github.com/$DG_OWNER_REPO/blob/main/"
 
 # create_repo <var> [<branch>]: assigns <var> a fresh scratch repository under TMPDIR_TEST whose
 # HEAD names refs/heads/<branch> (default main).
@@ -617,16 +1009,17 @@ write_trunk_response() {
     || setup_fail "cannot write $1"
 }
 
-# run_design_gate <repo> <trunk-file>: runs design-gate OFFLINE in <repo>. Sets DG_OUT, DG_STATUS.
+# run_design_gate <repo> <trunk-file> [<owner/repo>]: runs design-gate OFFLINE in <repo> for
+# <owner/repo> (default DG_OWNER_REPO). Sets DG_OUT, DG_STATUS.
 run_design_gate() {
   DG_STATUS=0
   DG_OUT="$(cd "$1" && SUBISSUE_OPS_OFFLINE=1 bash "$OPS" design-gate --slug "$DG_SLUG" \
-    --trunk-response-file "$2" 2>/dev/null)" || DG_STATUS=$?
+    --repo "${3:-$DG_OWNER_REPO}" --trunk-response-file "$2" 2>/dev/null)" || DG_STATUS=$?
 }
 
 # assert_design_case <case> <repo> <ui> <result> <reasons-json>
 # Writes a trunk response naming main at the repository's HEAD commit, runs design-gate offline
-# and asserts exit 0 and exactly {commit, trunk:"main", slug, ui, result, reasons}.
+# and asserts exit 0 and exactly {commit, trunk:"main", link_prefix, slug, ui, result, reasons}.
 assert_design_case() {
   local case_name="$1" repo="$2" ui="$3" result="$4" reasons="$5" commit trunk_file
   commit="$(git -C "$repo" rev-parse HEAD)" || setup_fail "rev-parse HEAD in $repo"
@@ -634,9 +1027,11 @@ assert_design_case() {
   write_trunk_response "$trunk_file" main "$commit"
   run_design_gate "$repo" "$trunk_file"
   if [ "$DG_STATUS" -eq 0 ] && printf '%s' "$DG_OUT" | jq -e --arg commit "$commit" \
-      --arg slug "$DG_SLUG" --arg ui "$ui" --arg result "$result" --argjson reasons "$reasons" '
-      (keys | sort) == ["commit","reasons","result","slug","trunk","ui"]
-      and .commit == $commit and .trunk == "main" and .slug == $slug
+      --arg slug "$DG_SLUG" --arg ui "$ui" --arg result "$result" --argjson reasons "$reasons" \
+      --arg link_prefix "$DG_LINK_PREFIX" '
+      (keys | sort) == ["commit","link_prefix","reasons","result","slug","trunk","ui"]
+      and .commit == $commit and .trunk == "main" and .link_prefix == $link_prefix
+      and .slug == $slug
       and .ui == $ui and .result == $result and .reasons == $reasons' >/dev/null 2>&1; then
     pass "$case_name" "ui=$ui result=$result reasons=$reasons"
   else
@@ -727,8 +1122,31 @@ for dg_oid_case in "absent-commit:0123456789abcdef0123456789abcdef01234567" "bra
   fi
 done
 
-# --trunk-response-file without SUBISSUE_OPS_OFFLINE is rejected (exit 2) before any gh call.
+# Offline design-gate without --repo exits 2 with no output.
+DG_STATUS=0
 DG_HEAD="$(git -C "$DG_REPO" rev-parse HEAD)" || setup_fail "rev-parse HEAD in $DG_REPO"
+write_trunk_response "$DG_REPO.no-repo.json" main "$DG_HEAD"
+DG_OUT="$(cd "$DG_REPO" && SUBISSUE_OPS_OFFLINE=1 bash "$OPS" design-gate --slug "$DG_SLUG" \
+  --trunk-response-file "$DG_REPO.no-repo.json" 2>/dev/null)" || DG_STATUS=$?
+if [ "$DG_STATUS" -eq 2 ] && [ -z "$DG_OUT" ]; then
+  pass "design-gate:offline-no-repo-exit2" "exit=2, no output"
+else
+  failed "design-gate:offline-no-repo-exit2" "status=$DG_STATUS output: $DG_OUT"
+fi
+
+# link_prefix is the shared library's own prefix for the same owner/repo and trunk name.
+DG_LIB="$REPO_ROOT/plugin/skills/_shared/readiness-check.sh"
+DG_LIB_PREFIX="$(bash -c '. "$1" && hivemind_readiness_link_prefix "$2" main' link-prefix \
+  "$DG_LIB" "$DG_OWNER_REPO")" || setup_fail "hivemind_readiness_link_prefix"
+run_design_gate "$DG_REPO" "$DG_REPO.no-repo.json"
+DG_GATE_PREFIX="$(printf '%s' "$DG_OUT" | jq -r '.link_prefix' 2>/dev/null)"
+if [ "$DG_STATUS" -eq 0 ] && [ -n "$DG_LIB_PREFIX" ] && [ "$DG_GATE_PREFIX" = "$DG_LIB_PREFIX" ]; then
+  pass "design-gate:link-prefix-from-library" "$DG_GATE_PREFIX"
+else
+  failed "design-gate:link-prefix-from-library" "status=$DG_STATUS gate: $DG_GATE_PREFIX library: $DG_LIB_PREFIX"
+fi
+
+# --trunk-response-file without SUBISSUE_OPS_OFFLINE is rejected (exit 2) before any gh call.
 write_trunk_response "$DG_REPO.live-reject.json" main "$DG_HEAD"
 run_live_ops "$DG_REPO" "$DG_REPO.live-reject.json" -- \
   design-gate --slug "$DG_SLUG" --trunk-response-file "$DG_REPO.live-reject.json"
@@ -769,9 +1187,9 @@ DG_REFS_AFTER="$(git -C "$DG_CONSUMER" for-each-ref --format='%(refname) %(objec
   || setup_fail "for-each-ref after"
 
 if [ "$DG_LIVE_STATUS" -eq 0 ] && [ "$DG_LIVE_GRAPHQL" = 1 ] && printf '%s' "$DG_LIVE_OUT" \
-    | jq -e --arg commit "$DG_LIVE_COMMIT" \
-      '.commit == $commit and .trunk == "main" and .ui == "yes" and .result == "pass"
-       and .reasons == []' >/dev/null 2>&1; then
+    | jq -e --arg commit "$DG_LIVE_COMMIT" --arg link_prefix "$DG_LINK_PREFIX" \
+      '.commit == $commit and .trunk == "main" and .link_prefix == $link_prefix
+       and .ui == "yes" and .result == "pass" and .reasons == []' >/dev/null 2>&1; then
   pass "design-gate:live-pass" "one api graphql call, commit fetched"
 else
   failed "design-gate:live-pass" "status=$DG_LIVE_STATUS graphql=$DG_LIVE_GRAPHQL output: $DG_LIVE_OUT"
@@ -821,6 +1239,91 @@ if [ "$LIVE_STATUS" -ne 0 ] && [ -z "$LIVE_OUT" ]; then
   pass "design-gate:live-force-pushed-refuse" "exit=$LIVE_STATUS, no output"
 else
   failed "design-gate:live-force-pushed-refuse" "status=$LIVE_STATUS output: $LIVE_OUT"
+fi
+
+# ── design-gate: Design links built from link_prefix pass the readiness check ─────────
+# The slice snapshot template's Design links are `{{link_prefix}}` plus each path, under a parent
+# with the seed issue marker and type:epic. Rendered with design-gate's link_prefix and checked by
+# the readiness check at the gate's commit, the Design block and parent raise none of the link or
+# epic codes; the same body linked at the commit id raises design_link_invalid.
+DG_SLICE_TEMPLATE="$PI_DIR/design-gate-slice-snapshot.json"
+DG_LINK_CODES='["design_block_missing","design_link_invalid","design_slug_mismatch","parent_not_epic","epic_marker_missing"]'
+jq -e '.body | contains("{{link_prefix}}")' "$DG_SLICE_TEMPLATE" >/dev/null 2>&1 \
+  || setup_fail "slice snapshot template lacks the {{link_prefix}} placeholder: $DG_SLICE_TEMPLATE"
+create_repo DG_SLICE_REPO; stage_passing_design "$DG_SLICE_REPO"; commit_paths "$DG_SLICE_REPO"
+DG_SLICE_COMMIT="$(git -C "$DG_SLICE_REPO" rev-parse HEAD)" || setup_fail "rev-parse HEAD in $DG_SLICE_REPO"
+write_trunk_response "$DG_SLICE_REPO.trunk.json" main "$DG_SLICE_COMMIT"
+run_design_gate "$DG_SLICE_REPO" "$DG_SLICE_REPO.trunk.json"
+DG_SLICE_PREFIX="$(printf '%s' "$DG_OUT" | jq -r '.link_prefix' 2>/dev/null)"
+[ "$DG_STATUS" -eq 0 ] && [ "$DG_SLICE_PREFIX" = "$DG_LINK_PREFIX" ] \
+  || setup_fail "design-gate for the slice snapshot: status=$DG_STATUS output: $DG_OUT"
+
+# check_slice_links <case> <link-base> <want-codes-json> <forbid-codes-json> [<owner/repo>]: renders
+# the slice snapshot template with <link-base> in place of {{link_prefix}}, runs the readiness
+# check's snapshot mode at DG_SLICE_COMMIT for <owner/repo> (default DG_OWNER_REPO), and asserts the
+# reasons hold every wanted code and no forbidden one.
+check_slice_links() {
+  local case_name="$1" input="$DG_SLICE_REPO.$1.snapshot.json" status=0 out=""
+  jq -c --arg base "$2" '[.body |= (split("{{link_prefix}}") | join($base))]' "$DG_SLICE_TEMPLATE" \
+    >"$input" || setup_fail "render slice snapshot $case_name"
+  out="$(cd "$DG_SLICE_REPO" && bash -c '. "$1" && hivemind_readiness_check_snapshot "$2" "$3" main' \
+    slice-check "$DG_LIB" "$DG_SLICE_COMMIT" "${5:-$DG_OWNER_REPO}" <"$input" 2>&1)" || status=$?
+  if [ "$status" -eq 0 ] && printf '%s' "$out" | jq -e -s --argjson want "$3" --argjson forbid "$4" '
+      length == 1 and .[0].track == "slice"
+      and (.[0].reasons as $reasons
+           | all($want[]; . as $code | any($reasons[]; . == $code))
+           and all($forbid[]; . as $code | any($reasons[]; . == $code) | not))' >/dev/null 2>&1; then
+    pass "$case_name" "$(printf '%s' "$out" | jq -c '.reasons' 2>/dev/null)"
+  else
+    failed "$case_name" "status=$status output: $out"
+  fi
+}
+
+check_slice_links "design-gate:slice-links-at-link-prefix-pass-readiness" "$DG_SLICE_PREFIX" '[]' \
+  "$DG_LINK_CODES"
+check_slice_links "design-gate:slice-links-at-commit-design-link-invalid" \
+  "https://github.com/$DG_OWNER_REPO/blob/$DG_SLICE_COMMIT/" '["design_link_invalid"]' '[]'
+
+# ── owner/repo: one rule, the shared library's hivemind_readiness_owner_repo_ok ────────────
+# A repo name with a leading `.` (demo-owner/.github) is a valid GitHub repository: design-gate
+# exits 0 with its link_prefix, and Design links built from that prefix pass the readiness check
+# for the same owner/repo.
+DG_DOT_OWNER_REPO="demo-owner/.github"
+DG_DOT_PREFIX_WANT="https://github.com/$DG_DOT_OWNER_REPO/blob/main/"
+run_design_gate "$DG_SLICE_REPO" "$DG_SLICE_REPO.trunk.json" "$DG_DOT_OWNER_REPO"
+DG_DOT_PREFIX="$(printf '%s' "$DG_OUT" | jq -r '.link_prefix' 2>/dev/null)"
+if [ "$DG_STATUS" -eq 0 ] && [ "$DG_DOT_PREFIX" = "$DG_DOT_PREFIX_WANT" ]; then
+  pass "design-gate:dot-repo-name-pass" "$DG_DOT_PREFIX"
+else
+  failed "design-gate:dot-repo-name-pass" "status=$DG_STATUS output: $DG_OUT"
+fi
+check_slice_links "design-gate:dot-repo-slice-links-pass-readiness" "$DG_DOT_PREFIX_WANT" '[]' \
+  "$DG_LINK_CODES" "$DG_DOT_OWNER_REPO"
+
+# A repo name of exactly `..`, or an owner with a leading `-`, exits 2 with no output.
+for dg_bad_repo in "demo-owner/.." "-x/y"; do
+  run_design_gate "$DG_SLICE_REPO" "$DG_SLICE_REPO.trunk.json" "$dg_bad_repo"
+  if [ "$DG_STATUS" -eq 2 ] && [ -z "$DG_OUT" ]; then
+    pass "design-gate:bad-repo-exit2[$dg_bad_repo]" "exit=2, no output"
+  else
+    failed "design-gate:bad-repo-exit2[$dg_bad_repo]" "status=$DG_STATUS output: $DG_OUT"
+  fi
+done
+
+# find-by-title and ensure-parent reject --repo x/.. with exit 2 before any gh call.
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+  find-by-title --title "slice" --repo "x/.."
+if [ "$LIVE_STATUS" -eq 2 ] && [ -z "$LIVE_OUT" ] && [ ! -s "$GH_LOG" ]; then
+  pass "find-by-title:dotdot-repo-exit2" "exit=2, no gh call"
+else
+  failed "find-by-title:dotdot-repo-exit2" "status=$LIVE_STATUS gh calls: $(tr '\n' ';' <"$GH_LOG")"
+fi
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+  ensure-parent --title "Epic" --body "epic body" --repo "x/.."
+if [ "$LIVE_STATUS" -eq 2 ] && [ -z "$LIVE_OUT" ] && [ ! -s "$GH_LOG" ]; then
+  pass "ensure-parent:dotdot-repo-exit2" "exit=2, no gh call"
+else
+  failed "ensure-parent:dotdot-repo-exit2" "status=$LIVE_STATUS gh calls: $(tr '\n' ';' <"$GH_LOG")"
 fi
 
 # A rejected value quoted in a diagnostic reaches stderr with no control byte.
