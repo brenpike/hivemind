@@ -39,8 +39,9 @@
 #   references/review-output.schema.json). A template missing a placeholder is the blocker
 #   `cannot build the review prompt`. The review input is the commit log (<base>..<head>), the
 #   diff stat and `git diff --no-color --no-ext-diff <base>...<head>`, where <head> is the HEAD
-#   commit read once before the changed paths (a before-snapshot whose HEAD is not <head> is the
-#   blocker `cannot compute the branch diff`); every reviewer gets it whole, inline. Its byte
+#   commit read once before the changed paths and used by every read (a before-snapshot whose HEAD
+#   is not <head> is the blocker `cannot compute the branch diff`). The base name is resolved at
+#   each read and is not pinned; every reviewer gets the input whole, inline. Its byte
 #   count (wc -c) is compared with the limit: 65536 bytes when the generic setting has a
 #   `{prompt}` element, else 262144 bytes (stdin and the preset). Input over the limit is
 #   `skipped: too-large`, decided after the branch diff and before the prompt, the
@@ -133,7 +134,10 @@
 # and the exec. A reviewer that truncates, drops or compacts part of its own prompt is not seen:
 # the script proves only that the whole input was sent. A reviewer that obeys an instruction
 # in the branch text despite the prompt's data rule is not seen either: its reply is checked
-# only for shape and schema. An after-check that outlasts its reserve
+# only for shape and schema. The base ref moving during collection is not detected, so the
+# changed-path list, log, stat and diff may then cover different base ends. A move of the base or
+# HEAD by another process during a review is operator activity, outside the threat model (ADR-0042
+# Amendment 2026-11-26). An after-check that outlasts its reserve
 # ends the call at the Bash tool's cap,
 # and the skill then blocks with `review timed out`, never passes. A reviewer that leaves its
 # process group escapes the timeout's kill (the operator-configured command is trusted). The
