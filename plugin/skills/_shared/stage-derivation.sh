@@ -324,22 +324,9 @@ def sd_plan($repo; $slug):
 # _hivemind_sd_lib_ok: 0 when every readiness check and record verify function derive calls is
 # defined, else 1.
 _hivemind_sd_lib_ok() {
-  declare -F hivemind_readiness_commit_ok hivemind_doc_entry hivemind_doc_read \
-    hivemind_readiness_jq_defs hivemind_readiness_check_snapshot hivemind_record_verify \
-    >/dev/null 2>&1
-}
-
-# _hivemind_sd_owner_repo_ok <owner/repo>: 0 when the argument is a safe owner/repo pair, else 1.
-_hivemind_sd_owner_repo_ok() {
-  local value="$1" name_chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-'
-  local pattern="^[${name_chars}]+/[${name_chars}]+\$"
-  if ! [[ "$value" =~ $pattern ]]; then
-    return 1
-  fi
-  case "$value" in
-    -* | .* | */-* | */.* | *..*) return 1 ;;
-  esac
-  return 0
+  declare -F hivemind_readiness_commit_ok hivemind_readiness_owner_repo_ok hivemind_doc_entry \
+    hivemind_doc_read hivemind_readiness_jq_defs hivemind_readiness_check_snapshot \
+    hivemind_record_verify >/dev/null 2>&1
 }
 
 # _hivemind_sd_trunk_ok <trunk-name>: 0 when the argument is a safe trunk branch name, else 1.
@@ -368,7 +355,7 @@ _hivemind_sd_args_ok() {
     _hivemind_sd_error commit-malformed
     return 2
   fi
-  if ! _hivemind_sd_owner_repo_ok "$2" || ! _hivemind_sd_trunk_ok "$3" || ! _hivemind_sd_slug_ok "$4"; then
+  if ! hivemind_readiness_owner_repo_ok "$2" || ! _hivemind_sd_trunk_ok "$3" || ! _hivemind_sd_slug_ok "$4"; then
     _hivemind_sd_error usage
     return 2
   fi
@@ -1109,11 +1096,12 @@ hivemind_stage_evidence_gh() {
   local owner_repo="${1-}" slug="${2-}" seeds="" prs="" refs="" logins="" writers="" new="" seed=""
   local epic=null number="" snapshot="" timeline="" slices="" evidence=""
   local -a login_list=() numbers=()
-  if ! declare -F hivemind_readiness_jq_defs hivemind_readiness_fetch_snapshot >/dev/null 2>&1; then
+  if ! declare -F hivemind_readiness_jq_defs hivemind_readiness_fetch_snapshot \
+    hivemind_readiness_owner_repo_ok >/dev/null 2>&1; then
     _hivemind_sd_error missing-library
     return 2
   fi
-  if ! _hivemind_sd_owner_repo_ok "$owner_repo" || ! _hivemind_sd_slug_ok "$slug"; then
+  if ! hivemind_readiness_owner_repo_ok "$owner_repo" || ! _hivemind_sd_slug_ok "$slug"; then
     _hivemind_sd_error usage
     return 2
   fi

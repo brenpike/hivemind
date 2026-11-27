@@ -721,6 +721,16 @@ test_arguments() {
   lib_call "arguments:sha256-shape" "$REPO" "$evidence" hivemind_stage_derive \
     "$trunk_commit${trunk_commit:0:24}" acme/widgets main demo
   expect_call "arguments:sha256-shape" 2 "" $'stage-derivation-error: commit-unresolvable\n'
+  lib_call "arguments:repo-dotdot" "$REPO" "$evidence" hivemind_stage_derive "$trunk_commit" acme/.. main demo
+  expect_call "arguments:repo-dotdot" 2 "" $'stage-derivation-error: usage\n'
+  expect_no_git "arguments:repo-dotdot"
+  lib_call "arguments:repo-leading-dot" "$REPO" "$evidence" hivemind_stage_derive \
+    "$trunk_commit" acme/.github main demo
+  if grep -qF 'stage-derivation-error: usage' "$CALL_ERR"; then
+    failed "arguments:repo-leading-dot" "rc $CALL_RC, stderr: $(cat "$CALL_ERR")"
+  else
+    pass "arguments:repo-leading-dot" "rc $CALL_RC"
+  fi
 }
 
 test_missing_library() {

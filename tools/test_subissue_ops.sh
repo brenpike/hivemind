@@ -888,12 +888,12 @@ write_trunk_response() {
     || setup_fail "cannot write $1"
 }
 
-# run_design_gate <repo> <trunk-file>: runs design-gate OFFLINE in <repo> for DG_OWNER_REPO. Sets
-# DG_OUT, DG_STATUS.
+# run_design_gate <repo> <trunk-file> [<owner/repo>]: runs design-gate OFFLINE in <repo> for
+# <owner/repo> (default DG_OWNER_REPO). Sets DG_OUT, DG_STATUS.
 run_design_gate() {
   DG_STATUS=0
   DG_OUT="$(cd "$1" && SUBISSUE_OPS_OFFLINE=1 bash "$OPS" design-gate --slug "$DG_SLUG" \
-    --repo "$DG_OWNER_REPO" --trunk-response-file "$2" 2>/dev/null)" || DG_STATUS=$?
+    --repo "${3:-$DG_OWNER_REPO}" --trunk-response-file "$2" 2>/dev/null)" || DG_STATUS=$?
 }
 
 # assert_design_case <case> <repo> <ui> <result> <reasons-json>
@@ -1137,15 +1137,16 @@ DG_SLICE_PREFIX="$(printf '%s' "$DG_OUT" | jq -r '.link_prefix' 2>/dev/null)"
 [ "$DG_STATUS" -eq 0 ] && [ "$DG_SLICE_PREFIX" = "$DG_LINK_PREFIX" ] \
   || setup_fail "design-gate for the slice snapshot: status=$DG_STATUS output: $DG_OUT"
 
-# check_slice_links <case> <link-base> <want-codes-json> <forbid-codes-json>: renders the slice
-# snapshot template with <link-base> in place of {{link_prefix}}, runs the readiness check's
-# snapshot mode at DG_SLICE_COMMIT, and asserts the reasons hold every wanted code and no forbidden one.
+# check_slice_links <case> <link-base> <want-codes-json> <forbid-codes-json> [<owner/repo>]: renders
+# the slice snapshot template with <link-base> in place of {{link_prefix}}, runs the readiness
+# check's snapshot mode at DG_SLICE_COMMIT for <owner/repo> (default DG_OWNER_REPO), and asserts the
+# reasons hold every wanted code and no forbidden one.
 check_slice_links() {
   local case_name="$1" input="$DG_SLICE_REPO.$1.snapshot.json" status=0 out=""
   jq -c --arg base "$2" '[.body |= (split("{{link_prefix}}") | join($base))]' "$DG_SLICE_TEMPLATE" \
     >"$input" || setup_fail "render slice snapshot $case_name"
   out="$(cd "$DG_SLICE_REPO" && bash -c '. "$1" && hivemind_readiness_check_snapshot "$2" "$3" main' \
-    slice-check "$DG_LIB" "$DG_SLICE_COMMIT" "$DG_OWNER_REPO" <"$input" 2>&1)" || status=$?
+    slice-check "$DG_LIB" "$DG_SLICE_COMMIT" "${5:-$DG_OWNER_REPO}" <"$input" 2>&1)" || status=$?
   if [ "$status" -eq 0 ] && printf '%s' "$out" | jq -e -s --argjson want "$3" --argjson forbid "$4" '
       length == 1 and .[0].track == "slice"
       and (.[0].reasons as $reasons
@@ -1161,6 +1162,48 @@ check_slice_links "design-gate:slice-links-at-link-prefix-pass-readiness" "$DG_S
   "$DG_LINK_CODES"
 check_slice_links "design-gate:slice-links-at-commit-design-link-invalid" \
   "https://github.com/$DG_OWNER_REPO/blob/$DG_SLICE_COMMIT/" '["design_link_invalid"]' '[]'
+
+# ── owner/repo: one rule, the shared library's hivemind_readiness_owner_repo_ok ────────────
+# A repo name with a leading `.` (demo-owner/.github) is a valid GitHub repository: design-gate
+# exits 0 with its link_prefix, and Design links built from that prefix pass the readiness check
+# for the same owner/repo.
+DG_DOT_OWNER_REPO="demo-owner/.github"
+DG_DOT_PREFIX_WANT="https://github.com/$DG_DOT_OWNER_REPO/blob/main/"
+run_design_gate "$DG_SLICE_REPO" "$DG_SLICE_REPO.trunk.json" "$DG_DOT_OWNER_REPO"
+DG_DOT_PREFIX="$(printf '%s' "$DG_OUT" | jq -r '.link_prefix' 2>/dev/null)"
+if [ "$DG_STATUS" -eq 0 ] && [ "$DG_DOT_PREFIX" = "$DG_DOT_PREFIX_WANT" ]; then
+  pass "design-gate:dot-repo-name-pass" "$DG_DOT_PREFIX"
+else
+  failed "design-gate:dot-repo-name-pass" "status=$DG_STATUS output: $DG_OUT"
+fi
+check_slice_links "design-gate:dot-repo-slice-links-pass-readiness" "$DG_DOT_PREFIX_WANT" '[]' \
+  "$DG_LINK_CODES" "$DG_DOT_OWNER_REPO"
+
+# A repo name of exactly `..`, or an owner with a leading `-`, exits 2 with no output.
+for dg_bad_repo in "demo-owner/.." "-x/y"; do
+  run_design_gate "$DG_SLICE_REPO" "$DG_SLICE_REPO.trunk.json" "$dg_bad_repo"
+  if [ "$DG_STATUS" -eq 2 ] && [ -z "$DG_OUT" ]; then
+    pass "design-gate:bad-repo-exit2[$dg_bad_repo]" "exit=2, no output"
+  else
+    failed "design-gate:bad-repo-exit2[$dg_bad_repo]" "status=$DG_STATUS output: $DG_OUT"
+  fi
+done
+
+# find-by-title and ensure-parent reject --repo x/.. with exit 2 before any gh call.
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+  find-by-title --title "slice" --repo "x/.."
+if [ "$LIVE_STATUS" -eq 2 ] && [ -z "$LIVE_OUT" ] && [ ! -s "$GH_LOG" ]; then
+  pass "find-by-title:dotdot-repo-exit2" "exit=2, no gh call"
+else
+  failed "find-by-title:dotdot-repo-exit2" "status=$LIVE_STATUS gh calls: $(tr '\n' ';' <"$GH_LOG")"
+fi
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+  ensure-parent --title "Epic" --body "epic body" --repo "x/.."
+if [ "$LIVE_STATUS" -eq 2 ] && [ -z "$LIVE_OUT" ] && [ ! -s "$GH_LOG" ]; then
+  pass "ensure-parent:dotdot-repo-exit2" "exit=2, no gh call"
+else
+  failed "ensure-parent:dotdot-repo-exit2" "status=$LIVE_STATUS gh calls: $(tr '\n' ';' <"$GH_LOG")"
+fi
 
 # A rejected value quoted in a diagnostic reaches stderr with no control byte.
 DIE_ERR="$(SUBISSUE_OPS_OFFLINE=1 bash "$OPS" design-gate --slug $'bad\033[31m\nslug' 2>&1 >/dev/null)"

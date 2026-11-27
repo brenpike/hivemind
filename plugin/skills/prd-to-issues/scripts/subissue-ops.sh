@@ -439,19 +439,17 @@ read_injected() {
   fi
 }
 
-# assert_owner_repo <subcmd> <owner/repo>: the SINGLE SOURCE owner/repo charset guard,
-# shared by find-by-title AND ensure-parent's pre-create discovery search so the two cannot
-# diverge (ensure-parent's create path previously did only the weak `*/*` glob; the discovery
-# path now applies this stronger guard). Split on the single `/`, gate each half against the
-# GitHub name charset BEFORE any gh/GraphQL call. owner_repo flows into the search DSL via -f
-# as DATA, but a malformed value is a usage bug, not a broadened query — fail CLOSED (exit 2).
-# Replaces the weak `*/*` glob, which admitted e.g. `a/b/c` or shell metacharacters.
+# assert_owner_repo <subcmd> <owner/repo>: the owner/repo guard shared by find-by-title,
+# ensure-parent and design-gate, run BEFORE any gh/GraphQL call. Validity is decided ONLY by the
+# shared readiness check library's hivemind_readiness_owner_repo_ok (the one owner/repo rule:
+# `<owner>/<repo>`, charset A-Za-z0-9_.-, owner with no leading `-` or `.` and no `..`, repo not
+# exactly `.` or `..`), so this script holds no owner/repo logic of its own. owner_repo flows into
+# GraphQL and the search DSL via -f as DATA, but a malformed value is a usage bug, not a broadened
+# query — fail CLOSED (exit 2) with one diagnostic line naming the subcommand.
 assert_owner_repo() {
-  local subcmd="$1" owner_repo="$2" owner_part repo_part
-  case "$owner_repo" in */*) ;; *) die "$subcmd: --repo must be owner/repo (got '$owner_repo')" 2 ;; esac
-  owner_part="${owner_repo%%/*}"; repo_part="${owner_repo#*/}"
-  case "$owner_part" in ''|*[!A-Za-z0-9._-]*) die "$subcmd: invalid repo owner (got '$owner_part')" 2 ;; esac
-  case "$repo_part" in ''|*/*|*[!A-Za-z0-9._-]*) die "$subcmd: invalid repo name (got '$repo_part')" 2 ;; esac
+  local subcmd="$1" owner_repo="$2"
+  hivemind_readiness_owner_repo_ok "$owner_repo" \
+    || die "$subcmd: --repo must be <owner>/<repo> (got '$owner_repo')" 2
 }
 
 # assert_node_id <flag-name> <value>: DEFENSE-IN-DEPTH node-id allowlist (ADR-0020 trust
