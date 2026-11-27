@@ -453,7 +453,8 @@ run_exit1_case "ensure-parent:slug-body-less-resolve-exit1" -- \
 # `label create` call is logged), a `number=` variable reads SUBISSUE_TEST_GH_RESPONSE, and any
 # other read SUBISSUE_TEST_GH_LIST_RESPONSE when set, else SUBISSUE_TEST_GH_RESPONSE. `label create`
 # and `issue edit` exit with SUBISSUE_TEST_GH_LABEL_CREATE_STATUS and
-# SUBISSUE_TEST_GH_ISSUE_EDIT_STATUS (default 0); `issue create` prints the URL of issue 7. Any
+# SUBISSUE_TEST_GH_ISSUE_EDIT_STATUS (default 0); `issue create` prints SUBISSUE_TEST_GH_CREATED_URL
+# (default the URL of issue 7). Any
 # other call exits 1.
 export HOME="$TMPDIR_TEST/home"
 export GIT_CONFIG_NOSYSTEM=1
@@ -487,7 +488,7 @@ printf '%s\n' '#!/bin/sh' \
   'case "$1 $2" in' \
   '  "label create") exit "${SUBISSUE_TEST_GH_LABEL_CREATE_STATUS:-0}" ;;' \
   '  "issue edit") exit "${SUBISSUE_TEST_GH_ISSUE_EDIT_STATUS:-0}" ;;' \
-  '  "issue create") printf "%s\n" "https://github.com/demo-owner/demo-repo/issues/7"; exit 0 ;;' \
+  '  "issue create") printf "%s\n" "${SUBISSUE_TEST_GH_CREATED_URL:-https://github.com/demo-owner/demo-repo/issues/7}"; exit 0 ;;' \
   'esac' \
   'exit 1' >"$GH_STUB_DIR/gh" \
   && chmod +x "$GH_STUB_DIR/gh" \
@@ -497,21 +498,23 @@ printf '%s\n' '#!/bin/sh' \
 setup_fail() { echo "FAIL: setup: $1" >&2; exit 2; }
 
 # reset_gh_stub_state: the stub answers every label read with a present `type:epic` label (no
-# separate reread answer), routes no read to a list response, and lets `label create` and
-# `issue edit` succeed.
+# separate reread answer), routes no read to a list response, lets `label create` and
+# `issue edit` succeed, and has `issue create` print the URL of issue 7.
 reset_gh_stub_state() {
   GH_LABEL_RESPONSE="$PI_DIR/ensure-parent-label-present-response.json"
   GH_LABEL_REREAD_RESPONSE=""
   GH_LIST_RESPONSE=""
   GH_LABEL_CREATE_STATUS=0
   GH_ISSUE_EDIT_STATUS=0
+  GH_CREATED_URL=""
 }
 reset_gh_stub_state
 
 # run_live_ops <dir> <gh-response> -- <ops-arg...>
 # Runs subissue-ops.sh LIVE (SUBISSUE_OPS_OFFLINE unset) in <dir> with the recording gh stub first
 # on PATH, after emptying both gh call logs. The stub also reads the GH_LABEL_RESPONSE,
-# GH_LABEL_REREAD_RESPONSE, GH_LIST_RESPONSE, GH_LABEL_CREATE_STATUS and GH_ISSUE_EDIT_STATUS state. Sets LIVE_OUT (stdout)
+# GH_LABEL_REREAD_RESPONSE, GH_LIST_RESPONSE, GH_LABEL_CREATE_STATUS, GH_ISSUE_EDIT_STATUS and
+# GH_CREATED_URL state. Sets LIVE_OUT (stdout)
 # and LIVE_STATUS.
 run_live_ops() {
   local dir="$1" gh_response="$2"; shift 2
@@ -527,6 +530,7 @@ run_live_ops() {
     SUBISSUE_TEST_GH_LIST_RESPONSE="$GH_LIST_RESPONSE" \
     SUBISSUE_TEST_GH_LABEL_CREATE_STATUS="$GH_LABEL_CREATE_STATUS" \
     SUBISSUE_TEST_GH_ISSUE_EDIT_STATUS="$GH_ISSUE_EDIT_STATUS" \
+    SUBISSUE_TEST_GH_CREATED_URL="$GH_CREATED_URL" \
     bash "$OPS" "$@" 2>/dev/null)" || LIVE_STATUS=$?
 }
 
@@ -758,6 +762,33 @@ run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
 assert_live_labeled "ensure-parent:live-resolved-zero-padded-labeled" \
   "$EXPECTED_DIR/ensure-parent-resolved.json" 2 "$EDIT_EPIC7_CALL"
 reset_gh_stub_state
+# An all-zero issue number is never a positive integer. --existing-number 0 or 000 exits 2 before
+# any gh call, with or without --slug. A created issue URL ending in /0 or /000 fails closed with
+# no issue edit, even when the node-id read answers a valid issue.
+for zero_number in 0 000; do
+  run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+    ensure-parent --existing-number "$zero_number" --repo "$DEMO_REPO"
+  if [ "$LIVE_STATUS" -eq 2 ] && [ -z "$LIVE_OUT" ] && [ ! -s "$GH_LOG" ]; then
+    pass "ensure-parent:live-existing-number-$zero_number-exit2" "exit=2, no output, no gh call"
+  else
+    failed "ensure-parent:live-existing-number-$zero_number-exit2" "status=$LIVE_STATUS output: $LIVE_OUT
+    gh calls: $(tr '\n' ';' <"$GH_LOG")"
+  fi
+  run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+    ensure-parent --existing-number "$zero_number" --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+  if [ "$LIVE_STATUS" -eq 2 ] && [ -z "$LIVE_OUT" ] && [ ! -s "$GH_LOG" ]; then
+    pass "ensure-parent:live-seed-existing-number-$zero_number-exit2" "exit=2, no output, no gh call"
+  else
+    failed "ensure-parent:live-seed-existing-number-$zero_number-exit2" "status=$LIVE_STATUS output: $LIVE_OUT
+    gh calls: $(tr '\n' ';' <"$GH_LOG")"
+  fi
+  GH_LIST_RESPONSE="$PI_DIR/ensure-parent-discovery-empty-response.json"
+  GH_CREATED_URL="https://github.com/demo-owner/demo-repo/issues/$zero_number"
+  run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+    ensure-parent --title "tracer epic" --body anchor --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-created-url-$zero_number-fails-closed" 0
+  reset_gh_stub_state
+done
 
 # The label subissue-ops creates matches the triage palette: triage-ops ensure-labels, run live
 # under the same stub, creates `type:epic` with the same --color and --description.

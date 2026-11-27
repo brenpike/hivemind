@@ -1050,18 +1050,32 @@ ensure_epic_label() {
     || die "ensure-parent: gh issue edit failed to add label '$EPIC_LABEL' to issue #$number" 1
 }
 
+# canonical_issue_number <value>: prints <value> as a canonical positive integer, leading zeros
+# dropped. An empty, non-digit or all-zero value fails with nothing on stdout. Every issue number
+# the shell reads (--existing-number, the created issue's URL, the record, the expected number)
+# passes this one check, so a zero or non-canonical number never reaches a read, a comparison or
+# a label edit.
+canonical_issue_number() {
+  local n="$1"
+  case "$n" in '' | *[!0-9]*) return 1 ;; esac
+  n="${n#"${n%%[!0]*}"}"
+  [ -n "$n" ] || return 1
+  printf '%s' "$n"
+}
+
 # record_issue_number <record> [<expected-number>]: prints the ensure-parent <record>'s number.
-# It must be a positive integer and, when <expected-number> is given (a read addressed by
-# number), equal to it; else it fails closed with nothing on stdout.
+# It must be a canonical positive integer and, when <expected-number> is given (a read addressed
+# by number), equal to it; else it fails closed with nothing on stdout. A given expected number
+# that is not a positive integer fails closed too, so the equality check is never skipped.
 record_issue_number() {
-  local record="$1" expected="${2-}" record_number
+  local record="$1" record_number canonical expected
   record_number="$(printf '%s' "$record" | jq -r '.number')" \
     || die "ensure-parent: could not read the epic number from its record" 1
-  case "$record_number" in
-    '' | 0* | *[!0-9]*) die "ensure-parent: the epic record's number is not a positive integer" 1 ;;
-  esac
-  if [ -n "$expected" ]; then
-    expected="${expected#"${expected%%[!0]*}"}"
+  canonical="$(canonical_issue_number "$record_number")" && [ "$canonical" = "$record_number" ] \
+    || die "ensure-parent: the epic record's number is not a positive integer" 1
+  if [ "$#" -ge 2 ]; then
+    expected="$(canonical_issue_number "$2")" \
+      || die "ensure-parent: the expected issue number is not a positive integer" 1
     [ "$record_number" = "$expected" ] \
       || die "ensure-parent: the read of issue #$expected returned issue #$record_number" 1
   fi
@@ -1074,7 +1088,7 @@ record_issue_number() {
 # exits nonzero before anything reaches stdout.
 emit_labeled_record() {
   local owner_repo="$1" record="$2" record_number
-  record_number="$(record_issue_number "$record" "${3-}")" || exit "$?"
+  record_number="$(record_issue_number "$record" "${@:3}")" || exit "$?"
   ensure_epic_label "$owner_repo" "$record_number"
   printf '%s\n' "$record"
 }
@@ -1106,7 +1120,8 @@ cmd_ensure_parent() {
     esac
   done
   if [ -n "$existing_number" ]; then
-    case "$existing_number" in ''|*[!0-9]*) die "ensure-parent: --existing-number must be an integer (got '$existing_number')" 2 ;; esac
+    existing_number="$(canonical_issue_number "$existing_number")" \
+      || die "ensure-parent: --existing-number must be a positive integer" 2
   fi
 
   # --discovery-response-file is meaningful ONLY on the create path (no --existing-number) —
@@ -1248,7 +1263,8 @@ cmd_ensure_parent() {
     # `gh issue create` prints the new issue URL; the trailing path segment is the number.
     number="${created_url##*/}"
   fi
-  case "$number" in ''|*[!0-9]*) die "ensure-parent: could not parse new issue number from gh output" 1 ;; esac
+  number="$(canonical_issue_number "$number")" \
+    || die "ensure-parent: could not parse new issue number from gh output" 1
 
   # Resolve the just-created issue's node id (the skill needs the id to attach
   # children). Routed through the shared kernel — a malformed read FAILS CLOSED.
