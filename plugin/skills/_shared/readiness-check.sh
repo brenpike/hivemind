@@ -37,6 +37,10 @@
 # PUBLIC API:
 #   hivemind_readiness_commit_ok <commit>
 #       0 when <commit> is 40 or 64 lowercase hex, else 1. No git call.
+#   hivemind_readiness_owner_repo_ok <owner/repo>
+#       0 when the argument is `<owner>/<repo>`: exactly one `/`, each part non-empty and only
+#       from A-Z, a-z, 0-9, `_`, `.` and `-`; the owner starts with no `-` or `.` and holds no
+#       `..`; the repo is not exactly `.` or `..`. Else 1. Prints nothing; no git or gh call.
 #   hivemind_readiness_codes
 #       Prints the closed reason-code set, one base code per line, in the order of the solution
 #       design's Readiness check output contract. A parameterized code ends with `:`.
@@ -256,7 +260,7 @@ hivemind_readiness_link_prefix() {
     return 2
   fi
   local owner_repo="${1-}" trunk="${2-}" prefix="" program
-  if ! _hivemind_rc_owner_repo_ok "$owner_repo" || ! _hivemind_rc_trunk_ok "$trunk"; then
+  if ! hivemind_readiness_owner_repo_ok "$owner_repo" || ! _hivemind_rc_trunk_ok "$trunk"; then
     _hivemind_rc_error usage
     return 2
   fi
@@ -559,15 +563,27 @@ def rc_issue_layer($repo; $trunk):
 '
 }
 
-# _hivemind_rc_owner_repo_ok <owner/repo>: 0 when the argument is a safe owner/repo pair, else 1.
-_hivemind_rc_owner_repo_ok() {
+# hivemind_readiness_owner_repo_ok <owner/repo>: 0 when the argument is a safe owner/repo pair,
+# else 1 (see PUBLIC API). Both parts become URL path segments, so dot segments are refused:
+# GitHub reserves `.` and `..` as repository names. A leading `-` in the owner is the
+# option-injection floor; the owner also refuses a leading `.` and an inner `..`, since GitHub
+# logins hold no `.`. Repository names with a leading `.`, such as `owner/.github`, are supported.
+hivemind_readiness_owner_repo_ok() {
+  if [ "$#" -ne 1 ]; then
+    return 1
+  fi
   local value="$1" name_chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-'
-  local pattern="^[${name_chars}]+/[${name_chars}]+\$"
+  local pattern="^[${name_chars}]+/[${name_chars}]+\$" owner repo
   if ! [[ "$value" =~ $pattern ]]; then
     return 1
   fi
-  case "$value" in
-    -* | .* | */-* | */.* | *..*) return 1 ;;
+  owner="${value%%/*}"
+  repo="${value#*/}"
+  case "$owner" in
+    -* | .* | *..*) return 1 ;;
+  esac
+  case "$repo" in
+    . | ..) return 1 ;;
   esac
   return 0
 }
@@ -884,7 +900,7 @@ _hivemind_rc_target_ok() {
     _hivemind_rc_error commit-malformed
     return 2
   fi
-  if ! _hivemind_rc_owner_repo_ok "$2" || ! _hivemind_rc_trunk_ok "$3"; then
+  if ! hivemind_readiness_owner_repo_ok "$2" || ! _hivemind_rc_trunk_ok "$3"; then
     _hivemind_rc_error usage
     return 2
   fi
@@ -954,7 +970,7 @@ hivemind_readiness_fetch_snapshot() {
     return 2
   fi
   local owner_repo="${1-}" number="${2-}" node="" gh_rc=0 query program
-  if ! _hivemind_rc_owner_repo_ok "$owner_repo" || ! _hivemind_rc_number_ok "$number"; then
+  if ! hivemind_readiness_owner_repo_ok "$owner_repo" || ! _hivemind_rc_number_ok "$number"; then
     _hivemind_rc_error usage
     return 2
   fi
