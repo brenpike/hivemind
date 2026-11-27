@@ -1,0 +1,48 @@
+{
+  "number": 301,
+  "state": "OPEN",
+  "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [ ] The slice is built.\n\n## Dependencies\n\nNone.\n\n## Design\n\n- Solution design: [docs/initiatives/demo-initiative/solution-design.md]({{link_prefix}}docs/initiatives/demo-initiative/solution-design.md)\n- Heading: Components\n- Review record: [docs/initiatives/demo-initiative/review-record.md]({{link_prefix}}docs/initiatives/demo-initiative/review-record.md)\n- Prototype: [docs/initiatives/demo-initiative/prototype/index.html]({{link_prefix}}docs/initiatives/demo-initiative/prototype/index.html)\n",
+  "labels": {
+    "nodes": [
+      {
+        "name": "readiness:ready"
+      },
+      {
+        "name": "type:enhancement"
+      },
+      {
+        "name": "effort:m"
+      },
+      {
+        "name": "moscow:must"
+      },
+      {
+        "name": "priority:p1"
+      },
+      {
+        "name": "risk:low"
+      },
+      {
+        "name": "difficulty:easy"
+      }
+    ]
+  },
+  "blockedBy": {
+    "nodes": []
+  },
+  "subIssues": {
+    "totalCount": 0
+  },
+  "parent": {
+    "number": 300,
+    "state": "OPEN",
+    "body": "<!-- hivemind-initiative: demo-initiative -->\n\n# Epic\n",
+    "labels": {
+      "nodes": [
+        {
+          "name": "type:epic"
+        }
+      ]
+    }
+  }
+}

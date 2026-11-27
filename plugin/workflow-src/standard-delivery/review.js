@@ -9,8 +9,10 @@
  *          answerLog, head, trunk, approvals, taken, rejected, undone, open,
  *          waits, replans, reviewReplans, repeatClusterAsked, and, set only
  *          here, resumeLedger, true from a review replan or a rerun of a
- *          blocked review until the next review run, and reviewSkip
- *          (gates.js): a skip's skip_reason, or user-reply on a reply of B.
+ *          blocked review until the next review run, reviewSkip (gates.js):
+ *          a skip's skip_reason, or user-reply on a reply of B, and
+ *          approachChanged, set by a repeated-cluster replan to whether its
+ *          reply picked B (describeApproachChange, briefs.js).
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   gates  the gate loop state of runGates (lib/gates.js): runs.review, answer
  *          and takenReview, which only this module sets and reads: the review
@@ -228,10 +230,7 @@ function buildReviewPrompt(plan, run, answer) {
  * agent failure, the describeNoResult sentence and next action run_again.
  */
 function describeReviewProblem(review) {
-  if (!validateSchema(REVIEW_SCHEMA, review).ok || hasUnusableQuestion(review.user_question)) {
-    return describeUnusableResult('The local review step returned no usable result' + describePullRequestStop(), review);
-  }
-  return undefined;
+  return !validateSchema(REVIEW_SCHEMA, review).ok || hasUnusableQuestion(review.user_question) ? describeUnusableResult('The local review step returned no usable result' + describePullRequestStop(), review) : undefined;
 }
 
 /**
@@ -480,7 +479,11 @@ function requestReviewReplan(review, run, plan) {
   }
   run.replans += 1;
   run.reviewReplans += 1;
-  return { replan: { reason: returned + ', so plan the remediation of what the review block reports, from the fresh facts.' + (isRepeat ? describeApproachChange(run.answerLog[run.answerLog.length - 1].reply, brief) : ''), review: projectReplanReview(review) } };
+  const change = isRepeat ? describeApproachChange(run.answerLog[run.answerLog.length - 1].reply, brief) : '';
+  if (isRepeat) {
+    run.approachChanged = change !== '';
+  }
+  return { replan: { reason: returned + ', so plan the remediation of what the review block reports, from the fresh facts.' + change, review: projectReplanReview(review) } };
 }
 
 /**

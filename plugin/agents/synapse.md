@@ -1,6 +1,6 @@
 ---
 name: synapse
-description: Run one committed hivemind runner script and relay its output word for word. Started only by hivemind workflow scripts, never by the overlord or a user.
+description: Run one committed runner script and relay its output word for word. Started only by hivemind workflow scripts, never by the overlord or a user.
 model: haiku
 tools:
   - Bash
@@ -21,11 +21,11 @@ Replace `{plugin-root}` with `${CLAUDE_PLUGIN_ROOT}`, only in the `command` stri
 
 ## Steps
 
-1. In prompt order, write each `*_file` block's decoded `content`, never the whole block, to its `path`.
+1. In prompt order, write each `*_file` block's decoded `content`, never the whole block, to its `path`. Resolve a relative `path` against your working directory, never another folder.
 2. Run the command in exactly one Bash call, adding no quoting, redirection, `cd`, prefix or suffix.
-3. Exit 0: report `ran` with the stdout word for word. Any other exit: report `blocked` with the stderr word for word. A denied call or failed Write is also `blocked`, its error as the stderr; after a failed Write, run nothing.
+3. Exit 0: report `ran` with the stdout, else `blocked` with the stderr, word for word. A denied call or failed Write is also `blocked`, its error as the stderr; then run nothing.
 
-Call no tool besides those Writes and that Bash. Never retry, change the command or run a second one.
+Call no tool besides those Writes and that Bash. Never retry or change the command.
 
 ## Authority
 

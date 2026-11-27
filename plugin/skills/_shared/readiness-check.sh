@@ -37,6 +37,10 @@
 # PUBLIC API:
 #   hivemind_readiness_commit_ok <commit>
 #       0 when <commit> is 40 or 64 lowercase hex, else 1. No git call.
+#   hivemind_readiness_owner_repo_ok <owner/repo>
+#       0 when the argument is `<owner>/<repo>`: exactly one `/`, each part non-empty and only
+#       from A-Z, a-z, 0-9, `_`, `.` and `-`; the owner starts with no `-` or `.` and holds no
+#       `..`; the repo is not exactly `.` or `..`. Else 1. Prints nothing; no git or gh call.
 #   hivemind_readiness_codes
 #       Prints the closed reason-code set, one base code per line, in the order of the solution
 #       design's Readiness check output contract. A parameterized code ends with `:`.
@@ -44,6 +48,11 @@
 #       Path allowlist: prints the kind (prd, solution-design, review-record, prototype-index,
 #       prototype-notes, adr) and returns 0 when <path> matches one allowlisted shape, else 1.
 #       The stamp allowlist is all six kinds.
+#   hivemind_readiness_link_prefix <owner/repo> <trunk-name>
+#       Prints the Design blob link prefix `https://github.com/<owner/repo>/blob/<trunk-name>/`
+#       and returns 0: the one definition, rc_link_prefix, that the Design link check reads back.
+#       Arguments take the same checks as snapshot mode; a bad or missing one gives usage and
+#       returns 2. No git or gh call.
 #   hivemind_doc_entry <commit> <path>
 #       Document existence test: prints the blob id and returns 0 only when the commit's tree
 #       holds exactly one entry at exactly <path>, of type blob and mode 100644 or 100755.
@@ -108,6 +117,8 @@ _hivemind_rc_error() {
 _hivemind_rc_jq_defs() {
   printf '%s\n' '
 def rc_slug: "[a-z0-9]+(-[a-z0-9]+)*";
+def rc_link_host: "https://github.com/";
+def rc_link_prefix($repo; $trunk): rc_link_host + $repo + "/blob/" + $trunk + "/";
 def rc_path_kind:
   if test("\\Adocs/prds/" + rc_slug + "\\.md\\z") then "prd"
   elif test("\\Adocs/initiatives/" + rc_slug + "/solution-design\\.md\\z") then "solution-design"
@@ -239,6 +250,26 @@ rc_path_kind // empty'
     return 1
   fi
   printf '%s\n' "$kind"
+}
+
+# hivemind_readiness_link_prefix <owner/repo> <trunk-name>: prints the Design blob link prefix
+# (see PUBLIC API).
+hivemind_readiness_link_prefix() {
+  if [ "$#" -ne 2 ]; then
+    _hivemind_rc_error usage
+    return 2
+  fi
+  local owner_repo="${1-}" trunk="${2-}" prefix="" program
+  if ! hivemind_readiness_owner_repo_ok "$owner_repo" || ! _hivemind_rc_trunk_ok "$trunk"; then
+    _hivemind_rc_error usage
+    return 2
+  fi
+  program="$(_hivemind_rc_jq_defs)"'
+rc_link_prefix($repo; $trunk)'
+  if ! prefix="$(jq -nr --arg repo "$owner_repo" --arg trunk "$trunk" "$program" 2>/dev/null)"; then
+    return 1
+  fi
+  printf '%s\n' "$prefix"
 }
 
 # _hivemind_rc_path_shape_ok <path>: 0 when <path> is relative, holds no empty, `.` or `..`
@@ -460,14 +491,15 @@ def rc_dependency_codes($sn; $doc):
   | [$sn.blockedBy.nodes[].number | tostring] as $edges
   | [.[] | select(. as $ref | any($edges[]; . == $ref) | not) | "dependency_edge_missing:" + .];
 def rc_target_path($repo; $trunk):
-  ("https://github.com/" | length) as $host_len
-  | ($repo | length) as $repo_len
-  | ("/blob/" + $trunk + "/") as $blob
+  rc_link_prefix($repo; $trunk) as $prefix
+  | ($prefix | length) as $prefix_len
+  | (rc_link_host | length) as $host_len
+  | ($host_len + ($repo | length)) as $repo_end
   | if startswith("https://") then
-      if startswith("https://github.com/")
-         and (.[$host_len:$host_len + $repo_len] | ascii_downcase) == ($repo | ascii_downcase)
-         and (.[$host_len + $repo_len:] | startswith($blob))
-      then .[$host_len + $repo_len + ($blob | length):] else null end
+      if .[:$host_len] == $prefix[:$host_len]
+         and (.[$host_len:$repo_end] | ascii_downcase) == ($prefix[$host_len:$repo_end] | ascii_downcase)
+         and .[$repo_end:$prefix_len] == $prefix[$repo_end:]
+      then .[$prefix_len:] else null end
     elif contains("://") then null
     else . end;
 def rc_link_path($repo; $trunk; $kind):
@@ -531,15 +563,27 @@ def rc_issue_layer($repo; $trunk):
 '
 }
 
-# _hivemind_rc_owner_repo_ok <owner/repo>: 0 when the argument is a safe owner/repo pair, else 1.
-_hivemind_rc_owner_repo_ok() {
+# hivemind_readiness_owner_repo_ok <owner/repo>: 0 when the argument is a safe owner/repo pair,
+# else 1 (see PUBLIC API). Both parts become URL path segments, so dot segments are refused:
+# GitHub reserves `.` and `..` as repository names. A leading `-` in the owner is the
+# option-injection floor; the owner also refuses a leading `.` and an inner `..`, since GitHub
+# logins hold no `.`. Repository names with a leading `.`, such as `owner/.github`, are supported.
+hivemind_readiness_owner_repo_ok() {
+  if [ "$#" -ne 1 ]; then
+    return 1
+  fi
   local value="$1" name_chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-'
-  local pattern="^[${name_chars}]+/[${name_chars}]+\$"
+  local pattern="^[${name_chars}]+/[${name_chars}]+\$" owner repo
   if ! [[ "$value" =~ $pattern ]]; then
     return 1
   fi
-  case "$value" in
-    -* | .* | */-* | */.* | *..*) return 1 ;;
+  owner="${value%%/*}"
+  repo="${value#*/}"
+  case "$owner" in
+    -* | .* | *..*) return 1 ;;
+  esac
+  case "$repo" in
+    . | ..) return 1 ;;
   esac
   return 0
 }
@@ -856,7 +900,7 @@ _hivemind_rc_target_ok() {
     _hivemind_rc_error commit-malformed
     return 2
   fi
-  if ! _hivemind_rc_owner_repo_ok "$2" || ! _hivemind_rc_trunk_ok "$3"; then
+  if ! hivemind_readiness_owner_repo_ok "$2" || ! _hivemind_rc_trunk_ok "$3"; then
     _hivemind_rc_error usage
     return 2
   fi
@@ -926,7 +970,7 @@ hivemind_readiness_fetch_snapshot() {
     return 2
   fi
   local owner_repo="${1-}" number="${2-}" node="" gh_rc=0 query program
-  if ! _hivemind_rc_owner_repo_ok "$owner_repo" || ! _hivemind_rc_number_ok "$number"; then
+  if ! hivemind_readiness_owner_repo_ok "$owner_repo" || ! _hivemind_rc_number_ok "$number"; then
     _hivemind_rc_error usage
     return 2
   fi

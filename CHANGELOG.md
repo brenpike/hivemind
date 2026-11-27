@@ -26,6 +26,30 @@ No prose budget raised.
 
 Issues: #693, #694, #695, #698.
 
+## [14.9.3] - 2026-11-27
+
+### Fixed
+
+- `hivemind:prd-to-issues` `ensure-parent` now adds the `type:epic` label to every epic it returns (created, resolved, found by title, and the seed issue when `seed` is true), with `gh issue edit --add-label`, so the seed's body and marker line are never edited. When the repository has no `type:epic` label, it creates it with the triage palette's colour and description, never with `--force`; a test pins that the two scripts agree. Slices of a promoted seed no longer fail the readiness check with `parent_not_epic`.
+- The readiness check library defines the Design blob link prefix once (`hivemind_readiness_link_prefix`), `design-gate` prints it as `link_prefix` built from the trunk name, never the commit, and the skill writes each Design link as that prefix plus the path. Offline `design-gate` now requires `--repo`.
+- `hivemind:prd-to-issues` `ensure-parent`'s guarantee never to create a second epic covers reruns; two runs publishing the same initiative at the same time are outside its threat model, recorded in `subissue-ops.sh`, and may each create their own epic.
+- The readiness check library's owner/repo check (`hivemind_readiness_owner_repo_ok`) now accepts every GitHub repository name except `.` and `..`, for example `owner/.github`, and is the one check that `design-gate`, `ensure-parent`, `find-by-title`, stage derivation and the idea-to-ready guide use; the owner rules are unchanged.
+
+No prose budget raised.
+
+Issues: #699, #700.
+
+## [14.9.2] - 2026-11-27
+
+### Fixed
+
+- After the user chooses to change approach, a remediation plan that repeats a surface now asks "Accept this plan" or "Stop" and says it carries out that change, instead of asking the same keep, change or stop question again, in standard-delivery and pr-feedback-remediation.
+- The workflow runner now writes every inputs file under its working directory's `.hivemind/`, so the synapse gate no longer refuses commit and PR steps. `synapse.md` says a relative `path` resolves against the working directory, never another folder.
+
+No prose budget raised.
+
+Issues: #692, #696.
+
 ## [14.9.1] - 2026-11-26
 
 ### Fixed

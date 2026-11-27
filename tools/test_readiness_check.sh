@@ -306,6 +306,24 @@ test_commit_forms() {
   done
 }
 
+test_owner_repo_ok() {
+  local entry
+  for entry in brenpike/hivemind x/.github 'x/y..z' x/-y; do
+    lib_call "owner-repo:accept" "$REPO" "$NO_INPUT" hivemind_readiness_owner_repo_ok "$entry"
+    expect_call "owner-repo:accept:$entry" 0 "" ""
+    expect_no_git "owner-repo:accept:$entry"
+  done
+  for entry in '' brenpike -x/y .x/y 'a..b/c' x/. x/.. a/b/c x/y/z x//y 'x y/z' $'x/y\n' 'x/y;z' \
+    'ü/y'; do
+    lib_call "owner-repo:reject" "$REPO" "$NO_INPUT" hivemind_readiness_owner_repo_ok "$entry"
+    expect_call "owner-repo:reject:$(printf '%q' "$entry")" 1 "" ""
+    expect_no_git "owner-repo:reject:$(printf '%q' "$entry")"
+  done
+  lib_call "owner-repo:no-arg" "$REPO" "$NO_INPUT" hivemind_readiness_owner_repo_ok
+  expect_call "owner-repo:no-arg" 1 "" ""
+  expect_no_git "owner-repo:no-arg"
+}
+
 test_doc_entry() {
   local want_prd want_exec path
   want_prd="$(rgit rev-parse "$C1:docs/prds/demo.md")" || setup_fail "rev-parse prd"
@@ -837,7 +855,7 @@ test_snapshot_failures() {
   snapshot_call "snapshot:malformed-commit" "$input" HEAD "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG"
   expect_call "snapshot:malformed-commit" 2 "" $'readiness-check-error: commit-malformed\n'
   expect_no_git "snapshot:malformed-commit"
-  for entry in '' brenpike -x/y x/-y .x/y x/.y x/y/z x//y 'x/y..z' 'x y/z' $'x/y\n' 'x/y;z' 'ü/y'; do
+  for entry in '' brenpike -x/y .x/y x/y/z x//y 'x y/z' $'x/y\n' 'x/y;z' 'ü/y' x/. x/..; do
     snapshot_call "snapshot:bad-owner-repo" "$input" "$C1" "$entry" "$SNAP_TRUNK_ARG"
     expect_call "snapshot:bad-owner-repo:$(printf '%q' "$entry")" 2 "" $'readiness-check-error: usage\n'
     expect_no_git "snapshot:bad-owner-repo:$(printf '%q' "$entry")"
@@ -945,6 +963,88 @@ test_snapshot_large_design() {
   jq -c '[.snapshot]' "$case_file" >"$input" || setup_fail "large-design input"
   snapshot_call "snapshot:large-design" "$input"
   expect_snapshot_lines "snapshot:large-design" "$input" '[{"track":"slice","result":"pass","reasons":[]}]'
+  SNAP_COMMIT="$BASE_COMMIT"
+}
+
+# relink_case_file <name> <source-case-file> <link-base>: writes the case with every Markdown link
+# target in its issue body rebuilt as <link-base> followed by the link text, and prints its path.
+relink_case_file() {
+  local case_file="$TMPDIR_TEST/case.$1"
+  jq -c --arg base "$3" \
+    '.snapshot.body |= gsub("\\[(?<text>[^\\]\\[]*)\\]\\([^()]*\\)"; "[\(.text)](\($base)\(.text))")' \
+    "$2" >"$case_file" || setup_fail "relinked case file $1"
+  printf '%s' "$case_file"
+}
+
+test_link_prefix() {
+  local prefix="" entry defs path got source_file case_file input
+  local want='https://github.com/brenpike/hivemind/blob/main/'
+  lib_call "link-prefix" "$REPO" "$NO_INPUT" hivemind_readiness_link_prefix "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG"
+  expect_call "link-prefix" 0 "$want"$'\n' ""
+  expect_no_git "link-prefix"
+  prefix="$(cat "$CALL_OUT")"
+  lib_call "link-prefix:no-args" "$REPO" "$NO_INPUT" hivemind_readiness_link_prefix
+  expect_call "link-prefix:no-args" 2 "" $'readiness-check-error: usage\n'
+  expect_no_git "link-prefix:no-args"
+  lib_call "link-prefix:one-arg" "$REPO" "$NO_INPUT" hivemind_readiness_link_prefix "$SNAP_REPO_ARG"
+  expect_call "link-prefix:one-arg" 2 "" $'readiness-check-error: usage\n'
+  expect_no_git "link-prefix:one-arg"
+  lib_call "link-prefix:three-args" "$REPO" "$NO_INPUT" hivemind_readiness_link_prefix \
+    "$SNAP_REPO_ARG" "$SNAP_TRUNK_ARG" extra
+  expect_call "link-prefix:three-args" 2 "" $'readiness-check-error: usage\n'
+  expect_no_git "link-prefix:three-args"
+  for entry in a/b/c -x/y x/. x/..; do
+    lib_call "link-prefix:bad-owner-repo:$entry" "$REPO" "$NO_INPUT" hivemind_readiness_link_prefix \
+      "$entry" "$SNAP_TRUNK_ARG"
+    expect_call "link-prefix:bad-owner-repo:$entry" 2 "" $'readiness-check-error: usage\n'
+    expect_no_git "link-prefix:bad-owner-repo:$entry"
+  done
+  for entry in -main 'a..b'; do
+    lib_call "link-prefix:bad-trunk:$entry" "$REPO" "$NO_INPUT" hivemind_readiness_link_prefix \
+      "$SNAP_REPO_ARG" "$entry"
+    expect_call "link-prefix:bad-trunk:$entry" 2 "" $'readiness-check-error: usage\n'
+    expect_no_git "link-prefix:bad-trunk:$entry"
+  done
+
+  defs="$(bash -c '. "$1"; _hivemind_rc_jq_defs; _hivemind_rc_issue_jq_defs' link-prefix "$LIB")" \
+    || setup_fail "cannot print the issue-layer jq definitions"
+  for path in docs/prds/demo.md docs/initiatives/demo/solution-design.md \
+    docs/initiatives/demo/review-record.md docs/initiatives/demo/prototype/index.html \
+    docs/initiatives/demo/prototype/notes.md docs/adr/0046-idea-to-ready.md; do
+    got="$(jq -nr --arg target "$prefix$path" --arg repo "$SNAP_REPO_ARG" --arg trunk "$SNAP_TRUNK_ARG" \
+      "$defs"'
+$target | rc_target_path($repo; $trunk) // "null"' 2>&1)" || got="jq failed: $got"
+    if [ "$got" = "$path" ]; then
+      pass "link-prefix:round-trip:$path" "rc_target_path reads the path back"
+    else
+      failed "link-prefix:round-trip:$path" "got $got"
+    fi
+  done
+
+  source_file="$(write_case_file link-prefix-source '.')"
+  case_file="$(relink_case_file link-prefix-trunk "$source_file" "$prefix")"
+  build_case_commit SNAP_COMMIT "$case_file"
+  input="$TMPDIR_TEST/input.link-prefix-trunk"
+  jq -c '[.snapshot]' "$case_file" >"$input" || setup_fail "link-prefix-trunk input"
+  snapshot_call "link-prefix:slice-pass" "$input"
+  expect_snapshot_lines "link-prefix:slice-pass" "$input" '[{"track":"slice","result":"pass","reasons":[]}]'
+  case_file="$(relink_case_file link-prefix-commit "$source_file" \
+    "https://github.com/$SNAP_REPO_ARG/blob/$SNAP_COMMIT/")"
+  input="$TMPDIR_TEST/input.link-prefix-commit"
+  jq -c '[.snapshot]' "$case_file" >"$input" || setup_fail "link-prefix-commit input"
+  snapshot_call "link-prefix:commit-link" "$input"
+  expect_snapshot_lines "link-prefix:commit-link" "$input" \
+    '[{"track":"slice","result":"fail","reasons":["design_link_invalid"]}]'
+
+  lib_call "link-prefix:dot-repo" "$REPO" "$NO_INPUT" hivemind_readiness_link_prefix x/.github "$SNAP_TRUNK_ARG"
+  expect_call "link-prefix:dot-repo" 0 'https://github.com/x/.github/blob/main/'$'\n' ""
+  expect_no_git "link-prefix:dot-repo"
+  case_file="$(relink_case_file link-prefix-dot-repo "$source_file" "$(cat "$CALL_OUT")")"
+  input="$TMPDIR_TEST/input.link-prefix-dot-repo"
+  jq -c '[.snapshot]' "$case_file" >"$input" || setup_fail "link-prefix-dot-repo input"
+  snapshot_call "link-prefix:dot-repo-slice-pass" "$input" "$SNAP_COMMIT" x/.github "$SNAP_TRUNK_ARG"
+  expect_snapshot_lines "link-prefix:dot-repo-slice-pass" "$input" \
+    '[{"track":"slice","result":"pass","reasons":[]}]'
   SNAP_COMMIT="$BASE_COMMIT"
 }
 
@@ -1180,7 +1280,7 @@ test_gh_arguments() {
   expect_call "gh:bad-second-number" 2 "" $'readiness-check-error: usage\n'
   expect_no_gh "gh:bad-second-number"
   expect_no_git "gh:bad-second-number"
-  for entry in '' brenpike -x/y x/.y x/y/z 'x/y..z' 'x y/z' $'x/y\n' 'x/y;z'; do
+  for entry in '' brenpike -x/y x/y/z 'x y/z' $'x/y\n' 'x/y;z' x/. x/..; do
     gh_call "gh:bad-owner-repo" hivemind_readiness_check_gh "$BASE_COMMIT" "$entry" "$SNAP_TRUNK_ARG" 101
     expect_call "gh:bad-owner-repo:$(printf '%q' "$entry")" 2 "" $'readiness-check-error: usage\n'
     expect_no_gh "gh:bad-owner-repo:$(printf '%q' "$entry")"
@@ -1215,6 +1315,19 @@ test_gh_arguments() {
   expect_git_flags "gh:unknown-commit"
 }
 
+# test_gh_dot_repo: a repository name with a leading `.` reaches gh as its own `name=` variable.
+test_gh_dot_repo() {
+  local case_file node_out
+  case_file="$(write_input gh-dot-repo-case '{"responses": {"101": {"issue": "standalone-pass"}}}')"
+  serve_gh_case "$case_file"
+  node_out="$(jq -c --slurpfile cases "$CASES" "$GH_RESPONSE_JQ"'
+.responses["101"] | node_of' "$case_file")" || setup_fail "gh dot-repo node"
+  gh_call "gh:dot-repo:fetch" hivemind_readiness_fetch_snapshot x/.github 101
+  expect_call "gh:dot-repo:fetch" 0 "$node_out"$'\n' ""
+  SNAP_REPO_ARG='x/.github' expect_gh_argv "gh:dot-repo:fetch" 101
+  expect_no_git "gh:dot-repo:fetch"
+}
+
 test_jq_defs() {
   local want_file="$TMPDIR_TEST/jq-defs.want" parsed=""
   bash -c '. "$1"; _hivemind_rc_jq_defs; _hivemind_rc_doc_jq_defs' jq-defs "$LIB" >"$want_file" \
@@ -1242,6 +1355,7 @@ test_library_form
 test_jq_defs
 test_codes
 test_commit_forms
+test_owner_repo_ok
 test_doc_entry
 test_doc_read
 test_sha256_repo
@@ -1254,6 +1368,7 @@ test_snapshot_failures
 test_snapshot_subdirectory
 test_snapshot_git_failure
 test_snapshot_large_design
+test_link_prefix
 test_snapshot_no_gh
 test_snapshot_code_bases
 test_gh_query_constant
@@ -1261,6 +1376,7 @@ test_gh_cases
 test_gh_page_info
 test_gh_absent
 test_gh_arguments
+test_gh_dot_repo
 
 # ── Summary ───────────────────────────────────────────────────────────────────────
 echo

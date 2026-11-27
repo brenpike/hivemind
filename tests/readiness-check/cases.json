@@ -2959,6 +2959,74 @@
     }
   },
   {
+    "name": "hostile-link-commit-id",
+    "snapshot": {
+      "number": 201,
+      "state": "OPEN",
+      "body": "## What to build\n\nThe slice.\n\n## Acceptance Criteria\n\n- [x] Slices pass the issue layer.\n\n## Dependencies\n\n- #150\n- Blocked by #151.\n\n## Design\n\n- Solution design: [docs/initiatives/demo/solution-design.md](https://github.com/brenpike/hivemind/blob/0123456789abcdef0123456789abcdef01234567/docs/initiatives/demo/solution-design.md)\n- Heading: Readiness check\n- Heading: Track fact\n- Review record: [docs/initiatives/demo/review-record.md](https://github.com/BrenPike/HiveMind/blob/main/docs/initiatives/demo/review-record.md)\n",
+      "labels": {
+        "nodes": [
+          {
+            "name": "readiness:ready"
+          },
+          {
+            "name": "type:enhancement"
+          },
+          {
+            "name": "effort:m"
+          },
+          {
+            "name": "moscow:must"
+          },
+          {
+            "name": "priority:p1"
+          },
+          {
+            "name": "risk:low"
+          },
+          {
+            "name": "difficulty:easy"
+          }
+        ]
+      },
+      "blockedBy": {
+        "nodes": [
+          {
+            "number": 150
+          },
+          {
+            "number": 151
+          }
+        ]
+      },
+      "subIssues": {
+        "totalCount": 0
+      },
+      "parent": {
+        "number": 200,
+        "state": "OPEN",
+        "body": "<!-- hivemind-initiative: demo -->\n\n# Epic\n",
+        "labels": {
+          "nodes": [
+            {
+              "name": "type:epic"
+            },
+            {
+              "name": "readiness:ready"
+            }
+          ]
+        }
+      }
+    },
+    "expected": {
+      "track": "slice",
+      "result": "fail",
+      "reasons": [
+        "design_link_invalid"
+      ]
+    }
+  },
+  {
     "name": "hostile-link-bracket-differs",
     "snapshot": {
       "number": 201,

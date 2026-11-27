@@ -672,7 +672,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '8cb8ae87cadac680';
+const BUILD_ID = 'f6cfe5eb8cab032a';
 
 function supportedSchemaKeywords(){
 return[
@@ -2774,7 +2774,7 @@ lines.push('',buildFactsBlock(facts),formatDataBlock('request',request),formatDa
 if(replan!==undefined){
 lines.push(formatDataBlock('replan',replan.reason));
 }
-if(replan!==undefined&&replan.review!==undefined){
+if(replan?.review!==undefined){
 lines.push(formatDataBlock('review',replan.review));
 }
 if(hasAnswers){
@@ -2814,6 +2814,7 @@ return'';
 }
 function describePlanProblem(planResult,resultSchema,facts,trunk,references){
 const stopped=', so '+RUN_NAME+' stopped.';
+const planNames='The plan names ';
 if(!isPlainObject(planResult)){
 return'The planner returned no result'+stopped;
 }
@@ -2826,7 +2827,7 @@ return'The planner could not plan the delivery: '+describeReason(planResult.bloc
 const plan=planResult.plan;
 const pathLocation=findRepositoryPathProblem(PLAN_SCHEMA,plan,'');
 if(pathLocation!==''){
-return'The plan names a path at '+pathLocation+' that is not a plain path inside the repository'+stopped;
+return planNames+'a path at '+pathLocation+' that is not a plain path inside the repository'+stopped;
 }
 const wave=computeWave(plan.steps,[]);
 if(!wave.ok){
@@ -2836,15 +2837,15 @@ if(plan.trunk_freshness!==facts.trunk_freshness){
 return'The plan copies a trunk freshness other than the facts'+stopped;
 }
 if(!isGitIdentifier(plan.branch)||!isGitIdentifier(plan.base)){
-return'The plan names a branch or base that is not a safe git name'+stopped;
+return planNames+'a branch or base that is not a safe git name'+stopped;
 }
-if(!plan.versioning.artifact_files.every((artifactPath)=>isGitIdentifier(artifactPath))){
-return'The plan names a version file path that is not a safe git path'+stopped;
+if(!plan.versioning.artifact_files.every(isGitIdentifier)){
+return planNames+'a version file path that is not a safe git path'+stopped;
 }
 for(let index=0;index<plan.validation_commands.length;index+=1){
 const commandProblem=describeValidationCommandProblem(plan.validation_commands[index]);
 if(commandProblem!==''){
-return'The plan names a validation command at validation_commands['+index+'] that '+commandProblem+stopped;
+return planNames+'a validation command at validation_commands['+index+'] that '+commandProblem+stopped;
 }
 }
 if(typedTitlePattern().test(cleanTitleText(plan.title))){
@@ -2853,12 +2854,11 @@ return'The plan title starts with a commit type, which the workflow writes befor
 if(buildTitleText(plan)===''){
 return'The plan title leaves no text once it is cleaned and cut to fit the pull request title'+stopped;
 }
-const isOnOtherBranch=facts.head_state==='branch'&&facts.branch!==trunk;
-if(isOnOtherBranch&&plan.branch!==facts.branch){
+if(facts.head_state==='branch'&&facts.branch!==trunk&&plan.branch!==facts.branch){
 return describeStartBranch(facts)+' and delivers on it, but the plan names branch '+encodeUntrustedText(plan.branch)+stopped;
 }
 if(!new RegExp(PLAN_SCHEMA.properties.branch.pattern,'u').test(plan.branch)){
-return'The plan names branch '+encodeUntrustedText(plan.branch)+describeTaxonomyMiss()+stopped;
+return planNames+'branch '+encodeUntrustedText(plan.branch)+describeTaxonomyMiss()+stopped;
 }
 return describeClosesProblem(plan,references);
 }
@@ -2904,8 +2904,7 @@ const mapped=trunkFreshnessMap()[facts.trunk_freshness];
 if(mapped!=='decide'){
 return mapped;
 }
-const status=resolveDecision(TRUNK_STALE_KIND,buildTrunkStaleBrief(facts),'run',run,resolution);
-return status==='ask'?undefined:'stale';
+return resolveDecision(TRUNK_STALE_KIND,buildTrunkStaleBrief(facts),'run',run,resolution)==='ask'?undefined:'stale';
 }
 function resolveExternalEffects(plan,run,resolution){
 for(const step of plan.steps){
@@ -2921,9 +2920,8 @@ resolveDecision(EXTERNAL_EFFECT_KIND,buildExternalEffectBrief(effect.summary),['
 function resolvePlanAcceptance(plan,run,resolution,scope){
 const isRemediation=run.taken.some((entry)=>entry.kind===PLANNER_ESCALATION_ROUTING_KIND||entry.kind===ROOT_CLUSTER_ROUTING_KIND);
 const outsidePaths=listOutsidePaths(plan,scope);
-const listed=outsidePaths.length>0?['outside_limits']:[];
-const brief=isRemediation?buildRemediationPlanBrief(plan):buildPlanAcceptanceBrief(plan);
-return resolveDecision(isRemediation?REMEDIATION_PLAN_ACCEPTANCE_KIND:PLAN_ACCEPTANCE_KIND,markOutsideLimits(brief,outsidePaths),[run.pass,plan],run,resolution,listed);
+const brief=isRemediation?buildRemediationPlanBrief(plan,run.approachChanged):buildPlanAcceptanceBrief(plan);
+return resolveDecision(isRemediation?REMEDIATION_PLAN_ACCEPTANCE_KIND:PLAN_ACCEPTANCE_KIND,markOutsideLimits(brief,outsidePaths),[run.pass,plan],run,resolution,outsidePaths.length>0?['outside_limits']:[]);
 }
 function resolvePlanAsks(planResult,facts,run,scope){
 const resolution={asks:[],taken:[],freshness:undefined,reversibleEffects:[]};
@@ -2940,14 +2938,12 @@ return resolution;
 }
 function acceptResolution(resolution,run){
 for(const entry of resolution.taken){
-const isListed=run.taken.some((listed)=>JSON.stringify(listed.brief)===JSON.stringify(entry.brief));
-if(!isListed){
+if(!run.taken.some((listed)=>JSON.stringify(listed.brief)===JSON.stringify(entry.brief))){
 run.taken.push(entry);
 }
 }
 for(const effect of resolution.reversibleEffects){
-const isListed=run.reversibleEffects.some((listed)=>listed.stepId===effect.stepId&&listed.summary===effect.summary);
-if(!isListed){
+if(!run.reversibleEffects.some((listed)=>listed.stepId===effect.stepId&&listed.summary===effect.summary)){
 run.reversibleEffects.push(effect);
 }
 }
@@ -2978,7 +2974,7 @@ const label=questionLabel(0);
 return run.decisions.map((decision)=>buildAnswerEntry({question:label+'. A decision you settled before the run started.',labels:[label],chosen:[{label:label}],reply:decision})).concat(run.answerLog);
 }
 function keepReplanReview(passEnd,replan){
-if(passEnd.replan===undefined||replan===undefined||replan.review===undefined){
+if(passEnd.replan===undefined||replan?.review===undefined){
 return passEnd;
 }
 return{replan:{reason:passEnd.replan.reason,review:replan.review}};
@@ -2994,7 +2990,7 @@ const settledKinds=new Set();
 if(facts.head_state==='branch'&&facts.branch!==run.trunk&&!new RegExp(PLAN_SCHEMA.properties.branch.pattern,'u').test(facts.branch)){
 return stopDelivery([{problem:describeStartBranch(facts)+describeTaxonomyMiss()+'.'}],run,[],true);
 }
-const pass={model:replan===undefined||replan.review===undefined?undefined:'sonnet'};
+const pass={model:replan?.review===undefined?undefined:'sonnet'};
 let checked=await callPassPlanner(run,facts,{prompt:buildPlanPrompt(run.request,facts,scope,replan,listAnswerEntries(run)),label:'plan-'+run.pass,phaseTitle:'Plan',schema:resultSchema},pass);
 for(;;){
 let{planResult,problem}=checked;
@@ -3002,8 +2998,7 @@ if(problem!==undefined){
 if(shownAsks.length>0){
 logPlanningReply(run,shownEntry,shownAsks);
 }
-const unusable=planResult===null?describeUnusableResult(problem,null):{problem:problem};
-return stopDelivery([checked.isExhausted?describeCheckLimit(problem):unusable],run,[],true);
+return stopDelivery([checked.isExhausted?describeCheckLimit(problem):planResult===null?describeUnusableResult(problem,null):{problem:problem}],run,[],true);
 }
 if(shownAsks.length>0){
 logPlanningReply(run,shownEntry,shownAsks,planResult);
@@ -3011,6 +3006,9 @@ markSettledAsks(run.answerLog[run.answerLog.length-1].settled,shownAsks,run,sett
 if(shownAsks.some((ask)=>[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind)&&run.answeredKeys.has(ask.key))){
 planResult=shownResult;
 }else{
+if(shownAsks[0].kind===REMEDIATION_PLAN_ACCEPTANCE_KIND&&describeApproachChange(shownEntry.reply,shownAsks[0].brief)!==''){
+run.approachChanged=true;
+}
 const rescoped=await runScopeStep(run,facts,run.answerLog.length);
 if(rescoped.problem!==undefined){
 return stopDelivery([rescoped],run,[],true);
@@ -3190,15 +3188,15 @@ recommendation:{option_id:optionLabel(1),strength:'strong',why:'Patching has not
 };
 }
 function describeApproachChange(reply,brief){
-const option=readReplyChoices(reply,[{brief:brief}]).map((choice)=>brief.options[choice.optionIndex]).find((chosen)=>chosen.id===brief.recommendation.option_id);
-return option===undefined?'':' The user chose: '+option.summary+' The plan must remove or narrow that decision.';
+const approach=buildApproachChoice().options[1];
+return readReplyChoices(reply,[{brief:brief}]).some((choice)=>brief.options[choice.optionIndex].summary===approach.summary)?' The user chose: '+approach.summary+' The plan must remove or narrow that decision.':'';
 }
 function maxFindingsDataLength(){
 return 1800;
 }
 function buildFindingsData(root,findings){
 const rootLine=root===undefined?undefined:'Root: '+encodeUntrustedText(root);
-const lines=rootLine!==undefined&&rootLine.length<=maxFindingsDataLength()?[rootLine]:[];
+const lines=rootLine?.length<=maxFindingsDataLength()?[rootLine]:[];
 let used=lines.join('\n').length;
 for(const finding of findings){
 const line='Finding: '+encodeUntrustedText(finding.title);
@@ -3211,18 +3209,20 @@ lines.push(line);
 return lines.length===0?undefined:lines.join('\n');
 }
 function buildRepeatPinned(resolution,plan,run,replan){
-const isRepeatAsk=resolution.asks.some((ask)=>ask.kind===REMEDIATION_PLAN_ACCEPTANCE_KIND)&&plan.remediation_gate.repeats_surface;
-return isRepeatAsk?buildFindingsData(replan?.review?.hypothesized_root,run.open):undefined;
+return resolution.asks.some((ask)=>ask.kind===REMEDIATION_PLAN_ACCEPTANCE_KIND)&&plan.remediation_gate.repeats_surface?buildFindingsData(replan?.review?.hypothesized_root,run.open):undefined;
 }
-function buildRemediationPlanBrief(plan){
+function buildRemediationPlanBrief(plan,approachChanged){
 const remediationGate=plan.remediation_gate;
 const flags={...remediationGate.promotion_gate,grows_surface:remediationGate.grows_surface,repeats_surface:remediationGate.repeats_surface};
 const texts=remediationGateTexts();
 const flagTexts=Object.keys(texts).filter((flag)=>flags[flag]).map((flag)=>texts[flag]);
-const lead='Run the remediation plan for the local review findings on the working branch, then every gate again.';
+const isCarried=flags.repeats_surface&&approachChanged===true;
+const lead='Run the remediation plan '+(isCarried?'that carries out your change of approach':'for the local review findings')+' on the working branch, then every gate again.';
 const brief=buildPlanAcceptanceBrief(plan);
-const choice=flags.repeats_surface?buildApproachChoice():{recommendation:{...brief.recommendation,why:'The plan answers the local review findings, and every gate runs again on its commit before the pull request.'}};
-return Object.assign(brief,choice,{
+if(isCarried){
+brief.options[0].summary='Accept this plan and run its steps.';
+}
+return Object.assign(brief,flags.repeats_surface&&!isCarried?buildApproachChoice():{recommendation:{...brief.recommendation,why:'The plan answers the local review findings, and every gate runs again on its commit before the pull request.'}},{
 kind:REMEDIATION_PLAN_ACCEPTANCE_KIND,
 problem:flagTexts.length===0?lead:lead+' The plan '+joinNames(flagTexts,'and')+'.',
 gate:{...remediationGate.promotion_gate,architectural:flags.architectural||flags.grows_surface||flags.repeats_surface}
@@ -3263,7 +3263,7 @@ function listOutsidePaths(plan,scope){
 if(scope.limits.length===0){
 return[];
 }
-const limits=scope.limits.map((limit)=>limit.path).filter((limit)=>isRepositoryPath(limit));
+const limits=scope.limits.map((limit)=>limit.path).filter(isRepositoryPath);
 const versionFiles=[...plan.versioning.artifact_files,...plan.versioning.changelog_files];
 const isInsideLimits=(file)=>versionFiles.includes(file)||limits.some((limit)=>file===limit||file.startsWith(limit+'/'));
 return listPlanPaths(plan).filter((file)=>!isInsideLimits(file));
@@ -3327,8 +3327,7 @@ return holds.map((hold)=>buildApprovalAsk(hold,isReplan,run));
 }
 function raiseVersion(version,bumpType){
 const parts=version.split('.').map(Number);
-const raised={major:[parts[0]+1,0,0],minor:[parts[0],parts[1]+1,0],patch:[parts[0],parts[1],parts[2]+1]};
-return raised[bumpType].join('.');
+return{major:[parts[0]+1,0,0],minor:[parts[0],parts[1]+1,0],patch:[parts[0],parts[1],parts[2]+1]}[bumpType].join('.');
 }
 function buildUnshownCriticality(level='medium',likelihood='certain'){
 return{level:level,likelihood:likelihood,blast_radius:unshownBriefText(),if_ignored:unshownBriefText()};
@@ -3350,8 +3349,7 @@ if(values.version_check==='unreadable'){
 return[buildBriefOption('A','Keep the branch version of each file.'),buildBriefOption('B','Set each file to the version you name.')];
 }
 const trunk=values.trunk_version;
-const bumpOptions=[['A','major'],['B','minor'],['C','patch']].map(([id,bumpType])=>buildBriefOption(id,'Make a '+bumpType+' bump'+(trunk===undefined?'.':', to version '+raiseVersion(trunk,bumpType)+'.')));
-return bumpOptions.concat(buildBriefOption('D','Make no bump'+(trunk===undefined?'.':', keeping version '+trunk+'.')));
+return[['A','major'],['B','minor'],['C','patch']].map(([id,bumpType])=>buildBriefOption(id,'Make a '+bumpType+' bump'+(trunk===undefined?'.':', to version '+raiseVersion(trunk,bumpType)+'.'))).concat(buildBriefOption('D','Make no bump'+(trunk===undefined?'.':', keeping version '+trunk+'.')));
 }
 function buildVersionQuestionBrief(values){
 const isUnreadable=values.version_check==='unreadable';
@@ -4803,10 +4801,7 @@ formatDataBlock('inputs',inputs)
 ].join('\n');
 }
 function describeReviewProblem(review){
-if(!validateSchema(REVIEW_SCHEMA,review).ok||hasUnusableQuestion(review.user_question)){
-return describeUnusableResult('The local review step returned no usable result'+describePullRequestStop(),review);
-}
-return undefined;
+return!validateSchema(REVIEW_SCHEMA,review).ok||hasUnusableQuestion(review.user_question)?describeUnusableResult('The local review step returned no usable result'+describePullRequestStop(),review):undefined;
 }
 function hasUnusableQuestion(question){
 if(question===undefined){
@@ -4971,7 +4966,11 @@ return decided;
 }
 run.replans+=1;
 run.reviewReplans+=1;
-return{replan:{reason:returned+', so plan the remediation of what the review block reports, from the fresh facts.'+(isRepeat?describeApproachChange(run.answerLog[run.answerLog.length-1].reply,brief):''),review:projectReplanReview(review)}};
+const change=isRepeat?describeApproachChange(run.answerLog[run.answerLog.length-1].reply,brief):'';
+if(isRepeat){
+run.approachChanged=change!=='';
+}
+return{replan:{reason:returned+', so plan the remediation of what the review block reports, from the fresh facts.'+change,review:projectReplanReview(review)}};
 }
 function waitForService(review,run){
 const resumeArgs=buildResumeArgs(run.answerLog.map((entry)=>entry.reply),BUILD_ID);

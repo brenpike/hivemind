@@ -485,22 +485,12 @@ gh_read() {
   GH_RESULT="$result"
 }
 
-# owner_repo_ok <owner/repo>: 0 when the argument is a safe owner/repo pair.
-owner_repo_ok() {
-  local name_chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-'
-  local pattern="^[${name_chars}]+/[${name_chars}]+\$"
-  [[ "$1" =~ $pattern ]] || return 1
-  case "$1" in
-    -* | .* | */-* | */.* | *..*) return 1 ;;
-  esac
-}
-
 # resolve_repo: sets OWNER_REPO from `gh repo view`; fails gh-failed or repo-malformed.
 resolve_repo() {
   local name=""
   name="$(gh repo view --json nameWithOwner --jq .nameWithOwner </dev/null 2>/dev/null)" \
     || idea_to_ready_fail gh-failed
-  owner_repo_ok "$name" || idea_to_ready_fail repo-malformed
+  hivemind_readiness_owner_repo_ok "$name" || idea_to_ready_fail repo-malformed
   OWNER_REPO="$name"
 }
 
