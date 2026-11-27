@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [14.9.2] - 2026-11-27
+
+### Fixed
+
+- `hivemind:prd-to-issues` `ensure-parent` now adds the `type:epic` label to every epic it returns (created, resolved, found by title, and the seed issue when `seed` is true), with `gh issue edit --add-label`, so the seed's body and marker line are never edited. When the repository has no `type:epic` label, it creates it with the triage palette's colour and description, never with `--force`; a test pins that the two scripts agree. Slices of a promoted seed no longer fail the readiness check with `parent_not_epic`.
+- The readiness check library defines the Design blob link prefix once (`hivemind_readiness_link_prefix`), `design-gate` prints it as `link_prefix` built from the trunk name, never the commit, and the skill writes each Design link as that prefix plus the path. Offline `design-gate` now requires `--repo`.
+
+No prose budget raised.
+
+Issues: #699, #700.
+
 ## [14.9.1] - 2026-11-26
 
 ### Fixed
