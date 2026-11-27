@@ -171,6 +171,9 @@
 #              routed through the SHARED kernel (see §4). The trunk name passes the identifier
 #              gate and `git check-ref-format --branch`; the commit id must pass the library's
 #              hivemind_readiness_commit_ok (40 or 64 lowercase hex).
+#     link prefix: after those checks, `link_prefix` is hivemind_readiness_link_prefix of
+#              owner/repo and the trunk NAME (never the commit id): the one Design blob link prefix
+#              the readiness check reads back. A failure there FAILS CLOSED.
 #     online (fetch): `GIT_TERMINAL_PROMPT=0 git --no-replace-objects fetch --quiet --no-tags
 #              --no-recurse-submodules --no-prune --refmap= -- <remote> refs/heads/<trunk>`, which
 #              writes FETCH_HEAD only. The commit id must then name a local commit object that
@@ -201,8 +204,8 @@
 #       slice at triage.
 #     offline: --trunk-response-file replaces the GraphQL read (same kernel) and the fetch is
 #              skipped, so the commit must already be in the local object store. REQUIRES
-#              --trunk-response-file offline (exit 2 otherwise); --repo, when given, is still
-#              checked.
+#              --trunk-response-file and --repo offline (exit 2 with no stdout otherwise); --repo
+#              is checked with assert_owner_repo and is the owner/repo of `link_prefix`.
 #     failure: a gh, git or fetch failure, a malformed read, or an unresolvable commit leaves
 #              stdout empty, prints ONE `subissue-ops:` stderr line and exits nonzero.
 #
@@ -244,12 +247,14 @@
 #     (already attached to the intended epic).
 #
 #   design-gate (one compact line, exit 0):
-#     { "commit": <object-id>, "trunk": <str>, "slug": <str>,
+#     { "commit": <object-id>, "trunk": <str>,
+#       "link_prefix": "https://github.com/<owner/repo>/blob/<trunk>/", "slug": <str>,
 #       "ui": "yes"|"no"|"invalid"|"missing",
 #       "result": "pass"|"refuse",
 #       "reasons": [ <readiness reason code>, ... ] }
 #     `reasons` is sorted and unique, and empty unless ui is yes. `result` is refuse ONLY when
-#     ui is yes and reasons is non-empty; otherwise pass.
+#     ui is yes and reasons is non-empty; otherwise pass. Each Design link the skill writes is
+#     `link_prefix` plus the path.
 #
 # 4. INVARIANTS
 # -------------
@@ -1517,9 +1522,12 @@ cmd_design_gate() {
   assert_git_identifier "design-gate" "remote name" "$remote"
 
   local resp="" owner_repo="" trunk_ref="" trunk="" commit="" object_type="" ui="" reasons="[]"
+  local link_prefix=""
   if is_offline; then
     [ -n "$trunk_response_file" ] || die "offline design-gate requires --trunk-response-file" 2
-    [ -z "$repo" ] || assert_owner_repo "design-gate" "$repo"
+    [ -n "$repo" ] || die "offline design-gate requires --repo" 2
+    assert_owner_repo "design-gate" "$repo"
+    owner_repo="$repo"
     resp="$(read_injected "$trunk_response_file")"
   else
     if [ -n "$repo" ]; then
@@ -1550,6 +1558,8 @@ cmd_design_gate() {
     || die "design-gate: trunk name fails git check-ref-format --branch" 1
   hivemind_readiness_commit_ok "$commit" \
     || die "design-gate: trunk commit id is not a full lowercase object id" 1
+  link_prefix="$(hivemind_readiness_link_prefix "$owner_repo" "$trunk" 2>/dev/null)" \
+    || die "design-gate: Design link prefix build failed for '$owner_repo' at trunk '$trunk'" 1
 
   # INVARIANT: the fetch writes FETCH_HEAD only (empty refmap: no remote-tracking ref moves), and
   # only the checked commit id, never a branch name or local ref, reaches the shared library.
@@ -1580,9 +1590,9 @@ cmd_design_gate() {
   if [ "$ui" = yes ]; then
     reasons="$(design_reasons "$commit" "$slug")" || exit "$?"
   fi
-  jq -c -n --arg commit "$commit" --arg trunk "$trunk" --arg slug "$slug" --arg ui "$ui" \
-    --argjson reasons "$reasons" \
-    '{ commit: $commit, trunk: $trunk, slug: $slug, ui: $ui,
+  jq -c -n --arg commit "$commit" --arg trunk "$trunk" --arg link_prefix "$link_prefix" \
+    --arg slug "$slug" --arg ui "$ui" --argjson reasons "$reasons" \
+    '{ commit: $commit, trunk: $trunk, link_prefix: $link_prefix, slug: $slug, ui: $ui,
        result: (if $ui == "yes" and ($reasons | length) > 0 then "refuse" else "pass" end),
        reasons: $reasons }'
 }
@@ -1604,6 +1614,8 @@ first line is the seed issue marker naming <slug>. Live, ensure-parent adds the 
 epic it returns (with --slug, only a seed epic), creating the repository label when missing. design-gate reads the trunk commit (fetched into
 FETCH_HEAD only) and, when docs/prds/<slug>.md says UI yes, refuses on a prototype file failing the
 Document existence test or a review record that is missing, malformed, not passed, stale or unstamped.
+Its output's link_prefix (https://github.com/<owner/repo>/blob/<trunk>/) starts every Design link;
+offline design-gate requires --repo.
 Set SUBISSUE_OPS_OFFLINE to drive the pure transforms over injected input (no gh).
 EOF
 }

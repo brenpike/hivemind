@@ -737,6 +737,8 @@ DG_INDEX="docs/initiatives/$DG_SLUG/prototype/index.html"
 DG_NOTES="docs/initiatives/$DG_SLUG/prototype/notes.md"
 DG_RECORD="docs/initiatives/$DG_SLUG/review-record.md"
 DG_REPO_SEQ=0
+DG_OWNER_REPO="demo-owner/demo-repo"
+DG_LINK_PREFIX="https://github.com/$DG_OWNER_REPO/blob/main/"
 
 # create_repo <var> [<branch>]: assigns <var> a fresh scratch repository under TMPDIR_TEST whose
 # HEAD names refs/heads/<branch> (default main).
@@ -816,16 +818,17 @@ write_trunk_response() {
     || setup_fail "cannot write $1"
 }
 
-# run_design_gate <repo> <trunk-file>: runs design-gate OFFLINE in <repo>. Sets DG_OUT, DG_STATUS.
+# run_design_gate <repo> <trunk-file>: runs design-gate OFFLINE in <repo> for DG_OWNER_REPO. Sets
+# DG_OUT, DG_STATUS.
 run_design_gate() {
   DG_STATUS=0
   DG_OUT="$(cd "$1" && SUBISSUE_OPS_OFFLINE=1 bash "$OPS" design-gate --slug "$DG_SLUG" \
-    --trunk-response-file "$2" 2>/dev/null)" || DG_STATUS=$?
+    --repo "$DG_OWNER_REPO" --trunk-response-file "$2" 2>/dev/null)" || DG_STATUS=$?
 }
 
 # assert_design_case <case> <repo> <ui> <result> <reasons-json>
 # Writes a trunk response naming main at the repository's HEAD commit, runs design-gate offline
-# and asserts exit 0 and exactly {commit, trunk:"main", slug, ui, result, reasons}.
+# and asserts exit 0 and exactly {commit, trunk:"main", link_prefix, slug, ui, result, reasons}.
 assert_design_case() {
   local case_name="$1" repo="$2" ui="$3" result="$4" reasons="$5" commit trunk_file
   commit="$(git -C "$repo" rev-parse HEAD)" || setup_fail "rev-parse HEAD in $repo"
@@ -833,9 +836,11 @@ assert_design_case() {
   write_trunk_response "$trunk_file" main "$commit"
   run_design_gate "$repo" "$trunk_file"
   if [ "$DG_STATUS" -eq 0 ] && printf '%s' "$DG_OUT" | jq -e --arg commit "$commit" \
-      --arg slug "$DG_SLUG" --arg ui "$ui" --arg result "$result" --argjson reasons "$reasons" '
-      (keys | sort) == ["commit","reasons","result","slug","trunk","ui"]
-      and .commit == $commit and .trunk == "main" and .slug == $slug
+      --arg slug "$DG_SLUG" --arg ui "$ui" --arg result "$result" --argjson reasons "$reasons" \
+      --arg link_prefix "$DG_LINK_PREFIX" '
+      (keys | sort) == ["commit","link_prefix","reasons","result","slug","trunk","ui"]
+      and .commit == $commit and .trunk == "main" and .link_prefix == $link_prefix
+      and .slug == $slug
       and .ui == $ui and .result == $result and .reasons == $reasons' >/dev/null 2>&1; then
     pass "$case_name" "ui=$ui result=$result reasons=$reasons"
   else
@@ -926,8 +931,31 @@ for dg_oid_case in "absent-commit:0123456789abcdef0123456789abcdef01234567" "bra
   fi
 done
 
-# --trunk-response-file without SUBISSUE_OPS_OFFLINE is rejected (exit 2) before any gh call.
+# Offline design-gate without --repo exits 2 with no output.
+DG_STATUS=0
 DG_HEAD="$(git -C "$DG_REPO" rev-parse HEAD)" || setup_fail "rev-parse HEAD in $DG_REPO"
+write_trunk_response "$DG_REPO.no-repo.json" main "$DG_HEAD"
+DG_OUT="$(cd "$DG_REPO" && SUBISSUE_OPS_OFFLINE=1 bash "$OPS" design-gate --slug "$DG_SLUG" \
+  --trunk-response-file "$DG_REPO.no-repo.json" 2>/dev/null)" || DG_STATUS=$?
+if [ "$DG_STATUS" -eq 2 ] && [ -z "$DG_OUT" ]; then
+  pass "design-gate:offline-no-repo-exit2" "exit=2, no output"
+else
+  failed "design-gate:offline-no-repo-exit2" "status=$DG_STATUS output: $DG_OUT"
+fi
+
+# link_prefix is the shared library's own prefix for the same owner/repo and trunk name.
+DG_LIB="$REPO_ROOT/plugin/skills/_shared/readiness-check.sh"
+DG_LIB_PREFIX="$(bash -c '. "$1" && hivemind_readiness_link_prefix "$2" main' link-prefix \
+  "$DG_LIB" "$DG_OWNER_REPO")" || setup_fail "hivemind_readiness_link_prefix"
+run_design_gate "$DG_REPO" "$DG_REPO.no-repo.json"
+DG_GATE_PREFIX="$(printf '%s' "$DG_OUT" | jq -r '.link_prefix' 2>/dev/null)"
+if [ "$DG_STATUS" -eq 0 ] && [ -n "$DG_LIB_PREFIX" ] && [ "$DG_GATE_PREFIX" = "$DG_LIB_PREFIX" ]; then
+  pass "design-gate:link-prefix-from-library" "$DG_GATE_PREFIX"
+else
+  failed "design-gate:link-prefix-from-library" "status=$DG_STATUS gate: $DG_GATE_PREFIX library: $DG_LIB_PREFIX"
+fi
+
+# --trunk-response-file without SUBISSUE_OPS_OFFLINE is rejected (exit 2) before any gh call.
 write_trunk_response "$DG_REPO.live-reject.json" main "$DG_HEAD"
 run_live_ops "$DG_REPO" "$DG_REPO.live-reject.json" -- \
   design-gate --slug "$DG_SLUG" --trunk-response-file "$DG_REPO.live-reject.json"
@@ -968,9 +996,9 @@ DG_REFS_AFTER="$(git -C "$DG_CONSUMER" for-each-ref --format='%(refname) %(objec
   || setup_fail "for-each-ref after"
 
 if [ "$DG_LIVE_STATUS" -eq 0 ] && [ "$DG_LIVE_GRAPHQL" = 1 ] && printf '%s' "$DG_LIVE_OUT" \
-    | jq -e --arg commit "$DG_LIVE_COMMIT" \
-      '.commit == $commit and .trunk == "main" and .ui == "yes" and .result == "pass"
-       and .reasons == []' >/dev/null 2>&1; then
+    | jq -e --arg commit "$DG_LIVE_COMMIT" --arg link_prefix "$DG_LINK_PREFIX" \
+      '.commit == $commit and .trunk == "main" and .link_prefix == $link_prefix
+       and .ui == "yes" and .result == "pass" and .reasons == []' >/dev/null 2>&1; then
   pass "design-gate:live-pass" "one api graphql call, commit fetched"
 else
   failed "design-gate:live-pass" "status=$DG_LIVE_STATUS graphql=$DG_LIVE_GRAPHQL output: $DG_LIVE_OUT"
@@ -1021,6 +1049,48 @@ if [ "$LIVE_STATUS" -ne 0 ] && [ -z "$LIVE_OUT" ]; then
 else
   failed "design-gate:live-force-pushed-refuse" "status=$LIVE_STATUS output: $LIVE_OUT"
 fi
+
+# ── design-gate: Design links built from link_prefix pass the readiness check ─────────
+# The slice snapshot template's Design links are `{{link_prefix}}` plus each path, under a parent
+# with the seed issue marker and type:epic. Rendered with design-gate's link_prefix and checked by
+# the readiness check at the gate's commit, the Design block and parent raise none of the link or
+# epic codes; the same body linked at the commit id raises design_link_invalid.
+DG_SLICE_TEMPLATE="$PI_DIR/design-gate-slice-snapshot.json"
+DG_LINK_CODES='["design_block_missing","design_link_invalid","design_slug_mismatch","parent_not_epic","epic_marker_missing"]'
+jq -e '.body | contains("{{link_prefix}}")' "$DG_SLICE_TEMPLATE" >/dev/null 2>&1 \
+  || setup_fail "slice snapshot template lacks the {{link_prefix}} placeholder: $DG_SLICE_TEMPLATE"
+create_repo DG_SLICE_REPO; stage_passing_design "$DG_SLICE_REPO"; commit_paths "$DG_SLICE_REPO"
+DG_SLICE_COMMIT="$(git -C "$DG_SLICE_REPO" rev-parse HEAD)" || setup_fail "rev-parse HEAD in $DG_SLICE_REPO"
+write_trunk_response "$DG_SLICE_REPO.trunk.json" main "$DG_SLICE_COMMIT"
+run_design_gate "$DG_SLICE_REPO" "$DG_SLICE_REPO.trunk.json"
+DG_SLICE_PREFIX="$(printf '%s' "$DG_OUT" | jq -r '.link_prefix' 2>/dev/null)"
+[ "$DG_STATUS" -eq 0 ] && [ "$DG_SLICE_PREFIX" = "$DG_LINK_PREFIX" ] \
+  || setup_fail "design-gate for the slice snapshot: status=$DG_STATUS output: $DG_OUT"
+
+# check_slice_links <case> <link-base> <want-codes-json> <forbid-codes-json>: renders the slice
+# snapshot template with <link-base> in place of {{link_prefix}}, runs the readiness check's
+# snapshot mode at DG_SLICE_COMMIT, and asserts the reasons hold every wanted code and no forbidden one.
+check_slice_links() {
+  local case_name="$1" input="$DG_SLICE_REPO.$1.snapshot.json" status=0 out=""
+  jq -c --arg base "$2" '[.body |= (split("{{link_prefix}}") | join($base))]' "$DG_SLICE_TEMPLATE" \
+    >"$input" || setup_fail "render slice snapshot $case_name"
+  out="$(cd "$DG_SLICE_REPO" && bash -c '. "$1" && hivemind_readiness_check_snapshot "$2" "$3" main' \
+    slice-check "$DG_LIB" "$DG_SLICE_COMMIT" "$DG_OWNER_REPO" <"$input" 2>&1)" || status=$?
+  if [ "$status" -eq 0 ] && printf '%s' "$out" | jq -e -s --argjson want "$3" --argjson forbid "$4" '
+      length == 1 and .[0].track == "slice"
+      and (.[0].reasons as $reasons
+           | all($want[]; . as $code | any($reasons[]; . == $code))
+           and all($forbid[]; . as $code | any($reasons[]; . == $code) | not))' >/dev/null 2>&1; then
+    pass "$case_name" "$(printf '%s' "$out" | jq -c '.reasons' 2>/dev/null)"
+  else
+    failed "$case_name" "status=$status output: $out"
+  fi
+}
+
+check_slice_links "design-gate:slice-links-at-link-prefix-pass-readiness" "$DG_SLICE_PREFIX" '[]' \
+  "$DG_LINK_CODES"
+check_slice_links "design-gate:slice-links-at-commit-design-link-invalid" \
+  "https://github.com/$DG_OWNER_REPO/blob/$DG_SLICE_COMMIT/" '["design_link_invalid"]' '[]'
 
 # A rejected value quoted in a diagnostic reaches stderr with no control byte.
 DIE_ERR="$(SUBISSUE_OPS_OFFLINE=1 bash "$OPS" design-gate --slug $'bad\033[31m\nslug' 2>&1 >/dev/null)"
