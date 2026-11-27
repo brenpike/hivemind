@@ -718,6 +718,45 @@ GH_ISSUE_EDIT_STATUS=1
 run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
   ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
 assert_live_label_failure "ensure-parent:live-issue-edit-failure" 1
+
+# ── ensure-parent: live issue-number checks ────────────────────────────────────────
+# A read addressed by number must return that issue, and every issue number must be a positive
+# integer: a response naming another issue, or a number that is zero, negative or fractional,
+# fails closed with no output and no issue edit, so a wrong issue is never labeled or returned.
+# number_response <name> <source-response> <number>: writes <source-response> with its issue
+# number set to <number> and prints its path.
+number_response() {
+  local out="$TMPDIR_TEST/number-response.$1.json"
+  jq -c --argjson n "$3" '.data.repository.issue.number = $n' "$2" >"$out" \
+    || setup_fail "number response $1"
+  printf '%s' "$out"
+}
+for bad_number in mismatch:8 zero:0 negative:-7 fractional:7.5; do
+  reset_gh_stub_state
+  run_live_ops "$TMPDIR_TEST" \
+    "$(number_response "resolve-${bad_number%%:*}" "$PI_DIR/ensure-parent-resolve-response.json" "${bad_number#*:}")" -- \
+    ensure-parent --existing-number 7 --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-resolved-number-${bad_number%%:*}-fails-closed" 0
+  run_live_ops "$TMPDIR_TEST" \
+    "$(number_response "seed-${bad_number%%:*}" "$PI_DIR/ensure-parent-seed-response.json" "${bad_number#*:}")" -- \
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-seed-number-${bad_number%%:*}-fails-closed" 0
+  run_live_ops "$TMPDIR_TEST" \
+    "$(number_response "not-seed-${bad_number%%:*}" "$PI_DIR/ensure-parent-no-marker-response.json" "${bad_number#*:}")" -- \
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-not-seed-number-${bad_number%%:*}-fails-closed" 0
+  GH_LIST_RESPONSE="$PI_DIR/ensure-parent-discovery-empty-response.json"
+  run_live_ops "$TMPDIR_TEST" \
+    "$(number_response "created-${bad_number%%:*}" "$PI_DIR/ensure-parent-resolve-response.json" "${bad_number#*:}")" -- \
+    ensure-parent --title "tracer epic" --body anchor --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-created-number-${bad_number%%:*}-fails-closed" 0
+done
+# A zero-padded --existing-number names the same issue: #007 resolves and labels #7.
+reset_gh_stub_state
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-resolve-response.json" -- \
+  ensure-parent --existing-number 007 --repo "$DEMO_REPO"
+assert_live_labeled "ensure-parent:live-resolved-zero-padded-labeled" \
+  "$EXPECTED_DIR/ensure-parent-resolved.json" 2 "$EDIT_EPIC7_CALL"
 reset_gh_stub_state
 
 # The label subissue-ops creates matches the triage palette: triage-ops ensure-labels, run live

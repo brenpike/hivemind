@@ -559,7 +559,7 @@ validate_response_shape() {
 # response (used by ensure-parent's resolve path and its post-create node-id read)
 # into the parent identity { number, id }. FAIL-CLOSED via the shared kernel: a
 # transport error, `.errors` envelope, null/missing issue node, or a null/wrong-typed
-# number/id field exits nonzero — never emit a parent record built from an
+# number/id field, or a number that is not a positive integer, exits nonzero — never emit a parent record built from an
 # unverifiable read. The issue node carries no collection of interest, so the kernel's
 # collection slot is `[]` (a trivially-valid empty array) and there is no element
 # predicate. <status> is spliced as DATA via --arg to tag the record created/resolved.
@@ -568,7 +568,7 @@ normalize_parent_resolve() {
   local resp="$1" status="$2"
   validate_response_shape "$resp" \
     '.data.repository.issue' \
-    '(.number | type == "number")
+    '(.number | type == "number" and . >= 1 and . == floor)
      and (.id | type == "string" and length > 0)' \
     '[]' \
     'true' \
@@ -588,7 +588,7 @@ normalize_parent_seed() {
   local resp="$1" slug="$2" validated marker="" marker_rc=0 seed=false
   validated="$(validate_response_shape "$resp" \
     '.data.repository.issue' \
-    '(.number | type == "number")
+    '(.number | type == "number" and . >= 1 and . == floor)
      and (.id | type == "string" and length > 0)
      and (.body | type == "string")' \
     '[]' \
@@ -645,7 +645,7 @@ normalize_children() {
      and (.subIssues.pageInfo.hasNextPage | type == "boolean")
      and (.subIssues.pageInfo.hasNextPage == false)' \
     '.subIssues.nodes' \
-    '(.number | type == "number")
+    '(.number | type == "number" and . >= 1 and . == floor)
      and (.id | type == "string" and length > 0)
      and (.title | type == "string" and length > 0)' \
     '.data.node as $n
@@ -682,7 +682,7 @@ normalize_find_by_title() {
     '(.pageInfo.hasNextPage | type == "boolean")
      and (.pageInfo.hasNextPage == false)' \
     '.nodes' \
-    '(.number | type == "number")
+    '(.number | type == "number" and . >= 1 and . == floor)
      and (.id | type == "string" and length > 0)
      and (.title | type == "string" and length > 0)
      and (.state | type == "string" and length > 0)' \
@@ -1052,13 +1052,31 @@ ensure_epic_label() {
     || die "ensure-parent: gh issue edit failed to add label '$EPIC_LABEL' to issue #$number" 1
 }
 
-# emit_labeled_record <owner_repo> <record>: label the epic the ensure-parent <record> names
-# `type:epic` (ensure_epic_label), then print the record unchanged. A labeling failure exits
-# nonzero before anything reaches stdout.
-emit_labeled_record() {
-  local owner_repo="$1" record="$2" record_number
+# record_issue_number <record> [<expected-number>]: prints the ensure-parent <record>'s number.
+# It must be a positive integer and, when <expected-number> is given (a read addressed by
+# number), equal to it; else it fails closed with nothing on stdout.
+record_issue_number() {
+  local record="$1" expected="${2-}" record_number
   record_number="$(printf '%s' "$record" | jq -r '.number')" \
     || die "ensure-parent: could not read the epic number from its record" 1
+  case "$record_number" in
+    '' | 0* | *[!0-9]*) die "ensure-parent: the epic record's number is not a positive integer" 1 ;;
+  esac
+  if [ -n "$expected" ]; then
+    expected="${expected#"${expected%%[!0]*}"}"
+    [ "$record_number" = "$expected" ] \
+      || die "ensure-parent: the read of issue #$expected returned issue #$record_number" 1
+  fi
+  printf '%s' "$record_number"
+}
+
+# emit_labeled_record <owner_repo> <record> [<expected-number>]: label the epic the ensure-parent
+# <record> names `type:epic` (ensure_epic_label), then print the record unchanged. The number is
+# checked first (record_issue_number), so a wrong issue is never labeled. A labeling failure
+# exits nonzero before anything reaches stdout.
+emit_labeled_record() {
+  local owner_repo="$1" record="$2" record_number
+  record_number="$(record_issue_number "$record" "${3-}")" || exit "$?"
   ensure_epic_label "$owner_repo" "$record_number"
   printf '%s\n' "$record"
 }
@@ -1170,8 +1188,9 @@ cmd_ensure_parent() {
       record="$(normalize_parent_seed "$resp" "$slug")" || exit "$?"
       # Only a seed epic is labeled: an issue that is not the initiative's seed is left as it is.
       if [ "$(printf '%s' "$record" | jq -r '.seed')" = "true" ]; then
-        emit_labeled_record "$owner_repo" "$record"
+        emit_labeled_record "$owner_repo" "$record" "$number"
       else
+        record_issue_number "$record" "$number" >/dev/null || exit "$?"
         printf '%s\n' "$record"
       fi
       return
@@ -1180,7 +1199,7 @@ cmd_ensure_parent() {
               -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
       || die "ensure-parent: GraphQL resolve failed for issue #$number" 1
     record="$(normalize_parent_resolve "$resp" "resolved")" || exit "$?"
-    emit_labeled_record "$owner_repo" "$record"
+    emit_labeled_record "$owner_repo" "$record" "$number"
     return
   fi
 
@@ -1239,7 +1258,7 @@ cmd_ensure_parent() {
             -f owner="$owner" -f repo="$repo_name" -F number="$number" 2>/dev/null)" \
     || die "ensure-parent: GraphQL node-id resolve failed for created issue #$number" 1
   record="$(normalize_parent_resolve "$resp" "created")" || exit "$?"
-  emit_labeled_record "$owner_repo" "$record"
+  emit_labeled_record "$owner_repo" "$record" "$number"
 }
 
 cmd_attach_subissue() {
@@ -1335,7 +1354,7 @@ cmd_list_children() {
     '(.id | type == "string" and length > 0)
      and (.subIssues.pageInfo.hasNextPage | type == "boolean")' \
     '.subIssues.nodes' \
-    '(.number | type == "number")
+    '(.number | type == "number" and . >= 1 and . == floor)
      and (.id | type == "string" and length > 0)
      and (.title | type == "string" and length > 0)' \
     '.subIssues.pageInfo' \
@@ -1363,7 +1382,7 @@ run_title_search() {
     '.data.repository.issues' \
     '(.pageInfo.hasNextPage | type == "boolean")' \
     '.nodes' \
-    '(.number | type == "number")
+    '(.number | type == "number" and . >= 1 and . == floor)
      and (.id | type == "string" and length > 0)
      and (.title | type == "string" and length > 0)
      and (.state | type == "string" and length > 0)' \
