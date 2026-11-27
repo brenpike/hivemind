@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-## [14.9.2] - 2026-11-27
+## [14.9.3] - 2026-11-27
 
 ### Fixed
 
@@ -25,6 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 No prose budget raised.
 
 Issues: #699, #700.
+
+## [14.9.2] - 2026-11-27
+
+### Fixed
+
+- After the user chooses to change approach, a remediation plan that repeats a surface now asks "Accept this plan" or "Stop" and says it carries out that change, instead of asking the same keep, change or stop question again, in standard-delivery and pr-feedback-remediation.
+- The workflow runner now writes every inputs file under its working directory's `.hivemind/`, so the synapse gate no longer refuses commit and PR steps. `synapse.md` says a relative `path` resolves against the working directory, never another folder.
+
+No prose budget raised.
+
+Issues: #692, #696.
 
 ## [14.9.1] - 2026-11-26
 
