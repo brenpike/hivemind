@@ -39,8 +39,9 @@
 #                 [--discovery-response-file <path|->]
 #     Idempotently CREATE-OR-FIND the PRD-level epic (parent) issue — ORPHAN-SAFE
 #     (closed-by-construction): when no --existing-number is supplied, ensure-parent first
-#     DISCOVERS-BY-TITLE before creating, so a create-before-record partial failure never
-#     spawns a SECOND duplicate epic.
+#     DISCOVERS-BY-TITLE before creating, so a rerun after a create-before-record partial
+#     failure never spawns a SECOND duplicate epic. Concurrent runs: see the THREAT MODEL
+#     under PARENT ORPHAN-SAFETY in §4.
 #     Idempotency key: if --existing-number is supplied the parent is RESOLVED (its
 #     node id read by number) instead of created — the skill anchors the epic to a
 #     known issue across re-runs. Otherwise: discover the EXACT epic title via the SHARED
@@ -310,14 +311,31 @@
 #   - FAIL-CLOSED on malformed injected input to a pure transform (bad --response-file,
 #     unreadable injection file, a continued offline page) — a malformed fixture is a
 #     usage bug, not noise.
-#   - PARENT ORPHAN-SAFETY IS CLOSED-BY-CONSTRUCTION. ensure-parent never blind-creates a
-#     second epic: with no --existing-number it DISCOVERS-BY-TITLE first (reusing the SINGLE
+#   - PARENT ORPHAN-SAFETY IS CLOSED-BY-CONSTRUCTION. Across sequential runs and reruns,
+#     ensure-parent never blind-creates a second epic: with no --existing-number it
+#     DISCOVERS-BY-TITLE first (reusing the SINGLE
 #     SHARED ENUMERATION machinery find-by-title uses — repository.issues enumeration +
 #     paginate_to_completeness + filter_exact_title, never a divergent second lookup), resolves
 #     a lone OPEN exact match (status resolved-by-title), creates ONLY on zero matches, and
 #     FAILS CLOSED on a multiple/CLOSED/divergent set rather than duplicating or reusing a
 #     closed epic. The same owner/repo charset guard find-by-title enforces is applied to the
 #     discovery enumeration path.
+#     THREAT MODEL: discovery and `gh issue create` are two GitHub calls, and GitHub issues
+#     have no create-if-absent. Two runs publishing the same initiative at once that both
+#     find zero exact-title matches each create an epic and return different epics, in all
+#     three create branches (--body-file -, --body-file <path>, --body). The skill's
+#     per-slice find-by-title-then-create has the same window. That race is outside the
+#     threat model: one run publishes an initiative at a time, and concurrent publishes of
+#     the same initiative are unsupported. Recorded per
+#     ${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (Recorded Residual), on the
+#     user's decision of 2026-11-27, local review finding 5f28677a. The impact is bounded:
+#     duplicate open issues, visible and reversible by closing them; no data loss, no body
+#     or title edit, no trust boundary crossed. A later run fails closed on the duplicates
+#     (resolve_discovery, kind ambiguous-epic), and the seed and --existing-number paths
+#     create no epic. Still in scope: concurrent runs for different initiatives, and the
+#     `type:epic` label create race, which ensure_epic_label closes by rereading the label
+#     after a failed create, because label names are unique per repository. A need to
+#     support concurrent publishes of one initiative reopens this as a filed issue.
 #   - TITLE-EXISTENCE IS A DETERMINISTIC ENUMERATION, NOT A FUZZY SEARCH. The title-lookup
 #     enumerates `repository.issues` (a terminally-paginated connection) and matches the title
 #     LOCALLY as jq --arg DATA. It NEVER feeds the untrusted title into GitHub's ranked
@@ -1172,6 +1190,7 @@ cmd_ensure_parent() {
   # uses, never a divergent second lookup) and apply the resolution rules (resolve_discovery): a
   # lone OPEN exact match RESOLVES (status resolved-by-title, skip create); a multiple/CLOSED/
   # divergent set FAILS CLOSED; ZERO matches falls through to create. A title is REQUIRED to discover.
+  # Concurrent runs for one initiative: see the THREAT MODEL under PARENT ORPHAN-SAFETY in §4.
   [ -n "$title" ] || die "ensure-parent: --title is required to create a parent (or pass --existing-number)" 2
   local discovery decision
   discovery="$(run_title_search "ensure-parent" "$owner_repo" "$title")" \
