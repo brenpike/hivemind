@@ -67,13 +67,14 @@
 #                refs/heads/<trunk>, or prints no end for a symbolic candidate, the run also
 #                stops with `cannot read trunk`. A trunk that names no ref passes. Then, whatever
 #                trunk names, the branch is compared with the default branch of every remote
-#                `git remote` lists, read from refs/remotes/<remote>/HEAD (see REMOTE DEFAULT
+#                `git remote` lists, read from refs/remotes/<remote>/HEAD or, when that local
+#                record is absent or not symbolic, from the remote itself (see REMOTE DEFAULT
 #                below). A branch that is one stops with `working_branch equals trunk`, a remote
 #                HEAD git cannot read stops with `cannot read trunk`, and a failed compare stops
-#                with `cannot compare working_branch with trunk`. A listed remote with no such
-#                HEAD ref, or one that is not symbolic, has no default branch record, so the
-#                branch cannot be cleared against it: the run stops with `a remote has no
-#                default branch record: run git remote set-head <remote> --auto`.
+#                with `cannot compare working_branch with trunk`. A listed remote with no local
+#                record whose read from the remote fails or names no branch leaves the branch
+#                uncleared against it: the run stops with `a remote has no default branch
+#                record: run git remote set-head <remote> --auto`.
 #   worktree    the branch is checked out in another worktree.
 #   base         the base does not resolve to a commit (see BASE below).
 #
@@ -93,10 +94,14 @@
 # REMOTE DEFAULT is read once, right after TRUNK REF and before the current branch is read, with
 # hivemind_branch_is_remote_default from _shared/git-refusals.sh. For each remote `git remote`
 # lists, the name used whole, the end of the symbolic ref refs/remotes/<remote>/HEAD, dangling or
-# not, is that remote's default branch. It names the branch when it is refs/heads/<branch> or
-# refs/remotes/<listed remote>/<branch>, compared after the ASCII case fold of RECORDED RESIDUAL
-# R1 in that file. Only the target branch is compared, so a run that starts on trunk still moves
-# off it.
+# not, is that remote's default branch. When that ref is absent or not symbolic, the default
+# branch is read once from the remote with `GIT_TERMINAL_PROMPT=0 git ls-remote --symref --
+# <remote> HEAD`, which writes no ref and no config; the <name> of its `ref: refs/heads/<name>`
+# line for HEAD gives the end refs/remotes/<remote>/<name>. That output is untrusted: it is only
+# compared, never printed and never passed to a git command. The end names the branch when it is
+# refs/heads/<branch> or refs/remotes/<listed remote>/<branch>, compared after the ASCII case fold
+# of RECORDED RESIDUAL R1 in that file. Only the target branch is compared, so a run that starts
+# on trunk still moves off it.
 #
 # ORDER NOTE: a trunk spelled as a remote, such as origin/<branch>, now stops at this trunk ref
 # check, not at the earlier no-git name check. It still stops before any change. Only the order
@@ -157,10 +162,13 @@
 # later commits then land on that branch, which is also the base. The impact is bounded: the
 # caller named that branch, and the trunk stop, which keys on every ref trunk names, still keeps
 # trunk off. Comparing the base's canonical ref would add a stop, and the stops here are not to
-# grow, so this is a recorded residual. The remote default refusal reads only the local
-# refs/remotes/<remote>/HEAD of each remote `git remote` lists. A local HEAD ref left stale by a
-# default branch rename on the remote is trusted as it stands. The refusal covers the default branch of any listed remote, a fork's
-# included, and folds ASCII case, so it can refuse a branch that is not trunk; it fails safe.
+# grow, so this is a recorded residual. The remote default refusal reads the local
+# refs/remotes/<remote>/HEAD of each remote `git remote` lists, and asks the remote only when that
+# record is absent or not symbolic. A local HEAD ref left stale by a default branch rename on the
+# remote is trusted as it stands. A listed remote with no local record that the read cannot reach,
+# or whose HEAD names no branch, stops the run whatever the branch. The refusal covers the default
+# branch of any listed remote, a fork's included, and folds ASCII case, so it can refuse a branch
+# that is not trunk. Both fail safe.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
@@ -364,8 +372,9 @@ refuse_trunk_ref() {
 # refuse_remote_default_branch
 #   Reads, once, whether the branch is the default branch of a remote `git remote` lists, with
 #   hivemind_branch_is_remote_default, whatever trunk names. Blocks when it is, when git cannot
-#   read a remote HEAD, when a listed remote has no default branch record, or when the compare
-#   fails. Runs in the main shell so blocker exits it.
+#   read a remote HEAD, when a listed remote has no local default branch record and its default
+#   branch cannot be read from the remote, or when the compare fails. Runs in the main shell so
+#   blocker exits it.
 refuse_remote_default_branch() {
   local default_rc=0
   hivemind_branch_is_remote_default "$branch_name" || default_rc=$?

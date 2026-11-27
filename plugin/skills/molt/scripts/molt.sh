@@ -153,9 +153,14 @@
 #                (hivemind_branch_is_remote_default in _shared/git-refusals.sh). When git cannot
 #                read a remote HEAD, or prints no end for it, the run stops with `cannot read
 #                trunk`. A listed remote with no such ref, or one that is not symbolic, has no
-#                default branch record, so the branch cannot be cleared against it: the run
-#                stops with `a remote has no default branch record: run git remote set-head
-#                <remote> --auto`.
+#                local default branch record. For that remote the default is read once from the
+#                remote itself with `GIT_TERMINAL_PROMPT=0 git ls-remote --symref -- <remote>
+#                HEAD`, which writes no ref and no config. The refs/heads/<name> it names is
+#                taken as the end refs/remotes/<remote>/<name> and compared the same way, so a
+#                match stops the run with `the current branch is trunk`. When that read fails or
+#                names no branch, the branch cannot be cleared against the remote: the run stops
+#                with `a remote has no default branch record: run git remote set-head <remote>
+#                --auto`.
 #   outside     `git status --porcelain=v1 -z --untracked-files=all --no-renames` reports a
 #                dirty path that is not in files. Each such path is printed to stderr as an
 #                `outside: <JSON string>` line, in status order, then the blocker `the working
@@ -617,9 +622,11 @@ refuse_trunk_branch() {
 
 # refuse_remote_default_branch
 #   Blocks when the current branch is the default branch of a remote `git remote` lists, read
-#   from its refs/remotes/<remote>/HEAD, whatever trunk names, when git cannot read a remote
-#   HEAD, and when a listed remote has no default branch record. Runs in the main shell so
-#   blocker exits it.
+#   from its refs/remotes/<remote>/HEAD or, when that local record is absent or not symbolic,
+#   from one read-only `git ls-remote --symref` of the remote, whatever trunk names. Also blocks
+#   when git cannot read a remote HEAD, and when a listed remote has no local default branch
+#   record and its default cannot be read from the remote. Runs in the main shell so blocker
+#   exits it.
 refuse_remote_default_branch() {
   local default_rc=0
   hivemind_branch_is_remote_default "$branch_name" || default_rc=$?
