@@ -17,7 +17,8 @@
 #                     a program text or an argv element of its own.
 #   Any other argument shape is the usage blocker.
 #
-# REVIEWER (env HIVEMIND_LOCAL_REVIEWER, read once; its value never reaches output):
+# REVIEWER (env HIVEMIND_LOCAL_REVIEWER, read once; the script never prints its value, though a
+#   reviewer's own output excerpt can carry it, per ADR-0042 Implementation decisions item 9):
 #   unset or empty    the `codex-plugin` preset when a Codex companion script is installed,
 #                     else `skipped: no-reviewer`.
 #   codex-plugin      the preset; no companion script is `skipped: tool-missing`.
@@ -43,11 +44,12 @@
 #   count (wc -c) is compared with the limit: 65536 bytes when the generic setting has a
 #   `{prompt}` element, else 262144 bytes (stdin and the preset). Input over the limit is
 #   `skipped: too-large`, decided after the branch diff and before the prompt, the
-#   before-snapshot and any reviewer run. The script never writes inside the repository.
+#   before-snapshot and any reviewer run. The script writes only its own work files, in one
+#   private folder made under ${TMPDIR:-/tmp}, and nothing else; it does not check where
+#   TMPDIR points.
 #
-# PRESET RUN: node <companion> task --json, with the prompt on stdin (the task command's
-#   read-only sandbox is its default). The companion must print one JSON object whose `.rawOutput`
-#   is a string; that string is read as a generic reply (RESULT CHECKS). Any other output,
+# PRESET RUN: node <companion> task --json, with the prompt on stdin. The companion must print
+#   one JSON object whose `.rawOutput` is a string; that string is read as a generic reply (RESULT CHECKS). Any other output,
 #   including an object `.result` with no string `.rawOutput`, is the output shape blocker.
 #
 # GENERIC RUN: a `{prompt}` element is replaced whole by the prompt as one argv element, with
@@ -136,6 +138,11 @@
 # and the skill then blocks with `review timed out`, never passes. A reviewer that leaves its
 # process group escapes the timeout's kill (the operator-configured command is trusted). The
 # stderr_excerpt and raw_excerpt are not redacted, per ADR-0042 Implementation decisions item 9.
+# The preset's read-only sandbox is a companion default the script neither sets nor checks;
+# the before/after check holds the work tree. A TMPDIR inside the work tree under review is
+# not refused: the work files then land there, and when they are not ignored the before/after
+# check blocks the run as a reviewer change (fails closed). TMPDIR is operator environment,
+# trusted like the reviewer command (ADR-0042 Amendment 2026-11-26).
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, bash 3.2 compatible (no mapfile, no
