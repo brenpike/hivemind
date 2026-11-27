@@ -3,6 +3,8 @@
 # git-refusals.sh: shared read-only checks a git script makes before it changes anything. A
 # change is a write to a branch ref, HEAD, the index, the work tree or git config. Each check
 # reads git state and reports it; the caller decides what to refuse and owns the blocker text.
+# One check may also read a remote's default branch with `git ls-remote`, a read that writes no
+# ref and no config, when the local record of it is missing.
 #
 # THIS FILE IS SOURCED, NOT EXECUTED. No shebang: each caller sources it by absolute path derived
 # from its OWN script_dir (`. "$shared_dir/git-refusals.sh"`). It defines functions only. It runs
@@ -81,19 +83,24 @@
 #     remote name may contain `/` and is used whole, never split. When the end that HEAD ref
 #     names (dangling or not) equals a branch ref, both ASCII case folded, <branch> is that
 #     remote's default branch. A remote with no HEAD ref, or a HEAD ref that is not symbolic,
-#     has no default branch record, so the branch cannot be cleared against it: that gives 4.
-#     `git remote set-head <remote> --auto` writes the record. No remote is assumed: with no
-#     listed remote, no branch is a default.
+#     has no local default branch record. For that remote it reads the default branch once from
+#     the remote itself with `GIT_TERMINAL_PROMPT=0 git ls-remote --symref -- <remote> HEAD`,
+#     which writes no ref and no config. The <name> of its `ref: refs/heads/<name><TAB>HEAD`
+#     line gives the end refs/remotes/<remote>/<name>, compared the same way. The remote's
+#     output is untrusted: it is held in a variable and only compared, never printed and never
+#     passed to a git command. A failed read, no such line or an empty <name> leaves the branch
+#     uncleared against that remote: that gives 4. `git remote set-head <remote> --auto` writes
+#     the local record. No remote is assumed: with no listed remote, no branch is a default.
 #     Returns 0 no listed remote's default branch is <branch>, 1 <branch> is a listed remote's
 #     default branch, 2 cannot read a remote HEAD (a git error other than not symbolic or
 #     absent, or git prints no end), 3 cannot compare (an empty <branch>, `git remote` failed, or
-#     a case fold failed), 4 a listed remote has no default branch record (its HEAD ref is absent
-#     or not symbolic). Codes 1, 2, 3 and 4 from the remote reads come from the first remote, in
-#     `git remote` order, that raises one.
+#     a case fold failed), 4 a listed remote has no local default branch record and its default
+#     branch cannot be read from the remote. Codes 1, 2, 3 and 4 from the remote reads come from
+#     the first remote, in `git remote` order, that raises one.
 #
 #   HIVEMIND__REMOTE_LISTING and HIVEMIND__BRANCH_REFS hold the last `git remote` listing read
-#   and the last branch refs built, for both functions above. They are internal and carry no
-#   contract.
+#   and the last branch refs built, for both functions above. HIVEMIND__REMOTE_DEFAULT_END holds
+#   the last default branch end read from a remote. They are internal and carry no contract.
 #
 #   REMOTE IMAGE LAYOUT: the branch refs above assume each remote fetches with git's default
 #   layout, refs/remotes/<remote>/*. A remote whose fetch refspec maps its branches elsewhere
@@ -289,6 +296,36 @@ hivemind_resolve_name_refs() {
   return 0
 }
 
+# hivemind__read_remote_default_end <remote>
+#   Reads <remote>'s default branch once with a read-only `git ls-remote --symref -- <remote>
+#   HEAD`. Sets HIVEMIND__REMOTE_DEFAULT_END to refs/remotes/<remote>/<name> from the first
+#   `ref: refs/heads/<name><TAB>HEAD` line and returns 0. Returns 4, with it empty, when the read
+#   fails, no such line is printed or <name> is empty. The output is untrusted: held in a
+#   variable, never printed, never passed to a git command. INTERNAL (double underscore): not a
+#   caller entry point.
+hivemind__read_remote_default_end() {
+  local remote_name="$1"
+  local tab_char=$'\t'
+  local symref_listing symref_line default_name
+  HIVEMIND__REMOTE_DEFAULT_END=''
+  symref_listing="$(GIT_TERMINAL_PROMPT=0 git ls-remote --symref -- "$remote_name" HEAD 2>/dev/null)" \
+    || return 4
+  while IFS= read -r symref_line; do
+    case "$symref_line" in
+      "ref: refs/heads/"*"${tab_char}HEAD") ;;
+      *) continue ;;
+    esac
+    default_name="${symref_line#ref: refs/heads/}"
+    default_name="${default_name%"${tab_char}HEAD"}"
+    [ -n "$default_name" ] || return 4
+    HIVEMIND__REMOTE_DEFAULT_END="refs/remotes/$remote_name/$default_name"
+    return 0
+  done <<EOF
+$symref_listing
+EOF
+  return 4
+}
+
 # hivemind_branch_is_remote_default <branch>
 #   See API above.
 hivemind_branch_is_remote_default() {
@@ -301,11 +338,13 @@ hivemind_branch_is_remote_default() {
     head_rc=0
     head_end="$(git symbolic-ref --quiet "refs/remotes/$remote_name/HEAD" 2>/dev/null)" || head_rc=$?
     case "$head_rc" in
-      0) ;;
-      1) return 4 ;;
+      0) [ -n "$head_end" ] || return 2 ;;
+      1)
+        hivemind__read_remote_default_end "$remote_name" || return 4
+        head_end="$HIVEMIND__REMOTE_DEFAULT_END"
+        ;;
       *) return 2 ;;
     esac
-    [ -n "$head_end" ] || return 2
     end_folded="$(hivemind__fold_ascii_case "$head_end")" || return 3
     if hivemind__matches_any_ref "$end_folded" "${HIVEMIND__BRANCH_REFS[@]}"; then
       return 1

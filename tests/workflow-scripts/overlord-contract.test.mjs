@@ -88,6 +88,8 @@ const waitParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.
 const escalationParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('Outside `## Instinct`,')) ?? '';
 const OPT_IN_LEAD = 'The `Workflow` tool\'s approval prompt is the only opt-in to a workflow.';
 const FALLBACK_LEAD = 'At an interactive autonomy level, the only levels today,';
+const GUIDE_RUN_POINTER = 'including its `HIVEMIND_SKIP_PR_WATCH` and guide-run short-circuits';
+const GUIDE_RUN_EXEMPTION = 'A guide run, per `## Engine`, never watches on any path; like the key, it short-circuits the request-text read and needs no citation, and returns to the guide, which re-derives its stage.';
 const fallbackParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith(FALLBACK_LEAD)) ?? '';
 const safetyRailsSection = readSection(body, '## Safety Rails');
 const postureSection = readSection(body, '## Review Remediation Posture');
@@ -324,7 +326,7 @@ describe('overlord guide run', () => {
 describe('overlord pull request hand-off and opt-in', () => {
   test('the pr hand-off names the watch pointer and runs hivemind:github-review-loop for the watch', () => {
     assert.notEqual(handOffParagraph, '', '## Engine has a paragraph starting After you show `message`, when the result carries `pr`,');
-    for (const phrase of ['`## Review Remediation Posture` (Default post-PR watch)', '`HIVEMIND_SKIP_PR_WATCH`', 'When the rule calls for a watch, run `hivemind:github-review-loop` for that pull request.', 'as the Reflex tail does', 'With no `pr`, there is no watch.']) {
+    for (const phrase of ['`## Review Remediation Posture` (Default post-PR watch)', '`HIVEMIND_SKIP_PR_WATCH`', GUIDE_RUN_POINTER, 'When the rule calls for a watch, run `hivemind:github-review-loop` for that pull request.', 'as the Reflex tail does', 'With no `pr`, there is no watch.']) {
       assert.ok(handOffParagraph.includes(phrase), `pr hand-off paragraph lacks ${phrase}`);
     }
   });
@@ -348,6 +350,15 @@ describe('overlord pull request hand-off and opt-in', () => {
     for (const phrase of ['if and only if', '`not_requested`', '`watch_requested`']) {
       assert.ok(!reflexSection.includes(phrase), `## Reflex (Ledger-Skip) restates the watch predicate: ${phrase}`);
     }
+  });
+  test('the Default post-PR watch paragraph exempts a guide run once, and the hand-off and Reflex tail name the exemption', () => {
+    const watchParagraph = postureSection.split('\n\n').find((paragraph) => paragraph.startsWith('**Default post-PR watch.**')) ?? '';
+    assert.ok(watchParagraph.includes(GUIDE_RUN_EXEMPTION), `Default post-PR watch paragraph lacks ${GUIDE_RUN_EXEMPTION}`);
+    assert.equal(body.split(GUIDE_RUN_EXEMPTION).length - 1, 1, 'the guide-run exemption does not occur exactly once in the body');
+    assert.ok(handOffParagraph.includes(GUIDE_RUN_POINTER), `pr hand-off paragraph lacks ${GUIDE_RUN_POINTER}`);
+    assert.ok(readSection(body, '## Reflex (Ledger-Skip)').includes(GUIDE_RUN_POINTER), `## Reflex (Ledger-Skip) lacks ${GUIDE_RUN_POINTER}`);
+    const deliveryParagraph = readSection(body, '## Instinct').split('\n\n').find((paragraph) => paragraph.startsWith('**Delivery.**')) ?? '';
+    assert.ok(deliveryParagraph.includes('then the watch as in `## Reflex (Ledger-Skip)`'), '## Instinct Delivery lacks the watch pointer to ## Reflex (Ledger-Skip)');
   });
   test('Engine names no state machine and no run ledger', () => {
     assert.doesNotMatch(engineSection, /state.machine/i, '## Engine still names a state machine');

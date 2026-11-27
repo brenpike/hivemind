@@ -505,6 +505,32 @@ check_request() {
   else
     failed "$1:request" "layout: $(head -n 3 "$3")"
   fi
+  check_title "$1" "$2" "$3" "$second"
+}
+
+# check_title <case> <slug> <file> <line-2>: asserts that only a `Docs pull request: none` request
+# holds a title line, exactly one, as line 4; its title is `docs: <slug prefix> PRD and solution
+# design` or `docs: <slug prefix> close-out`, at most 72 code points, without `Docs pull request:`.
+check_title() {
+  local count title prefix
+  count="$(grep -c '^Pull request title: ' "$3")"
+  if [ "$4" != "Docs pull request: none" ]; then
+    if [ "$count" -eq 0 ]; then
+      pass "$1:title" "no title line on a #<n> request"
+    else
+      failed "$1:title" "$count title lines on a #<n> request"
+    fi
+    return 0
+  fi
+  title="$(sed -n '4s/^Pull request title: //p' "$3")"
+  prefix="$(sed -E 's/^docs: (.*) (PRD and solution design|close-out)$/\1/' <<<"$title")"
+  if [ "$count" -eq 1 ] && [[ "$title" =~ ^docs:\ [a-z0-9]+(-[a-z0-9]+)*\ (PRD\ and\ solution\ design|close-out)$ ]] \
+    && [ "${#title}" -le 72 ] && [ "${2#"$prefix"}" != "$2" ] \
+    && [[ "$title" != *"Docs pull request:"* ]]; then
+    pass "$1:title" "one title line at line 4, ${#title} code points: $title"
+  else
+    failed "$1:title" "title lines $count, line 4: $(sed -n 4p "$3")"
+  fi
 }
 
 # test_cases: runs every case of cases.json.
