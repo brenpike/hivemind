@@ -1654,6 +1654,17 @@ Unchanged by this amendment.
 
 **Local review finding d5a5ff74.** Its main claim: a missing, non-symbolic or stale remote HEAD ref passes, so that default branch is not refused. The user decision (option B, 2026-10-30) fixes the main claim for a missing or non-symbolic ref. Such a remote is now refused, so the gap is closed by construction. The stale-ref part stays a recorded residual, with its ground above. Its write-up gap was also valid: the residual bullets lacked a bounded impact and a ground, and "All of these fail safe" read as covering every bullet. That gap is fixed here. The fix applied the "Recorded Residual" template to every bullet in one pass, not one bullet at a time.
 
+**Amendment 2026-11-27 (issue 698).** This amends Q1 (option B, 2026-10-30) of this section. The local `refs/remotes/<remote>/HEAD` record stays the first source. When it is absent or not symbolic, `hivemind_branch_is_remote_default` now runs one read-only `GIT_TERMINAL_PROMPT=0 git ls-remote --symref -- <remote> HEAD` through the internal helper `hivemind__read_remote_default_end`, which writes no ref and no config. Its `ref: refs/heads/<name>` answer is compared the same way as the local record: ASCII case folded, against the same branch refs. Code 4 now means that read failed or named no branch, not that the local record is missing. The blocker text, `a remote has no default branch record: run git remote set-head <remote> --auto`, is unchanged. So a clone of an initially empty repository, or a `git init` plus `git remote add` checkout, whose remote is reachable and has a default branch now works without `git remote set-head`: the default branch is refused and another branch passes. This replaces the cost the paragraph "A listed remote with no default branch record is no longer a residual" states, and the Q1 rule that such a remote is refused. It is refused now only when the remote read also fails.
+
+Residuals of the remote read. Each fails safe or is bounded by the ground below.
+
+- **Latency or a hang.** Not covered: network latency, or a hang on an unreachable host. Bounded impact: a slow or stuck runner call, no write. Ground: outside the threat model, which is a write to trunk, and the read writes nothing.
+- **Prompts outside `GIT_TERMINAL_PROMPT`.** Not covered: an ssh host-key or passphrase prompt. Bounded impact: with no tty the read fails and gives 4, a refusal. Ground: a refusal writes nothing.
+- **A remote HEAD that names no branch.** An unborn, dangling or detached remote HEAD prints no `ref: refs/heads/<name>` line, so the read gives 4. Bounded impact: a refusal only, failing safe. Ground: a refusal writes nothing.
+- **The remote's answer is untrusted text.** It is held in a variable and only compared, never printed, never passed to a git command and never written to a ref or config. Bounded impact: a hostile remote can name any branch as its default, which at worst refuses a branch. Ground: the same refusal-only bound.
+
+Tests: `tools/test_create_working_branch.sh`, `tools/test_push_branch.sh` and `tools/test_molt.sh` each gain the empty-clone case (the default branch is refused, another branch passes, no ref or config is written), plus a fallback case that reads the remote when the local record is absent or not symbolic, and a code-4 case for a failed read or a read that names no branch.
+
 Links: https://github.com/brenpike/hivemind/issues/482, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
 
 ## Amendment 2026-10-30: a relay is read for its routing lines only (issue 447)
