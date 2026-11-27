@@ -449,7 +449,8 @@ run_exit1_case "ensure-parent:slug-body-less-resolve-exit1" -- \
 # reaches the scratch repositories. The gh stub records the first two argv words of every call in
 # GH_LOG, and every argument of each call other than `api graphql`, tab-joined, in GH_FULL_LOG.
 # It answers `api graphql` by GraphQL variable: a `label=` variable reads
-# SUBISSUE_TEST_GH_LABEL_RESPONSE, a `number=` variable reads SUBISSUE_TEST_GH_RESPONSE, and any
+# SUBISSUE_TEST_GH_LABEL_RESPONSE (SUBISSUE_TEST_GH_LABEL_REREAD_RESPONSE instead, when set, once a
+# `label create` call is logged), a `number=` variable reads SUBISSUE_TEST_GH_RESPONSE, and any
 # other read SUBISSUE_TEST_GH_LIST_RESPONSE when set, else SUBISSUE_TEST_GH_RESPONSE. `label create`
 # and `issue edit` exit with SUBISSUE_TEST_GH_LABEL_CREATE_STATUS and
 # SUBISSUE_TEST_GH_ISSUE_EDIT_STATUS (default 0); `issue create` prints the URL of issue 7. Any
@@ -470,7 +471,12 @@ printf '%s\n' '#!/bin/sh' \
   'if [ "$1 $2" = "api graphql" ]; then' \
   '  for gh_arg in "$@"; do' \
   '    case "$gh_arg" in' \
-  '      label=*) exec cat "$SUBISSUE_TEST_GH_LABEL_RESPONSE" ;;' \
+  '      label=*)' \
+  '        if [ -n "${SUBISSUE_TEST_GH_LABEL_REREAD_RESPONSE:-}" ] \' \
+  '           && grep -q -x -F "label create" "$SUBISSUE_TEST_GH_LOG"; then' \
+  '          exec cat "$SUBISSUE_TEST_GH_LABEL_REREAD_RESPONSE"' \
+  '        fi' \
+  '        exec cat "$SUBISSUE_TEST_GH_LABEL_RESPONSE" ;;' \
   '      number=*) exec cat "$SUBISSUE_TEST_GH_RESPONSE" ;;' \
   '    esac' \
   '  done' \
@@ -490,10 +496,12 @@ printf '%s\n' '#!/bin/sh' \
 # setup_fail <message>: a scratch setup step failed; the suite cannot run.
 setup_fail() { echo "FAIL: setup: $1" >&2; exit 2; }
 
-# reset_gh_stub_state: the stub answers every label read with a present `type:epic` label, routes
-# no read to a list response, and lets `label create` and `issue edit` succeed.
+# reset_gh_stub_state: the stub answers every label read with a present `type:epic` label (no
+# separate reread answer), routes no read to a list response, and lets `label create` and
+# `issue edit` succeed.
 reset_gh_stub_state() {
   GH_LABEL_RESPONSE="$PI_DIR/ensure-parent-label-present-response.json"
+  GH_LABEL_REREAD_RESPONSE=""
   GH_LIST_RESPONSE=""
   GH_LABEL_CREATE_STATUS=0
   GH_ISSUE_EDIT_STATUS=0
@@ -503,7 +511,7 @@ reset_gh_stub_state
 # run_live_ops <dir> <gh-response> -- <ops-arg...>
 # Runs subissue-ops.sh LIVE (SUBISSUE_OPS_OFFLINE unset) in <dir> with the recording gh stub first
 # on PATH, after emptying both gh call logs. The stub also reads the GH_LABEL_RESPONSE,
-# GH_LIST_RESPONSE, GH_LABEL_CREATE_STATUS and GH_ISSUE_EDIT_STATUS state. Sets LIVE_OUT (stdout)
+# GH_LABEL_REREAD_RESPONSE, GH_LIST_RESPONSE, GH_LABEL_CREATE_STATUS and GH_ISSUE_EDIT_STATUS state. Sets LIVE_OUT (stdout)
 # and LIVE_STATUS.
 run_live_ops() {
   local dir="$1" gh_response="$2"; shift 2
@@ -515,6 +523,7 @@ run_live_ops() {
     SUBISSUE_TEST_GH_LOG="$GH_LOG" SUBISSUE_TEST_GH_FULL_LOG="$GH_FULL_LOG" \
     SUBISSUE_TEST_GH_RESPONSE="$gh_response" \
     SUBISSUE_TEST_GH_LABEL_RESPONSE="$GH_LABEL_RESPONSE" \
+    SUBISSUE_TEST_GH_LABEL_REREAD_RESPONSE="$GH_LABEL_REREAD_RESPONSE" \
     SUBISSUE_TEST_GH_LIST_RESPONSE="$GH_LIST_RESPONSE" \
     SUBISSUE_TEST_GH_LABEL_CREATE_STATUS="$GH_LABEL_CREATE_STATUS" \
     SUBISSUE_TEST_GH_ISSUE_EDIT_STATUS="$GH_ISSUE_EDIT_STATUS" \
@@ -682,6 +691,28 @@ if [ "$(count_gh_calls "label create")" = 1 ]; then
 else
   failed "ensure-parent:live-label-create-failure-attempted" "gh calls: $(tr '\n' ';' <"$GH_LOG")"
 fi
+# A label create that fails because a concurrent run created the label first: the label is read
+# again, and only an exact `type:epic` reread lets the run label the epic and print its record.
+reset_gh_stub_state
+GH_LABEL_RESPONSE="$PI_DIR/ensure-parent-label-missing-response.json"
+GH_LABEL_REREAD_RESPONSE="$PI_DIR/ensure-parent-label-present-response.json"
+GH_LABEL_CREATE_STATUS=1
+run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+  ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+assert_live_labeled "ensure-parent:live-label-create-conflict-reread-labeled" \
+  "$EXPECTED_DIR/ensure-parent-seed.json" 3 "$LABEL_CREATE_CALL" "$EDIT_EPIC7_CALL"
+for label_reread in \
+  "missing:ensure-parent-label-missing-response.json" \
+  "case-variant:ensure-parent-label-case-variant-response.json" \
+  "malformed:ensure-parent-label-malformed-response.json" ; do
+  reset_gh_stub_state
+  GH_LABEL_RESPONSE="$PI_DIR/ensure-parent-label-missing-response.json"
+  GH_LABEL_REREAD_RESPONSE="$PI_DIR/${label_reread#*:}"
+  GH_LABEL_CREATE_STATUS=1
+  run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \
+    ensure-parent --existing-number 7 --slug "$SEED_SLUG" --repo "$DEMO_REPO"
+  assert_live_label_failure "ensure-parent:live-label-create-conflict-reread-${label_reread%%:*}-fails-closed" 0
+done
 reset_gh_stub_state
 GH_ISSUE_EDIT_STATUS=1
 run_live_ops "$TMPDIR_TEST" "$PI_DIR/ensure-parent-seed-response.json" -- \

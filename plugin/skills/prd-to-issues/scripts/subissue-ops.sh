@@ -77,7 +77,9 @@
 #              It reads the repository's label by name (GraphQL repository.label, owner/name/label
 #              via -f, through the SHARED kernel); a missing label is created with
 #              `gh label create type:epic --color 3e4b9e --description "triage type rating" -R
-#              <owner/repo>` (the triage palette's values, never --force); a label found whose name
+#              <owner/repo>` (the triage palette's values, never --force); when that create
+#              fails, the label is read again the same way and the run goes on only if it now
+#              reads exactly `type:epic` (another run created it); a label found whose name
 #              is not exactly `type:epic` (e.g. `Type:Epic`) FAILS CLOSED; then `gh issue edit
 #              <number> -R <owner/repo> --add-label type:epic`. It never edits an existing label,
 #              never removes a label and never touches an issue's title or body. Any read, create
@@ -984,16 +986,12 @@ paginate_to_completeness() {
   printf '%s' "$accumulated"
 }
 
-# ensure_epic_label <owner_repo> <number>: give the epic issue <number> the `type:epic` label
-# (live path only; the caller has validated owner_repo and ensured `gh` is on PATH). Reads the
-# repository's label by name through the shared kernel (root `.data.repository`; label null, or an
-# object with a non-empty string name). A missing label is created with the triage palette's color
-# and description, never with --force; a label found under a name that is not exactly
-# `type:epic` (e.g. `Type:Epic`) fails closed. Then adds the label to the issue. It never edits an
-# existing label, never removes a label and never touches an issue's title or body. Any read,
-# create or edit failure exits nonzero with nothing on stdout.
-ensure_epic_label() {
-  local owner_repo="$1" number="$2" owner repo_name resp label_read label_name
+# read_epic_label_name <owner_repo>: prints the name of the repository's label named `type:epic`
+# as GitHub returns it, or nothing when the repository has none. Reads it through the shared
+# kernel (root `.data.repository`; label null, or an object with a non-empty string name). A read
+# failure or a malformed read exits nonzero with nothing on stdout.
+read_epic_label_name() {
+  local owner_repo="$1" owner repo_name resp label_read
   owner="${owner_repo%%/*}"; repo_name="${owner_repo#*/}"
   resp="$(gh api graphql "${GQL_HEADER_ARGS[@]}" -f query="$EPIC_LABEL_QUERY" \
             -f owner="$owner" -f name="$repo_name" -f label="$EPIC_LABEL" 2>/dev/null)" \
@@ -1006,12 +1004,29 @@ ensure_epic_label() {
     'true' \
     '.data.repository.label')" \
     || die "ensure-parent: malformed read of label '$EPIC_LABEL'" 1
-  label_name="$(printf '%s' "$label_read" | jq -r 'if . == null then "" else .name end')" \
+  printf '%s' "$label_read" | jq -r 'if . == null then "" else .name end' \
     || die "ensure-parent: could not read the name of label '$EPIC_LABEL'" 1
+}
+
+# ensure_epic_label <owner_repo> <number>: give the epic issue <number> the `type:epic` label
+# (live path only; the caller has validated owner_repo and ensured `gh` is on PATH). Reads the
+# repository's label (read_epic_label_name). A missing label is created with the triage palette's
+# color and description, never with --force; when that create fails, the label is read again and
+# the run goes on only if it now reads exactly `type:epic` (a concurrent run created it). A label
+# found under a name that is not exactly `type:epic` (e.g. `Type:Epic`) fails closed. Then adds
+# the label to the issue. It never edits an existing label, never removes a label and never
+# touches an issue's title or body. Any read, create or edit failure exits nonzero with nothing
+# on stdout.
+ensure_epic_label() {
+  local owner_repo="$1" number="$2" label_name
+  label_name="$(read_epic_label_name "$owner_repo")" || exit "$?"
   if [ -z "$label_name" ]; then
-    gh label create "$EPIC_LABEL" --color "$EPIC_LABEL_COLOR" \
-        --description "$EPIC_LABEL_DESCRIPTION" -R "$owner_repo" >/dev/null \
-      || die "ensure-parent: gh label create '$EPIC_LABEL' failed" 1
+    if ! gh label create "$EPIC_LABEL" --color "$EPIC_LABEL_COLOR" \
+        --description "$EPIC_LABEL_DESCRIPTION" -R "$owner_repo" >/dev/null; then
+      label_name="$(read_epic_label_name "$owner_repo")" || exit "$?"
+      [ "$label_name" = "$EPIC_LABEL" ] \
+        || die "ensure-parent: gh label create '$EPIC_LABEL' failed" 1
+    fi
   elif [ "$label_name" != "$EPIC_LABEL" ]; then
     die "ensure-parent: the repository's label '$label_name' is not exactly '$EPIC_LABEL'; refusing to label the epic" 1
   fi
