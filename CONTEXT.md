@@ -162,7 +162,7 @@ The `HIVEMIND_LOCAL_REVIEWER` setting that picks the tool the **Adaptation Cycle
 _Avoid_: review CLI, codex override
 
 **Review Preset**:
-A named, built-in **Local Reviewer** configuration; today only `codex-plugin`, which calls the Codex plugin's own adversarial-review command.
+A named, built-in **Local Reviewer** configuration; today only `codex-plugin`, which runs Hivemind's review prompt through the Codex plugin's own `task` command (read-only), not its adversarial-review command.
 _Avoid_: adapter, profile
 
 **Remediation**:

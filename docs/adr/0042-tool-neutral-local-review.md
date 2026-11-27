@@ -76,3 +76,33 @@ Issue 673 found that real review tools wrap their JSON in prose or fences, and t
 User decision, 2026-11-25: decisions 1 to 4.
 
 Links: https://github.com/brenpike/hivemind/issues/673.
+
+## Amendment 2026-11-26: whole diff in every prompt, too-large skip, preset through the companion task command (issue 684)
+
+Issue 684 found a local review that passed without reading the whole diff. In a delivery on 2026-11-25, the review read about 760 of 1237 diff lines and gave the verdict `approve`. An input over 64 KB went to a file, and the tool read that file its own way. The `codex-plugin` preset (companion 1.0.6) inlines a diff only up to 2 files and 256 KiB. Past that, Codex collects the diff itself. Nothing checked coverage. Three decisions follow. Decisions 1, 3 and 6 and Implementation decisions, item 3, are amended.
+
+1. **Every prompt holds the whole review input.** This amends decision 3. The review input is the commit log, the diff stat and the full diff. There is no file mode, and the script writes only its own work files, in a private folder under `${TMPDIR:-/tmp}`. The limit is on the review input, measured before the prompt is built. It is 65536 bytes when the prompt fills a `{prompt}` argv element, for the same per-argument reason as before: the fixed template and schema add about 7 KiB, so the prompt stays well under the 128 KiB limit for one argument, and an argv too long to run ends `skipped: tool-missing`. It is 262144 bytes on stdin and for the `codex-plugin` preset. That matches the companion's own inline cap. The large-diff file in Implementation decisions, item 10, goes with the file mode.
+2. **Too large means skip.** This amends decision 6. A review input over its limit ends `skipped: too-large`, before any snapshot or run. Skip reasons are exactly `no-reviewer`, `bad-setting`, `tool-missing`, `tool-failed`, `timed-out` and `too-large`. This supersedes the list under Implementation decisions. The fallback follows `docs/engineering-principles.md` P26: local review did not run, and the PR body and the final report name the skip with its reason. The `skipped:` and `blocker:` output shapes stay, so `hivemind:design-review` needs no change. Two blockers go: cannot prepare the review diff file, and cannot remove it.
+3. **The preset runs the companion's `task` command.** This amends decision 1 and Implementation decisions, item 3. The preset still runs the Codex plugin's own command. It runs `task`, in its read-only sandbox by default, with Hivemind's prompt on stdin and `--json`. Its `.rawOutput` goes through the shape rules of the 2026-11-25 amendment, decision 1, and is checked against the same schema. `.result` is no longer read. Trade-off: Codex's `outputSchema` enforcement is lost. Tolerant parsing covers it.
+
+These options were rejected:
+
+| Option | Rejected because |
+|---|---|
+| Echo a coverage token from the last line of the prompt | It proves the end was read, not the middle. It needs a schema change, and the preset cannot carry it |
+| Split the diff over several reviewer runs | It does not fit the 570-second call budget. It loses context across files |
+| Keep the file mode with an instruction to read it all | The issue 684 run shows the instruction does not bind |
+| Keep the preset on `adversarial-review` and record coverage unchecked | It leaves the default reviewer, the likely path of the issue 684 run, unfixed |
+| Skip the preset whenever the companion would collect the diff itself | It mirrors companion internals and skips nearly every real branch |
+
+Recorded residual: a tool that truncates or compacts its own prompt is outside what the script can see. The impact is bounded. 256 KiB is about 70,000 to 85,000 tokens, well under the context windows of current reviewers.
+
+Threat-model residual: the reviewer's output has no byte cap. `run-review.sh` writes the reviewer's stdout and stderr to temporary files, and only the call's 570-second budget, with its process-group kill, bounds them. The reviewer is a command the operator set up. It runs with the user's own rights, so it could fill the disk without the script. Trunk has the same code. Run decision, 2026-11-26, under `plugin/governance/decision-autonomy.md` (`### Review Calls`), listed for veto on the PR.
+
+Threat-model residual: `TMPDIR` is operator environment. `run-review.sh` makes its work folder under `${TMPDIR:-/tmp}` and does not refuse a `TMPDIR` inside the work tree under review. The impact is bounded. The files are local and private, and they are removed at exit. When they are not ignored, the before/after check blocks the run as `reviewer modified the working tree`, so the run fails closed and never passes falsely. This is outside the threat model: `TMPDIR` is operator environment, like the reviewer command. User decision, 2026-11-26, local review finding d3b592ef, listed on the PR.
+
+Threat-model residual: the base ref is resolved at each read. `run-review.sh` checks once that the base names a commit and pins HEAD to one SHA, but it resolves the base name again at each of the four branch-diff reads (the changed-path list, the log, the stat and the diff). The impact is bounded. It needs a concurrent ref move on the base in the reviewed checkout, such as a commit, fetch or pull, during the seconds of collection. The reviewer then sees a mismatched input. It cannot make a failing review pass or write the work tree, and the before/after check still holds the work tree. This is outside the threat model: a concurrent git move of the base or HEAD during a review is operator activity, like `TMPDIR` and the reviewer command. User decision, 2026-11-26, rejecting the local review root cluster (findings ed9fc7a5, 0e8c0119, 12ceae9c, 6a5820f4), listed on the PR.
+
+User decision, 2026-11-26: decision 3. Run decisions under the request's delegation, listed for veto on the PR: decisions 1 and 2 and the rejected options.
+
+Links: https://github.com/brenpike/hivemind/issues/684.
