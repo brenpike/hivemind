@@ -5521,6 +5521,67 @@ const ROW_TESTS = {
       assert.deepEqual(structuredClone([brief.options, brief.recommendation]), structuredClone([main.buildApproachChoice().options, main.buildApproachChoice().recommendation]));
       assert.deepEqual(structuredClone(lib.validateSchema(briefSchema, main.markOutsideLimits(brief, ['src/auth.js']))), { ok: true, errors: [] });
     });
+    const CARRIED_LEAD = 'Run the remediation plan that carries out your change of approach on the working branch, then every gate again.';
+    const ACCEPT_LINES = '- A: Accept this plan and run its steps. (recommended)\n- B: Stop before any step runs.\nRecommendation: A (strong). The plan answers the local review findings, and every gate runs again on its commit before the pull request.';
+    test('a carried change of approach turns a repeats_surface remediation plan into Accept or Stop, recommended A strong, its gate still architectural, so it is still asked', () => {
+      const plan = { ...REMEDIATION_PLAN, remediation_gate: gateWith('repeats_surface') };
+      const brief = main.buildRemediationPlanBrief(plan, true);
+      assert.equal(brief.kind, 'remediation_plan_acceptance');
+      assert.equal(brief.problem, CARRIED_LEAD + ' The plan ' + main.remediationGateTexts().repeats_surface + '.');
+      assert.deepEqual(structuredClone(brief.options.map((option) => [option.id, option.summary, option.effort, option.reversible, option.beyond_request])), [['A', 'Accept this plan and run its steps.', 'medium', true, false], ['B', 'Stop before any step runs.', 'trivial', true, false]]);
+      assert.deepEqual([brief.recommendation.option_id, brief.recommendation.strength], ['A', 'strong']);
+      assert.deepEqual({ ...brief.gate }, { irreversible: false, architectural: true, safety: false });
+      assert.equal(main.buildPlanAcceptanceBrief(plan).options[0].summary, 'Accept the plan and run its steps.');
+      for (const level of autonomyTable.levels) {
+        assert.deepEqual({ ...lib.decide({ kind: 'remediation_plan_acceptance', level: level, brief: brief }, autonomyTable, briefSchema) }, { action: 'ask', reason: level === 'low' ? 'table_surface' : 'gate_architectural' }, level);
+      }
+      const outsidePaths = Array.from({ length: 400 }, (_, index) => 'x/f' + index + '.js');
+      const full = main.markOutsideLimits(main.buildRemediationPlanBrief({ ...REMEDIATION_PLAN, remediation_gate: FULL_GATE }, true), outsidePaths);
+      assert.ok(full.problem.startsWith(CARRIED_LEAD + ' The plan '), full.problem);
+      assert.ok(lib.validateSchema(briefSchema, full).ok, full.problem);
+      assert.ok(lib.validateSchema(agentBriefSchema, full).ok, full.problem);
+      assert.ok(Array.from(full.problem).length <= 300, String(Array.from(full.problem).length));
+      assert.deepEqual({ ...full.gate }, { irreversible: true, architectural: true, safety: true });
+    });
+    test('a carried change of approach changes nothing without repeats_surface, and a false flag builds the brief of no flag', () => {
+      for (const gate of [CLEAN_GATE, ...FLAG_NAMES.filter((flag) => flag !== 'repeats_surface').map((flag) => gateWith(flag))]) {
+        const plan = { ...REMEDIATION_PLAN, remediation_gate: gate };
+        assert.deepEqual(structuredClone(main.buildRemediationPlanBrief(plan, true)), structuredClone(main.buildRemediationPlanBrief(plan)), JSON.stringify(gate));
+      }
+      for (const gate of [CLEAN_GATE, gateWith('repeats_surface'), FULL_GATE]) {
+        const plan = { ...REMEDIATION_PLAN, remediation_gate: gate };
+        assert.deepEqual(structuredClone(main.buildRemediationPlanBrief(plan, false)), structuredClone(main.buildRemediationPlanBrief(plan)), JSON.stringify(gate));
+      }
+    });
+    test('describeApproachChange reads no change of approach from the Accept brief or a plain plan acceptance brief, for reply A or B', () => {
+      const plan = { ...REMEDIATION_PLAN, remediation_gate: gateWith('repeats_surface') };
+      for (const brief of [main.buildRemediationPlanBrief(plan, true), main.buildPlanAcceptanceBrief(plan), main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN)]) {
+        for (const reply of ['A', 'B']) {
+          assert.equal(main.describeApproachChange(reply, brief), '', reply + ' ' + brief.problem);
+        }
+      }
+      assert.notEqual(main.describeApproachChange('B', main.buildRemediationPlanBrief(plan)), '');
+    });
+    test('reply B to the approach question whose revise returns another repeats_surface plan pauses once more on Accept or Stop, and a reply A whose revise settles it runs that plan with no third pause', async () => {
+      const plan = { ...REMEDIATION_PLAN, remediation_gate: gateWith('repeats_surface') };
+      const carried = { ...plan, summary: 'Build the cache key from the parsed request.', steps: [makeStep('STEP-006', ['src/key.js'])] };
+      const results = remediationResults(ESCALATION, { 'plan-2': planResult(plan), 'revise-1': reviseResult(planResult(carried), []), 'scope-2-1': EMPTY_SCOPE, 'revise-2': reviseResult(planResult(carried), ['Q1']), 'work-2-STEP-006': WORKER_DONE });
+      const first = await runWorkflow(LAUNCH, results);
+      assert.ok(first.result.message.includes('**\n' + APPROACH_LINES), first.result.message);
+      const second = await runWorkflow(resumeWith(LAUNCH, first.result, 'B'), results);
+      assert.equal(second.result.needs_user, true, second.result.message);
+      assert.deepEqual(labelsOf(second), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'revise-1', 'scope-2-1']);
+      const carriedBrief = main.buildRemediationPlanBrief(carried, true);
+      assert.ok(carriedBrief.problem.startsWith(CARRIED_LEAD), carriedBrief.problem);
+      assert.ok(second.result.message.startsWith(main.describePlanLine(carried) + '\n\n**Q1. ' + carriedBrief.problem + '**\n' + ACCEPT_LINES), second.result.message);
+      assert.ok(!second.result.message.includes('Keep patching') && !second.result.message.includes('**Q2.'), second.result.message);
+      const run = await runWorkflow(resumeWith(LAUNCH, second.result, 'A'), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'revise-1', 'scope-2-1', 'revise-2', 'branch-2', 'work-2-STEP-006', 'commit-2-1', ...tailLabels(2)]);
+      assert.equal(readDataBlock(callOf(run, 'revise-2').prompt, 'reply'), 'A');
+      assert.ok(!labelsOf(run).includes('work-2-STEP-002'), labelsOf(run).join(' '));
+      assert.ok(prBodyOf(run, 'pr-2').startsWith(bodyStart(carried) + '\n\n'), prBodyOf(run, 'pr-2'));
+    });
     test('an accepted remediation plan whose revise rewrites the summary runs its steps with no re-ask', async () => {
       const rewritten = planResult({ ...REMEDIATION_PLAN, summary: REMEDIATION_PLAN.summary + ' The user accepted this plan.' });
       const run = await runWorkflow(REMEDIATION_LAUNCH, remediationResults(ESCALATION, { 'revise-1': reviseResult(rewritten, ['Q1']) }));
@@ -10642,6 +10703,51 @@ const ROW_TESTS = {
       first.pendingReply = 'B';
       assert.equal(main.requestReviewReplan(CLUSTER, first, makePlan()).replan.reason, REPLAN_REASON);
       assert.equal(first.repeatClusterAsked, false);
+    });
+    test('the reply to the approach question sets run.approachChanged from the chosen option only: true for B, b and B., false for A, C and a reply in the user words, the latest answer winning', () => {
+      assert.equal(main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true }).approachChanged, undefined);
+      for (const [reply, expected] of [['B', true], ['b', true], ['B.', true], ['A', false], ['C', false], ['b!', false], ['Change the approach, please.', false], ['B, and keep test X', false]]) {
+        const state = createReplannedState();
+        state.pendingReply = reply;
+        main.requestReviewReplan(CLUSTER, state, SAME_SURFACE_PLAN);
+        assert.equal(state.approachChanged, expected, reply);
+      }
+      const latest = createReplannedState();
+      latest.approachChanged = true;
+      latest.pendingReply = 'A';
+      main.requestReviewReplan(CLUSTER, latest, SAME_SURFACE_PLAN);
+      assert.equal(latest.approachChanged, false);
+      const first = createReplannedState();
+      first.reviewReplans = 0;
+      first.pendingReply = 'B';
+      main.requestReviewReplan(CLUSTER, first, makePlan());
+      assert.equal(first.approachChanged, undefined);
+    });
+    test('reply B to the approach question makes the repeats_surface plan of pass 3 ask Accept or Stop, and a reply A whose revise settles it runs that plan with no further pause', async () => {
+      const carried = { ...APPROACH_PLAN, remediation_gate: { ...APPROACH_PLAN.remediation_gate, repeats_surface: true } };
+      const results = sameSurfaceResults({ 'plan-3': planResult(carried), 'revise-2': reviseResult(planResult(carried), ['Q1']) });
+      const paused = await runWorkflow(LAUNCH, results);
+      const asked = await runWorkflow(resumeWith(LAUNCH, paused.result, 'B'), results);
+      assert.equal(asked.result.needs_user, true, asked.result.message);
+      assert.deepEqual(labelsOf(asked), [...SECOND_PASS_LABELS, 'facts-3', 'scope-3', 'plan-3']);
+      const brief = main.buildRemediationPlanBrief(carried, true);
+      assert.ok(brief.problem.startsWith('Run the remediation plan that carries out your change of approach on the working branch, then every gate again.'), brief.problem);
+      assert.ok(asked.result.message.includes('**Q1. ' + brief.problem + '**\n- A: Accept this plan and run its steps. (recommended)\n- B: Stop before any step runs.\nRecommendation: A (strong). '), asked.result.message);
+      assert.ok(!asked.result.message.includes('Keep patching') && !asked.result.message.includes('**Q2.'), asked.result.message);
+      const run = await runWorkflow(resumeWith(LAUNCH, asked.result, 'A'), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), [...SECOND_PASS_LABELS, 'facts-3', 'scope-3', 'plan-3', 'revise-2', 'branch-3', 'work-3-STEP-003', 'commit-3-1', ...tailLabels(3)]);
+      assert.equal(readDataBlock(callOf(run, 'revise-2').prompt, 'reply'), 'A');
+    });
+    test('reply A to the approach question keeps the approach options on the repeats_surface plan of pass 3', async () => {
+      const carried = { ...APPROACH_PLAN, remediation_gate: { ...APPROACH_PLAN.remediation_gate, repeats_surface: true } };
+      const results = sameSurfaceResults({ 'plan-3': planResult(carried) });
+      const paused = await runWorkflow(LAUNCH, results);
+      const asked = await runWorkflow(resumeWith(LAUNCH, paused.result, 'A'), results);
+      assert.equal(asked.result.needs_user, true, asked.result.message);
+      assert.deepEqual(labelsOf(asked), [...SECOND_PASS_LABELS, 'facts-3', 'scope-3', 'plan-3']);
+      assert.ok(asked.result.message.includes('**Q1. ' + main.buildRemediationPlanBrief(carried).problem + '**\n- A: Keep patching this class.\n'), asked.result.message);
+      assert.ok(!asked.result.message.includes('Accept this plan'), asked.result.message);
     });
     test('the repeated cluster question pins the encoded root and open finding titles, whole and outside the brief, and the run state starts with the question unasked', () => {
       assert.equal(main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true }).repeatClusterAsked, false);
