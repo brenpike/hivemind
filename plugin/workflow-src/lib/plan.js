@@ -8,10 +8,11 @@
  *
  * Inputs
  *   run     the run state of the workflow's main.js. The pass reads
- *           request, trunk, references, level, pass, decisions,
- *           storedAnswers and pendingReply, and updates answerLog, answeredKeys, taken,
- *           approvals and reversibleEffects. references reach
- *           describeClosesProblem (lib/title.js).
+ *           request, trunk, references, level, pass, decisions, storedAnswers
+ *           and pendingReply, and updates answerLog, answeredKeys, taken,
+ *           approvals and reversibleEffects. It reads approachChanged and
+ *           sets it true, never false. references reach describeClosesProblem
+ *           (lib/title.js).
  *   facts   the checked facts of the pass, from runFactsStep (lib/runner.js).
  *   scope   the checked scope of the pass, from runScopeStep (scope.js).
  *           Once the revise result of a reply round passes the plan check,
@@ -31,7 +32,7 @@
  *   data constants PLAN_SCHEMA, BRIEF_SCHEMA and AUTONOMY_TABLE. The
  *   workflow functions it reads: buildPlanAcceptanceBrief,
  *   buildRemediationPlanBrief, buildRepeatPinned, buildTrunkStaleBrief, buildExternalEffectBrief,
- *   listOutsidePaths and markOutsideLimits (briefs.js), applyApprovalChoices
+ *   describeApproachChange, listOutsidePaths and markOutsideLimits (briefs.js), applyApprovalChoices
  *   (approvals.js), stopDelivery and pauseDelivery (record.js) and
  *   runScopeStep (scope.js). Every workflow whose code calls these
  *   functions declares them.
@@ -59,7 +60,11 @@
  *   function of this library.
  *   Once local review sent the run back to planning, every later plan
  *   acceptance resolves through decide() kind remediation_plan_acceptance,
- *   with the brief of buildRemediationPlanBrief (briefs.js).
+ *   with the brief of buildRemediationPlanBrief (briefs.js) and
+ *   run.approachChanged. A reply the revise did not settle, to a round whose
+ *   one shown ask is that acceptance, sets run.approachChanged true when
+ *   describeApproachChange reads option B in it; a settled reply never does,
+ *   so the restored shown plan keeps its brief and key (issue 434).
  *   A pass whose replan data carries a review plans on sonnet, and on opus
  *   once a result flags architectural (callPassPlanner, lib/checks.js).
  *   Every decision resolves through decide() with its kind fixed here,
@@ -72,69 +77,66 @@
  *   acceptances, 'run' for trunk_stale, whose rendered text holds the trunk
  *   facts, and 'run' with the step id for an irreversible effect, whose
  *   rendered text holds the exact summary, so a changed irreversible text
- *   is a new question the user must approve word for word. A tail decision
- *   has no scope and no key. A plan
- *   acceptance ask waits while any other ask of its round is open, so the
- *   user accepts the plan that holds no open question. When a reply settles
- *   the shown acceptance, the plan result that was shown is the one that
- *   runs, and a revise that only rewrites the summary to record the answer
- *   does not ask again (issue 433). The residual: a planner question raised
- *   again with other rendered text, a changed recommendation too, is a new
- *   question, asked again in the next pause. The planner's revise pass reads
- *   the reply. The revise result names in settled, by label like Q1, the
+ *   is a new question the user must approve word for word. A tail decision has
+ *   no scope and no key. A plan acceptance ask waits while any other ask of its
+ *   round is open, so the user accepts the plan that holds no open question.
+ *   When a reply settles the shown acceptance, the plan result that was shown
+ *   is the one that runs, and a revise that only rewrites the summary to record
+ *   the answer does not ask again (issue 433). The residual: a planner question
+ *   raised again with other rendered text, a changed recommendation too, is a
+ *   new question, asked again in the next pause. The planner's revise pass
+ *   reads the reply. The revise result names in settled, by label like Q1, the
  *   shown questions the reply settled: only the keys of those questions count
  *   as answered and are not asked again, and every other question resolves
  *   again and goes in the next pause. A pause shows no decision made for you,
  *   so settled holds Q labels only. Which shown questions a reply settles is
  *   the planner's judgment, as its gate flags are (ADR-0037 decision 3). The
- *   impact is bounded: a question the planner does not name is asked again,
- *   the settled enum allows only the labels shown, and nothing runs while a
+ *   impact is bounded: a question the planner does not name is asked again, the
+ *   settled enum allows only the labels shown, and nothing runs while a
  *   question is open. Rejected: a free-text reply has no code parse, and a
  *   pause per effect adds stops (review finding d5619285, option C).
  *   Every plan value at a field whose PLAN_SCHEMA description starts with
- *   repositoryPathMark() must pass isRepositoryPath (lib/paths.js holds the
- *   rule). describePlanProblem runs findRepositoryPathProblem after the
- *   schema check and before computeWave, so a bad path stops the run
- *   before the branch step and any later agent call.
- *   Stops (issue 457): a plan, revise or rescope problem goes through
- *   stopDelivery (record.js) with isReplan true, so the reply starts a new
- *   pass outside maxReplans(). Each plan and revise call goes through
- *   callCheckedPlanner (lib/checks.js), which asks a result that fails the
- *   plan check again, a planner question decide() refuses as a defect
- *   among them, and one still failing ends the run, terminal with next
- *   action report. A null result, an agent failure, adds the
- *   agent-failure sentence through describeUnusableResult (lib/stop.js)
- *   and ends the run with next action run_again. A planner's blocked
- *   outcome that fits its schema and gives a reason pauses with the fix
- *   line, and the reply reaches the next plan prompt's answers block.
- *   The settled question guard below is report too: a workflow defect. A
- *   revise that ends the run on the plan check logs its reply first,
- *   settled []; one a retry fixed logs the settled labels of the fixed
- *   result. Before the plan call, a run that started on a branch other
- *   than the trunk whose name is outside the Branch Taxonomy pauses with
- *   the fix line.
+ *   repositoryPathMark() must pass isRepositoryPath (lib/paths.js holds the rule).
+ *   describePlanProblem runs findRepositoryPathProblem after the schema check and
+ *   before computeWave, so a bad path stops the run before the branch step and any
+ *   later agent call.
+ *   Stops (issue 457): a plan, revise or rescope problem goes through stopDelivery
+ *   (record.js) with isReplan true, so the reply starts a new pass outside
+ *   maxReplans(). Each plan and revise call goes through callCheckedPlanner
+ *   (lib/checks.js), which asks a result that fails the plan check again, a
+ *   planner question decide() refuses as a defect among them, and one still
+ *   failing ends the run, terminal with next action report. A null result, an
+ *   agent failure, adds the agent-failure sentence through describeUnusableResult
+ *   (lib/stop.js) and ends the run with next action run_again. A planner's blocked
+ *   outcome that fits its schema and gives a reason pauses with the fix line, and
+ *   the reply reaches the next plan prompt's answers block. The settled question
+ *   guard below is report too: a workflow defect. A revise that ends the run on
+ *   the plan check logs its reply first, settled []; one a retry fixed logs the
+ *   settled labels of the fixed result. Before the plan call, a run that started
+ *   on a branch other than the trunk whose name is outside the Branch Taxonomy
+ *   pauses with the fix line.
  *   Each validation_commands entry is one command line: describePlanProblem
  *   refuses a blank entry, or one that holds a line break or another
  *   control character, naming the reason, before the branch step.
- *   Branch names: by the plan schema branch pattern, which the schema check
- *   tests first, describePlanProblem refuses a plan.branch outside the
- *   Branch Taxonomy and Branch Naming of ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md,
- *   so a runner with no skill body never creates one (issue 467).
- *   Title type: normalizePlanTitle (lib/title.js) first cuts the plan's own
- *   commit type from plan.title. Then describePlanProblem refuses a plan whose cleaned
+ *   Branch names: by the plan schema branch pattern, which the schema check tests
+ *   first, describePlanProblem refuses a plan.branch outside the Branch Taxonomy
+ *   and Branch Naming of ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md, so a runner
+ *   with no skill body never creates one (issue 467).
+ *   Title type: normalizePlanTitle (lib/title.js) first cuts the plan's own commit
+ *   type from plan.title. Then describePlanProblem refuses a plan whose cleaned
  *   plan.title starts with a commitTypeMap() value in any letter case, an optional
- *   parenthesized scope, an optional '!' and ':', with a fixed message that
- *   names no title text, since the pull request step writes the type
- *   before the title (issue 469). It refuses an empty buildTitleText(plan)
- *   (lib/title.js) the same way, so the pull request title is never only its type.
- *   Settled question guard: within one pass, a trunk_stale question a
- *   reply settled renders the same text for the whole run, and a settled
+ *   parenthesized scope, an optional '!' and ':', with a fixed message that names
+ *   no title text, since the pull request step writes the type before the title
+ *   (issue 469). It refuses an empty buildTitleText(plan) (lib/title.js) the same
+ *   way, so the pull request title is never only its type.
+ *   Settled question guard: within one pass, a trunk_stale question a reply
+ *   settled renders the same text for the whole run, and a settled
  *   plan_acceptance or remediation_plan_acceptance restores the plan result
- *   that was shown, so its key holds and it is never asked again. When a
- *   pause round would still show one, that is a workflow defect: the run
- *   does not pause, and a terminal stop ends it naming the question kind. An
- *   irreversible effect whose text changed, and a planner question that
- *   renders other text, are new questions and pause again.
+ *   that was shown, so its key holds and it is never asked again. When a pause
+ *   round would still show one, that is a workflow defect: the run does not
+ *   pause, and a terminal stop ends it naming the question kind. An
+ *   irreversible effect whose text changed, and a planner question that renders
+ *   other text, are new questions and pause again.
  *   A planning pause leads with describePlanLine(plan): one line of the
  *   encoded branch, the step count, the distinct file count and
  *   digest.change through renderText. It names no outside path; the
@@ -157,37 +159,34 @@
  *   readReplyChoices (lib/brief.js) of the reply to run.approvals through
  *   applyApprovalChoices (approvals.js); settled still comes only from the
  *   revise.
- *   Every plan prompt once the log is not empty carries the whole log in
- *   an answers data block, and a revise prompt the entries of earlier
- *   rounds. Its data line calls settled only
- *   what the settled labels of an entry name, never the reply of the round
- *   being revised, so a replan never asks or reverses a settled answer and
- *   never takes an open question as settled (issue 472). Each prompt
- *   takes the log through listAnswerEntries, which puts one
- *   settled entry per launch decision ahead of it (issue 500). With no
+ *   Every plan prompt once the log is not empty carries the whole log in an
+ *   answers data block, and a revise prompt the entries of earlier rounds. Its
+ *   data line calls settled only what the settled labels of an entry name,
+ *   never the reply of the round being revised, so a replan never asks or
+ *   reverses a settled answer and never takes an open question as settled
+ *   (issue 472). Each prompt takes the log through listAnswerEntries, which
+ *   puts one settled entry per launch decision ahead of it (issue 500). With no
  *   decision and an empty log, the plan and first revise prompts are the
  *   prompts of a run with no answers, so a resume replays them from cache.
- *   Outside-limit list: the limit check and the pause lead read every plan
- *   path through the mark walk (listPlanPaths): the version files and the
- *   step files the wave commits take. When scope.limits is not empty, a
- *   plan path in neither versioning.artifact_files nor
- *   versioning.changelog_files that neither equals a limit path nor sits
- *   under it plus '/' makes resolvePlanAcceptance pass outside_limits, its
- *   only listed name, to decide(), so an acceptance decide() takes is
- *   listed for veto before merge: markOutsideLimits never changes the
- *   strength or why. A surface cell or a gate flag still asks, with its
- *   own reason; repeats_surface sets the remediation brief gate (issue 587).
- *   The acceptance problem names their count when it fits. Empty limits
- *   leave the brief as it was. The limits come only
- *   from the scope step, so a later pass lists a file outside them again.
- *   Validation fix round and local review edits are not plan paths and are
- *   outside the limits (ADR-0037, finding 2ecc5af1).
+ *   Outside-limit list: the limit check and the pause lead read every plan path
+ *   through the mark walk (listPlanPaths): the version files and the step files
+ *   the wave commits take. When scope.limits is not empty, a plan path in neither
+ *   versioning.artifact_files nor versioning.changelog_files that neither equals a
+ *   limit path nor sits under it plus '/' makes resolvePlanAcceptance pass
+ *   outside_limits, its only listed name, to decide(), so an acceptance decide()
+ *   takes is listed for veto before merge: markOutsideLimits never changes the
+ *   strength or why. A surface cell or a gate flag still asks, with its own
+ *   reason; repeats_surface sets the remediation brief gate (issue 587). The
+ *   acceptance problem names their count when it fits. Empty limits leave the
+ *   brief as it was. The limits come only from the scope step, so a later pass
+ *   lists a file outside them again. Validation fix round and local review edits
+ *   are not plan paths and are outside the limits (ADR-0037, finding 2ecc5af1).
  *   A taken decision goes in taken as {brief, kind, listed}, listed the
  *   listReasons() names decide() returns with it.
  *   The plan and revise prompts restate no rule of
  *   ${CLAUDE_PLUGIN_ROOT}/agents/cerebrate.md (docs/engineering-principles.md
- *   P24): how to read the facts, what is left to plan, the review block and
- *   the revise rules live there, and each field rule in its schema.
+ *   P24): how to read the facts, what is left to plan, the review block and the
+ *   revise rules live there, and each field rule in its schema.
  *
  * Why
  *   Every plan a wave runs is checked and accepted in this one place, so
@@ -249,7 +248,7 @@ function buildPlanPrompt(request, facts, scope, replan, answerLog) {
   if (replan !== undefined) {
     lines.push(formatDataBlock('replan', replan.reason));
   }
-  if (replan !== undefined && replan.review !== undefined) {
+  if (replan?.review !== undefined) {
     lines.push(formatDataBlock('review', replan.review));
   }
   if (hasAnswers) {
@@ -297,6 +296,7 @@ function describeValidationCommandProblem(command) {
 
 function describePlanProblem(planResult, resultSchema, facts, trunk, references) {
   const stopped = ', so ' + RUN_NAME + ' stopped.';
+  const planNames = 'The plan names ';
   if (!isPlainObject(planResult)) {
     return 'The planner returned no result' + stopped;
   }
@@ -309,7 +309,7 @@ function describePlanProblem(planResult, resultSchema, facts, trunk, references)
   const plan = planResult.plan;
   const pathLocation = findRepositoryPathProblem(PLAN_SCHEMA, plan, '');
   if (pathLocation !== '') {
-    return 'The plan names a path at ' + pathLocation + ' that is not a plain path inside the repository' + stopped;
+    return planNames + 'a path at ' + pathLocation + ' that is not a plain path inside the repository' + stopped;
   }
   const wave = computeWave(plan.steps, []);
   if (!wave.ok) {
@@ -319,15 +319,15 @@ function describePlanProblem(planResult, resultSchema, facts, trunk, references)
     return 'The plan copies a trunk freshness other than the facts' + stopped;
   }
   if (!isGitIdentifier(plan.branch) || !isGitIdentifier(plan.base)) {
-    return 'The plan names a branch or base that is not a safe git name' + stopped;
+    return planNames + 'a branch or base that is not a safe git name' + stopped;
   }
-  if (!plan.versioning.artifact_files.every((artifactPath) => isGitIdentifier(artifactPath))) {
-    return 'The plan names a version file path that is not a safe git path' + stopped;
+  if (!plan.versioning.artifact_files.every(isGitIdentifier)) {
+    return planNames + 'a version file path that is not a safe git path' + stopped;
   }
   for (let index = 0; index < plan.validation_commands.length; index += 1) {
     const commandProblem = describeValidationCommandProblem(plan.validation_commands[index]);
     if (commandProblem !== '') {
-      return 'The plan names a validation command at validation_commands[' + index + '] that ' + commandProblem + stopped;
+      return planNames + 'a validation command at validation_commands[' + index + '] that ' + commandProblem + stopped;
     }
   }
   if (typedTitlePattern().test(cleanTitleText(plan.title))) {
@@ -336,12 +336,11 @@ function describePlanProblem(planResult, resultSchema, facts, trunk, references)
   if (buildTitleText(plan) === '') {
     return 'The plan title leaves no text once it is cleaned and cut to fit the pull request title' + stopped;
   }
-  const isOnOtherBranch = facts.head_state === 'branch' && facts.branch !== trunk;
-  if (isOnOtherBranch && plan.branch !== facts.branch) {
+  if (facts.head_state === 'branch' && facts.branch !== trunk && plan.branch !== facts.branch) {
     return describeStartBranch(facts) + ' and delivers on it, but the plan names branch ' + encodeUntrustedText(plan.branch) + stopped;
   }
   if (!new RegExp(PLAN_SCHEMA.properties.branch.pattern, 'u').test(plan.branch)) {
-    return 'The plan names branch ' + encodeUntrustedText(plan.branch) + describeTaxonomyMiss() + stopped;
+    return planNames + 'branch ' + encodeUntrustedText(plan.branch) + describeTaxonomyMiss() + stopped;
   }
   return describeClosesProblem(plan, references);
 }
@@ -415,8 +414,7 @@ function resolveTrunkFreshness(facts, run, resolution) {
   if (mapped !== 'decide') {
     return mapped;
   }
-  const status = resolveDecision(TRUNK_STALE_KIND, buildTrunkStaleBrief(facts), 'run', run, resolution);
-  return status === 'ask' ? undefined : 'stale';
+  return resolveDecision(TRUNK_STALE_KIND, buildTrunkStaleBrief(facts), 'run', run, resolution) === 'ask' ? undefined : 'stale';
 }
 
 function resolveExternalEffects(plan, run, resolution) {
@@ -442,9 +440,8 @@ function resolveExternalEffects(plan, run, resolution) {
 function resolvePlanAcceptance(plan, run, resolution, scope) {
   const isRemediation = run.taken.some((entry) => entry.kind === PLANNER_ESCALATION_ROUTING_KIND || entry.kind === ROOT_CLUSTER_ROUTING_KIND);
   const outsidePaths = listOutsidePaths(plan, scope);
-  const listed = outsidePaths.length > 0 ? ['outside_limits'] : [];
-  const brief = isRemediation ? buildRemediationPlanBrief(plan) : buildPlanAcceptanceBrief(plan);
-  return resolveDecision(isRemediation ? REMEDIATION_PLAN_ACCEPTANCE_KIND : PLAN_ACCEPTANCE_KIND, markOutsideLimits(brief, outsidePaths), [run.pass, plan], run, resolution, listed);
+  const brief = isRemediation ? buildRemediationPlanBrief(plan, run.approachChanged) : buildPlanAcceptanceBrief(plan);
+  return resolveDecision(isRemediation ? REMEDIATION_PLAN_ACCEPTANCE_KIND : PLAN_ACCEPTANCE_KIND, markOutsideLimits(brief, outsidePaths), [run.pass, plan], run, resolution, outsidePaths.length > 0 ? ['outside_limits'] : []);
 }
 
 function resolvePlanAsks(planResult, facts, run, scope) {
@@ -472,14 +469,12 @@ function resolvePlanAsks(planResult, facts, run, scope) {
 
 function acceptResolution(resolution, run) {
   for (const entry of resolution.taken) {
-    const isListed = run.taken.some((listed) => JSON.stringify(listed.brief) === JSON.stringify(entry.brief));
-    if (!isListed) {
+    if (!run.taken.some((listed) => JSON.stringify(listed.brief) === JSON.stringify(entry.brief))) {
       run.taken.push(entry);
     }
   }
   for (const effect of resolution.reversibleEffects) {
-    const isListed = run.reversibleEffects.some((listed) => listed.stepId === effect.stepId && listed.summary === effect.summary);
-    if (!isListed) {
+    if (!run.reversibleEffects.some((listed) => listed.stepId === effect.stepId && listed.summary === effect.summary)) {
       run.reversibleEffects.push(effect);
     }
   }
@@ -524,7 +519,7 @@ function listAnswerEntries(run) {
  * review, so the next plan still sees the findings.
  */
 function keepReplanReview(passEnd, replan) {
-  if (passEnd.replan === undefined || replan === undefined || replan.review === undefined) {
+  if (passEnd.replan === undefined || replan?.review === undefined) {
     return passEnd;
   }
   return { replan: { reason: passEnd.replan.reason, review: replan.review } };
@@ -541,7 +536,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
   if (facts.head_state === 'branch' && facts.branch !== run.trunk && !new RegExp(PLAN_SCHEMA.properties.branch.pattern, 'u').test(facts.branch)) {
     return stopDelivery([{ problem: describeStartBranch(facts) + describeTaxonomyMiss() + '.' }], run, [], true);
   }
-  const pass = { model: replan === undefined || replan.review === undefined ? undefined : 'sonnet' };
+  const pass = { model: replan?.review === undefined ? undefined : 'sonnet' };
   let checked = await callPassPlanner(run, facts, { prompt: buildPlanPrompt(run.request, facts, scope, replan, listAnswerEntries(run)), label: 'plan-' + run.pass, phaseTitle: 'Plan', schema: resultSchema }, pass);
   for (;;) {
     let { planResult, problem } = checked;
@@ -549,8 +544,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
       if (shownAsks.length > 0) {
         logPlanningReply(run, shownEntry, shownAsks);
       }
-      const unusable = planResult === null ? describeUnusableResult(problem, null) : { problem: problem };
-      return stopDelivery([checked.isExhausted ? describeCheckLimit(problem) : unusable], run, [], true);
+      return stopDelivery([checked.isExhausted ? describeCheckLimit(problem) : planResult === null ? describeUnusableResult(problem, null) : { problem: problem }], run, [], true);
     }
     if (shownAsks.length > 0) {
       logPlanningReply(run, shownEntry, shownAsks, planResult);
@@ -558,6 +552,9 @@ async function runPlanningPass(run, facts, passScope, replan) {
       if (shownAsks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind) && run.answeredKeys.has(ask.key))) {
         planResult = shownResult;
       } else {
+        if (shownAsks[0].kind === REMEDIATION_PLAN_ACCEPTANCE_KIND && describeApproachChange(shownEntry.reply, shownAsks[0].brief) !== '') {
+          run.approachChanged = true;
+        }
         const rescoped = await runScopeStep(run, facts, run.answerLog.length);
         if (rescoped.problem !== undefined) {
           return stopDelivery([rescoped], run, [], true);

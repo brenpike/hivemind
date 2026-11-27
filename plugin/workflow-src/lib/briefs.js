@@ -41,8 +41,10 @@
  *            of option B and ' The plan must remove or narrow that decision.',
  *            when the reply, read by readReplyChoices
  *            (lib/brief.js) against the one question of brief, picks the
- *            recommended option of buildApproachChoice, never from free
- *            text; '' otherwise.
+ *            option whose summary is that of option B of
+ *            buildApproachChoice, never from free text; '' otherwise, so ''
+ *            for every brief that is not an approach question, the
+ *            acceptance of a carried change included.
  *   buildFindingsData(root, findings)  the pinned text of an approach
  *            question: a Root line for the reviewer's suspected shared root,
  *            when given, then one Finding line per open finding title, each
@@ -62,10 +64,16 @@
  *            of run.open, shown after the lead and kept in the question text
  *            of the answers block when the pause shows it (fitPinned,
  *            lib/record.js); undefined for any other pause.
- *   buildPlanAcceptanceBrief(plan), buildRemediationPlanBrief(plan),
- *   buildTrunkStaleBrief(facts) and buildExternalEffectBrief(summary)
+ *   buildPlanAcceptanceBrief(plan), buildRemediationPlanBrief(plan,
+ *   approachChanged), buildTrunkStaleBrief(facts) and
+ *   buildExternalEffectBrief(summary)
  *            the briefs lib/plan.js resolves through decide(). The effect brief
  *            names no step: the step id lives only in the question key.
+ *            approachChanged is run.approachChanged. When it is true and
+ *            repeats_surface holds, the change is carried: the remediation
+ *            problem leads with the plan that carries out your change of
+ *            approach, and the options are A, accept this plan, and the
+ *            Stop option of buildPlanAcceptanceBrief, A recommended strong.
  *   listOutsidePaths(plan, scope)  the plan paths outside every limit of
  *            the scope, [] when it sets none. A version or changelog file
  *            the plan declares is never outside.
@@ -121,8 +129,11 @@
  *   also true when grows_surface or repeats_surface is, and its problem
  *   names each flag that holds, so it asks then and is taken otherwise at
  *   the default level (decision-autonomy.md, Promotion Gate). When
- *   repeats_surface holds, its options and recommendation are
- *   buildApproachChoice() (issue 587).
+ *   repeats_surface holds and the change is not carried, its options and
+ *   recommendation are buildApproachChoice() (issue 587); a carried change
+ *   keeps the same gate, so the user still accepts it, and is never asked
+ *   the approach question again. A brief whose change is not carried is
+ *   the brief built before approachChanged existed, unchanged.
  *   Reviewer text of an approach question (the root and finding titles)
  *   reaches the user only through buildFindingsData, as the pinned text of
  *   a pause (lib/record.js pauseDelivery), encoded, whole or not shown.
@@ -172,15 +183,16 @@ function buildApproachChoice() {
 }
 
 /**
- * Returns the sentence a reply adds to a replan reason when it picks the
- * recommended option of buildApproachChoice, B, read by readReplyChoices
+ * Returns the sentence a reply adds to a replan reason when it picks option
+ * B of buildApproachChoice, matched by its summary, read by readReplyChoices
  * against the one question of brief: the user chose that option, by its
  * summary, then the plan must remove or narrow that decision. A reply in free
- * words picks nothing, so it returns ''.
+ * words picks nothing, and no other brief holds that summary, so both return
+ * ''.
  */
 function describeApproachChange(reply, brief) {
-  const option = readReplyChoices(reply, [{ brief: brief }]).map((choice) => brief.options[choice.optionIndex]).find((chosen) => chosen.id === brief.recommendation.option_id);
-  return option === undefined ? '' : ' The user chose: ' + option.summary + ' The plan must remove or narrow that decision.';
+  const approach = buildApproachChoice().options[1];
+  return readReplyChoices(reply, [{ brief: brief }]).some((choice) => brief.options[choice.optionIndex].summary === approach.summary) ? ' The user chose: ' + approach.summary + ' The plan must remove or narrow that decision.' : '';
 }
 
 function maxFindingsDataLength() {
@@ -190,7 +202,7 @@ function maxFindingsDataLength() {
 
 function buildFindingsData(root, findings) {
   const rootLine = root === undefined ? undefined : 'Root: ' + encodeUntrustedText(root);
-  const lines = rootLine !== undefined && rootLine.length <= maxFindingsDataLength() ? [rootLine] : [];
+  const lines = rootLine?.length <= maxFindingsDataLength() ? [rootLine] : [];
   let used = lines.join('\n').length;
   for (const finding of findings) {
     const line = 'Finding: ' + encodeUntrustedText(finding.title);
@@ -210,19 +222,21 @@ function buildFindingsData(root, findings) {
  * Returns undefined for any other pause and when nothing is shown.
  */
 function buildRepeatPinned(resolution, plan, run, replan) {
-  const isRepeatAsk = resolution.asks.some((ask) => ask.kind === REMEDIATION_PLAN_ACCEPTANCE_KIND) && plan.remediation_gate.repeats_surface;
-  return isRepeatAsk ? buildFindingsData(replan?.review?.hypothesized_root, run.open) : undefined;
+  return resolution.asks.some((ask) => ask.kind === REMEDIATION_PLAN_ACCEPTANCE_KIND) && plan.remediation_gate.repeats_surface ? buildFindingsData(replan?.review?.hypothesized_root, run.open) : undefined;
 }
 
-function buildRemediationPlanBrief(plan) {
+function buildRemediationPlanBrief(plan, approachChanged) {
   const remediationGate = plan.remediation_gate;
   const flags = { ...remediationGate.promotion_gate, grows_surface: remediationGate.grows_surface, repeats_surface: remediationGate.repeats_surface };
   const texts = remediationGateTexts();
   const flagTexts = Object.keys(texts).filter((flag) => flags[flag]).map((flag) => texts[flag]);
-  const lead = 'Run the remediation plan for the local review findings on the working branch, then every gate again.';
+  const isCarried = flags.repeats_surface && approachChanged === true;
+  const lead = 'Run the remediation plan ' + (isCarried ? 'that carries out your change of approach' : 'for the local review findings') + ' on the working branch, then every gate again.';
   const brief = buildPlanAcceptanceBrief(plan);
-  const choice = flags.repeats_surface ? buildApproachChoice() : { recommendation: { ...brief.recommendation, why: 'The plan answers the local review findings, and every gate runs again on its commit before the pull request.' } };
-  return Object.assign(brief, choice, {
+  if (isCarried) {
+    brief.options[0].summary = 'Accept this plan and run its steps.';
+  }
+  return Object.assign(brief, flags.repeats_surface && !isCarried ? buildApproachChoice() : { recommendation: { ...brief.recommendation, why: 'The plan answers the local review findings, and every gate runs again on its commit before the pull request.' } }, {
     kind: REMEDIATION_PLAN_ACCEPTANCE_KIND,
     problem: flagTexts.length === 0 ? lead : lead + ' The plan ' + joinNames(flagTexts, 'and') + '.',
     gate: { ...remediationGate.promotion_gate, architectural: flags.architectural || flags.grows_surface || flags.repeats_surface }
@@ -273,7 +287,7 @@ function listOutsidePaths(plan, scope) {
   if (scope.limits.length === 0) {
     return [];
   }
-  const limits = scope.limits.map((limit) => limit.path).filter((limit) => isRepositoryPath(limit));
+  const limits = scope.limits.map((limit) => limit.path).filter(isRepositoryPath);
   const versionFiles = [...plan.versioning.artifact_files, ...plan.versioning.changelog_files];
   const isInsideLimits = (file) => versionFiles.includes(file) || limits.some((limit) => file === limit || file.startsWith(limit + '/'));
   return listPlanPaths(plan).filter((file) => !isInsideLimits(file));
@@ -350,8 +364,7 @@ function buildApprovalAsks(holds, isReplan, run) {
 
 function raiseVersion(version, bumpType) {
   const parts = version.split('.').map(Number);
-  const raised = { major: [parts[0] + 1, 0, 0], minor: [parts[0], parts[1] + 1, 0], patch: [parts[0], parts[1], parts[2] + 1] };
-  return raised[bumpType].join('.');
+  return { major: [parts[0] + 1, 0, 0], minor: [parts[0], parts[1] + 1, 0], patch: [parts[0], parts[1], parts[2] + 1] }[bumpType].join('.');
 }
 
 /**
@@ -399,8 +412,7 @@ function listVersionOptions(values) {
     return [buildBriefOption('A', 'Keep the branch version of each file.'), buildBriefOption('B', 'Set each file to the version you name.')];
   }
   const trunk = values.trunk_version;
-  const bumpOptions = [['A', 'major'], ['B', 'minor'], ['C', 'patch']].map(([id, bumpType]) => buildBriefOption(id, 'Make a ' + bumpType + ' bump' + (trunk === undefined ? '.' : ', to version ' + raiseVersion(trunk, bumpType) + '.')));
-  return bumpOptions.concat(buildBriefOption('D', 'Make no bump' + (trunk === undefined ? '.' : ', keeping version ' + trunk + '.')));
+  return [['A', 'major'], ['B', 'minor'], ['C', 'patch']].map(([id, bumpType]) => buildBriefOption(id, 'Make a ' + bumpType + ' bump' + (trunk === undefined ? '.' : ', to version ' + raiseVersion(trunk, bumpType) + '.'))).concat(buildBriefOption('D', 'Make no bump' + (trunk === undefined ? '.' : ', keeping version ' + trunk + '.')));
 }
 
 function buildVersionQuestionBrief(values) {
