@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [14.9.5] - 2026-11-27
+
+### Fixed
+
+- `hivemind:design-review` treats a finding of any pass that contests a recorded decision as a repeat, taking both the term and the rule from the remediation doctrine's Recorded Decisions and Repeat Findings with no scope of its own, so a decision recorded where the doctrine places it counts, not only one in the review record. A repeat is `rejected` with a reason that cites the recorded decision it repeats. It is never fixed or asked again and is not new, so it does not make the round unclean. A finding that shows a failure the record does not cover is still new. The idea-to-ready guide posts `--clean yes` for a clean round as the skill defines it. The skill's `round` step now acts on the first match, with the review-fix confirming round after `stop=open-findings` and ahead of `stop=passed`, `stop=cap-reached` and `next=<n>`, so `stop=passed` and `stop=cap-reached` cannot cancel it, and the findings of the round before still land first; that round still changes no `rounds` and does not count toward the cap.
+- `hivemind:design-review` gives a finding that only a later round can close, such as "no clean round covers the final docs", the disposition `rejected` with that reason, whichever pass raised it. Such a finding is never open, so the guide no longer stops on a finding no repository step can close. When first raised it is still a new finding, so its round is not clean.
+
+No prose budget raised.
+
+Version: one patch over main's 14.9.4, as the maintainer decided for this change. This section was written and amended on the change's branch; 14.9.5 was never released before it.
+
+Issues: #697. Refs #651.
+
 ## [14.9.4] - 2026-11-27
 
 ### Fixed

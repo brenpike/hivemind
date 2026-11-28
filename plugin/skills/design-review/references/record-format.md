@@ -28,7 +28,7 @@ clean_round: false
 
 - `verdict` is `pass` or `fail`, and `clean_round` is `true` or `false`. Each count and `rounds` is a decimal integer with no leading zero.
 - Each `blob` matches `^[0-9a-f]{40}$` or `^[0-9a-f]{64}$`.
-- Each stamp `path` appears once and names one document, never a directory: the PRD, the solution design, an ADR `docs/adr/<NNNN>-<name>.md`, or a UI prototype file, `docs/initiatives/<slug>/prototype/index.html` or `docs/initiatives/<slug>/prototype/notes.md`.
+- Each stamp `path` appears once and names one document: the PRD, the solution design, an ADR `docs/adr/<NNNN>-<name>.md`, or a UI prototype file, `docs/initiatives/<slug>/prototype/index.html` or `docs/initiatives/<slug>/prototype/notes.md`.
 
 ### Stamps
 
@@ -39,7 +39,7 @@ clean_round: false
 
 ### Pass and Open Rules
 
-- Pass rule: the record passes when `verdict` is `pass`, every open count is 0, `clean_round` is `true` and `rounds` is 2 to 3. `verdict` is `pass` only under this rule. Round 1 is always followed by a confirming round.
+- Pass rule: the record passes when `verdict` is `pass`, every open count is 0, `clean_round` is `true` and `rounds` is 2 to 3. `verdict` is `pass` only under this rule.
 - Open rule: each `open.<severity>` count equals that severity's Findings rows whose Disposition is `open`. A critical or high row counts as open unless its Disposition is `fixed` or `rejected`.
 
 ## Body
@@ -63,7 +63,7 @@ The Findings section holds one table and nothing else; with no finding it is emp
 - Angle: `A` or `B` for a finding a round-1 cerebrate pass raised: `A` for code truth, conflicts with the project's documented principles, governance and ADR conflicts or existing-path coverage; `B` for failure modes, trust and injection or testability. `confirm` for a finding a confirming round's cerebrate pass raised. `review` for a finding the local review tool pass, local review or the post-PR review of the docs pull request raised.
 - Severity: `critical`, `high`, `medium` or `low`.
 - Disposition: exactly one of `fixed`, `rejected`, `deferred`, `recorded` or `open`. A critical or high finding is only `fixed` or `rejected`.
-- Note: the summary. For `rejected`, the reason. For `deferred`, the reason and an issue reference `#<n>`, `<n>` a decimal number from 1, checked by shape only. For `recorded`, the reason and the repository path where it is recorded: a Markdown link target, read relative to the record's folder, or a code span, read from the repository root. The path resolves inside the repository, holds no `.git` part and no control character, and names a file present at the pull request head.
+- Note: the summary. For `rejected`, the reason, which for a repeat cites the recorded decision it repeats. For `deferred`, the reason and an issue reference `#<n>`, `<n>` a decimal number from 1, checked by shape only. For `recorded`, the reason and the repository path where it is recorded: a Markdown link target, read relative to the record's folder, or a code span, read from the repository root. The path resolves inside the repository, holds no `.git` part and no control character, and names a file present at the pull request head.
 
 ## Re-review
 

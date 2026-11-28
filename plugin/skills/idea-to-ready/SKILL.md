@@ -56,7 +56,7 @@ Act on `stage`'s `next`:
   - `approval=kept` and `folded=yes`: the fold landed without the Verdict; launch only `compose --kind prototype-verdict`.
 - `design`: launch `compose --kind design`; the run writes the design hivemind:solution-design gives.
 - `review` or `re-review`: with the docs branch checked out at the pull request head, run `reviewed`, act on its `action`, then run `reviewed` again:
-  - `review`: run hivemind:design-review with the `reviewed`, `merge_base`, `previous` and `review_fix` it prints, and `touches` as the record states it. Post the round's findings, from every pass, and its record update with `comment --kind round --commit <reviewed> --clean yes|no`, `yes` for a round with no finding.
+  - `review`: run hivemind:design-review with the `reviewed`, `merge_base`, `previous` and `review_fix` it prints and `touches` as the record states. Post the round's findings, from every pass, and its record update with `comment --kind round --commit <reviewed> --clean yes|no`, `yes` for a clean round.
   - `launch`: launch `compose --kind record`, then post `comment --kind veto`.
   - `ask`: report the open findings and ask the maintainer, launch `compose --kind record` with the answer as the maintainer's words, then post `comment --kind veto`.
   - `stop`: report the `reason`. On `cap-reached`, the initiative is split before its docs merge; the pull request stays a draft.
