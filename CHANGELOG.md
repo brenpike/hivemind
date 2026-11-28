@@ -17,8 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `hivemind:design-review` treats a local review tool pass finding that contests a decision the review record holds as a repeat, per the remediation doctrine's Recorded Decisions and Repeat Findings. It is `rejected` with a reason that cites the row or decision it repeats. It is never fixed or asked again and is not new, so it does not make the round unclean. A finding that shows a failure the record does not cover is still new. The idea-to-ready guide posts `--clean yes` for a round with no new finding.
-- No design review pass raises a finding that only a later round can close, such as "no clean round covers the final docs", so the guide no longer stops on an open finding no repository step can close.
+- `hivemind:design-review` treats a finding of any pass that contests a recorded decision the review record holds as a repeat, per the remediation doctrine's Recorded Decisions and Repeat Findings. It is `rejected` with a reason that cites the row or decision it repeats. It is never fixed or asked again and is not new, so it does not make the round unclean. A finding that shows a failure the record does not cover is still new. The idea-to-ready guide posts `--clean yes` for a clean round as the skill defines it. A review-fix confirming round is now stated before the `round` lines it overrides.
+- No design review pass raises a finding that only a later round can close, such as "no clean round covers the final docs"; the local review tool pass's focus says so too, so the guide no longer stops on an open finding no repository step can close.
 
 No prose budget raised.
 
