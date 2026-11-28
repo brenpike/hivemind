@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No prose budget raised.
 
+Version: one patch over main's 14.9.4, as the maintainer decided for this change. This section was written and amended on the change's branch; 14.9.5 was never released before it.
+
 Issues: #697. Refs #651.
 
 ## [14.9.4] - 2026-11-27
