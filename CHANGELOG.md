@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [14.9.4] - 2026-11-27
+
+### Fixed
+
+- The idea-to-ready guide's first push of a new docs branch passes `origin` as `push-branch`'s `push_remote`. `push-branch`'s `push_remote` may be named by a calling skill. Without `origin` the guide stops at its trunk fetch.
+- A guide run (line 1 exactly `hivemind-guide-run: <slug>`) starts no post-PR watch on any path; the run returns to the guide. ADR-0029 amended.
+- When `compose` opens the docs pull request it prints a `Pull request title:` line naming the initiative (`docs: <slug> PRD and solution design`, or `docs: <slug> close-out`), at most 72 code points with a long slug cut.
+- The runner scripts' remote default-branch refusal (`molt`, `push-branch`, `create-working-branch`, via `git-refusals.sh`) reads a remote's default branch once with `git ls-remote --symref` when `refs/remotes/<remote>/HEAD` is missing. `git-refusals.sh` states when the read blocks and what it trusts. `security-policy.md` and ADR-0037 updated.
+
+No prose budget raised.
+
+Issues: #693, #694, #695, #698.
+
 ## [14.9.3] - 2026-11-27
 
 ### Fixed

@@ -124,8 +124,13 @@
 #            refused docs-pr-exists while a counting docs pull request is open, and is taken
 #            only by the prototype-build, design and close-out kinds (pr-required): the run then
 #            opens the docs pull request, the close-out one after the first has merged. Line 3 names
-#            hivemind:standard-delivery on the script engine with draft true. Only record's pass
-#            and restamp add `Launch with local_review false.`. Then the kind's fixed lines:
+#            hivemind:standard-delivery on the script engine with draft true. Only with none, line
+#            4 is exactly `Pull request title: docs: <slug> PRD and solution design` for
+#            prototype-build and design, `Pull request title: docs: <slug> close-out` for
+#            close-out; #<n> prints no such line. The title, the text after `Pull request title: `,
+#            is at most 72 code points: when longer, <slug> is cut to the room left and a
+#            trailing `-` dropped. Only record's pass and restamp add `Launch with local_review
+#            false.`. Then the kind's fixed lines:
 #              prototype-build   a hivemind:changeling step for prototype/index.html, then a
 #                                hivemind:drone step for prototype/notes.md with no Verdict.
 #              prototype-refine  the approval comment URL (kept, else approval-missing or
@@ -1524,6 +1529,21 @@ compose_kind_lines() {
   esac
 }
 
+# compose_title_line <kind>: appends the docs pull request title line of a none run to OUT; the
+# title is at most 72 code points, <slug> cut to the room left with a trailing `-` dropped.
+compose_title_line() {
+  local suffix=" PRD and solution design" prefix="docs: " slug_part="$SLUG" room
+  if [ "$1" = close-out ]; then
+    suffix=" close-out"
+  fi
+  room=$((72 - ${#prefix} - ${#suffix}))
+  if [ "${#slug_part}" -gt "$room" ]; then
+    slug_part="${slug_part:0:room}"
+    slug_part="${slug_part%-}"
+  fi
+  OUT+="Pull request title: $prefix$slug_part$suffix"$'\n'
+}
+
 # run_compose <arg>...: the compose subcommand.
 run_compose() {
   local kind="" pr_arg="" have_kind=0 have_slug=0 have_pr=0
@@ -1582,6 +1602,9 @@ run_compose() {
     OUT+="Docs pull request: #$PR_NUMBER"$'\n'
   fi
   OUT+="Deliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files."$'\n'
+  if [ "$pr_arg" = none ]; then
+    compose_title_line "$kind"
+  fi
   if [ "$kind:$ACTION_RUN" = record:pass ] || [ "$kind:$ACTION_RUN" = record:restamp ]; then
     OUT+="Launch with local_review false."$'\n'
   fi

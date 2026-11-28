@@ -55,17 +55,14 @@
 #        stops with `cannot read base`, and a failed compare with `cannot compare the current
 #        branch with base`. A base that names more than one ref does not stop the run: none of
 #        them is b. Base is read once and never again.
-#   DEFAULT then, whatever base is, the run stops with `current branch does not match head or
-#        equals base` when b is the default branch of a remote `git remote` lists
-#        (hivemind_branch_is_remote_default in _shared/git-refusals.sh): that remote's local
-#        refs/remotes/<remote>/HEAD is a symbolic ref whose end, dangling or not, is b's own ref
-#        or b's image on a listed remote, after the same ASCII case fold. A remote name that
-#        contains `/` is used whole. A remote HEAD git cannot read stops with `cannot read base`,
-#        and a failed compare with `cannot compare the current branch with base`. A listed remote
-#        with no HEAD ref, or a HEAD ref that is not symbolic, has no default branch record, so b
-#        cannot be cleared against it: the run stops with `a remote has no default branch record:
-#        run git remote set-head <remote> --auto` (`git clone` writes the ref, and that command
-#        writes it again). A push remote that `git remote` does not list (an explicit --remote
+#   DEFAULT then, whatever base is, b is compared with the default branch of every remote
+#        `git remote` lists, as hivemind_branch_is_remote_default in _shared/git-refusals.sh
+#        reads it (its API states how each listed remote's default is read, the read from the
+#        remote included, and when each code is returned). Code 1 stops with `current branch
+#        does not match head or equals base`, code 2 with `cannot read base`, code 4 with `a
+#        remote has no default branch record: run git remote set-head <remote> --auto` (that
+#        command writes the local record), any other code with `cannot compare the current
+#        branch with base`. A push remote that `git remote` does not list (an explicit --remote
 #        path) is not seen.
 #   MODE explicit: --remote given; push to it, then record the upstream.
 #        upstream: branch.<b>.remote or branch.<b>.merge non-empty. Both must then be non-empty,
@@ -373,9 +370,13 @@ refuse_base_names_branch() {
 refuse_base_names_branch
 
 # refuse_remote_default_branch
-#   Blocks when the current branch is the default branch of a remote `git remote` lists, read with
-#   hivemind_branch_is_remote_default, whatever base names, and when a listed remote has no default
-#   branch record. Runs in the main shell so blocker exits it.
+#   Blocks when the current branch is the default branch of a remote `git remote` lists, as
+#   hivemind_branch_is_remote_default in _shared/git-refusals.sh reads it (its API states how each
+#   listed remote's default is read, the read from the remote included, and when each code is
+#   returned), whatever base names. Code 1 stops with `$mismatch_reason`, code 2 with `cannot read
+#   base`, code 4 with `a remote has no default branch record: run git remote set-head <remote>
+#   --auto`, any other code with `cannot compare the current branch with base`. Runs in the main
+#   shell so blocker exits it.
 refuse_remote_default_branch() {
   local default_rc=0
   hivemind_branch_is_remote_default "$current_branch" || default_rc=$?

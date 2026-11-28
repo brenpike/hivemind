@@ -270,6 +270,14 @@
    "branches": {
     "docs/sigma": 1
    }
+  },
+  "long": {
+   "slug": "guided-initiative-command-title-from-slug-cut-at-limit-overflow",
+   "trunk": {
+    "README.md": "readme"
+   },
+   "docs": [],
+   "branches": {}
   }
  },
  "cases": [
@@ -1899,7 +1907,7 @@
    "request": true,
    "expect": {
     "rc": 0,
-    "stdout": "hivemind-guide-run: alpha\nDocs pull request: none\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nSolution design run for docs/prds/alpha.md.\nA hivemind:drone step with exact file scope writes docs/initiatives/alpha/solution-design.md with every section of the solution design template, and each design-stage ADR under docs/adr/.\nThis run writes no review record.\n",
+    "stdout": "hivemind-guide-run: alpha\nDocs pull request: none\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nPull request title: docs: alpha PRD and solution design\nSolution design run for docs/prds/alpha.md.\nA hivemind:drone step with exact file scope writes docs/initiatives/alpha/solution-design.md with every section of the solution design template, and each design-stage ADR under docs/adr/.\nThis run writes no review record.\n",
     "stderr": ""
    }
   },
@@ -1946,7 +1954,7 @@
    "request": true,
    "expect": {
     "rc": 0,
-    "stdout": "hivemind-guide-run: alpha\nDocs pull request: none\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nSolution design run for docs/prds/alpha.md.\nA hivemind:drone step with exact file scope writes docs/initiatives/alpha/solution-design.md with every section of the solution design template, and each design-stage ADR under docs/adr/.\nThis run writes no review record.\n",
+    "stdout": "hivemind-guide-run: alpha\nDocs pull request: none\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nPull request title: docs: alpha PRD and solution design\nSolution design run for docs/prds/alpha.md.\nA hivemind:drone step with exact file scope writes docs/initiatives/alpha/solution-design.md with every section of the solution design template, and each design-stage ADR under docs/adr/.\nThis run writes no review record.\n",
     "stderr": ""
    }
   },
@@ -2455,7 +2463,53 @@
    "expect": {
     "rc": 0,
     "stderr": "",
-    "stdout": "hivemind-guide-run: omega\nDocs pull request: none\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nClose-out run: a hivemind:drone step with exact file scope adds **Status:** delivered as the first line after the title of docs/initiatives/omega/solution-design.md and an ## As-built deltas section.\nThis run writes no review record.\n"
+    "stdout": "hivemind-guide-run: omega\nDocs pull request: none\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nPull request title: docs: omega close-out\nClose-out run: a hivemind:drone step with exact file scope adds **Status:** delivered as the first line after the title of docs/initiatives/omega/solution-design.md and an ## As-built deltas section.\nThis run writes no review record.\n"
+   }
+  },
+  {
+   "name": "compose-design-long-slug-title-cut",
+   "scenario": "long",
+   "args": [
+    "compose",
+    "--kind",
+    "design",
+    "--slug",
+    "guided-initiative-command-title-from-slug-cut-at-limit-overflow",
+    "--pr",
+    "none"
+   ],
+   "routes": [
+    "repo-view",
+    "docs-pulls-long-none"
+   ],
+   "request": true,
+   "expect": {
+    "rc": 0,
+    "stderr": "",
+    "stdout": "hivemind-guide-run: guided-initiative-command-title-from-slug-cut-at-limit-overflow\nDocs pull request: none\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nPull request title: docs: guided-initiative-command-title-from-slug PRD and solution design\nSolution design run for docs/prds/guided-initiative-command-title-from-slug-cut-at-limit-overflow.md.\nA hivemind:drone step with exact file scope writes docs/initiatives/guided-initiative-command-title-from-slug-cut-at-limit-overflow/solution-design.md with every section of the solution design template, and each design-stage ADR under docs/adr/.\nThis run writes no review record.\n"
+   }
+  },
+  {
+   "name": "compose-close-out-long-slug-title-cut",
+   "scenario": "long",
+   "args": [
+    "compose",
+    "--kind",
+    "close-out",
+    "--slug",
+    "guided-initiative-command-title-from-slug-cut-at-limit-overflow",
+    "--pr",
+    "none"
+   ],
+   "routes": [
+    "repo-view",
+    "docs-pulls-long-none"
+   ],
+   "request": true,
+   "expect": {
+    "rc": 0,
+    "stderr": "",
+    "stdout": "hivemind-guide-run: guided-initiative-command-title-from-slug-cut-at-limit-overflow\nDocs pull request: none\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nPull request title: docs: guided-initiative-command-title-from-slug-cut-at-limit-o close-out\nClose-out run: a hivemind:drone step with exact file scope adds **Status:** delivered as the first line after the title of docs/initiatives/guided-initiative-command-title-from-slug-cut-at-limit-overflow/solution-design.md and an ## As-built deltas section.\nThis run writes no review record.\n"
    }
   },
   {
@@ -2663,7 +2717,7 @@
    "expect": {
     "rc": 0,
     "stderr": "",
-    "stdout": "hivemind-guide-run: beta\nDocs pull request: none\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nUI prototype build run for docs/prds/beta.md.\nStep 1: a hivemind:changeling step with exact file scope writes docs/initiatives/beta/prototype/index.html with 3 to 5 structurally different variants behind the ?variant= switcher, with stub data only.\nStep 2, after step 1: a hivemind:drone step with exact file scope writes docs/initiatives/beta/prototype/notes.md with one ## Variant <key>: <name> section per variant and no ## Verdict section.\nThis run writes no review record.\n"
+    "stdout": "hivemind-guide-run: beta\nDocs pull request: none\nDeliver with hivemind:standard-delivery on the script engine, on the checked-out docs branch, launched with draft true; every step writes only its named files.\nPull request title: docs: beta PRD and solution design\nUI prototype build run for docs/prds/beta.md.\nStep 1: a hivemind:changeling step with exact file scope writes docs/initiatives/beta/prototype/index.html with 3 to 5 structurally different variants behind the ?variant= switcher, with stub data only.\nStep 2, after step 1: a hivemind:drone step with exact file scope writes docs/initiatives/beta/prototype/notes.md with one ## Variant <key>: <name> section per variant and no ## Verdict section.\nThis run writes no review record.\n"
    }
   },
   {

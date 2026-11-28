@@ -116,3 +116,21 @@ This follows ADR-0023, which refused to fold `merge-advised` into `review_exhaus
 - **The preventive half of this record's remediation is DEFERRED.** Two structural checks — one asserting that no caller invokes the loop below the `max_remediation_cycles` floor, one asserting that no prose outside `plugin/skills/github-review-loop/SKILL.md` restates the seed-capture rule — were identified and NOT built. They are tracked at https://github.com/brenpike/hivemind/issues/362, raised by review threads https://github.com/brenpike/hivemind/pull/361#discussion_r4051925782 and https://github.com/brenpike/hivemind/pull/361#discussion_r4051925784. The exposure is bounded to FUTURE AUTHORING: every current caller honors the floor, which is now declared and enforced at runtime by `plugin/skills/github-review-loop/scripts/loop-state.sh`, and no current prose restates the seed rule, the copies in this record having been reduced to citations above. What is unprotected is a NEW caller or a NEW prose copy added later, which nothing in the suite would catch.
 - **Approval-by-review-state detection was CUT from this change.** A first-class `REVIEW_APPROVED` signal — an approving GitHub review ending the watch alongside the existing Codex 👍 reaction — was built inside this change and then removed before merge. It derived approval per poll from one capped, context-blind query instead of carrying it as explicit state through the arm lifecycle, and three consecutive review iterations each found a different edge of that same primitive. What ships here is unchanged on this point: the watch ends on approval only via the Codex 👍 reaction, and an approving review surfaces as an ordinary `CHANGED` that the reviewer answers. A clean rebuild is tracked at https://github.com/brenpike/hivemind/issues/363.
 - **ADR-0009's 4h figure is now stale** and is deliberately not edited. ADRs are historical records; the drift is resolved forward by the current value recorded above.
+
+## Amendment 2026-11-27: a guide run starts no post-PR watch (issue 694)
+
+User decision, 2026-11-27: a run that the `hivemind:idea-to-ready` guide launches skips the post-PR watch on the draft docs PR. The guide owns that PR until `gh pr ready`, and guide-launched runs return to the guide (the initiative's solution design, D33). A watch on a docs PR with no bot reviewer idles for up to one window (currently 1h) and blocks the guide. Decisions 1 to 5 are unchanged: the default stays `watch_requested` for every request that is not a guide run.
+
+The rule:
+
+- A guide run is a request whose line 1 is exactly `hivemind-guide-run: <slug>`.
+- A guide run starts no watch on any path that would start one: the Engine PR hand-off, and the Instinct delivery tail when the guide run's launch fell back to Instinct.
+- The run returns to the guide, which re-derives its stage.
+
+Where it lives, verified against the committed files:
+
+- `plugin/agents/overlord.md`, `## Review Remediation Posture`, **Default post-PR watch.** carries the short-circuit beside `HIVEMIND_SKIP_PR_WATCH`: it skips the request-text read and needs no citation.
+- The Engine hand-off and the Reflex tail each name it as "`HIVEMIND_SKIP_PR_WATCH` and guide-run short-circuits".
+- `tests/policy/safety-default-pr-watch.json` pins it with a consumer pin on the guide-run sentence. `tests/workflow-scripts/overlord-contract.test.mjs` checks the marker and the pointer text.
+
+Residual: a request whose line 1 is the marker skips the watch. The impact is bounded to one unwatched draft PR, and the review loop can still be run by hand. The pin proves presence only; it does not prove the overlord obeys the rule.

@@ -17,8 +17,11 @@
 # git's six lookup candidates for it, or the end a candidate resolves to, is refs/heads/<b> or
 # refs/remotes/<remote>/<b> for a remote `git remote` lists, compared exactly after an ASCII case
 # fold. A trunk that only ends with `/<b>` does not. Whatever --trunk says, the current branch is
-# also trunk when refs/remotes/<remote>/HEAD of a listed remote names it. No world here fetches,
-# so no remote HEAD exists unless a case writes one, and results do not depend on the git version.
+# also trunk when refs/remotes/<remote>/HEAD of a listed remote names it, or, when that record is
+# absent or not symbolic, when the remote's own HEAD read with `git ls-remote --symref` names it.
+# No world here fetches, so no remote HEAD record exists unless a case writes one, and results do
+# not depend on the git version. Most listed remotes are paths that do not exist, so a read of the
+# remote itself fails; the remote default read cases use real bare repositories on local paths.
 # A dirty path outside `files` is printed as an
 # `outside: <JSON string>` stderr line before the blocker. With nothing listed dirty it prints
 # `committed: false`; otherwise it stages exactly the dirty listed paths, commits them with the
@@ -167,13 +170,27 @@ run_git() {
 # WORK_TREE, INPUTS_PATH, SUBJECT_PATH, FILES_PATH, BODY_PATH, MAIN_SHA and HEAD_SHA (the BRANCH
 # tip), and resets BODY_GIVEN to no.
 create_world() {
+    start_world "$1"
+    mkdir -p "$WORK_TREE"
+    run_git "$WORK_TREE" init -q
+    populate_world
+}
+
+# start_world <name> -> sets WORLD_ROOT to $WORKDIR/<name> (created), WORK_TREE to its w, the
+# inputs paths under WORK_TREE, and resets BODY_GIVEN to no. Creates no repository.
+start_world() {
     WORLD_ROOT="$WORKDIR/$1"
     WORK_TREE="$WORLD_ROOT/w"
     set_inputs_path "$WORK_TREE/$INPUTS_REL"
     BODY_GIVEN=no
-    mkdir -p "$WORK_TREE/sub" "$WORK_TREE/.hivemind"
-    run_git "$WORK_TREE" init -q
+    mkdir -p "$WORLD_ROOT"
+}
+
+# populate_world -> in the repository at WORK_TREE, which has no commit, makes create_world's main
+# and BRANCH commits and leaves BRANCH checked out. Sets MAIN_SHA and HEAD_SHA.
+populate_world() {
     run_git "$WORK_TREE" symbolic-ref HEAD refs/heads/main
+    mkdir -p "$WORK_TREE/sub" "$WORK_TREE/.hivemind"
     printf '*.log\n.hivemind/\n' >"$WORK_TREE/.gitignore"
     printf 'keep\n' >"$WORK_TREE/sub/keep.txt"
     printf 'base\n' >"$WORK_TREE/f.txt"
@@ -993,8 +1010,8 @@ test_trunk_ref_identity() {
 }
 
 # set_remote_head <remote> <end> -> adds <remote> to the current world's `git remote` list (a
-# path that does not exist; nothing is fetched) and points refs/remotes/<remote>/HEAD at <end>,
-# which need not exist.
+# path that does not exist; nothing is fetched, and a read of the remote itself fails) and points
+# refs/remotes/<remote>/HEAD at <end>, which need not exist.
 set_remote_head() {
     run_git "$WORK_TREE" remote add "$1" "$WORLD_ROOT/$1.git"
     run_git "$WORK_TREE" symbolic-ref "refs/remotes/$1/HEAD" "$2"
@@ -1012,8 +1029,9 @@ create_main_world() {
 # read from refs/remotes/<remote>/HEAD, whatever --trunk says. A spoofed trunk on main stops with
 # nothing changed when origin's HEAD names main, as an existing, case-variant or dangling end, a
 # local branch end, through a remote whose name holds `/`, or through a second remote. A remote
-# HEAD that is absent or not symbolic is no default branch record and stops the run with nothing
-# changed, an unreadable one stops the run, and main proceeds when the remote HEAD names another
+# HEAD that is absent or not symbolic is no local default branch record; the remote's path does
+# not exist, so the read of the remote itself fails and the run stops with nothing changed. An
+# unreadable remote HEAD stops the run, and main proceeds when the remote HEAD names another
 # branch.
 test_remote_default_branch() {
     local trunk_spelling index=0
@@ -1087,6 +1105,77 @@ test_remote_default_branch() {
     write_basic_inputs '["f.txt"]'
     assert_commit_run remote-default-other-branch-proceeds "$WORK_TREE" "$INPUTS_REL"
     assert_committed remote-default-other-branch-proceeds "$(printf 'M\tf.txt')" 'feat(core): add thing'
+}
+
+# remote_head_state -> prints `absent` when the current world has no refs/remotes/origin/HEAD,
+# symbolic or not, else `present`.
+remote_head_state() {
+    if run_git "$WORK_TREE" symbolic-ref -q refs/remotes/origin/HEAD >/dev/null \
+        || run_git "$WORK_TREE" rev-parse -q --verify refs/remotes/origin/HEAD >/dev/null; then
+        printf 'present'
+    else
+        printf 'absent'
+    fi
+}
+
+# remote_record_snapshot -> prints the current world's refs/remotes refs and its git config, to
+# show a remote default read wrote neither.
+remote_record_snapshot() {
+    run_git "$WORK_TREE" for-each-ref --format='%(refname) %(objectname) %(symref)' refs/remotes
+    cat "$WORK_TREE/.git/config"
+}
+
+# create_empty_clone_world <name> -> origin.git is a bare repository with no commit and HEAD on
+# main; w is cloned from it while it is empty, then a second clone gives origin a main branch by
+# a push. w then gets create_world's main and BRANCH commits on its own history. No fetch runs in
+# w; any refs/remotes/origin/HEAD the clone wrote is removed.
+create_empty_clone_world() {
+    start_world "$1"
+    run_git "$WORLD_ROOT" init -q --bare origin.git
+    run_git "$WORLD_ROOT/origin.git" symbolic-ref HEAD refs/heads/main
+    run_git "$WORLD_ROOT" clone -q origin.git w 2>/dev/null
+    run_git "$WORLD_ROOT" clone -q origin.git pusher 2>/dev/null
+    run_git "$WORLD_ROOT/pusher" symbolic-ref HEAD refs/heads/main
+    run_git "$WORLD_ROOT/pusher" commit -q --allow-empty -m 'remote main'
+    run_git "$WORLD_ROOT/pusher" push -q origin main
+    rm -f "$WORK_TREE/.git/refs/remotes/origin/HEAD"
+    populate_world
+}
+
+# A listed remote with no local default branch record is read once with `git ls-remote --symref`.
+# A real origin whose default is main, added with no fetch, refuses a commit on main as trunk
+# whatever --trunk says. A clone made while origin was empty, with main pushed to origin later by
+# another clone, refuses a commit on main and commits on another branch. Neither read writes a
+# ref or the git config.
+test_remote_default_read() {
+    local records_before
+    create_main_world remote-read-real-origin
+    run_git "$WORLD_ROOT" clone -q --bare w origin.git
+    run_git "$WORLD_ROOT/origin.git" symbolic-ref HEAD refs/heads/main
+    run_git "$WORK_TREE" remote add origin "$WORLD_ROOT/origin.git"
+    assert_equal remote-read-real-origin-no-record absent "$(remote_head_state)" "no local origin HEAD"
+    records_before="$(remote_record_snapshot)"
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_refused_unchanged remote-read-real-origin "$WORK_TREE" "$IS_TRUNK_REASON" '' \
+        --trunk develop "${ENGINE_ARGS[@]}"
+    assert_equal remote-read-real-origin-no-write "$records_before" "$(remote_record_snapshot)" "remote refs and config"
+
+    create_empty_clone_world remote-read-empty-clone
+    assert_equal remote-read-empty-clone-no-record absent "$(remote_head_state)" "no local origin HEAD"
+    records_before="$(remote_record_snapshot)"
+    run_git "$WORK_TREE" checkout -q main
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_refused_unchanged remote-read-empty-clone-main "$WORK_TREE" "$IS_TRUNK_REASON" '' \
+        --trunk develop "${ENGINE_ARGS[@]}"
+    run_git "$WORK_TREE" checkout -q -- f.txt
+    run_git "$WORK_TREE" checkout -q "$BRANCH"
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_commit_run remote-read-empty-clone-branch-proceeds "$WORK_TREE" "$INPUTS_REL" develop
+    assert_committed remote-read-empty-clone-branch-proceeds "$(printf 'M\tf.txt')" 'feat(core): add thing'
+    assert_equal remote-read-empty-clone-no-write "$records_before" "$(remote_record_snapshot)" "remote refs and config"
 }
 
 # write_remote_failing_git -> writes a `git` stand-in to $WORKDIR/git-shim. It counts each
@@ -1584,6 +1673,7 @@ test_git_state_refusals
 test_trunk_refusals
 test_trunk_ref_identity
 test_remote_default_branch
+test_remote_default_read
 test_remote_listing_fails
 test_outside_paths
 test_nothing_to_commit

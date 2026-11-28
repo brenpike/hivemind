@@ -21,7 +21,7 @@ After:
 - [ ] Working branch is on its remote — push SUCCEEDED, or the skill returned `blocked` (exit 1)
 - [ ] This skill's procedure ended at its own final Bash tool call (exit 0 = pushed/routing emitted, exit 1 = blocked)
 
-Push the current working branch to its remote. This skill does NOT create a pull request — its sole job is to place remediation commits on the remote so an in-flight review loop can resume against the updated branch.
+Push the current working branch to its remote. It opens no pull request; it only places remediation commits on the remote so an in-flight review loop can resume against the updated branch.
 
 Contract: **the push succeeds or the skill returns `blocked`.** There is no warn-and-continue path. In the post-PR `push_remediation` flow a failed push means the review loop would resume against the UNCHANGED remote and could repeat the same finding forever (no `gh pr create` fallback exists here, unlike `hivemind:open-plan-pr`). Any push failure — auth, read-only, protected branch, hook policy, `[remote rejected]`, a non-fast-forward that force-with-lease cannot resolve, or no remote to push to — is therefore a terminal `blocked` (exit 1), never a warning.
 
@@ -34,7 +34,7 @@ The orchestrator resolves and passes these. The skill does not resolve them on i
 - `base`: resolved trunk branch — used only as a guard (current branch must not equal it).
 - `head`: working branch (current branch).
 - `expect_commit`: the full SHA of the commit to push. That is the commit the caller's gates held for, or, when no gate runs after the caller's last commit, the commit the caller just made (the `commit:` line of that commit's output). The script stops before the push when HEAD is another commit.
-- `push_remote`: optional explicit remote name. Omit unless the user named one.
+- `push_remote`: optional explicit remote name. Omitted unless the user or a calling skill named one.
 
 ## Requirements
 

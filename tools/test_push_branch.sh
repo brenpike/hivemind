@@ -637,30 +637,165 @@ test_remote_default_any_end() {
     assert_remote_refs remote-default-end-origin-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
 
-# A remote HEAD ref that is absent, or not symbolic, is no default branch record, so the branch
-# cannot be cleared against that remote: the engine stops with the record reason and pushes
-# nothing. A branch that is not the default passes while the remote HEAD points elsewhere.
+# list_local_state -> prints every ref of `w` with its value (a symbolic ref as its target) and
+# every local config entry, so a case can prove a check wrote no ref and no config.
+list_local_state() {
+    run_git "$WORK_TREE" for-each-ref --format='%(refname) %(objectname) %(symref)'
+    run_git "$WORK_TREE" config --local --list
+}
+
+# assert_remote_head_absent <name> <remote> -> asserts `w` has no refs/remotes/<remote>/HEAD.
+assert_remote_head_absent() {
+    if run_git "$WORK_TREE" show-ref --verify --quiet "refs/remotes/$2/HEAD"; then
+        failed "$1" "refs/remotes/$2/HEAD exists"
+    else
+        pass "$1" "refs/remotes/$2/HEAD absent"
+    fi
+}
+
+# assert_blocker_writes_nothing <name> <reason> <engine args...> -> runs assert_blocker in `w`
+# and asserts the run left every ref and every local config entry of `w` as it found them.
+assert_blocker_writes_nothing() {
+    local name="$1" reason="$2" state_before
+    shift 2
+    state_before="$(list_local_state)"
+    assert_blocker "$name" "$WORK_TREE" "$reason" "$@"
+    assert_equal "$name-no-local-write" "$state_before" "$(list_local_state)" "local refs and config"
+}
+
+# A remote HEAD ref that is absent, or not symbolic, is no local default branch record, so the
+# engine reads the default branch once from the remote with `git ls-remote --symref` and compares
+# it the same way: main, origin's default, stops with nothing pushed and no ref or config written.
+# A branch that is not the default passes and the read writes no refs/remotes/origin/HEAD. A
+# branch that is not the default passes while the remote HEAD points elsewhere.
 test_remote_default_passes() {
+    local sha
     create_on_main_world remote-default-absent
     install_pre_push_hook
     delete_remote_head origin
-    assert_blocker remote-default-absent "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
+    assert_remote_head_absent remote-default-absent-precondition origin
+    assert_blocker_writes_nothing remote-default-absent "$MISMATCH_REASON" \
         --head main --base develop --remote origin --expect-commit "$(head_sha)"
     assert_equal remote-default-absent-no-push 0 "$(count_push_attempts)" "push attempts"
     assert_remote_refs remote-default-absent-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
     create_on_main_world remote-default-not-symbolic
     install_pre_push_hook
     run_git "$WORK_TREE" update-ref --no-deref refs/remotes/origin/HEAD "$TRUNK_SHA"
-    assert_blocker remote-default-not-symbolic "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
+    assert_blocker_writes_nothing remote-default-not-symbolic "$MISMATCH_REASON" \
         --head main --base develop --remote origin --expect-commit "$(head_sha)"
     assert_equal remote-default-not-symbolic-no-push 0 "$(count_push_attempts)" "push attempts"
     assert_remote_refs remote-default-not-symbolic-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
+    create_world remote-default-absent-other-branch
+    delete_remote_head origin
+    sha="$(head_sha)"
+    assert_success remote-default-absent-other-branch "$WORK_TREE" "$sha" '' \
+        --head "$BRANCH" --base main --remote origin --expect-commit "$sha"
+    assert_remote_head_absent remote-default-absent-other-branch-no-head-write origin
+    assert_remote_refs remote-default-absent-other-branch-pushed "$ORIGIN_DIR" \
+        "$(branch_and_trunk_listing "$sha")"
     create_on_main_world remote-default-elsewhere
     assert_success_on_main remote-default-elsewhere
 
     create_world remote-default-other-branch
     set_remote_head origin refs/remotes/origin/main
     assert_base_passes remote-default-other-branch main
+}
+
+# With no local default branch record and a remote read that fails or names no branch, the branch
+# cannot be cleared against that remote, so even a branch that is no default stops with the record
+# reason, nothing pushed and no ref or config written: a listed remote whose URL is a missing path,
+# and a remote whose HEAD is detached (ls-remote prints no `ref:` line).
+test_remote_default_unreadable_record() {
+    create_world remote-default-unreachable
+    install_pre_push_hook
+    run_git "$WORK_TREE" remote add gone "$WORLD_ROOT/missing.git"
+    assert_remote_head_absent remote-default-unreachable-precondition gone
+    assert_blocker_writes_nothing remote-default-unreachable "$NO_DEFAULT_RECORD_REASON" \
+        --head "$BRANCH" --base main --remote origin --expect-commit "$(head_sha)"
+    assert_equal remote-default-unreachable-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs remote-default-unreachable-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
+    create_world remote-default-detached
+    install_pre_push_hook
+    git --git-dir="$ORIGIN_DIR" update-ref --no-deref HEAD "$TRUNK_SHA"
+    delete_remote_head origin
+    assert_blocker_writes_nothing remote-default-detached "$NO_DEFAULT_RECORD_REASON" \
+        --head "$BRANCH" --base main --remote origin --expect-commit "$(head_sha)"
+    assert_equal remote-default-detached-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs remote-default-detached-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+# install_ls_remote_stand_in -> writes $WORLD_ROOT/ls-remote-stand-in/git, a `git` that runs the
+# real git for every call except `git ls-remote`, which prints two `ref: refs/heads/<name><TAB>HEAD`
+# lines, `other` first and `main` second, and exits 0. Sets STAND_IN_DIR to the folder to put
+# first on PATH.
+install_ls_remote_stand_in() {
+    local real_git stand_in_path
+    real_git="$(command -v git)"
+    STAND_IN_DIR="$WORLD_ROOT/ls-remote-stand-in"
+    stand_in_path="$STAND_IN_DIR/git"
+    mkdir -p "$STAND_IN_DIR"
+    printf '#!/bin/sh\nif [ "$1" = ls-remote ]; then\n  printf '"'"'ref: refs/heads/other\\tHEAD\\nref: refs/heads/main\\tHEAD\\n'"'"'\n  exit 0\nfi\nexec '"'"'%s'"'"' "$@"\n' \
+        "$real_git" >"$stand_in_path"
+    chmod +x "$stand_in_path"
+}
+
+# A remote read that prints more than one `ref: refs/heads/<name><TAB>HEAD` line is ambiguous, so
+# the branch cannot be cleared against that remote: main stops with the record reason, nothing
+# pushed and no ref or config written, even though the first line names another branch. A parser
+# that takes the first line pushes main here.
+test_remote_default_ambiguous_reply() {
+    local saved_path="$PATH" state_before
+    create_on_main_world remote-default-ambiguous
+    install_pre_push_hook
+    delete_remote_head origin
+    assert_remote_head_absent remote-default-ambiguous-precondition origin
+    install_ls_remote_stand_in
+    state_before="$(list_local_state)"
+    PATH="$STAND_IN_DIR:$PATH"
+    assert_blocker remote-default-ambiguous "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
+        --head main --base develop --remote origin --expect-commit "$(head_sha)"
+    PATH="$saved_path"
+    assert_equal remote-default-ambiguous-no-local-write "$state_before" "$(list_local_state)" \
+        "local refs and config"
+    assert_equal remote-default-ambiguous-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs remote-default-ambiguous-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+# A clone of a repository that was empty when cloned has no refs/remotes/origin/HEAD, and gets
+# none when another clone later pushes main (no fetch runs here, so no git version writes it). The
+# engine reads origin's default from the remote: main stops with nothing pushed and no ref or
+# config written, and another branch pushes without the read writing refs/remotes/origin/HEAD.
+test_remote_default_empty_clone() {
+    local world_root="$WORKDIR/remote-default-empty-clone" seed_sha sha
+    WORLD_ROOT="$world_root"
+    WORK_TREE="$world_root/w"
+    ORIGIN_DIR="$world_root/origin.git"
+    mkdir -p "$world_root"
+    run_git "$world_root" init -q --bare origin.git
+    run_git "$ORIGIN_DIR" symbolic-ref HEAD refs/heads/main
+    run_git "$world_root" clone -q "$ORIGIN_DIR" w 2>/dev/null
+    run_git "$world_root" clone -q "$ORIGIN_DIR" seed 2>/dev/null
+    run_git "$world_root/seed" symbolic-ref HEAD refs/heads/main
+    run_git "$world_root/seed" commit --allow-empty -q -m seed
+    run_git "$world_root/seed" push -q origin refs/heads/main:refs/heads/main
+    seed_sha="$(run_git "$world_root/seed" rev-parse HEAD)"
+    delete_remote_head origin
+    assert_remote_head_absent remote-default-empty-clone-precondition origin
+    run_git "$WORK_TREE" symbolic-ref HEAD refs/heads/main
+    run_git "$WORK_TREE" commit --allow-empty -q -m local-main
+    install_pre_push_hook
+    assert_blocker_writes_nothing remote-default-empty-clone-main "$MISMATCH_REASON" \
+        --head main --base develop --remote origin --expect-commit "$(head_sha)"
+    assert_equal remote-default-empty-clone-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs remote-default-empty-clone-unchanged "$ORIGIN_DIR" "refs/heads/main $seed_sha"
+    run_git "$WORK_TREE" checkout -q -b "$BRANCH"
+    run_git "$WORK_TREE" commit --allow-empty -q -m one
+    sha="$(head_sha)"
+    assert_success remote-default-empty-clone-other-branch "$WORK_TREE" "$sha" '' \
+        --head "$BRANCH" --base main --remote origin --expect-commit "$sha"
+    assert_remote_head_absent remote-default-empty-clone-no-head-write origin
+    assert_remote_refs remote-default-empty-clone-pushed "$ORIGIN_DIR" \
+        "$(printf 'refs/heads/%s %s\nrefs/heads/main %s' "$BRANCH" "$sha" "$seed_sha")"
 }
 
 # assert_success_on_main <name> -> in the current on-main world, asserts the engine pushes main at
@@ -1148,6 +1283,9 @@ test_base_remote_image_refused
 test_remote_default_refused
 test_remote_default_any_end
 test_remote_default_passes
+test_remote_default_unreadable_record
+test_remote_default_ambiguous_reply
+test_remote_default_empty_clone
 test_remote_listing_unreadable
 test_expect_commit
 test_explicit_sets_upstream

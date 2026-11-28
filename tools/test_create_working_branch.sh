@@ -16,9 +16,12 @@
 # refs/remotes/<remote>/<branch> for a remote `git remote` lists, compared exactly after an ASCII
 # case fold. A trunk that only ends with `/<branch>` does not. Whatever trunk names, it also refuses
 # a branch that is the default branch of a remote `git remote` lists, the end of that remote's
-# symbolic refs/remotes/<remote>/HEAD, dangling or not, compared after the same case fold; a listed
-# remote with no such HEAD ref, or one that is not symbolic, stops with the default branch record
-# blocker, and a remote HEAD git cannot read stops with `cannot read trunk`. It reads trunk's ref once, before any
+# symbolic refs/remotes/<remote>/HEAD, dangling or not, compared after the same case fold. A listed
+# remote with no such HEAD ref, or one that is not symbolic, has its default branch read from the
+# remote itself, as `hivemind_branch_is_remote_default` in
+# plugin/skills/_shared/git-refusals.sh reads it. Its API states what the read trusts and when it
+# gives code 4, which stops the run with the default branch record blocker. A remote HEAD
+# git cannot read stops with `cannot read trunk`. It reads trunk's ref once, before any
 # change, in git's lookup order, following symbolic refs to their end even when the end does not
 # exist yet, and makes every refusal before any change. It resolves the base once (local branch,
 # then any commit name, then a fetch from origin), switches to an existing branch (removing an
@@ -666,13 +669,64 @@ test_trunk_ref_identity() {
         --base scratch --branch main --classification feature --trunk-freshness fresh --trunk team/main
 }
 
+# read_remote_head_record <remote> -> prints the end of refs/remotes/<remote>/HEAD in `w` when it
+# is symbolic, else its object id, else nothing when it is absent.
+read_remote_head_record() {
+    local record_ref="refs/remotes/$1/HEAD"
+    if run_git "$WORK_TREE" symbolic-ref -q "$record_ref"; then
+        return 0
+    fi
+    run_git "$WORK_TREE" for-each-ref --format='%(objectname)' "$record_ref"
+}
+
+# read_local_config -> prints every entry of the local git config of `w`.
+read_local_config() {
+    run_git "$WORK_TREE" config --local --list
+}
+
+# assert_remote_read_fallback <name> <record> -> `w` is on develop at TRUNK_SHA and origin's
+# refs/remotes/origin/HEAD is <record> (empty: absent), not symbolic. The default branch read from
+# origin itself is main, so target main stops with `working_branch equals trunk` and nothing
+# changed, and target feature/x is created. Origin's record and the local config stay as they were.
+assert_remote_read_fallback() {
+    local case_name="$1" record_before="$2" config_before
+    config_before="$(read_local_config)"
+    assert_equal "$case_name-record-before" "$record_before" "$(read_remote_head_record origin)" \
+        "refs/remotes/origin/HEAD before the run"
+    assert_refused_unchanged "$case_name" "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base develop --branch main --classification feature --trunk-freshness fresh --trunk develop
+    assert_equal "$case_name-head" refs/heads/develop "$(read_head_ref)" "HEAD"
+    assert_success "$case_name-other-branch" "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true)" \
+        --base develop --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk develop
+    assert_on_branch_without_upstream "$case_name-other-branch" "$TRUNK_SHA"
+    assert_equal "$case_name-record-after" "$record_before" "$(read_remote_head_record origin)" \
+        "refs/remotes/origin/HEAD after the runs"
+    assert_equal "$case_name-config" "$config_before" "$(read_local_config)" "local git config"
+}
+
+# assert_no_default_record <name> -> `w` is on develop with no refs/remotes/origin/HEAD, and the
+# default branch cannot be read from origin, so target feature/x, not a default branch of any
+# remote, stops with the default branch record blocker and nothing changed.
+assert_no_default_record() {
+    local case_name="$1" config_before
+    config_before="$(read_local_config)"
+    assert_refused_unchanged "$case_name" "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
+        --base develop --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk develop
+    assert_equal "$case_name-head" refs/heads/develop "$(read_head_ref)" "HEAD"
+    assert_equal "$case_name-no-record" '' "$(read_remote_head_record origin)" "refs/remotes/origin/HEAD absent"
+    assert_equal "$case_name-config" "$config_before" "$(read_local_config)" "local git config"
+}
+
 # The caller chooses the trunk name, so the trunk stop also refuses the default branch of every
 # remote `git remote` lists, read from the end of its symbolic refs/remotes/<remote>/HEAD, whatever
 # trunk names. A spoofed trunk (develop, team/main), a case-variant end, a dangling end, a second
 # remote and a remote whose name holds `/` all stop with nothing changed. A remote HEAD that is
-# absent or not symbolic is no default branch record, so the run stops with nothing changed and
-# the remedy in the blocker. A remote HEAD git cannot read stops with `cannot read trunk`. Only the target branch is compared, so a run that starts on the
-# default branch still moves off it.
+# absent or not symbolic is no local default branch record, so the default branch is read from the
+# remote itself: its default branch stops with nothing changed, another branch is created, and the
+# record and the local config are left as they were. A remote the read cannot reach, or whose HEAD
+# is detached, leaves every branch uncleared, so the run stops with nothing changed and the remedy
+# in the blocker. A remote HEAD git cannot read stops with `cannot read trunk`. Only the target
+# branch is compared, so a run that starts on the default branch still moves off it.
 test_remote_default_branch() {
     local index trunk_spelling
     local -a spoof_names=(develop team-main)
@@ -724,17 +778,25 @@ test_remote_default_branch() {
     create_world remote-default-absent
     delete_remote_head origin
     run_git "$WORK_TREE" checkout -q -b develop
-    assert_refused_unchanged remote-default-absent "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
-        --base develop --branch main --classification feature --trunk-freshness fresh --trunk develop
-    assert_equal remote-default-absent-head refs/heads/develop "$(read_head_ref)" "HEAD"
+    assert_remote_read_fallback remote-default-absent ''
 
     create_world remote-default-not-symbolic
     delete_remote_head origin
     run_git "$WORK_TREE" update-ref refs/remotes/origin/HEAD "$TRUNK_SHA"
     run_git "$WORK_TREE" checkout -q -b develop
-    assert_refused_unchanged remote-default-not-symbolic "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
-        --base develop --branch main --classification feature --trunk-freshness fresh --trunk develop
-    assert_equal remote-default-not-symbolic-head refs/heads/develop "$(read_head_ref)" "HEAD"
+    assert_remote_read_fallback remote-default-not-symbolic "$TRUNK_SHA"
+
+    create_world remote-default-unreachable
+    delete_remote_head origin
+    run_git "$WORK_TREE" remote set-url origin "$WORLD_ROOT/missing.git"
+    run_git "$WORK_TREE" checkout -q -b develop
+    assert_no_default_record remote-default-unreachable
+
+    create_world remote-default-detached
+    delete_remote_head origin
+    run_git "$ORIGIN_DIR" update-ref --no-deref HEAD "$TRUNK_SHA"
+    run_git "$WORK_TREE" checkout -q -b develop
+    assert_no_default_record remote-default-detached
 
     create_world remote-default-unreadable
     delete_remote_head origin
@@ -742,6 +804,45 @@ test_remote_default_branch() {
     printf 'ref: refs/remotes/origin/ma..in\n' >"$WORK_TREE/.git/refs/remotes/origin/HEAD"
     assert_refused_unchanged remote-default-unreadable "$WORK_TREE" "$UNREADABLE_TRUNK_REASON" \
         --base develop --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk develop
+}
+
+# A clone of an empty repository records no refs/remotes/origin/HEAD, and origin gets main later
+# from another clone's push. `w` fetches the pushed main, then deletes any record a newer git's
+# fetch wrote, so the record is absent before the runs. Trunk develop names no ref, so only the
+# default branch read from origin itself stops target main, with nothing changed. Target feature/x
+# is created from origin/main. The record stays absent and the local config unchanged.
+test_remote_default_empty_clone() {
+    local world_root="$WORKDIR/remote-default-empty-clone" pushed_sha config_before
+    WORLD_ROOT="$world_root"
+    ORIGIN_DIR="$world_root/origin.git"
+    WORK_TREE="$world_root/w"
+    mkdir -p "$world_root"
+    run_git "$world_root" init -q --bare origin.git
+    run_git "$ORIGIN_DIR" symbolic-ref HEAD refs/heads/main
+    run_git "$world_root" clone -q "$ORIGIN_DIR" w
+    run_git "$world_root" clone -q "$ORIGIN_DIR" w2
+    run_git "$world_root/w2" symbolic-ref HEAD refs/heads/main
+    commit_file "$world_root/w2" f.txt base init
+    run_git "$world_root/w2" push -q origin refs/heads/main:refs/heads/main
+    pushed_sha="$(run_git "$world_root/w2" rev-parse HEAD)"
+    run_git "$WORK_TREE" fetch -q origin
+    delete_remote_head origin
+    assert_equal remote-default-empty-clone-record-before '' "$(read_remote_head_record origin)" \
+        "refs/remotes/origin/HEAD absent before the runs"
+    config_before="$(read_local_config)"
+    assert_refused_unchanged remote-default-empty-clone "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base origin/main --branch main --classification feature --trunk-freshness fresh --trunk develop
+    assert_equal remote-default-empty-clone-record '' "$(read_remote_head_record origin)" \
+        "refs/remotes/origin/HEAD absent after the refusal"
+    assert_equal remote-default-empty-clone-config "$config_before" "$(read_local_config)" "local git config"
+    assert_success remote-default-empty-clone-other-branch "$WORK_TREE" \
+        "$(expected_block "$BRANCH" "$pushed_sha" true)" \
+        --base origin/main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
+    assert_on_branch_without_upstream remote-default-empty-clone-other-branch "$pushed_sha"
+    assert_equal remote-default-empty-clone-other-branch-record '' "$(read_remote_head_record origin)" \
+        "refs/remotes/origin/HEAD absent after the create"
+    assert_equal remote-default-empty-clone-other-branch-config "$config_before" "$(read_local_config)" \
+        "local git config"
 }
 
 # write_failing_remote_git <dir> <fail at> -> writes <dir>/git, a stand-in that counts each bare
@@ -1052,6 +1153,7 @@ test_trunk_any_spelling
 test_branch_differs_from_non_main_trunk
 test_trunk_ref_identity
 test_remote_default_branch
+test_remote_default_empty_clone
 test_trunk_compare_failure
 test_not_a_checkout
 test_merge_in_progress

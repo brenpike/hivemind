@@ -146,16 +146,13 @@
 #                run stops with `cannot read trunk`. A trunk that names more than one existing
 #                ref does not stop the run, and neither does a trunk that names no ref.
 #                Trunk also covers the default branch of every remote `git remote` lists,
-#                whatever --trunk is. That default is read from refs/remotes/<remote>/HEAD with
-#                `git symbolic-ref --quiet`, the remote name used whole. When the end it names,
-#                dangling or not, is refs/heads/<branch> or the branch's image on a listed
-#                remote, ignoring ASCII case, the run stops with `the current branch is trunk`
-#                (hivemind_branch_is_remote_default in _shared/git-refusals.sh). When git cannot
-#                read a remote HEAD, or prints no end for it, the run stops with `cannot read
-#                trunk`. A listed remote with no such ref, or one that is not symbolic, has no
-#                default branch record, so the branch cannot be cleared against it: the run
-#                stops with `a remote has no default branch record: run git remote set-head
-#                <remote> --auto`.
+#                whatever --trunk is, as hivemind_branch_is_remote_default in
+#                _shared/git-refusals.sh reads it (its API states how each listed remote's
+#                default is read, the read from the remote included, and when each code is
+#                returned). Code 1 stops the run with `the current branch is trunk`, code 2 with
+#                `cannot read trunk`, code 4 with `a remote has no default branch record: run git
+#                remote set-head <remote> --auto`, any other code with `cannot compare the
+#                current branch with trunk`.
 #   outside     `git status --porcelain=v1 -z --untracked-files=all --no-renames` reports a
 #                dirty path that is not in files. Each such path is printed to stderr as an
 #                `outside: <JSON string>` line, in status order, then the blocker `the working
@@ -616,10 +613,13 @@ refuse_trunk_branch() {
 }
 
 # refuse_remote_default_branch
-#   Blocks when the current branch is the default branch of a remote `git remote` lists, read
-#   from its refs/remotes/<remote>/HEAD, whatever trunk names, when git cannot read a remote
-#   HEAD, and when a listed remote has no default branch record. Runs in the main shell so
-#   blocker exits it.
+#   Blocks when the current branch is the default branch of a remote `git remote` lists, as
+#   hivemind_branch_is_remote_default in _shared/git-refusals.sh reads it (its API states how each
+#   listed remote's default is read, the read from the remote included, and when each code is
+#   returned), whatever trunk names. Code 1 stops with `the current branch is trunk`, code 2 with
+#   `cannot read trunk`, code 4 with `a remote has no default branch record: run git remote
+#   set-head <remote> --auto`, any other code with `cannot compare the current branch with
+#   trunk`. Runs in the main shell so blocker exits it.
 refuse_remote_default_branch() {
   local default_rc=0
   hivemind_branch_is_remote_default "$branch_name" || default_rc=$?
