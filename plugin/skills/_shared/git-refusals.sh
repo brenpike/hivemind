@@ -3,8 +3,9 @@
 # git-refusals.sh: shared read-only checks a git script makes before it changes anything. A
 # change is a write to a branch ref, HEAD, the index, the work tree or git config. Each check
 # reads git state and reports it; the caller decides what to refuse and owns the blocker text.
-# One check may also read a remote's default branch with `git ls-remote`, a read that writes no
-# ref and no config, when the local record of it is missing.
+# One check may also read a remote's default branch from the remote itself when the local record
+# of it is missing. The TRUST paragraph under hivemind_branch_is_remote_default states what that
+# read trusts.
 #
 # THIS FILE IS SOURCED, NOT EXECUTED. No shebang: each caller sources it by absolute path derived
 # from its OWN script_dir (`. "$shared_dir/git-refusals.sh"`). It defines functions only. It runs
@@ -84,9 +85,9 @@
 #     names (dangling or not) equals a branch ref, both ASCII case folded, <branch> is that
 #     remote's default branch. A remote with no HEAD ref, or a HEAD ref that is not symbolic,
 #     has no local default branch record. For that remote it reads the default branch once from
-#     the remote itself with `GIT_TERMINAL_PROMPT=0 git ls-remote --symref -- <remote> HEAD`,
-#     which writes no ref and no config. The <name> of its `ref: refs/heads/<name><TAB>HEAD`
-#     line gives the end refs/remotes/<remote>/<name>, compared the same way. The remote's
+#     the remote itself with `GIT_TERMINAL_PROMPT=0 git ls-remote --symref -- <remote> HEAD`.
+#     The <name> of its `ref: refs/heads/<name><TAB>HEAD` line gives the end
+#     refs/remotes/<remote>/<name>, compared the same way. The remote's
 #     output is untrusted: it is held in a variable and only compared, never printed and never
 #     passed to a git command. A failed read, no such line, more than one such line or an empty
 #     <name> leaves the branch uncleared against that remote: that gives 4. `git remote set-head <remote> --auto` writes
@@ -97,6 +98,16 @@
 #     a case fold failed), 4 a listed remote has no local default branch record and its default
 #     branch cannot be read from the remote. Codes 1, 2, 3 and 4 from the remote reads come from
 #     the first remote, in `git remote` order, that raises one.
+#
+#     TRUST: the read from the remote trusts what a `git fetch` from or `git push` to that remote
+#     trusts, and no other party. That equivalence is the definition. Examples of what it trusts:
+#     the remote, the authority for its own default branch (ADR-0037); the network to it, with no
+#     time bound on the read; and what git config selects for that remote, for example its URL,
+#     transport, remote helper, ssh command or credential helper, any of which may run commands
+#     and change files. Git config is trusted under
+#     ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier Discipline).
+#     The library itself runs no `git fetch`, `git remote set-head` or `git config` for the read.
+#     Other sites cite this paragraph and do not restate it.
 #
 #   HIVEMIND__REMOTE_LISTING and HIVEMIND__BRANCH_REFS hold the last `git remote` listing read
 #   and the last branch refs built, for both functions above. HIVEMIND__REMOTE_DEFAULT_END holds
@@ -297,8 +308,8 @@ hivemind_resolve_name_refs() {
 }
 
 # hivemind__read_remote_default_end <remote>
-#   Reads <remote>'s default branch once with a read-only `git ls-remote --symref -- <remote>
-#   HEAD`. Sets HIVEMIND__REMOTE_DEFAULT_END to refs/remotes/<remote>/<name> from its one
+#   Reads <remote>'s default branch once with `git ls-remote --symref -- <remote> HEAD`, trusted
+#   as the TRUST paragraph under hivemind_branch_is_remote_default in the API above states. Sets HIVEMIND__REMOTE_DEFAULT_END to refs/remotes/<remote>/<name> from its one
 #   `ref: refs/heads/<name><TAB>HEAD` line and returns 0. Returns 4, with it empty, when the read
 #   fails, no such line or more than one is printed, or <name> is empty. The output is untrusted:
 #   held in a variable, never printed, never passed to a git command. INTERNAL (double underscore): not a

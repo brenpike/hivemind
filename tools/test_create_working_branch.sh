@@ -18,8 +18,9 @@
 # a branch that is the default branch of a remote `git remote` lists, the end of that remote's
 # symbolic refs/remotes/<remote>/HEAD, dangling or not, compared after the same case fold. A listed
 # remote with no such HEAD ref, or one that is not symbolic, has its default branch read from the
-# remote itself with `git ls-remote --symref`, which writes no ref and no config; when that read
-# fails or names no branch, the run stops with the default branch record blocker. A remote HEAD
+# remote itself, as `hivemind_branch_is_remote_default` in
+# plugin/skills/_shared/git-refusals.sh reads it. Its API states what the read trusts and when it
+# gives code 4, which stops the run with the default branch record blocker. A remote HEAD
 # git cannot read stops with `cannot read trunk`. It reads trunk's ref once, before any
 # change, in git's lookup order, following symbolic refs to their end even when the end does not
 # exist yet, and makes every refusal before any change. It resolves the base once (local branch,
